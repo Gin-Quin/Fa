@@ -623,9 +623,9 @@ function schemaNames = (schema: Schema): String => when schema is {
 }
 static names = @schemaNames(@typeToSchema({ z: String, a: String }))
 static spelling = @typeToString({ z: String, a: String })
-function keys = <Item, fields: Keys<Item>>(_value: Item, suffix: String = ""): String => {
+function keys = <Item, fields: Keys<Item>>(value: Item, suffix: String = ""): String => {
     mutable names: Array<String> = []
-    @for key in fields { names.push(key) }
+    @for key in fields { names.push(key + "=[" + units(value[key]) + "]") }
     names.join(",") + suffix
 }
 function fieldProbe = (text: String): String => {
@@ -636,7 +636,7 @@ function fieldProbe = (text: String): String => {
     type Node = { text: String, next: Node? }
     let inside = Node { next = Node { next = none, text = text }, text = text }
     let pair = { outside = outside(text), inside = inside }
-    let printed = "{left}".startsWith("{{ a = ") and "{right}".startsWith("{{ a = ") and "{nested}".startsWith("{{ a = {{ a = ") and "{declared}".startsWith("{{ b = ")
+    let printed = "{left}".startsWith("{{ a = ") and "{right}".startsWith("{{ a = ") and "{nested}".startsWith("{{ a = {{ a = ") and "{declared}".startsWith("{{ b = ") and "{pair}".startsWith("{{ inside = {{ text = ")
     let reflected = spelling + ":" + names + ":" + keys<Type<left>, { z, a }>(left) + ":" + keys<Type<right>, { a, z }>(right)
     ["{printed}", reflected, units(Json.stringify(left)), units(Json.stringify(right)), units(Json.stringify(nested)), units(Json.stringify(declared)), units(Json.stringify(pair)), units(Json.stringify([copy pair, pair])), units(variant(Forward { a = "a", z = text, kind = "forward" })), units(variant(Reverse { kind = "reverse", z = text, a = "a" })), units(distinct({ z = text })), units(distinct({ a = text }))].join("|")
 }
@@ -646,12 +646,17 @@ const units=s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i)).join(",");
 for(const text of JSON.parse(await Bun.stdin.text())) {
     const left={a:"a",z:text},right={a:"a",z:text},nested={a:right,z:left},declared={b:text,a:"a"};
     const pair={inside:{text,next:{text}},outside:{z:text,next:{z:text}}};
-    console.log(["true","{ a: String, z: String }:a,z:a,z:a,z",...[left,right,nested,declared,pair,[pair,pair],{kind:"forward",z:text,a:"a"},{a:"a",z:text,kind:"reverse"},{z:text},{a:text}].map(value=>units(JSON.stringify(value)))].join("|"));
+    console.log(["true",`{ a: String, z: String }:a,z:a=[97],z=[${units(text)}]:a=[97],z=[${units(text)}]`,...[left,right,nested,declared,pair,[pair,pair],{kind:"forward",z:text,a:"a"},{a:"a",z:text,kind:"reverse"},{z:text},{a:text}].map(value=>units(JSON.stringify(value)))].join("|"));
 }
 """
     values = subjects()
     references = subprocess.run([bun,"-e",oracle],input=json.dumps(values,ensure_ascii=True),text=True,capture_output=True,check=True).stdout.splitlines()
     write_cases(output,"field-enumeration",prelude,[(literal(text),) for text in values],references,"fieldProbe",16)
+    # Printing, reflection and key enumeration also concern freestanding.
+    basic = prelude.split('    ["{printed}", reflected,', 1)[0] + '    "{printed}|" + reflected\n}\n'
+    basic = "\n".join(line for line in basic.splitlines() if not line.startswith(("-- skip-target:", "use { Json }", "function variant =", "function distinct ="))) + "\n"
+    basic_reference = ["|".join(row.split("|", 2)[:2]) for row in references]
+    write_cases(output,"field-order",basic,[(literal(text),) for text in values],basic_reference,"fieldProbe",16)
 
 def split_cases(output, bun):
     needles = ["", "\ud83d", "\ude00", ","]

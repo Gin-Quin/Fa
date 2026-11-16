@@ -502,7 +502,14 @@ function faJsonIs(value, schema) {
 			return value instanceof Map || value?.[Symbol.toStringTag] === "fa:HashMap";
 		case "o":
 			return (
-				value !== null && typeof value === "object" && !Array.isArray(value) && !("$t" in value)
+				value !== null &&
+				typeof value === "object" &&
+				!Array.isArray(value) &&
+				!("$t" in value) &&
+				schema[1].every((/** @type {any} */ [name, field]) => {
+					const property = name in Object.prototype ? `${name}$` : name;
+					return Object.hasOwn(value, property) && faJsonIs(value[property], field);
+				})
 			);
 		case "F":
 			return typeof value === (schema[1].length > 32 ? "bigint" : "number");

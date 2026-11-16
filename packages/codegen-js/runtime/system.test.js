@@ -137,6 +137,39 @@ describe("faJsonParse", () => {
 });
 
 describe("faJsonStringify", () => {
+	test("object unions select by fields and literal discriminants", () => {
+		const forward = [
+			"o",
+			[
+				["kind", ["l", "forward"]],
+				["z", "s"],
+				["a", "s"],
+			],
+		];
+		const reverse = [
+			"o",
+			[
+				["a", "s"],
+				["z", "s"],
+				["kind", ["l", "reverse"]],
+			],
+		];
+		const schema = ["u", [forward, reverse]];
+		expect(faJsonStringify({ a: "a", z: "z", kind: "reverse" }, schema)).toBe(
+			'{"a":"a","z":"z","kind":"reverse"}',
+		);
+		expect(faJsonStringify({ a: "a", z: "z", kind: "forward" }, schema)).toBe(
+			'{"kind":"forward","z":"z","a":"a"}',
+		);
+		const distinct = [
+			"u",
+			[
+				["o", [["z", "s"]]],
+				["o", [["a", "s"]]],
+			],
+		];
+		expect(faJsonStringify({ a: "a" }, distinct)).toBe('{"a":"a"}');
+	});
 	test("deep recursive values use bounded stack space", () => {
 		/** @type {any} */
 		let value;

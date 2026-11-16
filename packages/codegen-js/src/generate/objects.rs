@@ -305,18 +305,20 @@ impl Generator<'_> {
 			.map(|&(_, index)| slots[index].expect("a value"))
 			.collect();
 		let values = self.in_order(&nodes, &mut f);
-		let reordered = order.iter().enumerate().any(|(left, &(_, position))| {
-			order
-				.iter()
-				.enumerate()
-				.skip(left + 1)
-				.any(|(right, &(_, later))| {
-					position > later && (!values[left].pure || !values[right].pure)
-				})
-		});
+		let mut staged_through = None;
+		for (left, &(_, position)) in order.iter().enumerate() {
+			for (right, &(_, later)) in order.iter().enumerate().skip(left + 1) {
+				if position > later && (!values[left].pure || !values[right].pure) {
+					staged_through =
+						Some(staged_through.map_or(right, |last: usize| last.max(right)));
+				}
+			}
+		}
 		let mut by_slot: Vec<Option<Expr>> = vec![None; slots.len()];
-		for (&(_, index), value) in order.iter().zip(values) {
-			let value = if reordered && !value.stable {
+		for (source, (&(_, index), value)) in order.iter().zip(values).enumerate() {
+			// Preserve earlier reads/effects before the lifted prefix, leaving
+			// the unaffected suffix inline in the resulting object or call.
+			let value = if staged_through.is_some_and(|last| source <= last) && !value.stable {
 				let temp = self.temp();
 				self.out.line(format!("const {temp} = {};", value.text));
 				Expr::name(temp, true)

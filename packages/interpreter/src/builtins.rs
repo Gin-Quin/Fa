@@ -329,6 +329,15 @@ pub fn index(value: &Value, index: &Value) -> Result<Value, Error> {
 			other => Err(stop(format!("`{}` can't be sliced", other.to_text()))),
 		};
 	}
+	if matches!(value, Value::Object(_) | Value::Member(_))
+		&& let Some(path) = index.as_str()
+	{
+		let mut selected = value.clone();
+		for name in path.split('.') {
+			selected = field(&selected, name)?;
+		}
+		return Ok(selected);
+	}
 	match value {
 		Value::Array(items) | Value::Tuple(items) => {
 			Ok(items[position(integer(index)?, items.len())?].clone())

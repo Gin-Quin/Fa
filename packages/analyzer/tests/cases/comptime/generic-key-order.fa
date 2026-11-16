@@ -5,12 +5,12 @@ let first = { z = 9, a = 1 }
 let second = { a = 2, z = 8 }
 static direct = @keys<{ z: Integer, a: Integer }, { z, a }>({ z = 9, a = 1 })
 static nested = @keyModule.keys<{ a: Integer, z: Integer }, { a, z }>({ a = 2, z = 8 })
-console.log(direct, nested) -- prints: a,z a,z
-console.log(keys<Type<first>, { z, a }>(first), keyModule.keys<Type<second>, { a, z }>(second)) -- prints: a,z a,z
+console.log(direct, nested) -- prints: a=1,z=9 a=2,z=8
+console.log(keys<Type<first>, { z, a }>(first), keyModule.keys<Type<second>, { a, z }>(second)) -- prints: a=1,z=9 a=2,z=8
 
 -- file: keys.fa
-export function keys = <Item, fields: Keys<Item>>(_value: Item, suffix: String = ""): String => {
+export function keys = <Item, fields: Keys<Item>>(value: Item, suffix: String = ""): String => {
 	mutable result: Array<String> = []
-	@for key in fields { result.push(key) }
+	@for key in fields { result.push("{key}={value[key]}") }
 	result.join(",") + suffix
 }

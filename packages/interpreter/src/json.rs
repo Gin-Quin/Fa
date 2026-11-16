@@ -805,7 +805,7 @@ mod tests {
 		.unwrap();
 		assert_eq!(
 			value.to_text(),
-			"{ port = 8080, debug = false, ratio = 0.5, tags = [\"a\", \"é\"], none = none }"
+			"{ debug = false, none = none, port = 8080, ratio = 0.5, tags = [\"a\", \"é\"] }"
 		);
 		assert!(matches!(parse("[1, 2"), Err(Error::Thrown(_))));
 		assert!(matches!(parse("{} x"), Err(Error::Thrown(_))));

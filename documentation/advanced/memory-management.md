@@ -36,7 +36,7 @@ A **structure** is a collection, a value of a recursive type, or any value ownin
 
 The collection types are `Bytes`, `Array`, `GrowingArray`, `Set`, `GrowingSet`, `Map`, `GrowingMap`, `Pool`, `GrowingPool`, `Columnar`, `GrowingColumnar` and `OrderedColumnar`. This includes tables represented by maps or columnars, and a relation collection when materialized as an owned value. A relation field itself is a link, not an owned copy of its targets.
 
-An object owns a structure when one of its data fields is a collection, a recursive value, or owns one transitively. Tuples, optionals and unions own the structures in their items or alternatives; named-union payloads follow the same rule. A union is copyable only if every remaining alternative is copyable. Narrowing to a particular alternative uses that alternative's category. A fixed inline `CArray` inherits its item category; its fixed inline storage alone does not make it an owning collection. References and shared handles stop this traversal: a reference borrows its target, a synchronization handle shares its state.
+An object owns a structure when one of its data fields is a collection, a recursive value, or owns one transitively. Tuples, optionals and unions own the structures in their items or alternatives; named-union payloads follow the same rule. A union is copyable only if every remaining alternative is copyable. Narrowing to a particular alternative uses that alternative's category. A fixed inline `CArray` owns its items; its fixed inline storage alone does not make it a structure. References and shared handles stop this traversal: a reference borrows its target, a synchronization handle shares its state.
 
 ```fa
 mutable original = { items = [1, 2] }
@@ -237,7 +237,7 @@ An implicit function adapter cannot copy a resource result into a plain data res
 
 ### Shared handles
 
-`Mutex`, `AtomicInteger`, `AtomicBoolean` and `Channel` handles share identity: assignment or `copy` gives access to the same state. An explicit copy of a composite containing both a handle and a structure duplicates its owned data independently and retains the handle; keeping both composites requires `copy`. Sharing a handle does not authorize an unprotected borrow of its payload.
+`Mutex`, `AtomicInteger`, `AtomicBoolean` and `Channel` handles share identity: assignment or `copy` gives access to the same state. An object, tuple, optional or union containing only ordinary values and these handles has ordinary value semantics: its data copies as values and its handles keep their identity. An explicit copy of a composite containing both a handle and a structure duplicates its owned data independently and retains the handle; keeping both composites requires `copy`. Sharing a handle does not authorize an unprotected borrow of its payload.
 
 ```fa
 use { Mutex } = std.concurrency

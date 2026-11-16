@@ -181,6 +181,55 @@ extern "C" unsigned fa_specialize_frozen_strings(LLVMModuleRef module) {
 		indices[&function] = variants.size();
 		variants.push_back({&function, receiver, offset, parts[2].str()});
 	}
+	// Self recursion can already become one loop. The benefit here is
+	// carrying a field fact around a mutually recursive method group and
+	// through its callers; do not duplicate unrelated single-method loops.
+	std::vector<std::vector<size_t>> edges(variants.size());
+	for (size_t i = 0; i < variants.size(); ++i) {
+		const auto &source = variants[i];
+		for (const auto &block : *source.original) {
+			for (const auto &instruction : block) {
+				const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction);
+				if (!call) { continue; }
+				auto found = indices.find(call->getCalledFunction());
+				if (found == indices.end() || found->second == i) { continue; }
+				const auto &target = variants[found->second];
+				if (source.field == target.field && source.capacity_offset == target.capacity_offset &&
+					call->getArgOperand(target.receiver) == source.original->getArg(source.receiver)) {
+					edges[i].push_back(found->second);
+				}
+			}
+		}
+	}
+	std::vector<bool> keep(variants.size(), false);
+	for (size_t root = 0; root < variants.size(); ++root) {
+		std::vector<bool> seen(variants.size(), false);
+		auto pending = edges[root];
+		while (!pending.empty()) {
+			auto next = pending.back(); pending.pop_back();
+			if (next == root) { keep[root] = true; break; }
+			if (seen[next]) { continue; }
+			seen[next] = true;
+			pending.insert(pending.end(), edges[next].begin(), edges[next].end());
+		}
+	}
+	bool changed = true;
+	while (changed) {
+		changed = false;
+		for (size_t i = 0; i < variants.size(); ++i) {
+			if (keep[i]) { continue; }
+			for (auto next : edges[i]) {
+				if (keep[next]) { keep[i] = true; changed = true; break; }
+			}
+		}
+	}
+	std::vector<FrozenVariant> selected;
+	for (size_t i = 0; i < variants.size(); ++i) {
+		if (keep[i]) { selected.push_back(std::move(variants[i])); }
+	}
+	variants = std::move(selected);
+	indices.clear();
+	for (size_t i = 0; i < variants.size(); ++i) { indices[variants[i].original] = i; }
 	// Predeclare every body before redirecting mutual recursion. CloneFunction
 	// does not remap function addresses: only the exact direct calls below do.
 	for (auto &variant : variants) {

@@ -7,6 +7,12 @@ type Cursor = {
 		if self.position >= self.text.length { return accumulated }
 		let unit = try self.text.codeUnitAt(self.position)
 		self.position += 1
+		try self.sumNext(accumulated + unit)
+	}
+	function sumNext = (self, accumulated: Integer): Integer throws IndexError mutates self => {
+		if self.position >= self.text.length { return accumulated }
+		let unit = try self.text.codeUnitAt(self.position)
+		self.position += 1
 		try self.sum(accumulated + unit)
 	}
 	function tail = (self, accumulated: Integer): Integer mutates self => {

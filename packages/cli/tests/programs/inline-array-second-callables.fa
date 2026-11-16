@@ -1,0 +1,20 @@
+-- Both entries use the same place ABI, including a sync value awaited as async.
+function append = (items: InlineArray<String, 1>) throws CapacityError mutates items.length => {
+	try items.push("sync")
+}
+async function asyncAppend = <capacity: UInt32>(items: InlineArray<String, capacity>, pause: Boolean = true)
+	throws CapacityError mutates items.length => {
+	if pause { await Task.yield() }
+	try items.push("async")
+}
+function invoke = (callback: async (items: InlineArray<String, 1>) => Void throws CapacityError mutates items.length,
+	items: InlineArray<String, 1>) throws CapacityError mutates items.length => {
+	try callback(items)
+}
+mutable syncItems: InlineArray<String, 1> = []
+try invoke(append, syncItems)
+console.log(syncItems) -- prints: ["sync"]
+mutable asyncItems: InlineArray<String, 1> = []
+let callback = asyncAppend<1>
+try await callback(asyncItems, true)
+console.log(asyncItems) -- prints: ["async"]

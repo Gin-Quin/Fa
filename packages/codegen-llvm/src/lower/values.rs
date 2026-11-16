@@ -736,6 +736,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return false;
 		}
 		let (from, to) = match (from, to) {
+			(Repr::InlineUnion(a), Repr::InlineUnion(b)) | (Repr::Enum(a), Repr::Enum(b)) => {
+				let mut merger = self.types().merger(Some(self.session.module_id(self.file)));
+				return merger.nominal(a) == merger.nominal(b);
+			}
+			(Repr::Tuple(a), Repr::Tuple(b)) if self.same_type(a, b) => return true,
 			(Repr::Rec(a), Repr::Rec(b)) => match (self.repr_of(a, 0), self.repr_of(b, 0)) {
 				(Ok(a), Ok(b)) => (a, b),
 				_ => return false,

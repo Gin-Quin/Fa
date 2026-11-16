@@ -2366,7 +2366,30 @@ impl Walker<'_> {
 	/// which copy their captures too) that escapes: `REF021` on its writes
 	/// of what it captures.
 	pub(crate) fn escape_closure(&mut self, lambda: NodeId, at: NodeId) {
-		self.a.escapes.insert(lambda);
+		let newly_escaping = self.a.escapes.insert(lambda);
+		if newly_escaping {
+			// a captured task or worker's handle moves into an escaping closure
+			let captured: Vec<SymbolId> = self
+				.a
+				.functions
+				.get(&lambda)
+				.map(|info| info.captures.clone())
+				.unwrap_or_default();
+			for symbol in captured {
+				let symbol_type = self.a.symbols.symbol(symbol).ty;
+				if self.is_moved_handle(symbol_type)
+					&& self.body.flow.reachable
+					&& !self
+						.body
+						.flow
+						.consumed
+						.iter()
+						.any(|&(other, _)| other == symbol)
+				{
+					self.body.flow.consumed.push((symbol, at));
+				}
+			}
+		}
 		// requirements are not captured (requirements.rs)
 		self.check_stored_lambda(lambda);
 		let Some(writes) = self.closure_writes.get(&lambda).cloned() else {

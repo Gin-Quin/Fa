@@ -25,3 +25,6 @@ fa-parser = { path = "../parser" }
 ethnum = "1.5"
 libc = "0.2"
 rustc-hash = "2"
+
+[dev-dependencies]
+fa-codegen-js = { path = "../codegen-js" }

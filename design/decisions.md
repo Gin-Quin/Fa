@@ -1595,3 +1595,34 @@ The imported generic-owner O0 probe exposed an inherited freestanding link failu
 Contextual generic function-value specialization also applies to lambdas and parenthesized names. JavaScript binds their destructor/method/value arguments exactly once at the node carrying the instantiation; native declaration values recover that node through their group parents before constructing the thunk. The inline callback fixture checks named, lambda and grouped values at runtime and compile time; the existing ordinary Array.map generic-lambda case remains the control.
 
 The full corpus exposed a timer race in the existing async-starter regression: sleeping 5 ms cannot guarantee a yielded detached task has finished. The test now polls explicit completion flags through asynchronous sleep, retaining detached tasks and all ten event-order/shared-state expectations. This is a test synchronization correction, with no scheduler or runtime change.
+
+## InlineArray second review fixes (2026-11-16)
+
+Aggregate parameters use the same borrowed-place ABI in direct calls, function
+values, generic thunks and asynchronous entries. The representation does not
+change because another function in the program suspends, or because an item has
+a destructor. Awaited and kept coroutine calls retain the caller's place;
+detached tasks construct their owned snapshot in the frame before suspension.
+Only Task-consuming parameters transfer ownership; ordinary resource parameters
+borrow as required by the memory-management specification.
+
+Native representation identity compares promoted and local nominal identities
+through the shared store before interpreting a union as a box. Hash helpers
+borrow aggregate keys by address so an inline capacity never becomes wasm
+function arity. Nested aggregate fields use that same helper convention.
+
+The LLVM integration matrix is deterministic and grouped by item kind to bound
+compiler memory. Each operation sequence is evaluated by the compile-time
+interpreter in a local place; the runtime encloses that value in each tested
+position. Bun must agree with that oracle before native/wasm/freestanding O0/O3
+are compared, with leak checks. Generated annotated sources remain in target/tmp
+for inspecting individual failures; the generator and harness live in tests/.
+
+The O0 wasm audit additionally removes tagged code pointers: wasm callable
+indices can be odd, so they cannot share their low bit with a linear-memory
+entry table. Every callable in an asynchronous program now uses a constant
+`{ sync, async }` entry table, with a null async entry for synchronous functions;
+synchronous programs keep direct code pointers. Generic producers, compositions,
+error adapters and worker callbacks share this rule. Aggregate copy helpers use
+caller-owned result storage as well as address parameters, including their early
+return paths, so wide return values are not flattened either.

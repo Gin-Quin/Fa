@@ -840,6 +840,12 @@ impl TypeStore {
 		self.holds_move_only(ty, Holds::Resource, &mut Vec::new())
 	}
 
+	/// A Task-consuming parameter transfers a plain Task owner. Resources
+	/// and synchronization handles stop the traversal and always borrow.
+	pub fn consumes_parameter(&self, ty: TypeId) -> bool {
+		self.holds_move_only(ty, Holds::TaskParameter, &mut Vec::new())
+	}
+
 	/// Visits each type reachable from `ty` once (`seen`): linear in the
 	/// types, recursive ones included.
 	fn holds_move_only(&self, ty: TypeId, holds: Holds, seen: &mut Vec<TypeId>) -> bool {
@@ -854,6 +860,9 @@ impl TypeStore {
 			TypeKind::Task(..) => holds != Holds::Resource,
 			TypeKind::Sync(crate::types::SyncKind::Worker, _) => holds == Holds::MoveOnly,
 			TypeKind::Object(shape) => {
+				if self.is_resource(ty) && holds == Holds::TaskParameter {
+					return false;
+				}
 				self.is_resource(ty)
 					|| self
 						.shape_fields(shape)
@@ -2465,6 +2474,8 @@ mod tests {
 /// What [`TypeStore::is_move_only`] and its variants look for.
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum Holds {
+	/// Tasks owned outside a resource or synchronization boundary.
+	TaskParameter,
 	/// Tasks, worker handles and resources.
 	MoveOnly,
 	/// Tasks and resources.

@@ -37,8 +37,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		narrowed: Repr,
 		node: NodeId,
 	) -> Result<Val<'ctx>, Error> {
-		if value.repr == narrowed {
-			return Ok(value);
+		if value.repr == narrowed || self.same_layout(value.repr, narrowed) {
+			return Ok(Val {
+				repr: narrowed,
+				..value
+			});
 		}
 		if let Repr::Rec(target) = value.repr
 			&& self.compressed_union_link(value.repr).is_some()

@@ -544,7 +544,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let i64 = self.context.i64_type();
 		let function = self.module.add_function(
 			"fa.hash",
-			i64.fn_type(&[self.llvm_type(repr).into()], false),
+			i64.fn_type(
+				&[if self.llvm_type(repr).is_struct_type() {
+					self.pointer_type().into()
+				} else {
+					self.llvm_type(repr).into()
+				}],
+				false,
+			),
 			Some(Linkage::Internal),
 		);
 		self.runtime.add_attributes(function, &["nounwind"]);
@@ -563,6 +570,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let builder = self.context.create_builder();
 		builder.position_at_end(self.context.append_basic_block(function, "entry"));
 		let value = function.get_nth_param(0).expect("a value");
+		self.keep_aggregate_helper(function, repr);
+		let value = self.helper_parameter(&builder, repr, value)?;
 		let hash = self.build_hash(&builder, function, repr, value)?;
 		builder.build_return(Some(&hash))?;
 		Ok(function)
@@ -591,7 +600,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.get_nth_param(0)
 			.expect("a key")
 			.into_pointer_value();
-		let loaded = builder.build_load(self.llvm_type(repr), pointer, "")?;
+		let loaded = if self.llvm_type(repr).is_struct_type() {
+			pointer.into()
+		} else {
+			builder.build_load(self.llvm_type(repr), pointer, "")?
+		};
 		let hashed = builder
 			.build_call(hash, &[loaded.into()], "")?
 			.try_as_basic_value()
@@ -658,6 +671,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let call_hash =
 			|repr: Repr, value: BasicValueEnum<'ctx>| -> Result<IntValue<'ctx>, Error> {
 				let function = self.hash_function(repr)?;
+				let value = self.helper_argument(builder, value)?;
 				Ok(builder
 					.build_call(function, &[value.into()], "")?
 					.try_as_basic_value()
@@ -1098,8 +1112,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// The hash of a key.
 	fn hash_of(&mut self, key: Val<'ctx>) -> Result<IntValue<'ctx>, Error> {
 		let function = self.hash_function(key.repr)?;
+		let argument = self.helper_argument(&self.builder, key.value.expect("a key"))?;
 		Ok(self
-			.call_value(function, &[key.value.expect("a key").into()])?
+			.call_value(function, &[argument.into()])?
 			.into_int_value())
 	}
 
@@ -2513,7 +2528,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					if self.needs_drop(repr) {
 						let field = builder.build_struct_gep(table.entry, entry, index, "")?;
 						let loaded = builder.build_load(self.llvm_type(repr), field, "")?;
-						builder.build_call(self.drop_function(repr)?, &[loaded.into()], "")?;
+						self.call_drop(builder, repr, loaded)?;
 					}
 				}
 				Ok(())
@@ -2563,11 +2578,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					if self.needs_drop(repr) {
 						let field = builder.build_struct_gep(table.entry, entry, index, "")?;
 						let loaded = builder.build_load(self.llvm_type(repr), field, "")?;
-						let copied = builder
-							.build_call(self.copy_function(repr)?, &[loaded.into()], "")?
-							.try_as_basic_value()
-							.basic()
-							.expect("a copy");
+						let copied = self.call_copy(builder, repr, loaded)?;
 						builder.build_store(field, copied)?;
 					}
 				}

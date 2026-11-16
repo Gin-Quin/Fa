@@ -1080,21 +1080,32 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let function = if let Some(function) = cached {
 			function
 		} else {
+			let argument_type = if self.llvm_type(value.repr).is_struct_type() {
+				self.pointer_type().into()
+			} else {
+				self.llvm_type(value.repr)
+			};
 			let signature = self
 				.context
 				.void_type()
-				.fn_type(&[self.llvm_type(value.repr).into()], false);
+				.fn_type(&[argument_type.into()], false);
 			let function = self.module.add_function(
 				"fa.format.value",
 				signature,
 				Some(inkwell::module::Linkage::Internal),
 			);
+			self.keep_aggregate_helper(function, value.repr);
 			self.runtime.add_attributes(function, &["nounwind"]);
 			self.drop_functions.borrow_mut().insert(key, function);
 			let saved_frame = self.frame.take();
 			let saved_block = self.builder.get_insert_block();
 			self.begin_function(function, Repr::Void, None);
-			let argument = Val::new(value.repr, function.get_nth_param(0).expect("a value"));
+			let argument = self.helper_parameter(
+				&self.builder,
+				value.repr,
+				function.get_nth_param(0).expect("a value"),
+			)?;
+			let argument = Val::new(value.repr, argument);
 			match value.repr {
 				Repr::Object(ty) => self.append_object_fields(argument, ty, node)?,
 				Repr::Tuple(ty) => self.append_tuple(argument, ty, node)?,
@@ -1111,8 +1122,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			function
 		};
-		self.builder
-			.build_call(function, &[value.value.expect("a value").into()], "")?;
+		let argument = self.helper_argument(&self.builder, value.value.expect("a value"))?;
+		self.builder.build_call(function, &[argument.into()], "")?;
 		Ok(())
 	}
 

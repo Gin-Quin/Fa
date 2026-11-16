@@ -1113,8 +1113,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.picked_copy(value, to_repr, node)?
 				}
 				_ if self.needs_drop(from_repr) => {
-					let copy = self.copy_function(from_repr)?;
-					let copied = self.call_value(copy, &[extracted.into()])?;
+					let copied = self.call_copy(&self.builder, from_repr, extracted)?;
 					self.convert(Val::new(from_repr, copied), to_repr, node.index())?
 				}
 				_ => self.convert(value, to_repr, node.index())?,
@@ -1433,7 +1432,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.iter()
 					.map(|field| field.name)
 					.collect::<Vec<_>>()
-			});
+			})
+			.filter(|fields| !fields.is_empty());
 		// an anonymous type: the order of the first literal that builds it
 		let literal = || {
 			let mut literals: Vec<_> = self
@@ -1492,6 +1492,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: NodeId,
 	) -> Result<(), Error> {
 		let fields = self.printed_fields(ty);
+		self.append_ordered_fields(value, fields, node)
+	}
+
+	fn append_ordered_fields(
+		&mut self,
+		value: Val<'ctx>,
+		fields: Vec<(String, u32, TypeId)>,
+		node: NodeId,
+	) -> Result<(), Error> {
 		if fields.is_empty() {
 			let text = self.string_constant("{}");
 			return self.append_value(text, node);
@@ -2613,7 +2622,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if let Repr::Object(object) = repr {
 					let space = self.string_constant(" ");
 					self.append_value(space, node)?;
-					self.append_object(loaded, object, node)?;
+					// Union payloads have the canonical field order of their
+					// value, as in the interpreter and JavaScript representation.
+					let fields = self
+						.types()
+						.fields_of(object)
+						.iter()
+						.enumerate()
+						.filter(|(_, field)| {
+							!self.types().syms.resolve(field.name).starts_with('#')
+						})
+						.map(|(index, field)| {
+							(
+								self.types().syms.resolve(field.name).to_string(),
+								index as u32,
+								field.ty,
+							)
+						})
+						.collect();
+					self.append_ordered_fields(loaded, fields, node)?;
 				} else {
 					let open = self.string_constant("(");
 					self.append_value(open, node)?;

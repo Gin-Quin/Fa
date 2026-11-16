@@ -1356,15 +1356,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// Whether a parameter of this representation is passed as a pointer to
 	/// the caller's value (never copied): every aggregate but a function
-	/// value, outside of asynchronous programs (whose tasks may outlive the
-	/// caller's places). The same for direct and indirect calls.
+	/// value. Direct calls, thunks and indirect calls share this convention.
+	/// A detached coroutine snapshots borrowed arguments into its own frame.
 	pub(crate) fn borrows_parameter(&self, repr: Repr) -> bool {
-		// a move-only value moves into its function: by value
-		let moved =
-			matches!(repr, Repr::Object(ty) | Repr::Tuple(ty) if self.types().owns_unique(ty));
-		!self.tasks.asynchronous
-			&& !moved && !matches!(repr, Repr::Function(_))
-			&& self.llvm_type(repr).is_struct_type()
+		let consumes = matches!(repr, Repr::Object(ty) | Repr::Tuple(ty) if self.types().consumes_parameter(ty));
+		!consumes && !matches!(repr, Repr::Function(_)) && self.llvm_type(repr).is_struct_type()
 	}
 
 	/// Declares a function (or an instance of a generic one, under the

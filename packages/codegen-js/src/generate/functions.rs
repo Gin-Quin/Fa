@@ -260,6 +260,8 @@ impl Generator<'_> {
 			// a generic function's hidden parameters first (generics.rs)
 			let mut parameters = g.declare_hidden(info.lambda);
 			let mut prologue = Writer::at(indent + 1);
+			let mut owner_declarations = Writer::at(indent + 1);
+			let mut default_owners = Vec::new();
 			// the requirements: hidden parameters after the regular ones (references.rs)
 			let requirements = g.declare_requirements(info);
 			let required = !requirements.is_empty();
@@ -300,17 +302,37 @@ impl Generator<'_> {
 					continue;
 				};
 				let (lines, value) = g.capture_at(indent + 2, |g| g.expr(default));
-				if g.omitted_by_sentinel(param.symbol) {
+				let sentinel = g.omitted_by_sentinel(param.symbol);
+				let default_test = if sentinel {
 					let omitted = g.helper("faOmitted");
-					let test = if arrow {
+					if arrow {
 						format!("{name} === {omitted}")
 					} else {
 						format!(
 							"arguments.length < {} || {name} === {omitted}",
 							parameters.len() + 1
 						)
-					};
-					prologue.open(format!("if ({test})"));
+					}
+				} else {
+					format!("{name} === undefined")
+				};
+
+				if g.owns_resource(param.symbol)
+					&& !g
+						.types
+						.consumes_parameter(g.analysis.symbols.symbol(param.symbol).ty)
+				{
+					let flag = g.temp();
+					owner_declarations.line(format!("let {flag} = false;"));
+					prologue.open(format!("if ({default_test})"));
+					prologue.append(lines);
+					prologue.line(format!("{name} = {};", value.text));
+					prologue.line(format!("{flag} = true;"));
+					prologue.close("");
+					default_owners.push((param.symbol, flag));
+					parameters.push(name);
+				} else if sentinel {
+					prologue.open(format!("if ({default_test})"));
 					prologue.append(lines);
 					prologue.line(format!("{name} = {};", value.text));
 					prologue.close("");
@@ -335,11 +357,23 @@ impl Generator<'_> {
 				parameters.extend(g.declare_param_sources(instance));
 			}
 			let parameters = format!("({})", parameters.join(", "));
-			// the parameters holding a resource: moved in, dropped at the end
-			// unless they move out (resources.rs)
+			// Parameters borrow resources. Only a Task-consuming parameter
+			// owns its argument; ordinary resources remain with the caller.
 			let mut drops = Vec::new();
 			for param in &info.params {
-				if g.owns_resource(param.symbol) {
+				if let Some((_, flag)) = default_owners
+					.iter()
+					.find(|(symbol, _)| *symbol == param.symbol)
+				{
+					let ty = g.analysis.symbols.symbol(param.symbol).ty;
+					if let Some(drop) = g.drop_function(ty) {
+						drops.push(format!("if ({flag}) {drop}({});", g.name_of(param.symbol)));
+					}
+				} else if g
+					.types
+					.consumes_parameter(g.analysis.symbols.symbol(param.symbol).ty)
+					&& g.owns_resource(param.symbol)
+				{
 					let saved = std::mem::replace(&mut g.out, prologue);
 					if let Some(drop) = g.own_resource(param.symbol) {
 						drops.push(drop);
@@ -384,6 +418,7 @@ impl Generator<'_> {
 					body.line(format!("return {};", value.text));
 				}
 				let mut wrapped = Writer::at(indent + 1);
+				wrapped.append(owner_declarations);
 				wrapped.open("try");
 				wrapped.append(indent_by_one(body));
 				drops.reverse();

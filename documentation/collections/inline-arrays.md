@@ -109,6 +109,8 @@ An inline array is an aggregate containing `capacity` slots of the item's stride
 
 A recursive item keeps the owning indirection needed to break a cycle through inline lists; the fixed slot array never expands an infinite inline type.
 
+Aggregate parameters borrow their caller's place through direct calls, function values, generic thunks and awaited calls. A detached task snapshots its arguments into its frame before suspension. Resource items do not change this borrowing convention. Aggregate hash callbacks take addresses, so a wide capacity does not expand a WebAssembly function's parameter list. Promoting an item type into a shared interface preserves its nominal identity and representation.
+
 Only `[0, length)` is initialized. Construction, copying, moves, replacement, destruction and error cleanup must preserve that invariant. Unused slots are neither zero-filled nor read. Copies construct a new initialized prefix; moves transfer its ownership; destruction drops only that prefix. Hashing visits that same prefix in order and includes its length, consistently with equality. An append constructs its item before increasing length. Removing an item moves the suffix without copying or destroying its transferred owners a second time.
 
 An unproven push compares the length to the constant capacity and returns `CapacityError.InlineFull` before publishing an item. A proven push omits that branch. References point directly at item slots, which do not move during append.

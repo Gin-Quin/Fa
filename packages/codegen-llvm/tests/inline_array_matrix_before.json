@@ -1,0 +1,241 @@
+{
+	"revision": "449e2571",
+	"target": "native",
+	"optimization": 0,
+	"leak_check": true,
+	"programs": 33,
+	"failures": 29,
+	"results": [
+		{
+			"file": "anonymous_union.foreign.fa",
+			"exit": 1,
+			"passed": false,
+			"mismatched_rows": [5, 8, 9],
+			"reason": "crash: segmentation fault at 0x10 (a bug of the compiler or of foreign code)"
+		},
+		{
+			"file": "array.foreign.fa",
+			"exit": 1,
+			"passed": false,
+			"mismatched_rows": [5, 8, 9],
+			"reason": "crash: segmentation fault at 0x11 (a bug of the compiler or of foreign code)"
+		},
+		{
+			"file": "boolean.foreign.fa",
+			"exit": 1,
+			"passed": false,
+			"mismatched_rows": [5, 8, 9],
+			"reason": "crash: segmentation fault at 0x4 (a bug of the compiler or of foreign code)"
+		},
+		{
+			"file": "enum.foreign.fa",
+			"exit": 1,
+			"passed": false,
+			"mismatched_rows": [],
+			"reason": "/tmp/fa-inline-baseline/enum.foreign.fa:59:24: converting a value from Enum(NominalId(2147483660)) to Enum(NominalId(0)) is not supported by the native backend yet"
+		},
+		{
+			"file": "float32.foreign.fa",
+			"exit": 1,
+			"passed": false,
+			"mismatched_rows": [5, 8, 9],
+			"reason": "crash: segmentation fault at 0x8 (a bug of the compiler or of foreign code)"
+		},
+		{
+			"file": "float64.foreign.fa",
+			"exit": 1,
+			"passed": false,
+			"mismatched_rows": [5, 8, 9],
+			"reason": "crash: segmentation fault at 0x10 (a bug of the compiler or of foreign code)"
+		},
+		{
+			"file": "int128.foreign.fa",
+			"exit": 101,
+			"passed": false,
+			"mismatched_rows": [5, 8, 9],
+			"reason": "stop: deadlock: every task waits"
+		},
+		{
+			"file": "int16.foreign.fa",
+			"exit": 0,
+			"passed": false,
+			"mismatched_rows": [5, 8, 9, 11, 13],
+			"reason": "output differs"
+		},
+		{
+			"file": "int32.foreign.fa",
+			"exit": 1,
+			"passed": false,
+			"mismatched_rows": [5, 8, 9],
+			"reason": "crash: segmentation fault at 0x8 (a bug of the compiler or of foreign code)"
+		},
+		{
+			"file": "int64.foreign.fa",
+			"exit": 1,
+			"passed": false,
+			"mismatched_rows": [5, 8, 9],
+			"reason": "crash: segmentation fault at 0x10 (a bug of the compiler or of foreign code)"
+		},
+		{
+			"file": "int8.foreign.fa",
+			"exit": 1,
+			"passed": false,
+			"mismatched_rows": [5, 8, 9],
+			"reason": "crash: segmentation fault at 0x3 (a bug of the compiler or of foreign code)"
+		},
+		{
+			"file": "integer.foreign.fa",
+			"exit": 1,
+			"passed": false,
+			"mismatched_rows": [5, 8, 9],
+			"reason": "crash: segmentation fault at 0x10 (a bug of the compiler or of foreign code)"
+		},
+		{
+			"file": "long_string.foreign.fa",
+			"exit": 1,
+			"passed": false,
+			"mismatched_rows": [5, 8, 9],
+			"reason": "crash: segmentation fault at 0x45 (a bug of the compiler or of foreign code)"
+		},
+		{
+			"file": "named_union.foreign.fa",
+			"exit": 1,
+			"passed": false,
+			"mismatched_rows": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+			"reason": "crash: segmentation fault at 0x11 (a bug of the compiler or of foreign code)"
+		},
+		{
+			"file": "nested.foreign.fa",
+			"exit": 101,
+			"passed": false,
+			"mismatched_rows": [5, 8, 9],
+			"reason": "stop: deadlock: every task waits"
+		},
+		{
+			"file": "object.foreign.fa",
+			"exit": 1,
+			"passed": false,
+			"mismatched_rows": [0, 1, 2, 3, 4, 5, 7, 8, 9, 10],
+			"reason": "crash: segmentation fault at 0x45 (a bug of the compiler or of foreign code)"
+		},
+		{
+			"file": "optional.foreign.fa",
+			"exit": 1,
+			"passed": false,
+			"mismatched_rows": [5, 8, 9],
+			"reason": "crash: segmentation fault at 0x28 (a bug of the compiler or of foreign code)"
+		},
+		{
+			"file": "short_string.foreign.fa",
+			"exit": 1,
+			"passed": false,
+			"mismatched_rows": [5, 8, 9],
+			"reason": "crash: segmentation fault at 0x45 (a bug of the compiler or of foreign code)"
+		},
+		{
+			"file": "structure.foreign.fa",
+			"exit": 1,
+			"passed": false,
+			"mismatched_rows": [5, 8, 9],
+			"reason": "crash: segmentation fault at 0x11 (a bug of the compiler or of foreign code)"
+		},
+		{
+			"file": "tuple.foreign.fa",
+			"exit": 101,
+			"passed": false,
+			"mismatched_rows": [5, 8, 9],
+			"reason": "stop: deadlock: every task waits"
+		},
+		{
+			"file": "uint128.foreign.fa",
+			"exit": 101,
+			"passed": false,
+			"mismatched_rows": [5, 8, 9],
+			"reason": "stop: deadlock: every task waits"
+		},
+		{
+			"file": "uint16.foreign.fa",
+			"exit": 0,
+			"passed": false,
+			"mismatched_rows": [5, 8, 9, 11, 13],
+			"reason": "output differs"
+		},
+		{
+			"file": "uint32.foreign.fa",
+			"exit": 1,
+			"passed": false,
+			"mismatched_rows": [5, 8, 9],
+			"reason": "crash: segmentation fault at 0x8 (a bug of the compiler or of foreign code)"
+		},
+		{
+			"file": "uint64.foreign.fa",
+			"exit": 1,
+			"passed": false,
+			"mismatched_rows": [5, 8, 9],
+			"reason": "crash: segmentation fault at 0x10 (a bug of the compiler or of foreign code)"
+		},
+		{
+			"file": "uint8.foreign.fa",
+			"exit": 1,
+			"passed": false,
+			"mismatched_rows": [5, 8, 9],
+			"reason": "crash: segmentation fault at 0x3 (a bug of the compiler or of foreign code)"
+		},
+		{
+			"file": "unique.foreign.fa",
+			"exit": 1,
+			"passed": false,
+			"mismatched_rows": [],
+			"reason": "/tmp/fa-inline-next/unique.foreign.fa:38:1: error[MEM002]: `items` was moved on line 37: it holds a task, a worker's handle or a resource, so it can't be copied, and the moved value can't be used afterwards"
+		},
+		{
+			"file": "sync_integer.foreign.fa",
+			"exit": 0,
+			"passed": true,
+			"mismatched_rows": [],
+			"reason": ""
+		},
+		{
+			"file": "sync_long_string.foreign.fa",
+			"exit": 0,
+			"passed": true,
+			"mismatched_rows": [],
+			"reason": ""
+		},
+		{
+			"file": "sync_named_union.foreign.fa",
+			"exit": 0,
+			"passed": false,
+			"mismatched_rows": [0, 1, 2],
+			"reason": "output differs"
+		},
+		{
+			"file": "sync_nested.foreign.fa",
+			"exit": 0,
+			"passed": true,
+			"mismatched_rows": [],
+			"reason": ""
+		},
+		{
+			"file": "sync_object.foreign.fa",
+			"exit": 0,
+			"passed": false,
+			"mismatched_rows": [0, 2],
+			"reason": "output differs"
+		},
+		{
+			"file": "sync_structure.foreign.fa",
+			"exit": 0,
+			"passed": true,
+			"mismatched_rows": [],
+			"reason": ""
+		},
+		{
+			"file": "sync_unique.foreign.fa",
+			"exit": 1,
+			"passed": false,
+			"mismatched_rows": [],
+			"reason": "/tmp/fa-inline-next/sync_unique.foreign.fa:38:1: error[MEM002]: `items` was moved on line 37: it holds a task, a worker's handle or a resource, so it can't be copied, and the moved value can't be used afterwards"
+		}
+	]
+}

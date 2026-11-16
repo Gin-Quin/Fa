@@ -69,6 +69,63 @@ pub(crate) enum Cleanup<'ctx> {
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
+	/// Retain the memory ABI of wide helper calls through optimization.
+	/// Inlining their aggregate loads/stores expands thousands of unused
+	/// slots into SSA values, even when the initialized prefix is tiny.
+	pub(super) fn keep_aggregate_helper(&self, function: FunctionValue<'ctx>, repr: Repr) {
+		let ty = self.llvm_type(repr);
+		if ty.is_struct_type() && self.collection_data_size(ty) > 256 {
+			self.runtime.add_attributes(function, &["noinline"]);
+		}
+	}
+	/// Helper functions borrow aggregates by address, independently of their
+	/// width. In particular wasm must not flatten capacity into parameter count.
+	pub(super) fn helper_argument(
+		&self,
+		builder: &Builder<'ctx>,
+		value: BasicValueEnum<'ctx>,
+	) -> Result<BasicValueEnum<'ctx>, Error> {
+		if !value.is_struct_value() {
+			return Ok(value);
+		}
+		let slot = self.helper_slot(builder, value.get_type())?;
+		builder.build_store(slot, value)?;
+		Ok(slot.into())
+	}
+
+	fn helper_slot(
+		&self,
+		builder: &Builder<'ctx>,
+		ty: inkwell::types::BasicTypeEnum<'ctx>,
+	) -> Result<PointerValue<'ctx>, Error> {
+		let entry = builder
+			.get_insert_block()
+			.expect("a block")
+			.get_parent()
+			.expect("a function")
+			.get_first_basic_block()
+			.expect("an entry");
+		let allocations = self.context.create_builder();
+		match entry.get_first_instruction() {
+			Some(first) => allocations.position_before(&first),
+			None => allocations.position_at_end(entry),
+		}
+		Ok(allocations.build_alloca(ty, "aggregate_argument")?)
+	}
+
+	pub(super) fn helper_parameter(
+		&self,
+		builder: &Builder<'ctx>,
+		repr: Repr,
+		value: BasicValueEnum<'ctx>,
+	) -> Result<BasicValueEnum<'ctx>, Error> {
+		if self.llvm_type(repr).is_struct_type() {
+			Ok(builder.build_load(self.llvm_type(repr), value.into_pointer_value(), "")?)
+		} else {
+			Ok(value)
+		}
+	}
+
 	// ── shapes ──────────────────────────────────────────────────────────
 
 	/// Whether values of this representation may own heap memory.
@@ -267,10 +324,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if !self.needs_drop(value.repr) {
 			return Ok(());
 		}
-		let function = self.drop_function(value.repr)?;
-		let raw = self.freeze_union_padding(&self.builder, value.repr, raw);
-		self.builder.build_call(function, &[raw.into()], "")?;
-		Ok(())
+		self.call_drop(&self.builder, value.repr, raw)
 	}
 
 	/// A copy of a value that owns its own memory.
@@ -281,14 +335,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if !self.needs_drop(value.repr) {
 			return Ok(value);
 		}
-		let function = self.copy_function(value.repr)?;
-		let raw = self.freeze_union_padding(&self.builder, value.repr, raw);
-		let copied = self
-			.builder
-			.build_call(function, &[raw.into()], "")?
-			.try_as_basic_value()
-			.basic()
-			.expect("a copy");
+		let copied = self.call_copy(&self.builder, value.repr, raw)?;
 		Ok(Val::new(value.repr, copied))
 	}
 
@@ -314,10 +361,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(*function);
 		}
 		let ty = self.llvm_type(repr);
-		let r#type = self.context.void_type().fn_type(&[ty.into()], false);
+		let argument = if ty.is_struct_type() {
+			self.pointer_type().into()
+		} else {
+			ty
+		};
+		let r#type = self.context.void_type().fn_type(&[argument.into()], false);
 		let (function, builder) = self.helper_function("fa.drop", r#type);
+		self.keep_aggregate_helper(function, repr);
 		self.drop_functions.borrow_mut().insert(key, function);
 		let value = function.get_nth_param(0).expect("a value");
+		let value = self.helper_parameter(&builder, repr, value)?;
 		self.build_drop_body(&builder, function, repr, value)?;
 		builder.build_return(None)?;
 		Ok(function)
@@ -330,13 +384,31 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(*function);
 		}
 		let ty = self.llvm_type(repr);
-		let r#type = ty.fn_type(&[ty.into()], false);
+		let argument = if ty.is_struct_type() {
+			self.pointer_type().into()
+		} else {
+			ty
+		};
+		let r#type = if ty.is_struct_type() {
+			self.context
+				.void_type()
+				.fn_type(&[self.pointer_type().into(), argument.into()], false)
+		} else {
+			ty.fn_type(&[argument.into()], false)
+		};
 		let (function, builder) = self.helper_function("fa.copy", r#type);
+		self.keep_aggregate_helper(function, repr);
+		if ty.is_struct_type() {
+			self.add_return_slot_attribute(function, repr, false, 0);
+		}
 		if repr == Repr::Str {
 			self.runtime.add_attributes(function, &["alwaysinline"]);
 		}
 		self.copy_functions.borrow_mut().insert(key, function);
-		let value = function.get_nth_param(0).expect("a value");
+		let value = function
+			.get_nth_param(u32::from(ty.is_struct_type()))
+			.expect("a value");
+		let value = self.helper_parameter(&builder, repr, value)?;
 		if self.arena_repr(repr) {
 			builder.build_call(self.runtime.function("fa_arena_enter")?, &[], "")?;
 		}
@@ -349,7 +421,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				"",
 			)?;
 		}
-		builder.build_return(Some(&copied))?;
+		if ty.is_struct_type() {
+			let out = function
+				.get_nth_param(0)
+				.expect("a destination")
+				.into_pointer_value();
+			builder.build_store(out, copied)?;
+			builder.build_return(None)?;
+		} else {
+			builder.build_return(Some(&copied))?;
+		}
 		Ok(function)
 	}
 
@@ -363,6 +444,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if self.needs_drop(repr) {
 			let function = self.drop_function(repr)?;
 			let value = self.freeze_union_padding(builder, repr, value);
+			let value = self.helper_argument(builder, value)?;
 			builder.build_call(function, &[value.into()], "")?;
 		}
 		Ok(())
@@ -380,6 +462,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		let function = self.copy_function(repr)?;
 		let value = self.freeze_union_padding(builder, repr, value);
+		let value = self.helper_argument(builder, value)?;
+		if self.llvm_type(repr).is_struct_type() {
+			let out = self.helper_slot(builder, self.llvm_type(repr))?;
+			builder.build_call(function, &[out.into(), value.into()], "")?;
+			return Ok(builder.build_load(self.llvm_type(repr), out, "")?);
+		}
 		Ok(builder
 			.build_call(function, &[value.into()], "")?
 			.try_as_basic_value()
@@ -724,6 +812,27 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(())
 	}
 
+	/// Copy fast paths use the same result-place convention as the main
+	/// path, including strings and closure handles with an early return.
+	fn return_copy_value(
+		&self,
+		builder: &Builder<'ctx>,
+		function: FunctionValue<'ctx>,
+		value: BasicValueEnum<'ctx>,
+	) -> Result<(), Error> {
+		if function.get_type().get_return_type().is_none() {
+			let out = function
+				.get_nth_param(0)
+				.expect("a destination")
+				.into_pointer_value();
+			builder.build_store(out, value)?;
+			builder.build_return(None)?;
+		} else {
+			builder.build_return(Some(&value))?;
+		}
+		Ok(())
+	}
+
 	fn build_copy_body(
 		&self,
 		builder: &Builder<'ctx>,
@@ -759,7 +868,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					"",
 				)?;
 				self.helper_when(builder, function, external, |builder| {
-					builder.build_return(Some(&pair))?;
+					self.return_copy_value(builder, function, pair.into())?;
 					Ok(())
 				})?;
 				let length = builder.build_extract_value(pair, 1, "")?.into_int_value();
@@ -784,7 +893,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let not_shared = builder.build_not(shared, "")?;
 				self.helper_when(builder, function, not_shared, |builder| {
 					let zeroed = builder.build_insert_value(pair, flag, 2, "")?;
-					builder.build_return(Some(&zeroed))?;
+					self.return_copy_value(builder, function, zeroed.into_struct_value().into())?;
 					Ok(())
 				})?;
 				let slow = self.copy_string_slow()?;
@@ -803,7 +912,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let array = value.into_pointer_value();
 				let present = builder.build_is_not_null(array, "")?;
 				self.helper_when(builder, function, present, |builder| {
-					builder.build_return(Some(&array))?;
+					self.return_copy_value(builder, function, array.into())?;
 					Ok(())
 				})?;
 				let size = self.item_size_const(item);
@@ -830,7 +939,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						"",
 					)?;
 					self.helper_when(builder, function, ordinary, |builder| {
-						builder.build_return(Some(&copied))?;
+						self.return_copy_value(builder, function, copied.into())?;
 						Ok(())
 					})?;
 				}
@@ -861,7 +970,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let array = value.into_pointer_value();
 				let present = builder.build_is_not_null(array, "")?;
 				self.helper_when(builder, function, present, |builder| {
-					builder.build_return(Some(&array))?;
+					self.return_copy_value(builder, function, array.into())?;
 					Ok(())
 				})?;
 				self.build_growing_copy(builder, function, item_type, array)?
@@ -901,7 +1010,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 							"",
 						)?;
 					}
-					builder.build_return(Some(&value))?;
+					self.return_copy_value(builder, function, value)?;
 					Ok(())
 				})?;
 				// where the next copy goes: a slot holding the first copy, then
@@ -979,7 +1088,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.into_pointer_value();
 				let present = builder.build_is_not_null(environment, "")?;
 				self.helper_when(builder, function, present, |builder| {
-					builder.build_return(Some(&value))?;
+					self.return_copy_value(builder, function, value)?;
 					Ok(())
 				})?;
 				let copy_pointer =
@@ -1003,7 +1112,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Optional(scalar) => {
 				let (present, inner) = self.split_optional(builder, Val::new(repr, value))?;
 				self.helper_when(builder, function, present, |builder| {
-					builder.build_return(Some(&value))?;
+					self.return_copy_value(builder, function, value)?;
 					Ok(())
 				})?;
 				let inner = inner.value.expect("an optional value");
@@ -1743,7 +1852,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// type (`TypeStore::owns_unique`).
 	pub(crate) fn is_moved_parameter(&self, symbol: SymbolId) -> bool {
 		let data = self.analysis.symbols.symbol(symbol);
-		matches!(data.kind, SymbolKind::Parameter { .. }) && self.types().owns_unique(data.ty)
+		matches!(data.kind, SymbolKind::Parameter { .. })
+			&& self.types().consumes_parameter(data.ty)
 	}
 
 	/// Stops dropping a slot registered with `Cleanup::Local` (a value built

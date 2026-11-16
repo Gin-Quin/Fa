@@ -1850,6 +1850,31 @@ console.log(try read(T.One { child = T.Leaf { value = 7 } }, false))
 	}
 
 	#[test]
+	fn an_arithmetic_union_leaf_of_any_arm_is_tested_at_recursive_calls() {
+		let ir = ir_of(
+			"union-leaf-arithmetic",
+			include_str!("programs/union-leaf-arithmetic.fa"),
+		);
+		let evaluate = function(&ir, "fa.evaluate");
+		assert!(evaluate.contains("union_leaf"), "{evaluate}");
+		assert!(evaluate.contains("union_base_or_call = phi i64"), "{evaluate}");
+		let source = |leaf: &str| {
+			format!(
+				"type T = Union {{ One = {{ child: T }}, Leaf = {{ value: Int32 }} }}\nfunction double = (value: Integer): Integer => value * 2\nfunction read = (node: T, pass: Integer): Integer => when node is {{\n T.One as {{ child }} => read(child, pass) + 1\n T.Leaf as {{ value }} => {leaf}\n}}\nconsole.log(read(T.One {{ child = T.Leaf {{ value = 7 }} }}, 3))\n"
+			)
+		};
+		let calling = ir_of("calling-union-leaf", &source("double(value) + pass"));
+		assert!(!calling.contains("union_leaf"), "{calling}");
+		let local = ir_of(
+			"local-union-leaf",
+			&source("{\n  let twice = value * 2\n  twice + pass\n }"),
+		);
+		assert!(!local.contains("union_leaf"), "{local}");
+		let inlined = ir_of("arithmetic-union-leaf", &source("-(value * 2) + pass"));
+		assert!(inlined.contains("union_leaf"), "{inlined}");
+	}
+
+	#[test]
 	fn recursive_union_arrays_use_region_buffer_cleanups() {
 		let ir = ir_of(
 			"region-child-arrays",

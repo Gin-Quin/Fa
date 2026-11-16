@@ -40,6 +40,7 @@ console.log(half, half.length, half.isWellFormed()) -- prints: � 1 false
 console.log("{text[3]}{text[4]}" == "😀") -- prints: true
 console.log("{text[3]}{text[4]}") -- prints: 😀
 console.log("{text[3]}{""}{text[4]}") -- prints: 😀
+console.log([text[3], "", text[4]].join("").length, ["e", "\u{301}"].join("").length, ["é", "日"].join("😀").length) -- prints: 2 2 4
 function checked = (value: String, index: Integer): UInt16 throws IndexError => try value.codeUnitAt(index)
 console.log(checked("é😀", -1) catch _error => 0, checked("", 0) catch _error => 999, checked("x", -2) catch _error => 999) -- prints: 56832 999 999
 

@@ -3525,28 +3525,35 @@ FA_EXPORT void fa_array_join(const void *header, const uint8_t *separator,
 	join_strings(items, (size_t)array->length, separator, separator_length, out);
 }
 
-/// The length of a join needs no output buffer when every byte is simple.
-/// Otherwise join normally: graphemes may span the boundaries of parts.
+static __attribute__((noinline)) size_t join_unit_length(const FaString *parts, size_t count,
+                                                        size_t index, size_t bytes, size_t units) {
+	for (; index < count; index += 1) {
+		size_t size = string_length(parts + index);
+		bytes = fa_string_size(bytes, size);
+		units += fa_string_length(string_bytes(parts + index), size, parts[index].capacity);
+	}
+	return units;
+}
+
+/// UTF-16 lengths are additive even when a join reunites surrogate halves.
+/// Keep the ASCII loop as a single checked sum; a non-ASCII suffix also
+/// measures units, retaining byte-size overflow checks without an output.
 FA_EXPORT size_t fa_array_join_length(void *header, const uint8_t *separator, size_t separator_length) {
 	FaArrayHeader *array = header;
 	fa_array_materialize(array);
 	size_t count = (size_t)array->length;
-	if (count > 1 && !simple_flag(separator, separator_length)) { goto materialize; }
 	if (separator_length && count > 1 && count - 1 >= KIND_MASK / separator_length) { out_of_memory(); }
 	size_t length = count > 1 ? (count - 1) * separator_length : 0;
 	const FaString *parts = (const FaString *)array->items;
+	if (count > 1 && !simple_flag(separator, separator_length)) {
+		return join_unit_length(parts, count, 0, length, (count - 1) * unit_count(separator, separator_length));
+	}
 	for (size_t i = 0; i < count; i += 1) {
 		size_t size = string_length(parts + i);
-		if (size && !(parts[i].capacity & SIMPLE)) { goto materialize; }
+		if (!(parts[i].capacity & SIMPLE)) { return join_unit_length(parts, count, i, length, length); }
 		length = fa_string_size(length, size);
 	}
 	return length;
-materialize:;
-	FaString joined;
-	fa_array_join(header, separator, separator_length, &joined);
-	size_t result = fa_string_length(string_bytes(&joined), string_length(&joined), joined.capacity);
-	if (string_owned(joined.capacity)) { fa_string_free(joined.bytes, joined.capacity); }
-	return result;
 }
 
 /// `padStart` (`at_start` 1) and `padEnd` (0), in grapheme clusters.

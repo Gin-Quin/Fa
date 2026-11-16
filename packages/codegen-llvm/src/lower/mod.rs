@@ -1032,6 +1032,14 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			.build_load(self.llvm_type(slot.repr), slot.pointer, "")?;
 		if let Some(instruction) = inkwell::values::BasicValue::as_instruction_value(&value) {
 			self.tag(instruction, false)?;
+			if slot.repr == Repr::Str {
+				instruction
+					.set_metadata(
+						crate::runtime::string_value_scope(self.context),
+						self.context.get_kind_id("alias.scope"),
+					)
+					.map_err(|error| Error::Llvm(error.to_string()))?;
+			}
 			// a module `let` read by a function: initialized before any call
 			if self
 				.frame

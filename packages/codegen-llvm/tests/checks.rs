@@ -1086,6 +1086,35 @@ console.log(try equal("é", 0), try choose("a", 0))
 	}
 
 	#[test]
+	fn cached_string_length_preserves_the_value_header() {
+		let ir = optimized_ir(
+			"string-cache-header",
+			r#"
+function measure = (items: Array<String>): Integer => {
+	mutable total = 0
+	for item in items {
+		total += item.length + item.utf8Length()
+	}
+	total
+}
+console.log(measure(["é😀".repeat(100)]))
+"#,
+		);
+		// A cached query may update the heap prefix, but cannot change the
+		// three words of the item. The subsequent byte length reuses them.
+		let body = function(&ir, "main");
+		let call = body.find("@string_length_slow(").expect("a cached query");
+		let after = body[call..]
+			.lines()
+			.skip(1)
+			.take_while(|line| !line.is_empty());
+		assert!(
+			after.into_iter().all(|line| !line.contains(" = load ")),
+			"{body}"
+		);
+	}
+
+	#[test]
 	fn ordinary_string_operations_do_not_link_grapheme_tables() {
 		let ir = ir_of(
 			"units-no-graphemes",

@@ -1,7 +1,7 @@
 //! Evaluated provenance: one transfer per value, before its flow is lost.
 use crate::analysis::FieldValue;
 use crate::check::Walker;
-use crate::flow::values::{ClosureOrigin, ValueOrigins};
+use crate::flow::values::{CallableOrigin, ClosureOrigin, ValueOrigins};
 use crate::flow::{Identity, Step};
 use crate::ids::{NodeId, PlaceId, SymbolId, TypeId};
 use crate::symbols::{Resolution, SymbolKind};
@@ -69,7 +69,7 @@ impl Walker<'_> {
 				origins.owned = true;
 				origins.closures.push(ClosureOrigin {
 					projection: Vec::new(),
-					lambda: node,
+					callable: CallableOrigin::Local(node),
 				});
 			}
 			View::Name(_) => {
@@ -90,7 +90,7 @@ impl Walker<'_> {
 						{
 							origins.closures.push(ClosureOrigin {
 								projection: Vec::new(),
-								lambda: info.lambda,
+								callable: CallableOrigin::Local(info.lambda),
 							});
 						}
 					} else {
@@ -194,6 +194,17 @@ impl Walker<'_> {
 				origins.owned = origins.places.is_empty();
 				origins.opaque = !origins.bounds.is_empty();
 			}
+		}
+		if let crate::types::TypeKind::Function(sig) = self.s.types.kind(self.type_of(node))
+			&& let Resolution::External(key) = self.reference_callee_resolution(node)
+		{
+			origins.closures.push(ClosureOrigin {
+				projection: Vec::new(),
+				callable: CallableOrigin::External {
+					key,
+					reference: self.s.types.sig(sig).reference,
+				},
+			});
 		}
 		if self.type_of(node) == TypeId::NEVER {
 			origins = ValueOrigins::default();
@@ -354,7 +365,7 @@ impl Walker<'_> {
 					self.stored_origins(place)
 						.closures
 						.into_iter()
-						.map(|origin| origin.lambda),
+						.filter_map(|origin| origin.callable.local()),
 				);
 			}
 			let declaration = self.a.symbols.symbol(symbol).decl_node;

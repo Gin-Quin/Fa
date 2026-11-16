@@ -9,7 +9,7 @@ function example = (people: Array<Person>, i: Integer) throws IndexError mutates
 }
 
 -- Nonnegative indices retain the original disjointness proof.
-function nonnegative = (people: Array<Person>, i: Integer(0..1000)) throws IndexError mutates people => {
+function nonnegative = (people: Array<Person>, i: Integer<min = 0, max = 1000>) throws IndexError mutates people => {
  use a = try people[i]
  use b = try people[i + 2]
  people.delete(i + 1)

@@ -1615,12 +1615,13 @@ impl Walker<'_> {
 			self.evaluated_origins(callee)
 				.closures
 				.into_iter()
-				.map(|origin| {
+				.filter_map(|origin| origin.callable.local())
+				.map(|lambda| {
 					self.a
 						.functions
-						.get(&origin.lambda)
+						.get(&lambda)
 						.and_then(|info| info.declaration)
-						.unwrap_or(origin.lambda)
+						.unwrap_or(lambda)
 				}),
 		);
 		closures.sort_unstable();
@@ -1938,15 +1939,19 @@ impl Walker<'_> {
 				if matches!(self.view(self.strip_groups(*value)), View::Lambda { .. }) {
 					continue;
 				}
-				closures.extend(self.evaluated_origins(*value).closures.into_iter().map(
-					|origin| {
-						self.a
-							.functions
-							.get(&origin.lambda)
-							.and_then(|info| info.declaration)
-							.unwrap_or(origin.lambda)
-					},
-				));
+				closures.extend(
+					self.evaluated_origins(*value)
+						.closures
+						.into_iter()
+						.filter_map(|origin| origin.callable.local())
+						.map(|lambda| {
+							self.a
+								.functions
+								.get(&lambda)
+								.and_then(|info| info.declaration)
+								.unwrap_or(lambda)
+						}),
+				);
 			}
 		}
 		closures.sort_unstable();
@@ -2742,7 +2747,9 @@ impl Walker<'_> {
 	pub(crate) fn escape(&mut self, value: NodeId, at: NodeId) {
 		let origins = self.evaluated_origins(value);
 		for closure in origins.closures {
-			self.escape_closure(closure.lambda, at);
+			if let Some(lambda) = closure.callable.local() {
+				self.escape_closure(lambda, at);
+			}
 		}
 	}
 

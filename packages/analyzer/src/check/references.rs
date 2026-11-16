@@ -634,7 +634,7 @@ impl Walker<'_> {
 		summary
 	}
 
-	fn reference_callee_resolution(&self, callee: NodeId) -> Resolution {
+	pub(super) fn reference_callee_resolution(&mut self, callee: NodeId) -> Resolution {
 		let mut callee = self.strip_groups(callee);
 		if let View::Call { callee: inner, .. } = self.view(callee)
 			&& self.a.has_flags(callee, NodeFlags::GENERIC_APPLICATION)
@@ -645,10 +645,15 @@ impl Walker<'_> {
 			View::Access { members, .. } => members.last().unwrap_or(callee),
 			_ => callee,
 		};
-		self.a.resolution(resolved)
+		match self.a.resolution(resolved) {
+			Resolution::Local(symbol) => self
+				.external_value_key(symbol)
+				.map_or(Resolution::Local(symbol), Resolution::External),
+			other => other,
+		}
 	}
 
-	fn direct_reference_callee(&self, callee: NodeId) -> bool {
+	fn direct_reference_callee(&mut self, callee: NodeId) -> bool {
 		match self.reference_callee_resolution(callee) {
 			Resolution::Local(symbol) => self.a.symbols.symbol(symbol).kind == SymbolKind::Function,
 			Resolution::External(key) => self
@@ -665,60 +670,72 @@ impl Walker<'_> {
 		}
 	}
 
-	fn callee_reference_summary(
+	fn external_reference_summary(
 		&self,
+		key: crate::ids::DeclKey,
+	) -> Option<Vec<crate::analysis::ReferenceOrigin>> {
+		let interface = self.s.interface(self.s.types.decl_key_data(key).module)?;
+		let decl = interface.keys.get(&key)?.node;
+		interface
+			.reference_origins
+			.get(&decl)
+			.or_else(|| {
+				interface
+					.declared
+					.get(&decl)
+					.and_then(|decl| decl.function)
+					.and_then(|function| interface.reference_origins.get(&function))
+			})
+			.cloned()
+	}
+
+	fn callee_reference_summary(
+		&mut self,
 		call: NodeId,
 		callee: NodeId,
 	) -> Option<Vec<crate::analysis::ReferenceOrigin>> {
+		use crate::flow::values::CallableOrigin;
+		if let Resolution::External(key) = self.reference_callee_resolution(callee) {
+			return self.external_reference_summary(key);
+		}
 		if let Some(crate::analysis::Callee::Function(decl)) =
 			self.a.calls.get(&call).map(|info| info.callee)
 		{
 			return self.a.reference_origins.get(&decl).cloned();
 		}
-
-		if let Resolution::External(key) = self.reference_callee_resolution(callee) {
-			if self.tree.text(callee.index()).contains("places.field") {
-				eprintln!(
-					"IMPORT TRACE file={:?} key={:?} data={:?} iface={:?}",
-					self.file,
-					key,
-					self.s.types.decl_key_data(key),
-					self.s
-						.interface(self.s.types.decl_key_data(key).module)
-						.map(|i| (i.complete, i.keys.get(&key), &i.reference_origins))
-				);
-			}
-			let interface = self.s.interface(self.s.types.decl_key_data(key).module)?;
-			let decl = interface.keys.get(&key)?.node;
-			return interface.reference_origins.get(&decl).cloned();
-		}
 		let origins = self.evaluated_origins(callee);
 		if origins.closures.is_empty() {
 			return None;
 		}
+		let expected = match self.s.types.kind(self.type_of(callee)) {
+			TypeKind::Function(sig) => self.s.types.sig(sig).reference,
+			_ => return None,
+		};
 		let mut summary = Vec::new();
 		for closure in origins.closures {
-			if let TypeKind::Function(expected) = self.s.types.kind(self.type_of(callee))
-				&& self
-					.a
-					.functions
-					.get(&closure.lambda)
-					.and_then(|info| info.sig)
-					.is_some_and(|actual| {
-						self.s.types.sig(actual).reference != self.s.types.sig(expected).reference
-					}) {
-				return None;
-			}
 			if !closure.projection.is_empty() {
 				return None;
 			}
-			summary.extend(
-				self.a
-					.reference_origins
-					.get(&closure.lambda)?
-					.iter()
-					.copied(),
-			);
+			match closure.callable {
+				CallableOrigin::Local(lambda) => {
+					if self
+						.a
+						.functions
+						.get(&lambda)
+						.and_then(|info| info.sig)
+						.is_some_and(|sig| self.s.types.sig(sig).reference != expected)
+					{
+						return None;
+					}
+					summary.extend(self.a.reference_origins.get(&lambda)?.iter().copied());
+				}
+				CallableOrigin::External { key, reference } => {
+					if reference != expected {
+						return None;
+					}
+					summary.extend(self.external_reference_summary(key)?);
+				}
+			}
 		}
 		summary.sort_unstable();
 		summary.dedup();
@@ -1783,7 +1800,7 @@ impl Walker<'_> {
 
 	/// A flat value owns no memory (advanced brief §3.2): a primitive, a
 	/// union of literals, an enumeration, an object of flat fields.
-	fn is_flat(&self, ty: TypeId) -> bool {
+	pub(super) fn is_flat(&self, ty: TypeId) -> bool {
 		match self.s.types.kind(ty) {
 			TypeKind::Int(_)
 			| TypeKind::Float(_)

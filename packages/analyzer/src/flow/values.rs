@@ -1,12 +1,29 @@
 //! Evaluated value provenance, shared by escapes and reference results.
 use crate::flow::Step;
-use crate::ids::{NodeId, PlaceId, SymbolId};
+use crate::ids::{DeclKey, NodeId, PathId, PlaceId, SymbolId};
 use crate::intern::Interner;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum CallableOrigin {
+	Local(NodeId),
+	External {
+		key: DeclKey,
+		reference: Option<PathId>,
+	},
+}
+impl CallableOrigin {
+	pub fn local(self) -> Option<NodeId> {
+		match self {
+			Self::Local(node) => Some(node),
+			Self::External { .. } => None,
+		}
+	}
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ClosureOrigin {
 	pub projection: Vec<Step>,
-	pub lambda: NodeId,
+	pub callable: CallableOrigin,
 }
 
 /// An unknown returned place is somewhere below this owner. A formal root

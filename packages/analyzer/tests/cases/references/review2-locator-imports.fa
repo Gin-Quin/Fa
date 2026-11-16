@@ -18,6 +18,10 @@ function exercise = (): Array<Integer> throws IndexError => {
  mutable nodes: Array<places.Node> = [{ left = 2, right = 3, children = [4] }]
  use left = try places.field(nodes, 0)
  nodes[0].children.clear()
+ let fieldPicker: (values: Array<places.Node>, index: Integer) => Integer in values throws IndexError = places.field
+ use sameLeft = try fieldPicker(nodes, 0)
+ nodes[0].children.clear()
+ sameLeft += 0
  left = 8
  let pick: (values: Array<places.Node>, right: Boolean) => Integer in values throws IndexError = places.choose
  use right = try pick(nodes, true)

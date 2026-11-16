@@ -2,7 +2,8 @@ type Node = { value: Integer }
 function wrong = (first: Array<Node>, second: Array<Node>, flag: Boolean): Node in first throws IndexError => {
  if flag { try first[0] } else { try second[0] } -- error: REF009
 }
-function escaped = (flag: Boolean): (() => Integer) => {
+type Reader = () => Integer
+function escaped = (flag: Boolean): Reader => {
  mutable first = [7]
  mutable second = [9]
  use one = first[0]

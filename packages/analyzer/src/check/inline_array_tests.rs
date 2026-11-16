@@ -132,7 +132,7 @@ fn inline_bounded_while_proves_pushes_and_the_final_index() {
 #[test]
 fn inline_capacity_alone_is_substituted() {
 	let (session, file) = analyzed(
-		"function empty = <capacity: UInt32>(): InlineArray<Integer, capacity> => []\nmutable values = empty<2>()\nfunction append = <capacity: UInt32>(values: InlineArray<Integer, capacity>) throws CapacityError mutates values.length => { try values.push(9) }\ntry append<2>(values)\n",
+		"function empty = <capacity: UInt32>(): InlineArray<Integer, capacity> => []\nmutable values = empty<2>()\nfunction append = <capacity: UInt32>(items: InlineArray<Integer, capacity>) throws CapacityError mutates items.length => { try items.push(9) }\ntry append<2>(values)\n",
 	);
 	assert_eq!(
 		symbol_type(&session, file, "values"),

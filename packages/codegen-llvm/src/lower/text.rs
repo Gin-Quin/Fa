@@ -653,7 +653,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder
 			.build_store(snapshot.pointer, current.value.expect("a string"))?;
 		self.call_runtime(
-			"fa_string_append",
+			"fa_string_append_after_guard",
 			&[
 				snapshot.pointer.into(),
 				suffix_bytes.into(),

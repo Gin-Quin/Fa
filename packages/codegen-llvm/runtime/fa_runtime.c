@@ -179,6 +179,11 @@ static int string_counted_view(size_t capacity) {
 	       (capacity & STRING_COUNTED_VIEW) == STRING_COUNTED_VIEW;
 }
 
+static int string_view(size_t capacity) {
+	return !(capacity & STRING_INLINE) &&
+	       (string_counted_view(capacity) || (capacity & ~STRING_FLAGS) == KIND_MASK);
+}
+
 /// A content view is a descriptor value, whereas a whole String alias
 /// still designates its owner's place. Snapshot only the former when a
 /// designation is copied or reseated; no payload is copied or owned here.
@@ -186,8 +191,7 @@ FA_EXPORT __attribute__((always_inline)) const FaString *fa_string_reference(
     const FaString *place, FaString *snapshot) {
 	if (!place) { return 0; }
 	size_t capacity = place->capacity;
-	if (!(capacity & STRING_INLINE) &&
-	    (string_counted_view(capacity) || (capacity & ~STRING_FLAGS) == KIND_MASK)) {
+	if (string_view(capacity)) {
 		*snapshot = *place;
 		return snapshot;
 	}
@@ -317,9 +321,23 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_copy_bytes(
 	uint16_t low_unit = low ? span_low_unit(bytes) : 0;
 	uint16_t high_unit = high ? span_high_unit(bytes + end) : 0;
 	size_t written = low ? 3 : 0;
-	__builtin_memmove(out + written, bytes + start, end - start);
+	if (end > start) { __builtin_memmove(out + written, bytes + start, end - start); }
 	if (low) { encode_point(out, low_unit); }
 	if (high) { encode_point(out + written + end - start, high_unit); }
+}
+
+/// A borrowed reader can visit at most three canonical pieces. The tiny
+/// synthetic halves live only for the callback; the middle is never copied.
+static __attribute__((noinline)) void string_span_parts(const uint8_t *bytes, size_t length,
+    void (*read)(const uint8_t *, size_t)) {
+	int low = span_low_head(bytes, length);
+	int high = span_high_tail(bytes, length);
+	size_t start = low ? 2 : 0;
+	size_t end = length - (high ? 3 : 0);
+	uint8_t edge[3];
+	if (low) { encode_point(edge, span_low_unit(bytes)); read(edge, 3); }
+	read(bytes + start, end - start);
+	if (high) { encode_point(edge, span_high_unit(bytes + end)); read(edge, 3); }
 }
 
 /// A block of `old` bytes replaced by one of `size` bytes holding its first
@@ -614,7 +632,10 @@ FA_EXPORT void fa_b_string(const uint8_t *bytes, size_t length, size_t capacity)
 	if (capacity & SIMPLE) {
 		append_simple(bytes, length);
 	} else {
-		fa_b_bytes(bytes, length);
+		size_t encoded = fa_string_encoded_length(bytes, length, capacity);
+		reserve(encoded);
+		fa_string_copy_bytes(builder + builder_length, bytes, length, capacity);
+		builder_length += encoded;
 	}
 }
 
@@ -1720,9 +1741,8 @@ FA_EXPORT void fa_b_percentage(double fraction) {
 /// A string in Fa literal notation (`faQuote`): quoted, with `\\`, `\"`,
 /// `\n`, `\r`, `\t`, `\0`, `\xNN` for the other control characters, and
 /// `{{`, `}}` for the braces.
-FA_EXPORT void fa_b_quoted(const uint8_t *bytes, size_t length) {
+static void quote_fa_bytes(const uint8_t *bytes, size_t length) {
 	static const char hex[] = "0123456789ABCDEF";
-	append_byte('"');
 	for (size_t index = 0; index < length; index += 1) {
 		uint8_t byte = bytes[index];
 		switch (byte) {
@@ -1760,6 +1780,12 @@ FA_EXPORT void fa_b_quoted(const uint8_t *bytes, size_t length) {
 			}
 		}
 	}
+}
+
+FA_EXPORT void fa_b_quoted(const uint8_t *bytes, size_t length) {
+	append_byte('"');
+	if (span_has_edges(bytes, length)) { string_span_parts(bytes, length, quote_fa_bytes); }
+	else { quote_fa_bytes(bytes, length); }
 	append_byte('"');
 }
 
@@ -1777,18 +1803,20 @@ FA_EXPORT void fa_b_string_array(const FaString *items, size_t length) {
 
 FA_EXPORT __attribute__((always_inline)) void fa_concat(const uint8_t *left, size_t left_length, size_t left_capacity,
                          const uint8_t *right, size_t right_length, size_t right_capacity, FaString *out) {
-	size_t length = left_length + right_length;
+	size_t left_encoded = fa_string_encoded_length(left, left_length, left_capacity);
+	size_t right_encoded = fa_string_encoded_length(right, right_length, right_capacity);
+	size_t length = left_encoded + right_encoded;
 	size_t flags = (left_length ? left_capacity : SIMPLE) & (right_length ? right_capacity : SIMPLE) & SIMPLE;
 	if (!flags) { flags = simple_flag(left, left_length) & simple_flag(right, right_length); }
-	if (length < left_length || length >= KIND_MASK) { out_of_memory(); }
+	if (length < left_encoded || length >= KIND_MASK) { out_of_memory(); }
 	if (length <= 1) {
 		*out = owned_copy(left_length == 0 ? right : left, length);
 		return;
 	}
 	if (length <= INLINE_STRING_BYTES) {
 		FaString small = {0};
-		copy_bytes((uint8_t *)&small, left, left_length);
-		copy_bytes((uint8_t *)&small + left_length, right, right_length);
+		fa_string_copy_bytes((uint8_t *)&small, left, left_length, left_capacity);
+		fa_string_copy_bytes((uint8_t *)&small + left_encoded, right, right_length, right_capacity);
 		inline_string_tag(&small, length, flags);
 		*out = small;
 		fa_string_finish_known(out, flags);
@@ -1796,8 +1824,8 @@ FA_EXPORT __attribute__((always_inline)) void fa_concat(const uint8_t *left, siz
 	}
 	size_t block = string_block(length);
 	uint8_t *bytes = string_alloc(&block, flags);
-	copy_bytes(bytes, left, left_length);
-	copy_bytes(bytes + left_length, right, right_length);
+	fa_string_copy_bytes(bytes, left, left_length, left_capacity);
+	fa_string_copy_bytes(bytes + left_encoded, right, right_length, right_capacity);
 	out->bytes = bytes;
 	out->length = length;
 	out->capacity = block | flags;
@@ -1845,7 +1873,9 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_assign_local(const FaStr
     FaString *out, int32_t mutable, int32_t consume) {
 	FaString previous = *source;
 	FaString destination = *out;
-	size_t length = string_length(&previous);
+	size_t physical = string_length(&previous);
+	const uint8_t *bytes = string_bytes(&previous);
+	size_t length = fa_string_encoded_length(bytes, physical, previous.capacity);
 	int owned = consume && string_owned(previous.capacity);
 	int drop_destination = string_owned(destination.capacity);
 	if (owned && destination.bytes == previous.bytes) { drop_destination = 0; }
@@ -1857,7 +1887,9 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_assign_local(const FaStr
 	FaString result;
 	uint8_t *target = fa_string_allocate_local(length, previous.capacity & STRING_FLAGS,
 	                                         buffer, &result, mutable);
-	__builtin_memmove(target, string_bytes(&previous), length);
+	if ((previous.capacity & SIMPLE) || !span_has_edges(bytes, physical)) {
+		__builtin_memmove(target, bytes, physical);
+	} else { fa_string_copy_bytes(target, bytes, physical, previous.capacity); }
 	if (owned) { fa_string_free(previous.bytes, previous.capacity); }
 	if (drop_destination) { fa_string_free(destination.bytes, destination.capacity); }
 	if ((result.capacity & STRING_INLINE) && (previous.capacity & STRING_SURROGATES)) { fa_string_finish(&result); }
@@ -1867,7 +1899,7 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_assign_local(const FaStr
 /// Moving a header outside a frame-backed local must detach its bytes.
 FA_EXPORT __attribute__((always_inline)) void fa_string_escape(const FaString *source, FaString *out) {
 	FaString previous = *source;
-	*out = string_frame(previous.capacity)
+	*out = (string_frame(previous.capacity) || string_view(previous.capacity))
 	           ? owned_copy_with(string_bytes(&previous), string_length(&previous), previous.capacity & STRING_FLAGS)
 	           : previous;
 }
@@ -1907,11 +1939,12 @@ FA_EXPORT __attribute__((always_inline)) uint8_t *fa_string_replace_buffer(size_
 static __attribute__((always_inline)) void join_strings(const FaString *parts, size_t count,
                                                         const uint8_t *separator, size_t separator_length,
                                                         FaString *out) {
-	if (separator_length && count > 1 && count - 1 >= KIND_MASK / separator_length) { out_of_memory(); }
-	size_t length = count > 1 ? (count - 1) * separator_length : 0;
+	size_t separator_encoded = fa_string_encoded_length(separator, separator_length, 0);
+	if (separator_encoded && count > 1 && count - 1 >= KIND_MASK / separator_encoded) { out_of_memory(); }
+	size_t length = count > 1 ? (count - 1) * separator_encoded : 0;
 	size_t simple = count > 1 ? simple_flag(separator, separator_length) : SIMPLE;
 	for (size_t i = 0; i < count; i += 1) {
-		size_t part_length = string_length(parts + i);
+		size_t part_length = fa_string_encoded_length(string_bytes(parts + i), string_length(parts + i), parts[i].capacity);
 		if (part_length >= KIND_MASK - length) { out_of_memory(); }
 		length += part_length;
 		if (part_length) { simple &= parts[i].capacity; }
@@ -1922,12 +1955,12 @@ static __attribute__((always_inline)) void join_strings(const FaString *parts, s
 	size_t offset = 0;
 	for (size_t i = 0; i < count; i += 1) {
 		if (i) {
-			copy_bytes(target + offset, separator, separator_length);
-			offset += separator_length;
+			fa_string_copy_bytes(target + offset, separator, separator_length, 0);
+			offset += separator_encoded;
 		}
 		size_t part_length = string_length(parts + i);
-		copy_bytes(target + offset, string_bytes(parts + i), part_length);
-		offset += part_length;
+		fa_string_copy_bytes(target + offset, string_bytes(parts + i), part_length, parts[i].capacity);
+		offset += fa_string_encoded_length(string_bytes(parts + i), part_length, parts[i].capacity);
 	}
 	if (!simple) { simple = text_flags(target, length); }
 	if (length <= INLINE_STRING_BYTES) { inline_string_tag(&result, length, simple); }
@@ -1944,6 +1977,9 @@ FA_EXPORT __attribute__((always_inline)) void fa_strings_join(const FaString *pa
 /// twice as large.
 static __attribute__((noinline)) void string_grow(FaString *string, const uint8_t *bytes,
                                                   size_t length, size_t simple) {
+	// The caller reserves logical bytes. Recover the physical suffix extent
+	// for copying and overlap checks without adding a hot-path argument.
+	size_t physical = length - span_low_head(bytes, length);
 	size_t old_length = string_length(string);
 	size_t needed = old_length + length;
 	if (needed < old_length || needed >= KIND_MASK) { out_of_memory(); }
@@ -1958,14 +1994,14 @@ static __attribute__((noinline)) void string_grow(FaString *string, const uint8_
 	}
 	grown = string_block(grown);
 	uint8_t *block;
-	if (owned && (bytes + length <= string->bytes || bytes >= string->bytes + capacity)) {
+	if (owned && (bytes + physical <= string->bytes || bytes >= string->bytes + capacity)) {
 		// a large block moves its pages instead of its bytes (`fa_heap_grow`)
 		block = string_grow_block(string->bytes, string->capacity, old_length, &grown, simple);
-		copy_bytes(block + old_length, bytes, length);
+		fa_string_copy_bytes(block + old_length, bytes, physical, simple);
 	} else {
 		block = string_alloc(&grown, simple);
 		copy_bytes(block, string_bytes(string), old_length);
-		copy_bytes(block + old_length, bytes, length);
+		fa_string_copy_bytes(block + old_length, bytes, physical, simple);
 		if (owned) {
 			fa_string_free(string->bytes, string->capacity);
 		}
@@ -2008,8 +2044,15 @@ static __attribute__((noinline)) void string_append_slow(FaString *string, const
 		return;
 	}
 	size_t capacity = string->capacity;
+	if (string_view(capacity) && span_has_edges(string->bytes, string->length)) {
+		FaString result;
+		fa_concat(string->bytes, string->length, capacity, bytes, length, suffix_capacity, &result);
+		*string = result;
+		return;
+	}
 	size_t old_length = string_length(string);
-	size_t needed = old_length + length;
+	size_t encoded = fa_string_encoded_length(bytes, length, suffix_capacity);
+	size_t needed = old_length + encoded;
 	size_t simple = (suffix_capacity & SIMPLE) ? SIMPLE
 	                : length == 1 ? (bytes[0] < 0x80 ? SIMPLE : 0)
 	                              : text_flags(bytes, length);
@@ -2018,7 +2061,7 @@ static __attribute__((noinline)) void string_append_slow(FaString *string, const
 	}
 	if (string_writable(capacity, needed)) {
 		if (!(simple & SIMPLE)) { string_changed(string); }
-		copy_bytes((uint8_t *)string->bytes + old_length, bytes, length);
+		fa_string_copy_bytes((uint8_t *)string->bytes + old_length, bytes, length, suffix_capacity);
 		string->length = needed;
 		string->capacity = (capacity & KIND_MASK) | simple;
 		string_finish_append(string, old_length);
@@ -2026,12 +2069,12 @@ static __attribute__((noinline)) void string_append_slow(FaString *string, const
 	}
 	if (needed <= INLINE_STRING_BYTES) {
 		if (capacity & STRING_INLINE) {
-			copy_bytes((uint8_t *)string + old_length, bytes, length);
+			fa_string_copy_bytes((uint8_t *)string + old_length, bytes, length, suffix_capacity);
 			inline_string_tag(string, needed, simple);
 		} else {
 			FaString small = {0};
 			copy_bytes((uint8_t *)&small, string_bytes(string), old_length);
-			copy_bytes((uint8_t *)&small + old_length, bytes, length);
+			fa_string_copy_bytes((uint8_t *)&small + old_length, bytes, length, suffix_capacity);
 			inline_string_tag(&small, needed, simple);
 			if (string_owned(capacity)) { fa_string_free(string->bytes, capacity); }
 			*string = small;
@@ -2039,22 +2082,21 @@ static __attribute__((noinline)) void string_append_slow(FaString *string, const
 		string_finish_append(string, old_length);
 		return;
 	}
-	string_grow(string, bytes, length, simple);
+	string_grow(string, bytes, encoded, simple);
 	string_finish_append(string, old_length);
 }
 
-FA_EXPORT __attribute__((always_inline)) void fa_string_append(FaString *string, const uint8_t *bytes, size_t length,
+/// The lowering has already checked its common append edge. Do not
+/// duplicate that predicate in the snapshot path: it would give the hot
+/// condition two uses and prevent direct comparison branches on x86.
+FA_EXPORT __attribute__((always_inline)) void fa_string_append_after_guard(FaString *string, const uint8_t *bytes, size_t length,
                                 size_t suffix_capacity) {
-	// common path, inlined: a simple suffix into an owned block with room
-	// (the flag of the string stays as it is: simple stays simple)
 	size_t capacity = string->capacity;
-	size_t kind = capacity & ~(STRING_FLAGS | STRING_FRAME);
-	if (__builtin_expect((suffix_capacity & SIMPLE) && kind < (KIND_MASK & ~STRING_FRAME) && string->length + length <= kind, 1)) {
-		copy_bytes((uint8_t *)string->bytes + string->length, bytes, length);
-		string->length += length;
+	if (length == 0) { return; }
+	if (string_view(capacity) && span_has_edges(string->bytes, string->length)) {
+		string_append_slow(string, bytes, length, suffix_capacity);
 		return;
 	}
-	if (length == 0) { return; }
 	size_t old_length = string_length(string);
 	size_t needed = old_length + length;
 	// A non-simple short suffix retains a reserved heap block just as it
@@ -2081,6 +2123,18 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_append(FaString *string,
 		return;
 	}
 	string_append_slow(string, bytes, length, suffix_capacity);
+}
+
+FA_EXPORT __attribute__((always_inline)) void fa_string_append(FaString *string, const uint8_t *bytes, size_t length,
+                                size_t suffix_capacity) {
+	// Common path: an ASCII suffix into an owned/frame block with room.
+	size_t kind = string->capacity & ~(STRING_FLAGS | STRING_FRAME);
+	if (__builtin_expect((suffix_capacity & SIMPLE) && kind < (KIND_MASK & ~STRING_FRAME) && string->length + length <= kind, 1)) {
+		copy_bytes((uint8_t *)string->bytes + string->length, bytes, length);
+		string->length += length;
+		return;
+	}
+	fa_string_append_after_guard(string, bytes, length, suffix_capacity);
 }
 
 /// `fa_string_append` out of line, for the slow path of an append to a
@@ -2276,7 +2330,8 @@ FA_EXPORT __attribute__((always_inline)) size_t fa_string_room(size_t length, si
 /// bytes (inline when they fit).
 FA_EXPORT void fa_string_from(const uint8_t *bytes, size_t length, size_t capacity,
                               size_t room, FaString *out) {
-	if (room <= length || room <= INLINE_STRING_BYTES) {
+	size_t encoded = fa_string_encoded_length(bytes, length, capacity);
+	if (room <= encoded || room <= INLINE_STRING_BYTES) {
 		*out = owned_copy_with(bytes, length, capacity & STRING_FLAGS);
 		return;
 	}
@@ -2285,9 +2340,9 @@ FA_EXPORT void fa_string_from(const uint8_t *bytes, size_t length, size_t capaci
 	}
 	size_t block = string_block(room);
 	uint8_t *copy = string_alloc(&block, length == 0 ? SIMPLE : capacity & STRING_FLAGS);
-	copy_bytes(copy, bytes, length);
+	fa_string_copy_bytes(copy, bytes, length, capacity);
 	out->bytes = copy;
-	out->length = length;
+	out->length = encoded;
 	out->capacity = block | (length == 0 ? SIMPLE : capacity & STRING_FLAGS);
 }
 
@@ -3742,10 +3797,11 @@ FA_EXPORT void fa_string_repeat(const uint8_t *bytes, size_t length, int64_t cou
 		*out = (FaString){(const uint8_t *)"", 0, SIMPLE};
 		return;
 	}
-	if ((uint64_t)count > (KIND_MASK - 1) / length) { out_of_memory(); }
+	size_t encoded = fa_string_encoded_length(bytes, length, 0);
+	if ((uint64_t)count > (KIND_MASK - 1) / encoded) { out_of_memory(); }
 	fa_b_reset();
 	for (int64_t index = 0; index < count; index += 1) {
-		fa_b_bytes(bytes, length);
+		fa_b_string(bytes, length, 0);
 	}
 	fa_b_take(out);
 }
@@ -3762,9 +3818,10 @@ FA_EXPORT void fa_array_join(const void *header, const uint8_t *separator,
 static __attribute__((noinline)) size_t join_unit_length(const FaString *parts, size_t count,
                                                         size_t index, size_t bytes, size_t units) {
 	for (; index < count; index += 1) {
-		size_t size = string_length(parts + index);
+		size_t physical = string_length(parts + index);
+		size_t size = fa_string_encoded_length(string_bytes(parts + index), physical, parts[index].capacity);
 		bytes = fa_string_size(bytes, size);
-		units += fa_string_length(string_bytes(parts + index), size, parts[index].capacity);
+		units += fa_string_length(string_bytes(parts + index), physical, parts[index].capacity);
 	}
 	return units;
 }
@@ -3776,8 +3833,9 @@ FA_EXPORT size_t fa_array_join_length(void *header, const uint8_t *separator, si
 	FaArrayHeader *array = header;
 	fa_array_materialize(array);
 	size_t count = (size_t)array->length;
-	if (separator_length && count > 1 && count - 1 >= KIND_MASK / separator_length) { out_of_memory(); }
-	size_t length = count > 1 ? (count - 1) * separator_length : 0;
+	size_t separator_encoded = fa_string_encoded_length(separator, separator_length, 0);
+	if (separator_encoded && count > 1 && count - 1 >= KIND_MASK / separator_encoded) { out_of_memory(); }
+	size_t length = count > 1 ? (count - 1) * separator_encoded : 0;
 	const FaString *parts = (const FaString *)array->items;
 	if (count > 1 && !simple_flag(separator, separator_length)) {
 		return join_unit_length(parts, count, 0, length, (count - 1) * unit_count(separator, separator_length));
@@ -12239,9 +12297,8 @@ FA_EXPORT const FaJson *fa_json_field(const FaJson *node, const uint8_t *name, s
 
 /// A string of `JSON.stringify`: quoted, `\"`, `\\`, `\b`, `\f`, `\n`,
 /// `\r`, `\t`, and `\u00xx` for the other control characters.
-FA_EXPORT void fa_b_json_string(const uint8_t *bytes, size_t length) {
+static void quote_json_bytes(const uint8_t *bytes, size_t length) {
 	static const char hex[] = "0123456789abcdef";
-	append_byte('"');
 	size_t start = 0;
 	for (size_t index = 0; index < length; index += 1) {
 		uint8_t byte = bytes[index];
@@ -12279,6 +12336,12 @@ FA_EXPORT void fa_b_json_string(const uint8_t *bytes, size_t length) {
 		}
 	}
 	fa_b_bytes(bytes + start, length - start);
+}
+
+FA_EXPORT void fa_b_json_string(const uint8_t *bytes, size_t length) {
+	append_byte('"');
+	if (span_has_edges(bytes, length)) { string_span_parts(bytes, length, quote_json_bytes); }
+	else { quote_json_bytes(bytes, length); }
 	append_byte('"');
 }
 

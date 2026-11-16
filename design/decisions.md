@@ -1407,6 +1407,8 @@ Cut spans retain the two final bytes for a low-half head and the three initial b
 
 A capability is fixed after all functions and late generic/callback instances have been lowered. A closed module enables it when a view constructor is used; C libraries and separate units/runtime enable it conservatively. Thus a cached unit's value does not depend on which other unit makes a view. Modules without constructors eliminate edge handling. Counted-view lifetime protection is independent of this flag. All external text must be canonicalized/validated at ingress before it can be interpreted as a String span.
 
+Owning copies, frame assignments, concat/join, builders, reserve hints and append reserve logical encoded space, copying a virtual suffix before freeing or normalizing any aliased source. Pair joining runs after the canonical suffix is copied. Local append lowering enters the runtime remainder after its own common-path guard; repeating that guard in the snapshot branch gave LLVM's hot Boolean a second use and changed direct comparison branches into materialized Boolean arithmetic. Keeping one guard preserves the same predicates and slow paths while restoring the ASCII loop's instruction count.
+
 ## String redesign: JavaScript backend (2026-11-16)
 
 - UTF-16 strings use native JavaScript operations, with only the analyzer's index/range checks and optional search-result conversion. An indexed single-unit literal comparison uses `charCodeAt`, including `when` patterns without bindings. Code-point counting and UTF-8 iteration consume their analyzer facts without allocating arrays or byte buffers.

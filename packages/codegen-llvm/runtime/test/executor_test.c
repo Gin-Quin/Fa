@@ -879,6 +879,7 @@ static void test_region_slice_views(void) {
 }
 
 static void test_utf16_strings(void) {
+	fa_release_builder();
 	long before = allocated;
 	const uint8_t text[] = "a\xc3\xa9\xe6\x97\xa5\xf0\x9f\x98\x80z";
 	const uint16_t units[] = {97, 233, 0x65E5, 0xD83D, 0xDE00, 122};
@@ -967,6 +968,50 @@ static void test_utf16_strings(void) {
 	CHECK(fa_string_compare(both_edges, sizeof both_edges, canonical_edges, 7) == 0);
 	CHECK(fa_string_compare(both_edges, sizeof both_edges, (const uint8_t *)"z", 1) > 0);
 	CHECK(fa_hash_string_bits((size_t)(uintptr_t)both_edges, sizeof both_edges, STRING_COUNTED_VIEW | 3) == fa_hash_bytes(canonical_edges, 7));
+	FaString edge_view = {both_edges, sizeof both_edges, STRING_COUNTED_VIEW | 3};
+	FaString result = {0};
+	fa_string_escape(&edge_view, &result);
+	CHECK(!string_view(result.capacity) && fa_string_equal(string_bytes(&result), string_length(&result), canonical_edges, 7));
+	uint8_t view_frame[FRAME_STRING_BYTES];
+	fa_string_assign_local(&edge_view, view_frame, &result, 1, 1);
+	CHECK(string_frame(result.capacity) && result.length == 7);
+	CHECK(fa_string_equal(result.bytes, result.length, canonical_edges, 7));
+	fa_string_from(both_edges, sizeof both_edges, edge_view.capacity, 128, &result);
+	CHECK(result.length == 7 && string_owned(result.capacity));
+	fa_string_free(result.bytes, result.capacity);
+	fa_b_reset();
+	fa_b_string(both_edges, sizeof both_edges, edge_view.capacity);
+	fa_b_take(&result);
+	CHECK(fa_string_equal(string_bytes(&result), string_length(&result), canonical_edges, 7));
+	fa_b_reset();
+	fa_b_quoted(both_edges, sizeof both_edges);
+	fa_b_take(&result);
+	CHECK(string_length(&result) == 9 && fa_string_code_unit_at(string_bytes(&result), 9, result.capacity, 1) == 0xDE00);
+	fa_b_reset();
+	fa_b_json_string(both_edges, sizeof both_edges);
+	fa_b_take(&result);
+	CHECK(string_length(&result) == 9 && fa_string_code_unit_at(string_bytes(&result), 9, result.capacity, 3) == 0xD83D);
+	fa_concat(both_edges, sizeof both_edges, edge_view.capacity, both_edges, sizeof both_edges, edge_view.capacity, &result);
+	CHECK(fa_string_length(string_bytes(&result), string_length(&result), result.capacity) == 6);
+	fa_string_append(&result, both_edges, sizeof both_edges, edge_view.capacity);
+	CHECK(fa_string_length(string_bytes(&result), string_length(&result), result.capacity) == 9);
+	// A self-borrowed virtual suffix survives both in-place appends and
+	// allocation, even when normalization changes its original end bytes.
+	for (size_t reserved = 0; reserved <= 256; reserved += 256) {
+		uint8_t original[67] = {0xF0, 0x9F, 0x98, 0x80};
+		__builtin_memset(original + 4, 'x', 60);
+		copy_bytes(original + 64, (const uint8_t *)"\xED\xA0\xBD", 3);
+		FaString self;
+		fa_string_from(original, sizeof original, STRING_SURROGATES, reserved, &self);
+		const uint8_t *suffix = self.bytes + 2;
+		FaString expected;
+		fa_concat(self.bytes, self.length, self.capacity, suffix, self.length - 2, STRING_COUNTED_VIEW | 62, &expected);
+		fa_string_append(&self, suffix, self.length - 2, STRING_COUNTED_VIEW | 62);
+		CHECK(fa_string_equal(self.bytes, self.length, string_bytes(&expected), string_length(&expected)));
+		CHECK(fa_string_length(self.bytes, self.length, self.capacity) == 125);
+		fa_string_free(self.bytes, self.capacity);
+		fa_string_free(expected.bytes, expected.capacity);
+	}
 	for (size_t middle = 0; middle <= 80; middle += 1) {
 		uint8_t physical[85] = {0x98, 0x80};
 		__builtin_memset(physical + 2, 'x', middle);
@@ -1073,6 +1118,7 @@ static void test_utf16_strings(void) {
 	CHECK(fa_string_code_unit_at(growing.bytes, growing.length, growing.capacity, -2) == 0xD83D);
 	CHECK(fa_string_code_unit_at(growing.bytes, growing.length, growing.capacity, -1) == 0xDE00);
 	fa_string_free(growing.bytes, growing.capacity);
+	fa_release_builder();
 	CHECK(allocated == before);
 }
 

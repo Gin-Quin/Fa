@@ -1,0 +1,15 @@
+function empty = <Item, capacity: UInt32>(): InlineArray<Item, capacity> => []
+function append = <Item, capacity: UInt32>(items: InlineArray<Item, capacity>, value: Item)
+	throws CapacityError mutates items.length => { try items.push(value) }
+function room = <Item, capacity: UInt32>(items: InlineArray<Item, capacity>): Integer => items.capacity
+
+mutable values = empty<Integer, 2>()
+try append<Integer, 2>(values, 9)
+try append<Integer, 2>(values, 9)
+append<Integer, 2>(values, 10) catch _error => console.log("full") -- prints: full
+console.log(values, room<Integer, 2>(values)) -- prints: [9, 9] 2
+let zero = empty<Integer, 0>()
+console.log(zero) -- prints: []
+static bound = 2
+let other: InlineArray<Integer, bound * 2> = [1, 2, 3, 4]
+console.log(other.capacity, other) -- prints: 4 [1, 2, 3, 4]

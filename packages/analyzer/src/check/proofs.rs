@@ -349,8 +349,18 @@ impl Walker<'_> {
 	/// `expr.rs` and `objects.rs`): `INDEX_CHECK` and the error path unless
 	/// the facts prove the index; `E-NUM-17` when it is certainly out.
 	pub(crate) fn check_index_bounds(&mut self, n: NodeId, target: NodeId, index: NodeId) {
-		self.clear_flag(n, NodeFlags::INDEX_CHECK | NodeFlags::CAN_FAIL);
 		let target_ty = self.type_of(self.strip_groups(target));
+		self.check_index_bounds_of(n, target, index, target_ty);
+	}
+
+	pub(super) fn check_index_bounds_of(
+		&mut self,
+		n: NodeId,
+		target: NodeId,
+		index: NodeId,
+		target_ty: TypeId,
+	) {
+		self.clear_flag(n, NodeFlags::INDEX_CHECK | NodeFlags::CAN_FAIL);
 		let error = match self.s.types.kind(target_ty) {
 			TypeKind::Collection(
 				CollKind::Array

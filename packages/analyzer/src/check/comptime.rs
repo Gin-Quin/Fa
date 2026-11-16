@@ -502,6 +502,7 @@ impl Walker<'_> {
 	/// named type (an object type, a union) whose functions it keeps.
 	fn static_type(&mut self, checked: TypeId, value: &Value) -> TypeId {
 		let named = self.s.types.type_name(checked).is_some()
+			|| self.s.types.contains_inline_array(checked)
 			|| matches!(
 				self.s.types.kind(checked),
 				TypeKind::NamedUnion(..)

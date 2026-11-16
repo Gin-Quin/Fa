@@ -7,6 +7,8 @@ use crate::analysis::{Callee, NodeFlags};
 use crate::check::Walker;
 use crate::diagnostics::codes::{advanced::REF010, types::TY003, values::E_TYPE_1};
 use crate::ids::{NodeId, TypeId};
+use crate::symbols::{Resolution, SymbolKind};
+use crate::syntax;
 use crate::syntax::{NodeList, View};
 use crate::types::{CollKind, FnSig, Interval, TypeKind};
 
@@ -23,20 +25,32 @@ impl Walker<'_> {
 			.get(1)
 			.and_then(|capacity| self.constant_type(capacity));
 		let valid = capacity
-			.and_then(|ty| self.s.types.as_int(ty))
-			.is_some_and(|int| {
-				int.min == int.max && int.min >= I256::ZERO && int.max <= I256::from(u32::MAX)
-			});
+			.and_then(|ty| {
+				let ty = if let TypeKind::Param(param) = self.s.types.kind(ty) {
+					self.s.types.param(param).constraint
+				} else {
+					ty
+				};
+				self.s.types.as_int(ty)
+			})
+			.is_some_and(|int| int.min >= I256::ZERO && int.max <= I256::from(u32::MAX));
 		if arguments.len() != 2 || item.is_none() || !valid {
 			let diagnostic = self.diagnostic(&TY003, n,
-				"`InlineArray` needs an item type and a nonnegative capacity known at compile time, ex: `InlineArray<String, 4>`; use a constant from 0 through 4294967295");
+				"`InlineArray` needs an item type and a nonnegative capacity known at compile time, ex: `InlineArray<String, 4>`; use a constant from 0 through 4294967295, or a compile-time parameter constrained to UInt32");
 			self.report(diagnostic);
 			return self.memo(n, |_| TypeId::UNKNOWN);
 		}
 		let item = item.expect("checked item");
-		if self.contains_reference_type(arguments.first().expect("checked item"))
-			|| self.type_has_references(item, 0)
-		{
+		if item == TypeId::VOID {
+			let diagnostic = self.diagnostic(
+				&E_TYPE_1,
+				n,
+				"`Void` has no value: use an item type that can be stored in the inline array",
+			);
+			self.report(diagnostic);
+			return self.memo(n, |_| TypeId::UNKNOWN);
+		}
+		if self.inline_reference_item(arguments.first().expect("checked item")) {
 			let diagnostic = self.diagnostic(&REF010, n,
 				"an `InlineArray` cannot store references yet: store owned data; lists of references require a declared link field");
 			self.report(diagnostic);
@@ -46,6 +60,60 @@ impl Walker<'_> {
 		self.memo(n, |w| {
 			w.s.types.collection(CollKind::InlineArray, item, capacity)
 		})
+	}
+
+	/// Follow aliases before their reference annotations erase to owned
+	/// target types. Stop at records: a complete owner may own relations.
+	fn inline_reference_item(&mut self, node: NodeId) -> bool {
+		let mut stack = vec![(self.file, node)];
+		let mut seen = rustc_hash::FxHashSet::default();
+		while let Some((file, node)) = stack.pop() {
+			if !seen.insert((file, node)) {
+				continue;
+			}
+			let tree = if file == self.file {
+				std::sync::Arc::clone(&self.tree)
+			} else {
+				std::sync::Arc::clone(&self.s.source_file(file).tree)
+			};
+			match syntax::view(&tree, node) {
+				View::RefType { .. } => return true,
+				View::Object { .. } | View::TypedObject { .. } => continue,
+				_ => {}
+			}
+			let mut resolution = if file == self.file {
+				self.a.resolution(node)
+			} else {
+				self.s.analysis(file).resolution(node)
+			};
+			if file == self.file
+				&& let Resolution::Local(symbol) = resolution
+			{
+				resolution = self.external_resolution(symbol).unwrap_or(resolution);
+			}
+			match resolution {
+				Resolution::Local(symbol) => {
+					let data = if file == self.file {
+						self.a.symbols.symbol(symbol)
+					} else {
+						self.s.analysis(file).symbols.symbol(symbol)
+					};
+					if data.kind == SymbolKind::Type {
+						stack.push((file, data.decl_node));
+					}
+				}
+				Resolution::External(_) => {
+					if let Some((module, node)) = self.s.external_node(resolution)
+						&& let Some(file) = self.s.file_of(module)
+					{
+						stack.push((file, node));
+					}
+				}
+				_ => {}
+			}
+			stack.extend(syntax::children(&tree, node).map(|node| (file, node)));
+		}
+		false
 	}
 
 	pub(super) fn check_inline_literal(
@@ -79,16 +147,20 @@ impl Walker<'_> {
 	}
 
 	pub(super) fn inline_member_type(&mut self, ty: TypeId, text: &str, method: TypeId) -> TypeId {
-		let Some((_, capacity)) = self.s.types.inline_array(ty) else {
+		let Some(capacity) = self.s.types.inline_capacity_range(ty) else {
 			return method;
 		};
 		match text {
-			"capacity" => self.s.types.int_literal(I256::from(capacity)),
-			"length" => self.s.types.int_range(
-				I256::ZERO,
-				I256::from(capacity),
-				crate::types::IntStorage::Default,
-			),
+			"capacity" => {
+				self.s
+					.types
+					.int_range(capacity.lo, capacity.hi, crate::types::IntStorage::Default)
+			}
+			"length" => {
+				self.s
+					.types
+					.int_range(I256::ZERO, capacity.hi, crate::types::IntStorage::Default)
+			}
 			"push" | "delete" | "take" => {
 				let TypeKind::Function(sig) = self.s.types.kind(method) else {
 					return method;
@@ -126,7 +198,7 @@ impl Walker<'_> {
 		} else {
 			self.type_of(members.get(members.len() - 2).expect("receiver member"))
 		};
-		let Some((_, capacity)) = self.s.types.inline_array(receiver_type) else {
+		let Some(capacity) = self.s.types.inline_capacity_range(receiver_type) else {
 			return throws;
 		};
 		if !matches!(kind, Callee::Builtin(id) if crate::builtins::get(id).path == "Array#push") {
@@ -134,7 +206,12 @@ impl Walker<'_> {
 				return throws;
 			};
 			if let Some(index) = arguments.first() {
-				self.check_index_bounds(n, if members.len() == 1 { target } else { callee }, index);
+				self.check_index_bounds_of(
+					n,
+					if members.len() == 1 { target } else { callee },
+					index,
+					receiver_type,
+				);
 			}
 			return if self.a.has_flags(n, NodeFlags::INDEX_CHECK) {
 				throws
@@ -142,7 +219,8 @@ impl Walker<'_> {
 				TypeId::NEVER
 			};
 		}
-		let capacity = I256::from(capacity);
+		let bound = capacity;
+		let capacity = bound.hi;
 		let length = self
 			.expression_length(target)
 			.unwrap_or(Interval::new(I256::ZERO, capacity));
@@ -155,7 +233,7 @@ impl Walker<'_> {
 			self.report(diagnostic);
 			return TypeId::NEVER;
 		}
-		if length.hi < capacity {
+		if length.hi < bound.lo {
 			return TypeId::NEVER;
 		}
 		self.set_flag(n, NodeFlags::CAPACITY_CHECK);

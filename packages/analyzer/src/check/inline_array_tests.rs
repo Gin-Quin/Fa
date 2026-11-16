@@ -92,3 +92,27 @@ fn inline_unique_category_is_inherited_from_items() {
 		.ty;
 	assert!(session.types().owns_unique(ty));
 }
+
+#[test]
+fn inline_aliased_reference_items_are_rejected() {
+	assert!(codes("mutable nodes: GrowingPool<Integer> = []\ntype Borrow = Integer in nodes\nlet values: InlineArray<Borrow?, 4> = []\n").contains(&"REF010"));
+}
+
+#[test]
+fn inline_capacity_survives_compile_time_evaluation() {
+	let (session, file) = analyzed(
+		"function build = (): InlineArray<Integer, 4> => [1]\nstatic values = @build()\nstatic capacity = values.capacity\nconsole.log(capacity)\n",
+	);
+	assert_eq!(
+		symbol_type(&session, file, "values"),
+		"InlineArray<Integer, 4>"
+	);
+	assert_eq!(symbol_type(&session, file, "capacity"), "4");
+}
+
+#[test]
+fn inline_capacity_can_be_a_compile_time_parameter() {
+	analyzed(
+		"function empty = <Item, capacity: UInt32>(): InlineArray<Item, capacity> => []\nlet values = empty<Integer, 4>()\nconsole.log(values.capacity)\n",
+	);
+}

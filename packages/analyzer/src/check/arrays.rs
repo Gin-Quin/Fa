@@ -190,9 +190,16 @@ impl Walker<'_> {
 		expected: Option<TypeId>,
 	) -> TypeId {
 		if let Some(expected) = expected
-			&& let Some((item, capacity)) = self.s.types.inline_array(expected)
+			&& let Some((item, _)) = self.s.types.inline_array_types(expected)
+			&& let Some(capacity) = self.s.types.inline_capacity_range(expected)
 		{
-			return self.check_inline_literal(n, items, expected, item, capacity);
+			return self.check_inline_literal(
+				n,
+				items,
+				expected,
+				item,
+				u32::try_from(capacity.lo).unwrap_or(0),
+			);
 		}
 		// `[1.0, 2.0, 3.0]` as a `CArray(Float32, 3)` (foreign.rs)
 		if let Some(expected) = expected

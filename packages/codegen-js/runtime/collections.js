@@ -23,10 +23,36 @@ import { faCharacters, faStringCompare } from "./strings.js";
  * @param {T[]} array
  * @param {number} capacity
  * @param {T} value
+ * @param {((value: T) => void) | undefined} [drop]
  */
-export function faInlinePush(array, capacity, value) {
-	if (array.length >= capacity) throw new CapacityError();
+export function faInlinePush(array, capacity, value, drop) {
+	if (array.length >= capacity) {
+		drop?.(value);
+		throw new CapacityError();
+	}
 	array.push(value);
+}
+
+// @fa-helper faInlineClear
+/**
+ * @template T
+ * @param {T[]} array
+ * @param {(value: T) => void} drop
+ */
+export function faInlineClear(array, drop) {
+	for (const item of array) drop(item);
+	array.length = 0;
+}
+
+// @fa-helper faInlineDelete deps: faArrayTake
+/**
+ * @template T
+ * @param {T[]} array
+ * @param {number} index
+ * @param {(value: T) => void} drop
+ */
+export function faInlineDelete(array, index, drop) {
+	drop(faArrayTake(array, index));
 }
 
 // @fa-helper faNormalizeIndex deps: IndexError

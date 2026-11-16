@@ -16,7 +16,12 @@ use crate::error::Error;
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	pub(super) fn inline_info(&self, ty: TypeId) -> Option<(TypeId, u32)> {
-		self.types().inline_array(ty)
+		let (item, mut capacity) = self.types().inline_array_types(ty)?;
+		if let fa_analyzer::types::TypeKind::Param(param) = self.types().kind(capacity) {
+			capacity = *self.type_bindings.borrow().get(&param)?;
+		}
+		let int = self.types().as_int(capacity)?;
+		Some((item, u32::try_from(int.min).ok()?))
 	}
 
 	fn inline_length_type(&self, capacity: u32) -> IntType<'ctx> {
@@ -31,6 +36,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	pub(super) fn inline_type(&self, ty: TypeId) -> StructType<'ctx> {
 		let (item, capacity) = self.inline_info(ty).expect("an inline array");
+		if capacity == 0 {
+			return self.context.struct_type(
+				&[
+					self.context.i8_type().array_type(0).into(),
+					self.context.i8_type().into(),
+				],
+				false,
+			);
+		}
 		let item = self
 			.item_repr(item, NodeId::new(0))
 			.expect("an inline item layout");
@@ -111,9 +125,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		ty: TypeId,
 		items: NodeList<'_>,
 	) -> Result<Val<'ctx>, Error> {
-		let slot = self
-			.destination_for(node, Repr::Tuple(ty))
-			.unwrap_or(self.alloca(Repr::Tuple(ty), "inline.array")?);
+		let slot = match self.destination_for(node, Repr::Tuple(ty)) {
+			Some(slot) => slot,
+			None => self.alloca(Repr::Tuple(ty), "inline.array")?,
+		};
 		self.set_inline_length(slot, ty, self.context.i64_type().const_zero())?;
 		// Completed items remain cleanup owners until the complete list is
 		// published, including when a later item's constructor throws.
@@ -321,12 +336,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.convert(values[0], Repr::Int(IntRepr::I64), node.index())?
 					.int();
 				let position = self.counted_from_end(index, length)?;
-				let outside =
-					self.builder
-						.build_int_compare(IntPredicate::UGE, position, length, "")?;
-				self.guard(outside, |this| {
-					this.raise_runtime("fa_error_index", &[index.into(), length.into()])
-				})?;
+				if self.flags(node).contains(NodeFlags::INDEX_CHECK) {
+					let outside =
+						self.builder
+							.build_int_compare(IntPredicate::UGE, position, length, "")?;
+					self.guard(outside, |this| {
+						this.raise_runtime("fa_error_index", &[index.into(), length.into()])
+					})?;
+				}
 				let destination = self.inline_item(&self.builder, slot, ty, position)?;
 				let removed = self.load(destination)?;
 				if path == "Array#delete" {

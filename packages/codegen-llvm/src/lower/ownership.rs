@@ -122,7 +122,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The representations of the items of a tuple type.
 	pub(crate) fn tuple_reprs(&self, ty: TypeId) -> Vec<Repr> {
-		if let Some((item, _)) = self.inline_info(ty) {
+		if let Some((item, capacity)) = self.inline_info(ty) {
+			if capacity == 0 {
+				return vec![];
+			}
 			return vec![self.item_repr(item, NodeId::new(0)).unwrap_or(Repr::Bool)];
 		}
 		self.tuple_items(ty)

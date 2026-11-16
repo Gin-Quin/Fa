@@ -453,7 +453,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// Direct recursive objects and optionals keep their boxes. Check the
 	/// complete inline graph, including mutual recursion and nested tuples,
 	/// rather than assuming that seeing a collection anywhere is sufficient.
-	fn recursive_layout_is_finite(&self, ty: TypeId) -> bool {
+	pub(super) fn recursive_layout_is_finite(&self, ty: TypeId) -> bool {
 		let mut active = FxHashSet::default();
 		let mut done = FxHashSet::default();
 		let mut stack = vec![(ty, false)];
@@ -473,6 +473,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			match self.types().kind(at) {
 				TypeKind::Object(_) => {
 					stack.extend(self.types().fields_of(at).iter().map(|f| (f.ty, false)));
+				}
+				TypeKind::Collection(CollKind::InlineArray, item, _) => {
+					if self
+						.inline_info(at)
+						.is_none_or(|(_, capacity)| capacity != 0)
+					{
+						stack.push((item, false));
+					}
 				}
 				TypeKind::Tuple(list) | TypeKind::Union(list) => {
 					stack.extend(self.types().list_items(list).iter().map(|t| (*t, false)));

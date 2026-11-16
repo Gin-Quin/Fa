@@ -352,7 +352,7 @@ impl Generator<'_> {
 
 	/// The value a value parameter is bound to: a literal type, or the
 	/// enclosing function's own value parameter.
-	fn hidden_value(&mut self, ty: TypeId) -> Option<String> {
+	pub(crate) fn hidden_value(&mut self, ty: TypeId) -> Option<String> {
 		if let TypeKind::Param(param) = self.types.kind(ty) {
 			return self.hidden_names.get(&Hidden::Value(param)).cloned();
 		}

@@ -722,6 +722,48 @@ impl TypeStore {
 		self.intern(TypeKind::Pointer(target))
 	}
 
+	/// Whether recovering a static value's shape would erase an inline bound.
+	pub fn contains_inline_array(&self, ty: TypeId) -> bool {
+		let mut stack = vec![ty];
+		let mut seen = rustc_hash::FxHashSet::default();
+		while let Some(ty) = stack.pop() {
+			if !seen.insert(ty) {
+				continue;
+			}
+			match self.kind(ty) {
+				TypeKind::Collection(crate::types::CollKind::InlineArray, ..) => return true,
+				TypeKind::Collection(_, item, key) => stack.extend([item, key]),
+				TypeKind::Object(_) => {
+					stack.extend(self.fields_of(ty).iter().map(|field| field.ty))
+				}
+				TypeKind::Tuple(list) | TypeKind::Union(list) => {
+					stack.extend(self.list_items(list))
+				}
+				TypeKind::Rec(_) => stack.extend(self.rec_target(ty)),
+				_ => {}
+			}
+		}
+		false
+	}
+
+	/// The item and capacity types, retaining symbolic value parameters.
+	pub fn inline_array_types(&self, ty: TypeId) -> Option<(TypeId, TypeId)> {
+		match self.kind(ty) {
+			TypeKind::Collection(crate::types::CollKind::InlineArray, item, capacity) => {
+				Some((item, capacity))
+			}
+			_ => None,
+		}
+	}
+
+	pub fn inline_capacity_range(&self, ty: TypeId) -> Option<Interval> {
+		let (_, mut capacity) = self.inline_array_types(ty)?;
+		if let TypeKind::Param(param) = self.kind(capacity) {
+			capacity = self.param(param).constraint;
+		}
+		self.interval_of(capacity)
+	}
+
 	/// Item type and capacity of a bounded inline list.
 	pub fn inline_array(&self, ty: TypeId) -> Option<(TypeId, u32)> {
 		let TypeKind::Collection(crate::types::CollKind::InlineArray, item, capacity) =

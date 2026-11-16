@@ -943,7 +943,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| TypeKind::Member(..)
 			| TypeKind::Object(_)
 			| TypeKind::Collection(
-				CollKind::Array | CollKind::GrowingArray | CollKind::Map | CollKind::GrowingMap,
+				CollKind::Array
+				| CollKind::InlineArray
+				| CollKind::GrowingArray
+				| CollKind::Map
+				| CollKind::GrowingMap,
 				..,
 			) => {
 				let writer = self.json_writer(ty, value.repr, call)?;

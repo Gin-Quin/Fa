@@ -1983,6 +1983,33 @@ console.log(try read(T.One { child = T.Leaf { value = 7 } }, false))
 			assert!(ir.contains("filter_keep"), "{ir}");
 		}
 	}
+	#[test]
+	fn inline_arrays_have_narrow_counters_and_no_heap_buffer() {
+		for target in [Target::Native, Target::Wasm, Target::NativeFreestanding] {
+			let ir = ir_at_target(
+				"inline-array-layout",
+				r#"
+function first = (values: InlineArray<Int32, 255>): Int32 throws IndexError => try values[0]
+mutable small: InlineArray<Int32, 255> = [7]
+mutable large: InlineArray<Int32, 256> = [8]
+small.push(9)
+large.push(10)
+console.log(try first(small), large.length)
+"#,
+				true,
+				OptLevel::O0,
+				target,
+			);
+			assert!(ir.contains("[255 x i32], i8"), "{ir}");
+			assert!(ir.contains("[256 x i32], i16"), "{ir}");
+			for allocator in ["@fa_array_new(", "@fa_array_grow(", "@fa_alloc("] {
+				assert!(
+					!ir.contains(allocator),
+					"inline array allocates: {allocator}\n{ir}"
+				);
+			}
+		}
+	}
 }
 
 /// A resource moved on every path or on none has no drop flag left in the

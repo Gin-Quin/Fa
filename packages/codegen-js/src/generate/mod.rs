@@ -22,6 +22,7 @@ mod fields;
 mod foreign;
 mod functions;
 mod generics;
+mod inline_arrays;
 mod integer_variants;
 pub(crate) mod modules;
 mod number_api;

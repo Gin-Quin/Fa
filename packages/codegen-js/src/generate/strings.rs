@@ -11,7 +11,7 @@
 use fa_analyzer::analysis::{Argument, Callee};
 use fa_analyzer::ids::{NodeId, TypeId};
 use fa_analyzer::syntax::{TemplatePart, TemplateParts, View};
-use fa_analyzer::types::{FloatBits, TypeKind};
+use fa_analyzer::types::{CollKind, FloatBits, TypeKind};
 
 use crate::generate::{Generator, Kind};
 use crate::js::{self, Expr, Prec};
@@ -260,9 +260,9 @@ impl Generator<'_> {
 				let helper = self.helper("faFormatTuple");
 				format!("(value) => {helper}(value, [{}])", formats.join(", "))
 			}
-			TypeKind::Collection(_, item, key) => {
+			TypeKind::Collection(kind, item, key) => {
 				let item_format = self.nested_formatter(item);
-				if key == TypeId::NONE {
+				if !matches!(kind, CollKind::Map | CollKind::GrowingMap) {
 					let helper = self.helper("faFormatArray");
 					format!("(value) => {helper}(value, {item_format})")
 				} else {

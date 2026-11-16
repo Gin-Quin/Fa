@@ -89,6 +89,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Never | Repr::Void => Ok(Repr::Bool),
 			// A collection provides this value's storage even when some of
 			// its own fields still require boxes to break direct cycles.
+			Repr::Rec(target)
+				if self.types().contains_inline_array(target)
+					&& !self.recursive_layout_is_finite(target) =>
+			{
+				self.repr_of(item, node.index())
+			}
 			Repr::Rec(target) => self.repr_of(target, node.index()),
 			repr => Ok(repr),
 		}

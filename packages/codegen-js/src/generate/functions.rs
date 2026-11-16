@@ -1017,7 +1017,7 @@ impl Generator<'_> {
 				js::call(helper, &values)
 			}
 			"Array#push" => {
-				let inline = self.types.inline_array(self.receiver_type(callee));
+				let inline = self.types.inline_array_types(self.receiver_type(callee));
 				let receiver = self.receiver(callee);
 				let nodes: Vec<NodeId> = arguments
 					.iter()
@@ -1041,10 +1041,17 @@ impl Generator<'_> {
 						.has_flags(n, fa_analyzer::analysis::NodeFlags::CAPACITY_CHECK)
 				{
 					let helper = self.helper("faInlinePush");
-					return js::call(
-						helper,
-						&[receiver.text, capacity.to_string(), values[0].clone()],
-					);
+					let mut arguments = vec![
+						receiver.text,
+						self.hidden_value(capacity)
+							.expect("a compile-time capacity"),
+						values[0].clone(),
+					];
+					let (item, _) = inline.expect("an inline array");
+					if let Some(drop) = self.drop_function(item) {
+						arguments.push(drop);
+					}
+					return js::call(helper, &arguments);
 				}
 				Expr::primary(format!(
 					"{}.push({})",
@@ -1268,6 +1275,22 @@ impl Generator<'_> {
 			js::call(name, &all)
 		};
 		let texts: Vec<String> = values.iter().map(|value| value.text.clone()).collect();
+		if let Some((item, _)) = self.types.inline_array(self.receiver_type(callee))
+			&& matches!(path, "Array#clear" | "Array#delete")
+			&& let Some(drop) = self.drop_function(item)
+		{
+			let mut arguments = texts.clone();
+			arguments.push(drop);
+			return helper(
+				self,
+				if path == "Array#clear" {
+					"faInlineClear"
+				} else {
+					"faInlineDelete"
+				},
+				arguments,
+			);
+		}
 		match path {
 			"Array#get" => helper(self, "faArrayGet", texts),
 			"Array#isEmpty" => Expr::new(format!("{target}.length === 0"), Prec::Equality),

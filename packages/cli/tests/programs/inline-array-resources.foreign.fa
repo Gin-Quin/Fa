@@ -1,0 +1,57 @@
+type Resource = {
+	name: String
+	function destroy = (self) => { console.log("drop {self.name}") }
+}
+type ConstructionError = Errors { Rejected }
+function make = (name: String, fail: Boolean): Resource throws ConstructionError => {
+	if fail { throw ConstructionError.Rejected }
+	Resource { name = name }
+}
+
+do {
+	mutable values: InlineArray<Resource, 3> = []
+	values.push(Resource { name = "first" })
+	values.push(Resource { name = "second" })
+	let first = values.take(0)
+	values.clear() -- prints: drop second
+	console.log(first.name) -- prints: first
+} -- prints: drop first
+
+do {
+	mutable values: InlineArray<Resource, 2> = [Resource { name = "deleted" }]
+	values.delete(0) -- prints: drop deleted
+	values.push(Resource { name = "popped" })
+	let popped = values.pop()
+	console.log(popped is not none) -- prints: true
+} -- prints: drop popped
+
+type Holder = {
+	values: InlineArray<Resource, 1> = []
+	function append = (self, name: String)
+		throws CapacityError mutates self.values.length => {
+		try self.values.push(Resource { name = name })
+	}
+}
+do {
+	mutable holder: Holder = {}
+	try holder.append("kept")
+	holder.append("overflow") catch _error => console.log("full")
+	-- prints: drop overflow
+	-- prints: full
+	console.log(holder.values.length) -- prints: 1
+} -- prints: drop kept
+
+do {
+	mutable values: InlineArray<Resource, 2> = [Resource { name = "existing" }]
+	values.push(make("failed", true)) catch _error => console.log("construction failed")
+	-- prints: construction failed
+	console.log(values.length) -- prints: 1
+} -- prints: drop existing
+
+function partial = (): InlineArray<Resource, 3> throws ConstructionError => [
+	Resource { name = "prefix" }
+	try make("never published", true)
+]
+partial() catch _error => console.log("literal failed")
+-- prints: drop prefix
+-- prints: literal failed

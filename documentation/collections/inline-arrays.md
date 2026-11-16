@@ -18,6 +18,16 @@ Without an expected inline-array type, a list literal constructs an ordinary `Ar
 
 Only the first `length` slots contain values. Unused slots are never initialized and their items' constructors and destructors do not run.
 
+The capacity can also be a constant expression or a compile-time parameter:
+
+```fa
+function empty = <Item, capacity: UInt32>(): InlineArray<Item, capacity> => []
+let values = empty<Integer, 4>()
+```
+
+The implementation accepts capacities from 0 through 4,294,967,295. A capacity parameter must be constrained to that range, for example with `UInt32`.
+
+
 ## Reading and writing
 
 `length` is the current number of items, between zero and `capacity`. `capacity` is the declared bound and never changes. Indexing, negative indices, `get`, iteration and item assignment follow the rules of an [Array](/collections/arrays):

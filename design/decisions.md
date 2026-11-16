@@ -1571,3 +1571,19 @@ now drop their old contents and transfer the new ones while retaining the
 outer object/array identity required by `use` aliases. They avoid structural
 copying of unique items. Printing a None-typed effectful expression evaluates
 it before emitting the fixed text `none`, including in interpolation.
+
+## InlineArray review fixes (2026-11-16)
+
+The initialized-prefix bound must survive every generic call, including compile-time calls. The interpreter receives leading value parameters in declaration order (owner parameters before method parameters), forwards symbolic bindings through nested calls, and binds them in function values using its existing closure argument map. Capacity reads and checked pushes use that value. Builtin argument omission follows `Argument::Default`/`Missing`; a supplied `none` is never an omitted argument. Receiver places retain all field steps for both ordinary and inline collections. Native constant lowering checks the bound before creating any storage, independently of interpreter correctness.
+
+Inline-array flags inherit the item's ownership/category and containment flags, plus parameter/unknown metadata from the bound. They exclude scalar ordering and JavaScript BigInt representation. JavaScript lifetime dispatch identifies inline arrays even when the capacity is symbolic; destruction depends on Item, not on knowing a numeric bound. Native hashing visits the initialized prefix with the array hashing algorithm; an inline list is never exposed as a fictitious tuple field layout.
+
+Lead decision: reflection uses a distinct `Schema.InlineArray { item: Schema, capacity: Integer<min = 0> }`, because the capacity belongs to the type and has no meaning for other collection kinds. There is no existing fixed-count CArray schema representation to reuse. `TypeFromSchema` reconstructs the exact item and bound, rejecting non-integer, negative or greater-than-UInt32 capacities with an actionable diagnostic.
+
+The cleanup audit also found that erased generic Item had no destructor capability in the reviewed implementation. Generic requirements now include a drop operation for each type parameter, passed through local/imported calls and function values; ordinary instantiations pass a shared no-op. A composite drop involving a parameter is a local closure capturing that operation, not a global helper referring to a function-local name. Generic locals use the existing drop-flag/move machinery. This adds no metadata or wrapper to an inline array.
+
+Generic field defaults on native retain type bindings as well as representation bindings, since a value parameter can change aggregate layout without changing the scalar representation of the parameter. Native substitution promotes the module identity before using a scratch type-store view; a local ID belongs only to its source view. The ordinary `Array<none>` control uses canonical byte storage when push/pop have no semantic item payload.
+
+Inline representations carry their fully instantiated identity in the shared type store. The identity must outlive temporary binding scopes: call sites, function-value thunks and another compilation unit use exactly the same slots and count layout. Remote signature construction binds value types as well as representations. Shared interning supplies exact identity comparisons for resource methods and conversions; field lookup compares resolved names across local and shared symbol IDs. Structural generic instances need not retain a nominal identity, so field defaults recover their declaration from the default's source and the recorded generic application.
+
+The native object-cache version advances to `inline-length-2` so a cached caller with the previous incomplete generic aggregate ABI cannot be reused. Recursive type arguments and targets participate in native parameter collection, and generic recursive declarations are published before scratch-view substitution creates an instance with new arguments.

@@ -94,6 +94,8 @@ Effects use the values before the call. Popping an empty list invalidates nothin
 
 An inline array has its items' [ownership category](/advanced/memory-management): ordinary items make an ordinary value, structure items make a structure, and unique items make a unique owner. Inline storage alone does not require `copy`. Copy a structure explicitly when keeping both owners; move unique values instead. Copies visit only the initialized prefix and retain the declared capacity. Removed items are destroyed exactly once, unless `pop` or `take` transfers them to a new owner.
 
+[Type reflection](/types/types-at-runtime) describes an inline array as `Schema.InlineArray { item, capacity }`. `TypeFromSchema` preserves both parts of its type and validates the capacity against the same 0…4,294,967,295 range as a written type.
+
 Reference item types are not supported in this implementation slice. Store owned data instead; bounded lists of links require the separately declared link-field contract.
 
 Equality compares the length and corresponding initialized items in order. Unused slots do not participate. Printing uses the usual array form, such as `[10, 30]`. JSON writes an ordinary JSON array; reading JSON into an inline-array type checks both its items and the capacity and reports `JsonError` if they do not fit.
@@ -107,15 +109,15 @@ An inline array is an aggregate containing `capacity` slots of the item's stride
 
 A recursive item keeps the owning indirection needed to break a cycle through inline lists; the fixed slot array never expands an infinite inline type.
 
-Only `[0, length)` is initialized. Construction, copying, moves, replacement, destruction and error cleanup must preserve that invariant. Unused slots are neither zero-filled nor read. Copies construct a new initialized prefix; moves transfer its ownership; destruction drops only that prefix. An append constructs its item before increasing length. Removing an item moves the suffix without copying or destroying its transferred owners a second time.
+Only `[0, length)` is initialized. Construction, copying, moves, replacement, destruction and error cleanup must preserve that invariant. Unused slots are neither zero-filled nor read. Copies construct a new initialized prefix; moves transfer its ownership; destruction drops only that prefix. Hashing visits that same prefix in order and includes its length, consistently with equality. An append constructs its item before increasing length. Removing an item moves the suffix without copying or destroying its transferred owners a second time.
 
 An unproven push compares the length to the constant capacity and returns `CapacityError.InlineFull` before publishing an item. A proven push omits that branch. References point directly at item slots, which do not move during append.
 
 ### JavaScript
 
-An inline array is one ordinary dense JavaScript array, without a wrapper or separate count. Its `length` is the initialized prefix. Checked pushes compare that length against the capacity constant; proven pushes use ordinary `push`. Copy and cleanup use the item type's existing operations. The engine manages the array's own backing storage.
+An inline array is one ordinary dense JavaScript array, without a wrapper or separate count. Its `length` is the initialized prefix. Checked pushes compare that length against the capacity constant; proven pushes use ordinary `push`. Copy and cleanup use the item type's existing operations. Erased generic calls carry an item destructor capability (a shared no-op for ordinary data), including through imported interfaces and function values. Cleanup functions that use this capability stay inside its scope, including recursive generic owners. The engine manages the array's own backing storage.
 
 ### Compile-time evaluation
 
-The interpreter uses the same initialized-prefix operations, capacity errors and ownership rules. Capacity is part of the analyzed type rather than a second runtime container.
+The interpreter uses the same initialized-prefix operations, capacity errors and ownership rules. Capacity is part of the analyzed type rather than a second runtime container. Generic calls and function values carry their instantiated value parameters, so capacity reads and pushes use the actual bound. An explicitly supplied `none` remains an argument. Native constant emission independently rejects a prefix longer than the declared capacity before writing any storage.
 :::

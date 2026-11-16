@@ -17,9 +17,10 @@
 use fa_parser::TypedSyntaxTree;
 
 use crate::analysis::{Analysis, NodeFlags};
-use crate::ids::{NodeId, SymbolId};
+use crate::ids::{ModuleId, NodeId, NominalId, SymbolId, TypeId};
 use crate::symbols::{Resolution, SymbolKind};
 use crate::syntax::{self, View};
+use crate::types::{Mode, NominalKind, TypeKind, TypeStore};
 
 /// Immediate values contributing to an expression's result. Constructor
 /// fields, collection items and call arguments compute their own stores;
@@ -42,6 +43,118 @@ pub fn result_inputs(tree: &TypedSyntaxTree, node: NodeId) -> Option<Vec<NodeId>
 		View::Block { statements } => statements.last().into_iter().collect(),
 		_ => return None,
 	})
+}
+
+/// A runtime union alternative. A named member's semantic type is published
+/// in the shared store; its original nominal still identifies the source
+/// layout and tag in the unit being lowered.
+#[derive(Clone, Copy, Debug)]
+pub struct CopyAlternative {
+	pub ty: TypeId,
+	pub member: Option<(NominalId, u16)>,
+}
+
+pub fn copy_alternatives(
+	types: &TypeStore,
+	module: ModuleId,
+	source: TypeId,
+) -> Vec<CopyAlternative> {
+	let source = types.rec_target(source).unwrap_or(source);
+	let mut alternatives = Vec::new();
+	for &ty in types.union_members(&source) {
+		if let TypeKind::NamedUnion(nominal, mask) = types.kind(ty) {
+			let count = types.sym_list(types.nominal(nominal).members).len() as u16;
+			let mut merger = types.merger(Some(module));
+			let global = merger.ty(ty);
+			drop(merger);
+			let mut scratch = TypeStore::view(types.global());
+			let TypeKind::NamedUnion(global_nominal, _) = scratch.kind(global) else {
+				unreachable!()
+			};
+			for index in 0..count {
+				if types.mask_has(mask, index) {
+					let member = scratch.member(global_nominal, index);
+					alternatives.push(CopyAlternative {
+						ty: scratch.merger(Some(module)).ty(member),
+						member: Some((nominal, index)),
+					});
+				}
+			}
+		} else {
+			let member = match types.kind(ty) {
+				TypeKind::Member(nominal, index) => Some((nominal, index)),
+				_ => None,
+			};
+			alternatives.push(CopyAlternative { ty, member });
+		}
+	}
+	alternatives
+}
+
+/// Whether copying to the target retains a written member's identity rather
+/// than projecting its data. Compare in one store: local and published ids
+/// can describe the same declaration and arguments.
+pub fn preserves_copy_alternative(
+	types: &TypeStore,
+	module: ModuleId,
+	source: TypeId,
+	target: TypeId,
+) -> bool {
+	let mut merger = types.merger(Some(module));
+	let source = merger.ty(source);
+	let target = merger.ty(target);
+	drop(merger);
+	let scratch = TypeStore::view(types.global());
+	scratch.union_members(&target).iter().any(|&alternative| {
+		source == alternative
+			|| match (scratch.kind(source), scratch.kind(alternative)) {
+				(TypeKind::Member(a, index), TypeKind::NamedUnion(b, mask)) => {
+					a == b && scratch.mask_has(mask, index)
+				}
+				(TypeKind::NamedUnion(a, from), TypeKind::NamedUnion(b, to)) if a == b => {
+					let count = scratch.sym_list(scratch.nominal(a).members).len() as u16;
+					(0..count)
+						.all(|index| !scratch.mask_has(from, index) || scratch.mask_has(to, index))
+				}
+				(
+					TypeKind::Member(nominal, _) | TypeKind::NamedUnion(nominal, _),
+					TypeKind::ErrorTop,
+				) => scratch.nominal(nominal).kind == NominalKind::Errors,
+				_ => false,
+			}
+	})
+}
+
+/// The compatible destination for a copied alternative, retaining an exact
+/// written alternative before considering structural projections.
+pub fn copy_destination(
+	types: &TypeStore,
+	module: ModuleId,
+	source: TypeId,
+	target: TypeId,
+) -> Option<TypeId> {
+	let target = types.rec_target(target).unwrap_or(target);
+	let choices = types.union_members(&target).to_vec();
+	if let Some(&choice) = choices
+		.iter()
+		.find(|&&choice| preserves_copy_alternative(types, module, source, choice))
+	{
+		return Some(choice);
+	}
+	let mut merger = types.merger(Some(module));
+	let source = merger.ty(source);
+	let global: Vec<_> = choices.iter().map(|&ty| merger.ty(ty)).collect();
+	drop(merger);
+	let mut scratch = TypeStore::view(types.global());
+	choices
+		.into_iter()
+		.zip(global)
+		.find_map(|(original, target)| {
+			scratch
+				.assignable(source, target, Mode::Copy)
+				.is_ok()
+				.then_some(original)
+		})
 }
 
 /// The local symbol at the root of a place expression (`a`, `a.b`,
@@ -196,6 +309,44 @@ pub fn copies(
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn converting_union_copies_retain_written_members_across_store_views() {
+		let (session, file) = crate::analyze_source(
+			"type Status = Union { Ready, Value = { count: Int8 } }\nlet statuses: Array<Status | String> = [Status.Value { count = 1 }, Status.Ready]\nlet copied: Array<Status | String | Integer> = copy statuses\nconsole.log(statuses.length, copied.length)\n",
+		);
+		assert!(
+			session.diagnostics(file).is_empty(),
+			"{:?}",
+			session.diagnostics(file)
+		);
+		let input = session
+			.analysis(file)
+			.copy_inputs
+			.values()
+			.find(|input| input.produces)
+			.unwrap();
+		let types = session.types();
+		let TypeKind::Collection(_, source, _) = types.kind(input.source) else {
+			panic!("an array")
+		};
+		let TypeKind::Collection(_, target, _) = types.kind(input.target) else {
+			panic!("an array")
+		};
+		let module = session.module_id(file);
+		let members = copy_alternatives(types, module, source);
+		assert_eq!(
+			members.iter().filter(|case| case.member.is_some()).count(),
+			2
+		);
+		for member in members.into_iter().filter(|case| case.member.is_some()) {
+			let selected = copy_destination(types, module, member.ty, target).unwrap();
+			assert!(matches!(types.kind(selected), TypeKind::NamedUnion(..)));
+			assert!(preserves_copy_alternative(
+				types, module, member.ty, selected
+			));
+		}
+	}
 
 	/// Whether the value of the last declaration of a source is copied.
 	fn copied(source: &str) -> bool {

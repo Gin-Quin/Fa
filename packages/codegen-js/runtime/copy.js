@@ -45,6 +45,27 @@ export function faCopyShell(source) {
 	return Object.create(Object.getPrototypeOf(source));
 }
 
+// @fa-helper faCopyAs deps:
+/**
+ * Execute a generated converting-copy plan without recursive JavaScript calls.
+ * Jobs either copy one value into a destination property or commit a completed
+ * map/set entry after its children have been copied.
+ * @param {any} value
+ * @param {(value: any, target: any, key: any, work: any[]) => void} plan
+ * @returns {any}
+ */
+export function faCopyAs(value, plan) {
+	const result = { value: undefined };
+	/** @type {any[]} */
+	const work = [[plan, value, result, "value"]];
+	while (work.length > 0) {
+		const job = work.pop();
+		if (job.length === 1) job[0]();
+		else job[0](job[1], job[2], job[3], work);
+	}
+	return result.value;
+}
+
 // @fa-helper faCopy deps: faCopyShell FaHashMap FaSet faSides faSharedHandle
 /**
  * A deep structural copy of a Fa value. Iterative: long recursive chains

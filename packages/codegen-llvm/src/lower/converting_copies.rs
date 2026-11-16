@@ -4,7 +4,7 @@
 //! These builders never consult the caller's frame or temporary registry.
 
 use fa_analyzer::ids::{NodeId, TypeId};
-use fa_analyzer::types::{CollKind, Mode, TypeKind, TypeStore};
+use fa_analyzer::types::{CollKind, TypeKind};
 use inkwell::IntPredicate;
 use inkwell::builder::Builder;
 use inkwell::types::BasicType;
@@ -615,63 +615,28 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// Select the same compatible target alternative as the semantic Copy
 	/// relation, preserving a written member when it is already present.
 	fn copy_alternative(&self, source: TypeId, target: TypeId) -> Result<TypeId, Error> {
-		let target = self.types().rec_target(target).unwrap_or(target);
-		let choices = self.types().union_members(&target).to_vec();
-		if choices.contains(&source) {
-			return Ok(source);
-		}
-		let module = self.session.module_id(self.file);
-		let mut merger = self.types().merger(Some(module));
-		let source = merger.ty(source);
-		let global: Vec<_> = choices.iter().map(|&ty| merger.ty(ty)).collect();
-		drop(merger);
-		let mut scratch = TypeStore::view(self.types().global());
-		choices
-			.into_iter()
-			.zip(global)
-			.find_map(|(original, target)| {
-				scratch
-					.assignable(source, target, Mode::Copy)
-					.is_ok()
-					.then_some(original)
-			})
-			.ok_or_else(|| {
-				Error::Llvm("a converting copy has no compatible union alternative".into())
-			})
+		fa_analyzer::lower::copies::copy_destination(
+			self.types(),
+			self.session.module_id(self.file),
+			source,
+			target,
+		)
+		.ok_or_else(|| {
+			Error::Llvm(format!(
+				"a converting copy from {} to {} has no compatible union alternative",
+				self.types().display(source),
+				self.types().display(target)
+			))
+		})
 	}
 
 	fn preserves_box_alternative(&self, source: TypeId, target: TypeId) -> bool {
-		if source == target {
-			return true;
-		}
-		let target = self.types().rec_target(target).unwrap_or(target);
-		self.types()
-			.union_members(&target)
-			.iter()
-			.any(|&alternative| {
-				source == alternative
-					|| match (self.types().kind(source), self.types().kind(alternative)) {
-						(TypeKind::Member(a, index), TypeKind::NamedUnion(b, mask)) => {
-							a == b && self.types().mask_has(mask, index)
-						}
-						(TypeKind::NamedUnion(a, from), TypeKind::NamedUnion(b, to)) if a == b => {
-							let count =
-								self.types().sym_list(self.types().nominal(a).members).len() as u16;
-							(0..count).all(|index| {
-								!self.types().mask_has(from, index)
-									|| self.types().mask_has(to, index)
-							})
-						}
-						(
-							TypeKind::Member(nominal, _) | TypeKind::NamedUnion(nominal, _),
-							TypeKind::ErrorTop,
-						) => {
-							self.types().nominal(nominal).kind
-								== fa_analyzer::types::NominalKind::Errors
-						}
-						_ => false,
-					}
-			})
+		fa_analyzer::lower::copies::preserves_copy_alternative(
+			self.types(),
+			self.session.module_id(self.file),
+			source,
+			target,
+		)
 	}
 
 	fn copy_union_pointer(
@@ -730,36 +695,54 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		b.position_at_end(join);
 		let result = b.build_phi(self.llvm_type(pair.to.repr), "")?;
 		let mut cases = Vec::new();
-		for alternative in self.copy_union_members(source)? {
-			// A named union remains boxed with the actual member's identity.
-			let member = self.member_of_type(alternative);
-			let tag = match member {
+		for alternative in fa_analyzer::lower::copies::copy_alternatives(
+			self.types(),
+			self.session.module_id(self.file),
+			source,
+		) {
+			let tag = match alternative.member {
 				Some((nominal, index)) => self.member_id(nominal, index),
-				None => self.type_id(alternative),
+				None => self.type_id(alternative.ty),
 			};
 			let block = self
 				.context
 				.append_basic_block(function, "copy_alternative");
 			b.position_at_end(block);
-			let repr = self.repr_of(alternative, 0)?;
-			let raw = if member.is_some() || matches!(repr, Repr::Union | Repr::InlineUnion(_)) {
-				pointer.into()
+			let copied = if let Some((nominal, index)) = alternative.member {
+				if self.preserves_box_alternative(alternative.ty, pair.to.ty) {
+					self.copy_union_representation(b, pair.from.repr, pair.to.repr, value)?
+				} else {
+					let payload = self.member_data(nominal, index).ok_or_else(|| {
+						Error::Llvm("projecting data from a bare union member".into())
+					})?;
+					let repr = self.repr_of(payload, 0)?;
+					let raw = self.member_payload_value(b, pointer, nominal, index, repr)?;
+					self.call_converting_copy(
+						b,
+						CopyPair {
+							from: CopyShape { ty: payload, repr },
+							to: pair.to,
+						},
+						raw,
+					)?
+				}
 			} else {
+				let repr = self.repr_of(alternative.ty, 0)?;
 				let layout = self.box_type(Some(repr));
 				let address = b.build_struct_gep(layout, pointer, 1, "")?;
-				b.build_load(self.llvm_type(repr), address, "")?
-			};
-			let copied = self.call_converting_copy(
-				b,
-				CopyPair {
-					from: CopyShape {
-						ty: alternative,
-						repr: if member.is_some() { Repr::Union } else { repr },
+				let raw = b.build_load(self.llvm_type(repr), address, "")?;
+				self.call_converting_copy(
+					b,
+					CopyPair {
+						from: CopyShape {
+							ty: alternative.ty,
+							repr,
+						},
+						to: pair.to,
 					},
-					to: pair.to,
-				},
-				raw,
-			)?;
+					raw,
+				)?
+			};
 			let end = b.get_insert_block().expect("a block");
 			b.build_unconditional_branch(join)?;
 			result.add_incoming(&[(&copied, end)]);
@@ -771,35 +754,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		b.build_switch(id, otherwise, &cases)?;
 		b.position_at_end(join);
 		Ok(result.as_basic_value())
-	}
-
-	fn copy_union_members(&self, source: TypeId) -> Result<Vec<TypeId>, Error> {
-		let mut members = Vec::new();
-		let module = self.session.module_id(self.file);
-		for &alternative in self.types().union_members(&source) {
-			if let TypeKind::NamedUnion(nominal, mask) = self.types().kind(alternative) {
-				let count = self
-					.types()
-					.sym_list(self.types().nominal(nominal).members)
-					.len() as u16;
-				let mut merger = self.types().merger(Some(module));
-				let global = merger.ty(alternative);
-				drop(merger);
-				let mut scratch = TypeStore::view(self.types().global());
-				let TypeKind::NamedUnion(global_nominal, _) = scratch.kind(global) else {
-					unreachable!()
-				};
-				for index in 0..count {
-					if self.types().mask_has(mask, index) {
-						let member = scratch.member(global_nominal, index);
-						members.push(scratch.merger(Some(module)).ty(member));
-					}
-				}
-			} else {
-				members.push(alternative);
-			}
-		}
-		Ok(members)
 	}
 
 	fn copy_box_to_inline(

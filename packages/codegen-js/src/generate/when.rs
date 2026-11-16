@@ -363,7 +363,7 @@ impl Generator<'_> {
 
 	/// `subject is ty` for a member of a named union or enumeration, or a
 	/// member type of an anonymous union.
-	fn type_test(&mut self, subject: &Expr, subject_type: TypeId, ty: TypeId) -> Expr {
+	pub(super) fn type_test(&mut self, subject: &Expr, subject_type: TypeId, ty: TypeId) -> Expr {
 		if let Some(test) = self.error_test(subject, ty) {
 			return test;
 		}

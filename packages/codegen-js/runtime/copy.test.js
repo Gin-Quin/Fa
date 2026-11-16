@@ -2,9 +2,67 @@ import { describe, expect, test } from "bun:test";
 
 import { FaHashMap } from "./collections.js";
 import { FaAtomic, FaChannel, FaMutex } from "./concurrency.js";
-import { faAssign, faCopy, faCopyGraph, faCopyInto } from "./copy.js";
+import { faAssign, faCopy, faCopyAs, faCopyGraph, faCopyInto } from "./copy.js";
 
 describe("copies", () => {
+	test("converting plans copy deep recursive values and project only retained data", () => {
+		/** @type {any} */
+		let source;
+		for (let index = 0; index < 100000; index++)
+			source = { value: index, next: source, omitted: [index] };
+		/** @type {(value: any, target: any, key: any, work: any[]) => void} */
+		const plan = (value, target, key, work) => {
+			if (value === undefined) {
+				target[key] = undefined;
+				return;
+			}
+			const result = { value: BigInt(value.value), next: undefined };
+			target[key] = result;
+			work.push([plan, value.next, result, "next"]);
+		};
+		const copied = faCopyAs(source, plan);
+		let count = 0;
+		for (
+			let left = source, right = copied;
+			left !== undefined;
+			left = left.next, right = right.next
+		) {
+			if (left === right || right.value !== BigInt(left.value) || "omitted" in right)
+				throw new Error("invalid converting copy");
+			count++;
+		}
+		expect(count).toBe(100000);
+		expect(typeof source.value).toBe("number");
+	});
+
+	test("converting plans finish a map key before hashing it", () => {
+		const source = new Map([[{ id: 1 }, [2]]]);
+		/** @type {(value: any, target: any, key: any, work: any[]) => void} */
+		const keyPlan = (value, target, key, work) => {
+			const result = { id: undefined };
+			target[key] = result;
+			work.push([
+				(value, target, key) => {
+					target[key] = BigInt(value);
+				},
+				value.id,
+				result,
+				"id",
+			]);
+		};
+		const result = faCopyAs(source, (value, target, key, work) => {
+			const result = new FaHashMap();
+			target[key] = result;
+			for (const [sourceKey, sourceValue] of value) {
+				const entry = { key: undefined, value: sourceValue.slice() };
+				work.push([() => result.set(entry.key, entry.value)]);
+				work.push([keyPlan, sourceKey, entry, "key"]);
+			}
+		});
+		expect(result.get({ id: 1n })).toEqual([2]);
+		expect(result.get({ id: 1n })).not.toBe(source.values().next().value);
+	});
+
 	test("structural and relation-graph copies retain shared synchronization handles", () => {
 		const values = [new FaAtomic(0), new FaMutex({ value: 1 }), new FaChannel(1)];
 		const source = { values };

@@ -970,7 +970,7 @@ impl Generator<'_> {
 
 	/// A value of type `source` where a `target` is expected: `BigInt(x)`,
 	/// `Number(x)` (checked against ±(2^53 − 1) when the target is wider).
-	fn convert_representation(
+	pub(super) fn convert_representation(
 		&mut self,
 		n: NodeId,
 		value: Expr,

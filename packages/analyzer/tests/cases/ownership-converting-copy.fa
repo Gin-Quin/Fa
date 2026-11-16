@@ -49,3 +49,11 @@ console.log(points.size, widePoints.size) -- prints: 1 1
 let rows: Columnar<{ x: Int8, name: String }> = [{ x = 1, name = "Ada" }]
 let wideRows: Columnar<{ x: Integer, name: String }> = copy rows
 for row in wideRows { console.log(row.x, row.name) } -- prints: 1 Ada
+
+type Status = Union {
+	Ready
+	Value = { count: Int8 }
+}
+let statuses: Array<Status | String> = [Status.Value { count = 7 }, "text", Status.Ready]
+let moreStatuses: Array<Status | String | Integer> = copy statuses
+console.log(statuses.length, moreStatuses.length) -- prints: 3 3

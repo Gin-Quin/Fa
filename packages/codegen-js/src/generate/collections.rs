@@ -75,7 +75,7 @@ impl Generator<'_> {
 	}
 
 	/// The class of the sets of an element type.
-	fn set_class(&mut self, item: TypeId) -> String {
+	pub(super) fn set_class(&mut self, item: TypeId) -> String {
 		if self.is_primitive(item) {
 			"Set".to_string()
 		} else {
@@ -84,7 +84,7 @@ impl Generator<'_> {
 	}
 
 	/// The class of the maps of a key type.
-	fn map_class(&mut self, key: TypeId) -> String {
+	pub(super) fn map_class(&mut self, key: TypeId) -> String {
 		if self.is_primitive(key) {
 			"Map".to_string()
 		} else {

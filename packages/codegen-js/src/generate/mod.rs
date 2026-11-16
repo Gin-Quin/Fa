@@ -16,6 +16,7 @@
 
 pub(crate) mod collections;
 mod constants;
+mod converting_copies;
 mod errors;
 mod expressions;
 mod fields;
@@ -189,6 +190,7 @@ pub(crate) struct Generator<'s> {
 	pub(crate) provided: HashMap<NodeId, Option<String>>,
 	/// The generated copy function of each type (empty while generated).
 	copies: HashMap<TypeId, String>,
+	copy_plans: HashMap<(TypeId, TypeId), String>,
 	/// The generated drop function of each type holding a resource (empty
 	/// while generated, `resources.rs`).
 	drops: HashMap<TypeId, String>,
@@ -321,6 +323,7 @@ pub(crate) fn generate_module(
 		requirement_scopes: Vec::new(),
 		provided: HashMap::new(),
 		copies: HashMap::new(),
+		copy_plans: HashMap::new(),
 		drops: HashMap::new(),
 		resource_flags: HashMap::new(),
 		item_results: Vec::new(),
@@ -846,7 +849,11 @@ impl<'s> Generator<'s> {
 
 	/// The type of a node.
 	pub(crate) fn type_of(&self, n: NodeId) -> TypeId {
-		self.analysis.type_of(n)
+		self.analysis
+			.copy_inputs
+			.get(&n)
+			.filter(|input| !input.produces)
+			.map_or_else(|| self.analysis.type_of(n), |input| input.target)
 	}
 
 	/// Whether a node has a flag. Without overflow checks

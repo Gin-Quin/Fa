@@ -468,7 +468,7 @@ fn recursive_generic_instances_classify_substituted_payloads() {
 }
 
 #[test]
-fn implicit_type_parameters_defer_while_symbolic_integer_bounds_are_ordinary() {
+fn implicit_type_parameters_defer_ownership() {
 	let mut types = TypeStore::new();
 	let (param, _) = parameter(&mut types, false);
 	let key = types.param(param).owner;

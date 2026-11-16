@@ -72,6 +72,7 @@ codes! {
 	FFI014 = "FFI014", Error, [], "a cLibrary API that isn't a namespace of functions with C types, throwing one Errors type";
 	MEM002 = "MEM002", Error, ["CONC009"], "on a later use). Without a binding, the watch lives to the end of its scope; at module level, for the program";
 	MEM003 = "MEM003", Error, [], "a Database can't be copied";
+	MEM005 = "MEM005", Error, [], "an error payload owns a unique value: keep an identifier or a description of the resource instead (lead, 2026-11-16). Synchronization…";
 	META001 = "META001", Error, [], "argument of a compile-time call not known at compile time";
 	META002 = "META002", Error, ["E-DECL-20", "FN050", "TF006"], "impure function called at compile time";
 	META003 = "META003", Error, ["TF003"], "step budget exceeded";

@@ -78,6 +78,8 @@ mod collection_tests;
 #[cfg(test)]
 mod effect_tests;
 #[cfg(test)]
+mod error_payload_tests;
+#[cfg(test)]
 mod flow_tests;
 #[cfg(test)]
 mod function_tests;
@@ -402,6 +404,8 @@ pub struct Walker<'s> {
 	/// The recursive reference of each type declaration that named itself
 	/// while being built (types brief §3.6).
 	pub(crate) rec_references: FxHashMap<SymbolId, TypeId>,
+	/// Error payload declarations, validated after recursive targets are complete.
+	pub(crate) error_payloads: Vec<(NodeId, TypeId)>,
 	/// The sink being checked is a view (an argument of a function), not a
 	/// copy: no narrowing copy is recorded (structural.rs).
 	pub(crate) view_sink: bool,
@@ -594,6 +598,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		pool_state: None,
 		readonly_elements: rustc_hash::FxHashSet::default(),
 		rec_references: FxHashMap::default(),
+		error_payloads: Vec::new(),
 		view_sink: false,
 		written_decls: FxHashMap::default(),
 		written_type_keys: FxHashMap::default(),
@@ -667,6 +672,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		walker.finish_tasks(root);
 		// the fields written into copies of `Type<parameter>` (structural.rs)
 		walker.finish_implicit_writes();
+		// Error payloads cannot own unique values (errors.rs).
+		walker.finish_error_payloads();
 		// the API of a C library (c_library.rs)
 		walker.finish_c_library(root);
 	}

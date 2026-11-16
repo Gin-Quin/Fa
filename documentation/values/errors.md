@@ -39,7 +39,18 @@ type ApiError = Errors {
 }
 ```
 
+An error payload is data: it cannot own a Task, a resource with `destroy`, a built-in lifetime owner such as a socket or Worker, or any composite owning one. The declaration is rejected with `MEM005`: keep an identifier or a description of the resource instead. Shared synchronization handles (`Mutex`, `Channel` and atomics) are allowed; they keep their usual sharing contract.
+
+```fa
+type Failure = Errors { Bad = { task: Task<Integer> } } -- error: MEM005
+-- Keep a task identifier or a description in the payload; keep ownership of the Task outside it.
+```
+
+The rule follows owned data through fields, tuples, optionals, unions and collections. A generic payload must satisfy the same restriction at each concrete instantiation. A concrete error member keeps its payload's [ownership category](/advanced/memory-management#structures): ordinary payloads keep value semantics, while collection or recursive payloads require `copy` when keeping two owners.
+
 ## The `Error` type
+
+The open `Error` type is conservatively a structure, because its payload may own a collection, and is never unique. Its last use moves it; `copy error` is allowed, and storing it while the source is still used requires `copy` (`MEM004`). Narrowing to a concrete member uses that member's payload category.
 
 Every member of an `Errors` type satisfies the built-in `Error` type: a value typed `Error` accepts any error. `Error` only exposes `toString(): String`, which gives the qualified name of the member and its data, like `ApiError.NetworkError { message = "Connection lost" }`; to read the data of an error, narrow it to its member first. Use `is` to tell error types apart in a union:
 

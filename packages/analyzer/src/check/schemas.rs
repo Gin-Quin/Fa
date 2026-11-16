@@ -599,6 +599,15 @@ impl Walker<'_> {
 			})
 			.collect();
 		named.pop();
+		if kind == NominalKind::Errors {
+			self.error_payloads.extend(
+				payloads
+					.iter()
+					.copied()
+					.filter(|ty| !ty.is_unset())
+					.map(|ty| (n, ty)),
+			);
+		}
 		self.s.types.set_payloads(nominal, payloads);
 		ty
 	}

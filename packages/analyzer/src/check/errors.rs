@@ -51,6 +51,23 @@ pub struct Handler {
 }
 
 impl Walker<'_> {
+	/// Run after declarations resolve: a payload can name a resource through
+	/// a recursive or forward reference. Generic-dependent payloads are checked
+	/// by the later instantiation-conditions slice, never guessed from bounds.
+	pub(super) fn finish_error_payloads(&mut self) {
+		for (node, ty) in std::mem::take(&mut self.error_payloads) {
+			if self.s.types.is_unique(ty) {
+				let message = format!(
+					"Error payload `{}` owns a unique value; keep an identifier or a description of the resource instead",
+					self.display(ty),
+				);
+				let diagnostic =
+					self.diagnostic(&crate::diagnostics::codes::advanced::MEM005, node, message);
+				self.report(diagnostic);
+			}
+		}
+	}
+
 	/// A built-in error type (`DivisionByZero`, `ArithmeticError`, `IndexError`…).
 	pub(crate) fn builtin_error(&mut self, name: &str) -> TypeId {
 		error_type(&mut self.s.types, name).unwrap_or(TypeId::ERROR)

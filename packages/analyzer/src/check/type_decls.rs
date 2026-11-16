@@ -645,6 +645,11 @@ impl Walker<'_> {
 				let diagnostic = self.diagnostic(&TY051, target, message);
 				self.report(diagnostic);
 			}
+			if kind == NominalKind::Errors
+				&& let Some(definition) = definition
+			{
+				self.error_payloads.push((definition, payload));
+			}
 			payloads.push(payload);
 		}
 		self.s.types.set_payloads(nominal, payloads);

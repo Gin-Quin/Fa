@@ -64,6 +64,8 @@ duplicate[0] = 72
 console.log(bytes[0], duplicate[0]) -- 104 72
 ```
 
+An error payload is data and cannot own a unique value (`MEM005` at its declaration): keep an identifier or a description of the resource instead. Shared synchronization handles are allowed. The open `Error` type is conservatively a structure, never unique: a last use moves it, and keeping both values needs `copy` (`MEM004`). A concrete error member uses its payload's category. See [errors](/values/errors#declaring-error-types).
+
 A copy preserves contents, not spare capacity. Reserve the destination separately if it needs more room.
 
 ### Explicit `copy`
@@ -382,6 +384,7 @@ Across workers, use an independent copy, a common `Mutex`, or a proven exclusive
 | `MEM002` | Value was moved or invalidated; it cannot be used here. A partial move names the exact path and move line; the whole owner is invalid until the field is assigned again. Also: a borrowed resource or a field needed by its destructor cannot transfer ownership. | Use the new owner, copy copyable data before moving, acquire a new resource, or transfer the complete resource. |
 | `MEM003` | `T` is unique or owns a unique value and can't be copied; move it instead. An escaping capture cannot own it either. | Move the owner, create a new resource, or keep the closure nonescaping. `copy` cannot fix this. |
 | `MEM004` | Copying `T` duplicates a structure; write `copy value` explicitly or stop using the source so it can move. | Write `copy` at the storage site; for a capture, first create a local snapshot and capture its last use. |
+| `MEM005` | An error payload owns a unique value; error payloads must be copyable data. | Keep an identifier or a description of the resource instead; keep the unique owner outside the error. Shared synchronization handles are allowed. |
 
 The following deliberately invalid example documents `MEM004`. Enforcement is a later implementation slice:
 
@@ -435,5 +438,5 @@ Copy/read/write/drop operations and binary worker codecs are generated at build 
 
 ### Integration status
 
-The `copy` syntax and existing copy operations are available in this slice. The category predicates, `MEM004`, complete `MEM003`, alias/branch/loop moves, unique-resource borrows, portable generic/capture conditions, recursive moves and binary transport are the subsequent ownership slices. The rules above are the specification those slices must satisfy; current acceptance of a prohibited copy is not permission to rely on it.
+The `copy` syntax and existing copy operations are available in this slice. The category predicates and concrete `MEM005` payload checks are available. Generic-dependent error payload constraints are checked by the subsequent instantiation-conditions slice. `MEM004`, complete `MEM003`, alias/branch/loop moves, unique-resource borrows, portable generic/capture conditions, recursive moves and binary transport are the subsequent ownership slices. The rules above are the specification those slices must satisfy; current acceptance of a prohibited copy is not permission to rely on it.
 :::

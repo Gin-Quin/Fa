@@ -1984,6 +1984,94 @@ console.log(try read(T.One { child = T.Leaf { value = 7 } }, false))
 		}
 	}
 	#[test]
+	fn private_inline_map_headers_stay_in_the_frame_and_escaping_maps_keep_owners() {
+		let private = ir_of(
+			"local-map-header",
+			"mutable map = Map<UInt32, UInt32>.from([(0, 1)], capacity = 128)\nmap[2] = 3\nconsole.log(map.get(2), map.size)\n",
+		);
+		assert!(private.contains("@fa_table_new_local("), "{private}");
+		let escaping = ir_of(
+			"escaping-map-header",
+			"function make = (): Map<UInt32, UInt32> => {\nmutable map = Map<UInt32, UInt32>.from([(0, 1)], capacity = 128)\nmap[2] = 3\nmap\n}\nconsole.log(make().size)\n",
+		);
+		assert!(!escaping.contains("@fa_table_new_local("), "{escaping}");
+		let copied = ir_of(
+			"copied-map-header",
+			"mutable map = Map<UInt32, UInt32>.from([(0, 1)], capacity = 128)\nlet other = copy map\nmap[2] = 3\nconsole.log(other.size, map.size)\n",
+		);
+		assert!(!copied.contains("@fa_table_new_local("), "{copied}");
+	}
+
+	#[test]
+	fn map_headers_shared_between_top_level_parts_keep_an_owner() {
+		// One large statement forces the initializer into several real LLVM
+		// functions without changing process-wide environment variables.
+		let padding = "x".repeat(70_000);
+		let source = format!(
+			"mutable map = Map<UInt32, UInt32>.from([(0, 1)], capacity = 128)\nassert \"{padding}\".length == 70000\nmap[2] = 3\nconsole.log(map.get(2), map.size)\n"
+		);
+		let ir = ir_of("map-header-top-level-parts", &source);
+		assert!(
+			count(&ir, "define internal void @fa.top_level_part") >= 2,
+			"{ir}"
+		);
+		assert!(!ir.contains("@fa_table_new_local("), "{ir}");
+	}
+
+	#[test]
+	fn private_map_headers_share_literal_and_recursive_frame_budgets() {
+		for (target_name, target) in [("native", Target::Native), ("wasm", Target::Wasm)] {
+			for (case, maps, recursive, fixed, expected) in [
+				("ordinary", 48, false, false, 42),
+				("recursive", 8, true, false, 5),
+				("literal", 48, false, true, 41),
+			] {
+				let mut source =
+					String::from("function many = (depth: Integer, key: UInt32): Integer => {\n");
+				if fixed {
+					source.push_str("let fixed: Map<UInt32, UInt32> = [(key, 1)]\n");
+				}
+				for index in 0..maps {
+					source.push_str(&format!(
+						"mutable map{index} = Map<UInt32, UInt32>.from([(key, 0)], capacity = 32)\n"
+					));
+				}
+				if recursive {
+					source.push_str("if depth > 0 { return many(depth - 1, key) }\n");
+				} else {
+					source.push_str("assert depth == 0\n");
+				}
+				let mut sizes: Vec<_> = (0..maps).map(|index| format!("map{index}.size")).collect();
+				if fixed {
+					sizes.push("fixed.size".into());
+				}
+				source.push_str(&format!(
+					"console.log({})\n0\n}}\nconsole.log(many(0, 7))\n",
+					sizes.join(", ")
+				));
+				let ir = ir_at_target(
+					&format!("map-headers-budget-{target_name}-{case}"),
+					&source,
+					false,
+					OptLevel::O0,
+					target,
+				);
+				let body = function(&ir, "fa.many");
+				assert_eq!(
+					count(body, "@fa_table_new_local("),
+					expected,
+					"{case}/{target_name}: {body}"
+				);
+				assert_eq!(
+					count(body, "@fa_table_local("),
+					usize::from(fixed),
+					"{case}/{target_name}: {body}"
+				);
+			}
+		}
+	}
+
+	#[test]
 	fn private_inline_maps_reuse_negative_probes_but_references_and_callbacks_do_not() {
 		let source = |extra: &str| {
 			format!(

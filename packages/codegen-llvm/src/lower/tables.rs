@@ -1458,7 +1458,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else if let Some(buffer) = self.collection_stack(node, bytes)? {
 			local(self, buffer)?
 		} else {
-			self.table_new(table, capacity)?
+			self.table_new_at(node, table, capacity)?
 		};
 		let result = self.fresh(Val::new(repr, pointer));
 		for item in items.iter() {
@@ -2402,7 +2402,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			_ => self.context.i64_type().const_zero(),
 		};
-		let result = self.table_new(table, capacity)?;
+		let result = self.table_new_at(node, table, capacity)?;
 		match source.repr {
 			Repr::Array(item_type) => {
 				let item = self.item_repr(item_type, node)?;

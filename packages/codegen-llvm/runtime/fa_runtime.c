@@ -6983,8 +6983,8 @@ typedef struct {
 	// dense entries: the contiguous array, and the entries it has room for
 	uint8_t *entries;
 	int64_t room;
-	// 0: the heap, 2: read-only data, 3: a block of a function's frame. The
-	// last two are immutable, and none of their blocks is freed.
+	// 0: heap; 1: frame header owning heap slots; 2: read-only data;
+	// 3: a whole frame block. The last two are immutable and free no blocks.
 	int64_t storage;
 } FaTable;
 
@@ -7536,6 +7536,16 @@ FA_EXPORT FaTable *fa_table_new(int64_t capacity, int64_t entry_size) {
 	return table;
 }
 
+/// An inline map whose header is private to its synchronous function. Only
+/// the header is in the frame; its ordinary heap slots still grow and free.
+FA_EXPORT __attribute__((always_inline)) FaTable *fa_table_new_local(
+    FaTable *table, int64_t capacity, int64_t entry_size) {
+	*table = (FaTable){0};
+	table->storage = 1;
+	inline_new_slots(table, index_slots(capacity), entry_size);
+	return table;
+}
+
 /// An empty table with room for `capacity` entries in a block of the frame
 /// of its function (an immutable literal, `table_local_bytes` of
 /// `src/lower/tables.rs` gives the size of the block): its header, then its
@@ -7830,12 +7840,14 @@ FA_EXPORT void fa_table_clear(FaTable *table, int64_t entry_size) {
 
 /// Frees a table whose keys and values were dropped.
 FA_EXPORT void fa_table_free(FaTable *table, int64_t entry_size) {
-	if (table->storage != 0) {
+	if (table->storage >= 2) {
 		return;
 	}
 	if (entry_size & TABLE_INLINE) {
 		inline_free_slots(table->index, table->mask, entry_size);
-		fa_free(table, sizeof(FaTable), sizeof(int64_t));
+		if (table->storage == 0) {
+			fa_free(table, sizeof(FaTable), sizeof(int64_t));
+		}
 		return;
 	}
 	int64_t chunks = table->capacity >> TABLE_CHUNK_BITS;

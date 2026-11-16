@@ -1604,3 +1604,31 @@ these first samples, with no retiming to replace them. Canonical profiles,
 artifacts, paired samples and strict-control tables are retained in
 `benchmarks/results/2026-11-16-collections-{before,probes}.json` and the generated
 `2026-11-16-collections-probes.md`. No benchmark source or string code changed.
+
+### Ported private inline map headers
+
+Port `3d93c163` using today's `storage` word rather than its old `directory=-1`
+marker: 1 means a private frame header owning ordinary heap probe slots. Growth,
+reserve, clear and drops retain their existing payload ownership; free releases
+slots but not this header. Copies already reset storage to heap (0); immutable
+read-only and whole-frame storage remain 2/3.
+
+The existing closed synchronous whole-program and inline KEY32 proofs apply.
+Every owner use must remain in its function and be a supported immediate map
+operation, indexing, scalar measurement or direct iteration. Copies, returns,
+unknown uses, references, captures and shared top-level initializer locals are
+excluded by this proof. Literals and literal-source `Map.from` are the covered fresh
+constructors; replacement retains normal drop/ownership rules.
+
+Record eligible initializers without allocating. Existing read-only, whole-frame
+and caller-buffer storage stays preferred. Only the actual remaining constructor
+allocates a fixed entry-block header, charging 96 aligned bytes against the
+shared 4 KiB / recursive 512-byte collection frame budget on both pointer widths.
+Tests require 42 ordinary headers, five recursive headers, or 41 after a 160-byte
+immutable literal; additional constructors fall back to the heap. Bump the object
+cache version. No input-sized stack allocation or map-value layout change.
+
+Three new IR tests pass, including firing/escaping/copy/shared initializer cases
+and all six pointer-width/budget cases. C ASan/UBSan passes with repeated local
+header growth, reserve, copy, clear and free. Full workspace, all-target fixtures
+and measurement acceptance follow in the lead report.

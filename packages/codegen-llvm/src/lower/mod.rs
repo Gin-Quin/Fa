@@ -51,6 +51,7 @@ mod inlining;
 mod io;
 mod iterators;
 mod json;
+mod map_headers;
 mod map_probes;
 mod numbers;
 mod objects;
@@ -400,6 +401,7 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// text) where they are read, so that the array is never built.
 	virtual_code_points: FxHashMap<SymbolId, NodeId>,
 	map_probes: map_probes::Probes<'ctx>,
+	local_map_headers: map_headers::Headers<'ctx>,
 	/// The whole program is lowered in this module (`compile.rs`, not the
 	/// units of `units.rs`): whole-program layouts may apply (dense maps).
 	whole_program: bool,
@@ -587,6 +589,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			field_flags: std::cell::RefCell::new(FxHashMap::default()),
 			virtual_code_points: FxHashMap::default(),
 			map_probes: map_probes::Probes::default(),
+			local_map_headers: Default::default(),
 			whole_program: false,
 			program_facts: None,
 			fact_log: None,
@@ -2908,6 +2911,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				self.fresh(value)
 			}
 		} else {
+			self.prepare_local_map_header(node, symbol, value_node)?;
 			let repr = self.repr_of(self.analysis.symbols.symbol(symbol).ty, node.index())?;
 			let destination = if self.uses_return_slot(repr) {
 				Some(self.slot_of(symbol, node)?)

@@ -145,7 +145,55 @@ function many = (depth: Integer, key: UInt32): Integer => {
 	assert map45.get(key) == 45
 	assert map46.get(key) == 46
 	assert map47.get(key) == 47
-	inner + map0.size + map1.size + map2.size + map3.size + map4.size + map5.size + map6.size + map7.size + map8.size + map9.size + map10.size + map11.size + map12.size + map13.size + map14.size + map15.size + map16.size + map17.size + map18.size + map19.size + map20.size + map21.size + map22.size + map23.size + map24.size + map25.size + map26.size + map27.size + map28.size + map29.size + map30.size + map31.size + map32.size + map33.size + map34.size + map35.size + map36.size + map37.size + map38.size + map39.size + map40.size + map41.size + map42.size + map43.size + map44.size + map45.size + map46.size + map47.size
+	inner
+		+ map0.size
+		+ map1.size
+		+ map2.size
+		+ map3.size
+		+ map4.size
+		+ map5.size
+		+ map6.size
+		+ map7.size
+		+ map8.size
+		+ map9.size
+		+ map10.size
+		+ map11.size
+		+ map12.size
+		+ map13.size
+		+ map14.size
+		+ map15.size
+		+ map16.size
+		+ map17.size
+		+ map18.size
+		+ map19.size
+		+ map20.size
+		+ map21.size
+		+ map22.size
+		+ map23.size
+		+ map24.size
+		+ map25.size
+		+ map26.size
+		+ map27.size
+		+ map28.size
+		+ map29.size
+		+ map30.size
+		+ map31.size
+		+ map32.size
+		+ map33.size
+		+ map34.size
+		+ map35.size
+		+ map36.size
+		+ map37.size
+		+ map38.size
+		+ map39.size
+		+ map40.size
+		+ map41.size
+		+ map42.size
+		+ map43.size
+		+ map44.size
+		+ map45.size
+		+ map46.size
+		+ map47.size
 }
 function recursive = (depth: Integer, key: UInt32): Integer => {
 	mutable map0 = Map<UInt32, UInt32>.from([(key, 0)], capacity = 32)
@@ -173,7 +221,15 @@ function recursive = (depth: Integer, key: UInt32): Integer => {
 	assert map5.get(key) == 5
 	assert map6.get(key) == 6
 	assert map7.get(key) == 7
-	inner + map0.size + map1.size + map2.size + map3.size + map4.size + map5.size + map6.size + map7.size
+	inner
+		+ map0.size
+		+ map1.size
+		+ map2.size
+		+ map3.size
+		+ map4.size
+		+ map5.size
+		+ map6.size
+		+ map7.size
 }
 assert many(0, 7) == 96
 assert recursive(20, 7) == 336

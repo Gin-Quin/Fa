@@ -15,7 +15,7 @@ function run = (query: UInt32) => {
 	assert map.get(key) == 43
 	console.log(found is none)
 }
-run(136) -- prints: true
-run(91) -- prints: false
-run(0) -- prints: true
+run(136)             -- prints: true
+run(91)              -- prints: false
+run(0)               -- prints: true
 run(UInt32.maxValue) -- prints: true

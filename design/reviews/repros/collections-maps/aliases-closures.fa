@@ -9,8 +9,10 @@ function run = (input: UInt32) => {
 	alias.reserve(1000)
 	map[key] = 42
 	assert map.get(key) == 42
-	function mutate = () => { map.clear()
-		map[key] = 99 }
+	function mutate = () => {
+		map.clear()
+		map[key] = 99
+	}
 	assert map.get(key) == 42
 	mutate()
 	assert map.take(key) == 99

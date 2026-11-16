@@ -16,8 +16,10 @@ function run = (input: UInt32) => {
 		for i in 0..20 { map[UInt32(i)] = UInt64(i) }
 		map[key] = 123
 		assert map.get(key) == UInt64(123)
-		let failed = do { change(map, key)
-		false } catch _ => true
+		let failed = do {
+			change(map, key)
+			false
+		} catch _ => true
 		assert failed
 		map[key] = 789
 		assert map.take(key) == UInt64(789)
@@ -31,9 +33,11 @@ function run = (input: UInt32) => {
 	mutable turn = 0
 	loop {
 		if turn == 1 { map[46] = 460 }
-		if turn == 0 { assert map.get(key) is none
-		turn = 1
-		continue }
+		if turn == 0 {
+			assert map.get(key) is none
+			turn = 1
+			continue
+		}
 		map[key] = 999
 		break
 	}

@@ -6,8 +6,10 @@ use fa_codegen_llvm::{Libraries, OptLevel, Options, PackageOutcome, SplitOptions
 fn main() {
 	let root = PathBuf::from(std::env::args().nth(1).expect("review fixture directory"));
 	let output = PathBuf::from(std::env::args().nth(2).expect("scratch output directory"));
+	let package = root.join(std::env::var("FA_REVIEW_PACKAGE").unwrap_or("per-unit".into()));
 	let mut files = Vec::new();
-	collect(&root.join("per-unit"), &root.join("per-unit"), &mut files);
+	collect(&package, &package, &mut files);
+	let mut failures = 0;
 	for target in [Target::Native, Target::Wasm, Target::NativeFreestanding] {
 		for opt in [OptLevel::O0, OptLevel::O3] {
 			let label = format!("{}-{opt:?}", target.name());
@@ -45,15 +47,28 @@ fn main() {
 				&Libraries::default(),
 			);
 			let PackageOutcome::Built(artifact) = outcome else {
-				panic!("{label}: {outcome:?}; {report:?}");
+				let diagnostics: Vec<_> = report
+					.modules
+					.iter()
+					.flat_map(|module| module.diagnostics.iter().map(|d| d.message.clone()))
+					.collect();
+				eprintln!("{label} FAIL: {outcome:?}; {diagnostics:?}");
+				failures += 1;
+				continue;
 			};
 			let result = fa_codegen_llvm::run(&artifact, &[]).unwrap();
-			assert!(result.status.success(), "{label}: {result:?}");
-			assert_eq!(result.stdout, b"per-unit ok\n", "{label}");
-			assert!(result.stderr.is_empty(), "{label}: {result:?}");
+			if !result.status.success()
+				|| result.stdout != b"per-unit ok\n"
+				|| !result.stderr.is_empty()
+			{
+				eprintln!("{label} FAIL: {result:?}");
+				failures += 1;
+				continue;
+			}
 			println!("{label} PASS");
 		}
 	}
+	assert_eq!(failures, 0, "per-unit failures (see the review report)");
 }
 
 fn collect(root: &Path, directory: &Path, files: &mut Vec<(String, String)>) {

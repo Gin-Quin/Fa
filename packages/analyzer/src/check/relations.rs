@@ -1353,7 +1353,8 @@ impl Walker<'_> {
 					let callee = self.strip_groups(callee);
 					applied.insert(callee, arguments.len());
 					if let View::Access { members, .. } = self.view(callee)
-						&& let Some(last) = members.last() {
+						&& let Some(last) = members.last()
+					{
 						applied.insert(last, arguments.len());
 					}
 				}
@@ -1370,7 +1371,14 @@ impl Walker<'_> {
 							.is_some_and(|(module, decl)| {
 								self.s.interface(module).is_some_and(|interface| {
 									interface.reference_aliases.contains(&decl)
-										|| interface.reference_defaults.get(&decl).is_some_and(|defaults| defaults.iter().skip(supplied).any(|&reference| reference))
+										|| interface.reference_defaults.get(&decl).is_some_and(
+											|defaults| {
+												defaults
+													.iter()
+													.skip(supplied)
+													.any(|&reference| reference)
+											},
+										)
 								})
 							}) {
 						return true;
@@ -1378,8 +1386,15 @@ impl Walker<'_> {
 					if let Resolution::Local(symbol) = self.a.resolution(resolved) {
 						if let Some((module, decl)) = self.proxy_decl(symbol) {
 							if self.s.interface(module).is_some_and(|interface| {
-									interface.reference_aliases.contains(&decl)
-										|| interface.reference_defaults.get(&decl).is_some_and(|defaults| defaults.iter().skip(supplied).any(|&reference| reference))
+								interface.reference_aliases.contains(&decl)
+									|| interface.reference_defaults.get(&decl).is_some_and(
+										|defaults| {
+											defaults
+												.iter()
+												.skip(supplied)
+												.any(|&reference| reference)
+										},
+									)
 							}) {
 								return true;
 							}
@@ -1390,8 +1405,13 @@ impl Walker<'_> {
 									View::TypeDecl { value, .. }
 									| View::ExportType { value, .. } => {
 										stack.push(value);
-										stack.extend(self.reference_default_nodes(entry.decl_node).into_iter().skip(supplied).flatten());
-									},
+										stack.extend(
+											self.reference_default_nodes(entry.decl_node)
+												.into_iter()
+												.skip(supplied)
+												.flatten(),
+										);
+									}
 									_ => {}
 								}
 							}
@@ -1410,10 +1430,13 @@ impl Walker<'_> {
 			View::TypeDecl { parameters, .. } | View::ExportType { parameters, .. } => parameters,
 			_ => return Vec::new(),
 		};
-		parameters.iter().map(|parameter| match self.view(parameter) {
-			View::Assignment { value, .. } => value,
-			_ => None,
-		}).collect()
+		parameters
+			.iter()
+			.map(|parameter| match self.view(parameter) {
+				View::Assignment { value, .. } => value,
+				_ => None,
+			})
+			.collect()
 	}
 
 	/// `x.f = t` (and `x = literal`): the checks of a relation write

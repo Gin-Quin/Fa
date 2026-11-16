@@ -473,12 +473,23 @@ impl Walker<'_> {
 				_ => false,
 			})
 			.collect();
-		let reference_defaults = self.a.type_decls.keys().copied().filter_map(|decl| {
-			let defaults: Vec<_> = self.reference_default_nodes(decl).iter().map(|default| {
-				default.is_some_and(|value| self.contains_reference_type(value))
-			}).collect();
-			defaults.iter().any(|&reference| reference).then_some((decl, defaults))
-		}).collect();
+		let reference_defaults = self
+			.a
+			.type_decls
+			.keys()
+			.copied()
+			.filter_map(|decl| {
+				let defaults: Vec<_> = self
+					.reference_default_nodes(decl)
+					.iter()
+					.map(|default| default.is_some_and(|value| self.contains_reference_type(value)))
+					.collect();
+				defaults
+					.iter()
+					.any(|&reference| reference)
+					.then_some((decl, defaults))
+			})
+			.collect();
 		let interface = &mut self.s.source_file_mut(self.file).interface;
 		interface.reference_aliases = reference_aliases;
 		interface.reference_defaults = reference_defaults;

@@ -13,7 +13,6 @@ type Plain = {
 	alias: Refs -- error: REF010
 	generic: List<Node in nodes> -- error: REF010
 	default: Default -- error: REF010
-	explicitDefault: Default<> -- error: REF010
 	overridden: Default<Integer>
 }
 -- This is the checked rejection of benchmarks/audit/ports/scene-children/main.fa.

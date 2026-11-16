@@ -382,10 +382,16 @@ impl Walker<'_> {
 		};
 		let direct = match self.a.resolution(resolved) {
 			Resolution::Local(symbol) => self.a.symbols.symbol(symbol).kind == SymbolKind::Function,
-			Resolution::External(key) => self.s.interface(self.s.types.decl_key_data(key).module)
-				.is_some_and(|interface| interface.keys.get(&key)
-					.and_then(|declaration| interface.declared.get(&declaration.node))
-					.is_some_and(|declaration| declaration.kind == SymbolKind::Function)),
+			Resolution::External(key) => self
+				.s
+				.interface(self.s.types.decl_key_data(key).module)
+				.is_some_and(|interface| {
+					interface
+						.keys
+						.get(&key)
+						.and_then(|declaration| interface.declared.get(&declaration.node))
+						.is_some_and(|declaration| declaration.kind == SymbolKind::Function)
+				}),
 			_ => false,
 		};
 		let identity = if direct && sig.fresh {

@@ -187,7 +187,13 @@ impl Generator<'_> {
 		} else {
 			format!("{}[{}] = value", container.text, key.text)
 		};
-		let cell = format!("{{ get $v() {{ return {read}; }}, set $v(value) {{ {write}; }} }}");
+		let slot = if map {
+			format!("$k: {}, ", key.text)
+		} else {
+			String::new()
+		};
+		let cell =
+			format!("{{ {slot}get $v() {{ return {read}; }}, set $v(value) {{ {write}; }} }}");
 		if parts.optional {
 			Expr::primary(format!(
 				"({} === undefined ? undefined : {cell})",
@@ -225,7 +231,7 @@ impl Generator<'_> {
 			let result = self.temp();
 			let slot = self.temp();
 			let cell = format!(
-				"{{ get $v() {{ return {receiver}.get({slot}); }}, set $v(value) {{ {receiver}.set({slot}, value); }} }}"
+				"{{ $k: {slot}, get $v() {{ return {receiver}.get({slot}); }}, set $v(value) {{ {receiver}.set({slot}, value); }} }}"
 			);
 			// Use one expression so the lexical slot remains captured by its cell.
 			let add = self.helper("faAdd");
@@ -308,6 +314,9 @@ impl Generator<'_> {
 			..
 		}) = self.references.get(&symbol).cloned()
 		{
+			if matches!(&parts.key, Key::Field(property) if property == "$v") {
+				self.reference_cells.insert(symbol, container_name.clone());
+			}
 			let Some((container, key, _)) = self.pair_of(&parts) else {
 				self.unsupported(n, "this reference");
 				return;
@@ -330,6 +339,9 @@ impl Generator<'_> {
 		self.out.line(format!(
 			"let {container_name} = {container}, {key_name} = {key};"
 		));
+		if matches!(&parts.key, Key::Field(property) if property == "$v") {
+			self.reference_cells.insert(symbol, container_name.clone());
+		}
 		let reference = Reference::Pair {
 			container: container_name,
 			key: key_name,
@@ -448,7 +460,12 @@ impl Generator<'_> {
 				}
 				self.alias(symbol, text);
 			}
-			Key::Field(property) => self.alias(symbol, format!("{container}{dot}{property}")),
+			Key::Field(property) => {
+				if property == "$v" {
+					self.reference_cells.insert(symbol, container.clone());
+				}
+				self.alias(symbol, format!("{container}{dot}{property}"));
+			}
 			Key::Index(index) => {
 				let access = if parts.optional { "?.[" } else { "[" };
 				self.alias(symbol, format!("{container}{access}{}]", index.text));
@@ -781,6 +798,9 @@ impl Generator<'_> {
 		let Resolution::Local(symbol) = self.analysis.resolution(n) else {
 			return None;
 		};
+		if let Some(cell) = self.reference_cells.get(&symbol) {
+			return Some(format!("{cell}.$k"));
+		}
 		match self.references.get(&symbol) {
 			Some(Reference::Pair { key, map: true, .. }) => Some(key.clone()),
 			_ => self.map_aliases.get(&symbol).map(|(_, key)| key.clone()),

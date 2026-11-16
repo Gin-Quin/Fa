@@ -1485,3 +1485,27 @@ instructions 164.03 M → 159.43 M (Goose 148.79 M), audit −2.23%; every other
 row within +0.03%. The tag dispatch is already an IR `switch` that LLVM lowers to
 three compares; the narrow/far link format costs one predictable test per binary
 node and was left alone. CPU: see the aggregate report.
+
+## Benchmark ports (lead, 2026-11-16)
+
+A port of a Goose benchmark uses the corresponding documented Fa collection
+and performs the same construction and traversal passes, in the same order.
+Checksum agreement alone is insufficient. Keep a natural recursive-value
+implementation as a named variant when the main becomes a collection-based
+port, and pair each version with the Rust row of the same structure. Preserve
+field widths and disclose source-level reservation differences.
+
+The [sixteen-port audit](../benchmarks/audit/ports/README.md) records ownership,
+widths, passes, exact source evidence and intended Rust pairings. The pool ports
+need language decisions about one-way links in GrowingPool, compact reference
+widths and bounded inline ordered reference lists. Do not replace those with
+owning child arrays, hand-written containers or extra reverse-relation writes
+and then call the result faithful. Fixed CArray storage already exists; it does
+not supply an appendable bounded reference-list abstraction.
+
+`push` uses unreserved `GrowingArray<Item>`, retaining integer marks as explicitly
+prescribed for local reference collections in the reference documentation.
+`push-array` retains the original reserved Array version byte-for-byte. Both
+pair with the suite's only safe Rust push row (`push.rs`, Vec+reserve/indices);
+its allocation policy differs from Fa's segmented growth. No compiler changes
+are part of this port audit.

@@ -114,6 +114,19 @@ One entry per work package of [the dated inventory §4](reviews/inventory-2026-1
 
 ## 4. Performance
 
+- **Faithful Goose ports (2026-11-16).** The [sixteen-port audit](../benchmarks/audit/ports/README.md)
+  records all structures/passes and intended Rust rows. Push now uses unreserved
+  GrowingArray with documented index marks; the reserved Array is `push-array`.
+  Next: unreserved sum/particles/blur (UInt16 stencil temporary), direct-output
+  respond with retained variants. Before scene/interp/sexp/calc/tree/binary-trees/
+  graph pool ports, decide compact one-way growing-pool links and bounded inline
+  ordered child references; preserve recursive variants and change Rust pairings
+  together. Decide exact words/lru slot algorithms versus standard Map comparisons;
+  words needs Int32 counts and a borrowed-key ownership policy. Sexp needs reverse
+  sibling order and its parser error path. The current scene-children probe is
+  wrongly accepted and stores values instead of rejecting Array reference fields;
+  add the missing rejection (`benchmarks/audit/ports/scene-children/main.fa`).
+
 The 2026-11-16 trunk baseline is [generated from the recorded JSON](../benchmarks/README.md#trunk-baseline--2026-11-16). Of the original Goose 16, eight meet the ≤1.10× CPU gate, six are behind and two are unresolved; against the matching Rust rows, twelve meet the strict faster-than gate, one is behind and three are unresolved. Native CPU, instructions, RSS and sizes are separate. A threshold margin within ±0.05 requires an interleaved same-binary control within 3% on both estimates. Preserve the first primary series; supplemental diagnostics do not replace it.
 
 Ranked by the sum of CPU gap budgets over the 25 distinct ports at default sizes (one execution each; variants are controls, not duplicate weights). The budgets use point estimates and include explicitly unresolved rows; they are the time required to reach min(1.10× Goose, Rust), not demonstrated optimization gains. Proposed gains need controlled measurements.

@@ -37,7 +37,8 @@ DEFAULTS = {
 # items never move, like Goose's `u8[>..]` arrays.
 VARIANTS = {"string-building-bytes": ("string-building", "bytes.fa"),
             "string-building-growing": ("string-building", "growing.fa"),
-            "growing-index-array": ("growing-index", "array.fa")}
+            "growing-index-array": ("growing-index", "array.fa"),
+            "push-array": ("push", "array.fa")}
 DEFAULTS.update({name: DEFAULTS[directory] for name, (directory, _) in VARIANTS.items()})
 AUDIT = {name: int(size) for name, size in
          (line.split() for line in Path(__file__).with_name("sizes.txt").read_text().splitlines())}

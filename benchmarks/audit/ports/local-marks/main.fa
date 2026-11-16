@@ -1,0 +1,7 @@
+-- Representation probe, not a benchmark: the documented alternative is indices.
+type Item = { key: Int32, value: Int32 }
+mutable items: GrowingArray<Item> = []
+mutable marks: Array<Item in items> = []
+items.push({ key = 1, value = 2 })
+use first = items[0]
+marks.push(first)

@@ -21,12 +21,12 @@ def markdown(report):
              "Native CPU/RSS sizes and round counts are recorded per series in JSON. Instructions/cache: audit sizes.",
              "Each ratio cell is ratio of medians / paired median [Q1, Q3]. Near-threshold CPU gates",
              "require the same-binary control to differ by <3% on both measures. `within noise` is unresolved.",
-             "", "| Benchmark | CPU size | Fa / Goose CPU | Fa / Rust CPU | Fa / Goose Ir | Fa / Rust Ir | Control | Goose / Rust goal |",
-             "| --- | ---: | --- | --- | ---: | ---: | --- | --- |"]
+             "", "| Suite | Benchmark | CPU size | Fa / Goose CPU | Fa / Rust CPU | Fa / Goose Ir | Fa / Rust Ir | Control | Goose / Rust goal |",
+             "| --- | --- | ---: | --- | --- | ---: | ---: | --- | --- |"]
     for name, row in sorted(rows.items()):
         cpu, profile = row.get("cpu", {}), row.get("profile", {})
         if "error" in cpu or not cpu:
-            lines.append(f"| `{name}` | {cpu.get('size', '—')} | {cpu.get('error', 'unmeasured')} | — | — | — | — | — |")
+            lines.append(f"| {cpu.get('suite', '—')} | `{name}` | {cpu.get('size', '—')} | {cpu.get('error', 'unmeasured')} | — | — | — | — | — |")
             continue
         def ratio(side):
             stats = cpu["comparisons"][side]
@@ -38,7 +38,7 @@ def markdown(report):
         control = cpu["control"]
         control_text = f"{number(control['ratio_of_medians'])}/{number(control['median'])} {'pass' if control['passes'] else 'fail'}"
         verdict = " / ".join(cpu["comparisons"][side]["verdict"] for side in ("goose", "rust"))
-        lines.append(f"| `{name}` | {cpu['size']} | {ratio('goose')} | {ratio('rust')} | {instructions('goose')} | {instructions('rust')} | {control_text} | {verdict} |")
+        lines.append(f"| {cpu.get('suite', '—')} | `{name}` | {cpu['size']} | {ratio('goose')} | {ratio('rust')} | {instructions('goose')} | {instructions('rust')} | {control_text} | {verdict} |")
     lines += ["", "### Absolute measurements", "",
               "RSS is a separate GNU-time run, in KiB; stripped executable size is in bytes.",
               "Wasm and Bun timings use the size shown, including process startup; errors are retained.",

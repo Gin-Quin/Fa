@@ -98,3 +98,19 @@ checked artifact manifests and start/end load snapshots, or an explicit `error`.
 Markdown from those records. Keep the JSON with a published table (force-add a
 named dated result under the normally ignored `benchmarks/results/`). Nothing is
 entered by hand into the generated tables. Raw executables/profiles remain ignored.
+
+For a direct GrowingArray/Array (or String/bytes) CPU gate, interleave the prepared
+variant in the **same rounds**, rather than pairing samples from separate rows:
+
+```sh
+python3 benchmarks/audit/compare.py growing-index --size 16 --directory benchmarks/audit/build/index-16 --reuse --mode cpu --runs 21 --additional growing-index-array=benchmarks/audit/build/index-16/growing-index-array --report benchmarks/results/index-16-paired.json
+```
+
+`--additional NAME=DIRECTORY` validates all three existing manifests against the
+current sources, compiler, modes, exact size and Rust reference, then adds the Fa
+binary as another label. No bare unvalidated executable is accepted. The result
+retains its artifact manifests, samples, orders and `additional_pairs` (Fa divided
+by the variant, ratio of medians and paired median/quartiles). Apply the documented
+1.10 GrowingArray/Array gate to both estimates with the same control; this field
+does not invent a threshold for arbitrary variants. The same option replaces the
+old variants timer's multi-binary series.

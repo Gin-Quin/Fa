@@ -382,6 +382,8 @@ def main():
     parser.add_argument("--render", type=Path, nargs="+", help="Merge phase JSON and generate Markdown")
     parser.add_argument("--markdown", type=Path)
     parser.add_argument("--secondary-memory-mib", type=int, default=512)
+    parser.add_argument("--additional", action="append", default=[], metavar="NAME=DIRECTORY",
+                        help="Interleave an already prepared Fa variant (one selected benchmark, CPU mode)")
     args = parser.parse_args()
     if args.render:
         tables.render(args.render, args.report, args.markdown)
@@ -394,6 +396,8 @@ def main():
         args.mode = "prepare"
     if args.size is not None and args.size < 1 or args.runs < 1 or args.secondary_memory_mib < 1:
         parser.error("size, runs and memory limit must be positive")
+    if args.additional and (args.mode != "cpu" or len(args.names) != 1):
+        parser.error("--additional requires CPU mode and exactly one selected benchmark")
     if args.rebuild_fa and not args.reuse:
         parser.error("--rebuild-fa requires --reuse")
     try:
@@ -431,10 +435,24 @@ def main():
         try:
             build_plan = plan(name, size, compilers, args.goose_runtime_size)
             commands, expected, manifests = prepare(directory, build_plan, args.reuse, args.rebuild_fa)
-            result = {"size": size, "output_sha256": artifacts.sha256(expected),
+            result = {"size": size, "suite": "goose" if name in GOOSE_SUITE else "secondary",
+                      "output_sha256": artifacts.sha256(expected),
                       "artifacts": manifests, "start": start}
             if args.mode == "cpu":
                 commands["fa_control"] = commands["fa"]
+                additional = {}
+                for specification in args.additional:
+                    label, separator, path = specification.partition("=")
+                    if not separator or label not in DEFAULTS or label in commands:
+                        raise ValueError(f"invalid or duplicate additional variant: {specification}")
+                    extra_plan = plan(label, size, compilers, args.goose_runtime_size)
+                    extra_commands, extra_expected, extra_manifests = prepare(
+                        Path(path).resolve(), extra_plan, reuse=True)
+                    if extra_expected != expected:
+                        raise RuntimeError(f"{label}: additional variant has a different Rust reference")
+                    commands[label] = extra_commands["fa"]
+                    additional[label] = extra_manifests
+                result["additional_artifacts"] = additional
                 result["commands"] = commands
                 samples = {side: [] for side in commands}
                 orders = []
@@ -459,6 +477,9 @@ def main():
                     comparison["verdict"] = (measurements.verdict(comparison, threshold, result["control"])
                                              if result["acceptance_eligible"] else "within noise")
                     result["comparisons"][side] = comparison
+                result["additional_pairs"] = {
+                    label: measurements.paired(cpu_series["fa"], cpu_series[label])
+                    for label in additional}
                 result["orders"] = orders
                 for side in ("fa", "goose", "rust"):
                     location = directory / ("rust-profile" if side == "rust" else side)

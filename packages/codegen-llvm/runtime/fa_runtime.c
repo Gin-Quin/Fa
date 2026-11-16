@@ -2657,10 +2657,9 @@ FA_EXPORT uint8_t fa_next_utf8_byte(const uint8_t *bytes, size_t length, FaUtf8C
 /// A previously bounds-checked byte of the UTF-8 encoding. Canonical WTF-8
 /// and UTF-8 have equal byte positions; only cut heads shift them, and lone
 /// surrogates replace three bytes with three bytes. No whole encoding is made.
-FA_EXPORT __attribute__((always_inline)) uint8_t fa_string_utf8_byte(
+static __attribute__((noinline, cold)) uint64_t string_utf8_byte_slow(
     const uint8_t *bytes, size_t length, size_t capacity, size_t position) {
-	if (capacity & SIMPLE) { return bytes[position]; }
-	if (!(capacity & STRING_SURROGATES)) { return bytes[position]; }
+	(void)capacity;
 	static const uint8_t replacement[] = {0xEF, 0xBF, 0xBD};
 	if (span_low_head(bytes, length)) {
 		if (position < 3) { return replacement[position]; }
@@ -2673,6 +2672,16 @@ FA_EXPORT __attribute__((always_inline)) uint8_t fa_string_utf8_byte(
 	if (position && bytes[position - 1] == 0xED && bytes[position] >= 0xA0 && position + 1 < length) { return 0xBF; }
 	if (position >= 2 && bytes[position - 2] == 0xED && bytes[position - 1] >= 0xA0) { return 0xBD; }
 	return bytes[position];
+}
+
+/// Keep the plain byte load separate from replacement-code result merges.
+/// A wide internal return retains that load's zero extension through phis.
+FA_EXPORT __attribute__((always_inline)) uint64_t fa_string_utf8_byte(
+    const uint8_t *bytes, size_t length, size_t capacity, size_t position) {
+	if (__builtin_expect((capacity & SIMPLE) != 0, 1) || !(capacity & STRING_SURROGATES)) {
+		return bytes[position];
+	}
+	return string_utf8_byte_slow(bytes, length, capacity, position);
 }
 
 /// Normalize a writable byte sequence, including joins across builder parts.
@@ -3390,7 +3399,7 @@ static __attribute__((noinline)) size_t string_length_slow(const uint8_t *text, 
 }
 
 FA_EXPORT __attribute__((always_inline)) size_t fa_string_length(const uint8_t *text, size_t length, size_t capacity) {
-	if (capacity & SIMPLE) { return length; }
+	if (__builtin_expect((capacity & SIMPLE) != 0, 1)) { return length; }
 	if (!(capacity & STRING_INLINE) && (capacity & STRING_LITERAL)) { return capacity & KIND_MASK; }
 	// A borrowed view has no cache to mutate. Keep that fact visible to
 	// callers, so a length query cannot obscure their representation.

@@ -1411,7 +1411,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				],
 			)?
 			.into_int_value();
-		let byte = self.builder.build_int_z_extend(byte, i64, "")?;
+		self.runtime_integer_range(byte, 0, 256)?;
+		let byte = self.builder.build_int_z_extend_or_bit_cast(byte, i64, "")?;
 		self.builder.build_unconditional_branch(end)?;
 		self.builder.position_at_end(end);
 		let code = self.builder.build_phi(i64, "byte_or_missing")?;

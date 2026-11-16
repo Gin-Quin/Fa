@@ -67,3 +67,5 @@ setup and expectations. No compiler source changed after c8ad4a5c.
 Runtime ASAN/UBSan, leak checks, all 18 JavaScript goldens, 308 Bun runtime tests,
 33 audit-driver tests and website type/snippet/prerender checks pass. Vendored
 Unicode source files retain their upstream bytes and checked hashes.
+
+[Controlled CPU results and canonical provenance](2026-11-16-strings-trunk.md), with the [eight-row CPU summary](2026-11-16-strings-trunk-cpu-summary.md). Six controls fail and strlist straddles the threshold; those seven CPU comparisons remain unresolved. The instruction gate passes every row.

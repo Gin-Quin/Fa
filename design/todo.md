@@ -160,6 +160,7 @@ One entry per work package of [the dated inventory §4](reviews/inventory-2026-1
   Sum/blur meet the CPU goal; particles/respond/words/lru and four variants fail
   controls. Keep those eight series unresolved and append a separately labeled
   quiet recheck later rather than replacing the first samples.
+- **Post-merge string CPU recheck (2026-11-16).** The [faithful-port string audit](../benchmarks/results/2026-11-16-strings-trunk.md) passes all36 instruction gates versus clean main cbe3c5a6 (largest increase +0.644%). Preserve its first21-round CPU series. Respond/words/records/calc/sexp/word-count fail the identical-binary control; strlist straddles1.10 despite a passing control. Append a separately labeled quiet supplemental recheck before drawing CPU conclusions for those rows. String-building has a passing control and remains behind Goose (1.546/1.563); its construction/destination work stays in the ranked item below.
 - **GrowingArray push and scan (faithful push port).** At 3.2 M items, the scalar
   segment scan executes 25.60 M instructions versus 12.00 M for Goose's vectorized
   scan and the reserved Array control; use a plain inner loop over each segment

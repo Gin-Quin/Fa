@@ -1,0 +1,69 @@
+-- Acceptance repro for declaration bindings and conditional capture reads.
+-- Direct calls before a capturing declaration borrow; later calls use its
+-- single environment. Promote to the shared harness with that implementation.
+
+type Reader = () => Integer
+
+function structure = (): (Integer, Integer, Reader) => {
+	let items = [1]
+	function invoke = (): Integer => read()
+	let before = invoke()
+	function read = (): Integer => items.length
+	let after = invoke()
+	(before, after, read)
+}
+let result = structure()
+console.log(result[0], result[1], result[2]()) -- prints: 1 1 1
+
+-- Nested declaration conditions must remain graph edges: an early inner
+-- invocation of an owned outer function borrows the outer environment.
+type Pair = (Integer, Reader)
+function nested = (): (Integer, () => Pair) => {
+	mutable n = 1
+	function early = (): Integer => outer()[0]
+	let first = early()
+	n = 2
+	function outer = (): Pair => {
+		function wrap = (): Integer => inner()
+		let a = wrap()
+		function inner = (): Integer => n
+		let b = wrap()
+		(a * 10 + b, inner)
+	}
+	n = 3
+	(first, outer)
+}
+function summary = (): Integer => {
+	let made = nested()
+	made[0] * 1000 + made[1]()[0] * 10 + made[1]()[1]()
+}
+static compiled = @summary()
+console.log(compiled, summary()) -- prints: 11222 11222
+
+function mutual = (offset: Integer): Boolean => {
+	function even = (n: Integer): Boolean => if n == 0 { offset == 7 } else { odd(n - 1) }
+	function odd = (n: Integer): Boolean => if n == 0 { false } else { even(n - 1) }
+	even(6) and odd(5)
+}
+static compiledMutual = @mutual(7)
+console.log(compiledMutual, mutual(7)) -- prints: true true
+
+function makeReaders = (): Array<Reader> => {
+	mutable readers: Array<Reader> = []
+	for index in 0..3 {
+		function invoke = (): Integer => read()
+		let before = invoke()
+		function read = (): Integer => index
+		let after = invoke()
+		assert before == after
+		readers.push(read)
+	}
+	readers
+}
+function iterations = (): String => {
+	mutable text = ""
+	for read in makeReaders() { text += "{read()}" }
+	text
+}
+static compiledIterations = @iterations()
+console.log(compiledIterations, iterations()) -- prints: 012 012

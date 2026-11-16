@@ -660,6 +660,12 @@ pub struct Analysis {
 	/// capture (`FnInfo::captures`) when created; the others see the
 	/// captured variables themselves (advanced brief §5.11, D3).
 	pub escapes: rustc_hash::FxHashSet<NodeId>,
+	/// Captured value types at environment creation, keyed by lambda and
+	/// captured binding. These preserve flow narrowing independently of the
+	/// binding's declared type. References still designate their value here;
+	/// capture materialization must distinguish that logical type from the
+	/// source's physical representation. This table makes no transfer claim.
+	pub capture_types: FxHashMap<(NodeId, SymbolId), TypeId>,
 	/// Parameters whose callable data can be retained by their function.
 	pub kept_parameters: rustc_hash::FxHashSet<SymbolId>,
 	/// Retention inferred conservatively from an unknown function value.
@@ -1595,6 +1601,7 @@ impl Analysis {
 			argument_ownership: FxHashMap::default(),
 			callback_types: FxHashMap::default(),
 			escapes: rustc_hash::FxHashSet::default(),
+			capture_types: FxHashMap::default(),
 			kept_parameters: rustc_hash::FxHashSet::default(),
 			unknown_kept_parameters: rustc_hash::FxHashSet::default(),
 			non_escaping: rustc_hash::FxHashSet::default(),

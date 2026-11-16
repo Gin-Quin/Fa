@@ -298,6 +298,7 @@ impl Walker<'_> {
 			let mut handles = self.callable_handle_captures(function);
 			for symbol in captures {
 				let ty = self
+					.a
 					.capture_types
 					.get(&(function, symbol))
 					.copied()

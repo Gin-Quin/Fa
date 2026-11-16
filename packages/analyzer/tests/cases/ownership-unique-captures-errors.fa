@@ -41,6 +41,13 @@ function detached = (held: Held) => {
 	start read()
 }
 
+type Work = (Integer) => Integer
+function defaultHandle = (held: Held): Work => {
+	function read = (): Integer => held.name.length -- error: MEM003
+	function outer = (value: Integer = read()): Integer => value
+	outer
+}
+
 -- file: State.worker.fa
 export type = {
 	function run = (self, value: Integer): Integer => value

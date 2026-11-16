@@ -29,7 +29,7 @@ impl Walker<'_> {
 			}
 			let mut copies = Vec::new();
 			for symbol in info.captures {
-				let Some(mut ty) = self.capture_types.get(&(info.lambda, symbol)).copied() else {
+				let Some(mut ty) = self.a.capture_types.get(&(info.lambda, symbol)).copied() else {
 					continue;
 				};
 				while let TypeKind::Ref(target, _) = self.s.types.kind(ty) {
@@ -162,7 +162,7 @@ impl Walker<'_> {
 			.iter()
 			.copied()
 			.filter_map(|symbol| {
-				let mut ty = self.capture_types.get(&(lambda, symbol)).copied()?;
+				let mut ty = self.a.capture_types.get(&(lambda, symbol)).copied()?;
 				// An escaping `use` capture stores the designated value.
 				while let TypeKind::Ref(target, _) = self.s.types.kind(ty) {
 					ty = target;
@@ -328,6 +328,16 @@ mod tests {
 	}
 
 	#[test]
+	fn an_escaping_default_retains_its_local_callee_handle() {
+		assert_eq!(
+			codes(
+				"type Work = (Integer) => Integer\ntype Held = { name: String, function destroy = (self) => {} }\nfunction bad = (held: Held): Work => {\nfunction read = (): Integer => held.name.length\nfunction outer = (value: Integer = read()): Integer => value\nouter\n}\n"
+			),
+			["MEM003"]
+		);
+	}
+
+	#[test]
 	fn owned_structure_captures_require_independence_from_borrows_and_later_uses() {
 		for source in [
 			"type Reader = () => Integer\nfunction keep = (items: Array<Integer>): Reader => () => items.length\n",
@@ -393,6 +403,74 @@ mod tests {
 				diagnostic.message
 			);
 			assert!(!diagnostic.related.is_empty());
+		}
+	}
+
+	#[test]
+	fn published_capture_types_preserve_creation_narrowing_and_analysis_clones() {
+		let (session, file) = analyzed(
+			"type Reader = () => Integer\nfunction make = (value: Array<Integer> | Integer): Reader => if value is Integer { () => value } else { () => 0 }\n",
+		);
+		let analysis = session.analysis(file);
+		let captures: Vec<_> = analysis
+			.capture_types
+			.iter()
+			.filter(|((_, symbol), _)| {
+				session
+					.types()
+					.syms
+					.resolve(analysis.symbols.symbol(*symbol).name)
+					== "value"
+			})
+			.collect();
+		assert_eq!(captures.len(), 1);
+		let (&key, &ty) = captures[0];
+		assert!(matches!(
+			session.types().kind(ty),
+			crate::types::TypeKind::Int(_)
+		));
+		assert!(matches!(
+			session.types().kind(analysis.symbols.symbol(key.1).ty),
+			crate::types::TypeKind::Union(_)
+		));
+		assert_eq!(analysis.clone().capture_types.get(&key), Some(&ty));
+	}
+
+	#[test]
+	fn key_loop_capture_types_belong_to_their_own_iteration_snapshot() {
+		let (session, file) = analyzed(
+			"type Reader = () => String\ntype Row = { count: Integer, label: String }\nstatic keys: Keys<Row> = { count, label }\nfunction make = (row: Row): Array<Reader> => {\nmutable readers: Array<Reader> = []\n@for key in keys {\nlet field = row[key]\nreaders.push(() => \"{field}\")\n}\nreaders\n}\n",
+		);
+		let analysis = session.analysis(file);
+		let snapshots: Vec<_> = analysis
+			.key_loop_bodies
+			.values()
+			.flat_map(|instances| instances.iter())
+			.flat_map(|instance| instance.analyses.iter())
+			.collect();
+		assert_eq!(snapshots.len(), 2);
+		for (index, snapshot) in snapshots.into_iter().enumerate() {
+			let captures: Vec<_> = snapshot
+				.capture_types
+				.iter()
+				.filter(|((_, symbol), _)| {
+					session
+						.types()
+						.syms
+						.resolve(snapshot.symbols.symbol(*symbol).name)
+						== "field"
+				})
+				.collect();
+			assert_eq!(captures.len(), 1, "iteration {index}");
+			let ty = *captures[0].1;
+			let matches = match index {
+				0 => matches!(session.types().kind(ty), crate::types::TypeKind::Int(_)),
+				_ => matches!(
+					session.types().kind(ty),
+					crate::types::TypeKind::String | crate::types::TypeKind::StringLit(_)
+				),
+			};
+			assert!(matches, "iteration {index}: {}", session.display_type(ty));
 		}
 	}
 

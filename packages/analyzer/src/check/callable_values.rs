@@ -232,6 +232,26 @@ impl Walker<'_> {
 		}
 	}
 
+	/// A key-loop body is checked anew for each key. Its capture sources
+	/// must not join the values or narrowing of the previous specialization.
+	pub(super) fn forget_callable_capture_sources(&mut self, node: NodeId) {
+		let Some(info) = self.a.function(node) else {
+			return;
+		};
+		let lambda = info.lambda;
+		let captures = info.captures.clone();
+		let mut changed = false;
+		for symbol in captures {
+			let key = (lambda, symbol);
+			changed |= self.a.capture_types.remove(&key).is_some();
+			changed |= self.capture_places.remove(&key).is_some();
+			changed |= self.callable_captures.remove(&key).is_some();
+		}
+		if changed {
+			self.retention_version += 1;
+		}
+	}
+
 	fn record_callable_captures(&mut self, node: NodeId) {
 		if !self.body.flow.reachable {
 			return;
@@ -256,11 +276,11 @@ impl Walker<'_> {
 				places.push(place);
 				self.retention_version += 1;
 			}
-			let captured = match self.capture_types.get(&key).copied() {
+			let captured = match self.a.capture_types.get(&key).copied() {
 				Some(previous) if previous != actual => self.s.types.join(previous, actual),
 				_ => actual,
 			};
-			if self.capture_types.insert(key, captured) != Some(captured) {
+			if self.a.capture_types.insert(key, captured) != Some(captured) {
 				self.retention_version += 1;
 			}
 			let sources = self.callable_place_sources(place, &self.body.flow.callable_values);
@@ -303,6 +323,7 @@ impl Walker<'_> {
 		};
 		let root = NodeId::new(self.tree.root);
 		let mut pending = vec![info.body];
+		pending.extend(info.params.iter().filter_map(|param| param.default));
 		let mut handles = Vec::new();
 		while let Some(node) = pending.pop() {
 			if self

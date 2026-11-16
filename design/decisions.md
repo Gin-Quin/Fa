@@ -1963,3 +1963,8 @@ Int64 value literal separately exposes a pre-existing JavaScript conversion
 bug (recorded with a durable repro in todo). The corrected fixture still
 fails on the archived scalar64 native compiler and preserves both static
 layouts and all value assertions. No expected-skip list changes.
+
+
+### Ownership enforcement: published capture creation types (implementation, 2026-11-17)
+
+Store creation-time captured types in the file analysis, keyed by lambda and captured binding, rather than in a private walk table. The ownership diagnostics and retained-handle traversal read the same facts. Analysis cloning preserves them automatically, including key-loop snapshots. A captured logical type retains flow narrowing independently of the binding's declared type and of a native physical layout; it is not a move decision. Capture-transfer modes, callable readiness and target declaration bindings remain the coordinated next change.

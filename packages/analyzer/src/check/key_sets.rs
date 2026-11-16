@@ -582,6 +582,9 @@ impl Walker<'_> {
 	/// checked for another key.
 	fn forget_body(&mut self, nodes: &[NodeId]) {
 		for &node in nodes {
+			if matches!(self.view(node), View::Lambda { .. }) {
+				self.forget_callable_capture_sources(node);
+			}
 			let index = node.index();
 			if let Some(slot) = self.a.types.get_mut(index) {
 				*slot = TypeId::UNSET;

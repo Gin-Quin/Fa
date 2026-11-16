@@ -110,7 +110,11 @@ impl Generator<'_> {
 			Value::Float(value) | Value::Percentage(value) => js::float_literal(*value),
 			Value::Bytes(bytes) => Expr::primary(format!(
 				"new Uint8Array([{}])",
-				bytes.iter().map(u8::to_string).collect::<Vec<_>>().join(", ")
+				bytes
+					.iter()
+					.map(u8::to_string)
+					.collect::<Vec<_>>()
+					.join(", ")
 			)),
 			Value::String(text) => {
 				Expr::constant(js::string_literal(text.as_str()?), Prec::Primary)

@@ -213,11 +213,23 @@ impl Text {
 	pub fn concat(pieces: &[Self]) -> Self {
 		if pieces.iter().all(Self::is_well_formed) {
 			let size = pieces.iter().map(Self::utf8_len).sum();
-			let mut text = String::with_capacity(size);
+			let mut bytes = Arc::<[u8]>::new_uninit_slice(size);
+			let output = Arc::get_mut(&mut bytes).expect("new allocation");
+			let mut offset = 0;
 			for piece in pieces {
-				text.push_str(piece.as_str().expect("well-formed"));
+				let source = piece.as_str().expect("well-formed").as_bytes();
+				for (slot, byte) in output[offset..][..source.len()].iter_mut().zip(source) {
+					slot.write(*byte);
+				}
+				offset += source.len();
 			}
-			return Self::from_utf8(Arc::from(text), pieces.iter().map(Self::len).sum());
+			// SAFETY: every byte was initialized from complete UTF-8 strings.
+			// The allocation/layout of Arc<str> is the same as Arc<[u8]>.
+			let text = unsafe {
+				let initialized = bytes.assume_init();
+				Arc::from_raw(Arc::into_raw(initialized) as *const str)
+			};
+			return Self::from_utf8(text, pieces.iter().map(Self::len).sum());
 		}
 		let units: Vec<u16> = pieces.iter().flat_map(Self::units).collect();
 		Self::from_units(&units)

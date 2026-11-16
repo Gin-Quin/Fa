@@ -430,6 +430,7 @@ impl Generator<'_> {
 
 	/// A call.
 	pub(crate) fn call(&mut self, n: NodeId, callee: NodeId, arguments: NodeList<'_>) -> Expr {
+		let callee = self.strip_groups(callee);
 		// `pick(value, { foo })`: the value copied to the node's type
 		if let Some(&value) = self.analysis.forwards.get(&n) {
 			let ty = self.type_of(n);
@@ -1211,6 +1212,7 @@ impl Generator<'_> {
 	/// The receiver of a method call whose callee is `receiver.method` (or
 	/// `receiver?.method`: the receiver before `?.`).
 	pub(crate) fn receiver(&mut self, callee: NodeId) -> Expr {
+		let callee = self.strip_groups(callee);
 		match self.view(callee) {
 			View::Access { target, members } => self.access_prefix(callee, target, members),
 			View::OptionalAccess { target, members } if members.len() == 1 => self.expr(target),
@@ -1220,7 +1222,7 @@ impl Generator<'_> {
 
 	/// The type of the receiver of a method call.
 	pub(crate) fn receiver_type(&self, callee: NodeId) -> TypeId {
-		match self.view(callee) {
+		match self.view(self.strip_groups(callee)) {
 			View::Access { target, members } | View::OptionalAccess { target, members } => {
 				match members.len() {
 					0 | 1 => self.type_of(target),

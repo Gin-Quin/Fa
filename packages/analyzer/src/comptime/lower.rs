@@ -1360,11 +1360,20 @@ impl<'a> Lowerer<'a> {
 		}
 	}
 
+	fn strip_groups(&self, mut node: NodeId) -> NodeId {
+		while let View::Group(inner) = syntax::view(self.tree, node) {
+			node = inner;
+		}
+		node
+	}
+
 	fn string_call_receiver(&self, call: NodeId) -> Option<NodeId> {
+		let call = self.strip_groups(call);
 		let View::Call { callee, .. } = syntax::view(self.tree, call) else {
 			return None;
 		};
-		let View::Access { target, members } = syntax::view(self.tree, callee) else {
+		let View::Access { target, members } = syntax::view(self.tree, self.strip_groups(callee))
+		else {
 			return None;
 		};
 		(members.len() == 1).then_some(target)
@@ -1493,6 +1502,7 @@ impl<'a> Lowerer<'a> {
 
 	/// A call, from its `CallInfo`.
 	fn call(&mut self, n: NodeId, callee: NodeId, arguments: syntax::NodeList<'_>) -> Expr {
+		let callee = self.strip_groups(callee);
 		let Some(info) = self.a.call(n).cloned() else {
 			return self.unsupported(format!("`{}`", self.text(callee)));
 		};

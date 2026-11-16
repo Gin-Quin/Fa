@@ -1,0 +1,5 @@
+export = {
+	name = "cutunits"
+	version = "0.1.0"
+	targets = ["bun", "native"]
+}

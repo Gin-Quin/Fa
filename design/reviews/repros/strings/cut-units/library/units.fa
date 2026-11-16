@@ -1,0 +1,5 @@
+export function = (text: String): String => {
+	mutable result: Array<String> = []
+	for index in 0..text.length { result.push(text.codeUnitAt(index).toString()) }
+	"{text.length}:{text.utf8Length()}:{text.isWellFormed()}:[{result.join(",")}]"
+}

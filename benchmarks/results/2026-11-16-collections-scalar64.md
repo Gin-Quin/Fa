@@ -19,7 +19,7 @@ Every CPU verdict requires the same-binary control to differ by <3% on both meas
 | — | `growing-index` | — | unmeasured | — | — | — | — | — |
 | — | `growing-index-array` | — | unmeasured | — | — | — | — | — |
 | — | `interp` | — | unmeasured | — | — | — | — | — |
-| — | `lru` | — | unmeasured | — | — | — | — | — |
+| goose | `lru` | 2000000 | 1.119 / 1.049 [1.002, 1.222] | 0.491 / 0.471 [0.427, 0.561] | 1.071 | 0.356 | 0.991/0.966 fail | not resolved / not resolved |
 | — | `lru-open` | — | unmeasured | — | — | — | — | — |
 | — | `mandelbrot` | — | unmeasured | — | — | — | — | — |
 | — | `nbody` | — | unmeasured | — | — | — | — | — |
@@ -42,8 +42,8 @@ Every CPU verdict requires the same-binary control to differ by <3% on both meas
 | — | `sum` | — | unmeasured | — | — | — | — | — |
 | — | `sum-reserved` | — | unmeasured | — | — | — | — | — |
 | — | `tree` | — | unmeasured | — | — | — | — | — |
-| — | `word-count` | — | unmeasured | — | — | — | — | — |
-| — | `words` | — | unmeasured | — | — | — | — | — |
+| secondary | `word-count` | 5000000 | 1.827 / 1.895 [1.639, 1.998] | 0.636 / 0.641 [0.591, 0.669] | 1.605 | 0.616 | 0.960/1.006 fail | not resolved / not resolved |
+| goose | `words` | 500000 | 1.171 / 1.137 [1.083, 1.316] | 0.483 / 0.464 [0.439, 0.507] | 1.266 | 0.456 | 0.992/0.999 pass | behind / goal met |
 | — | `words-wide` | — | unmeasured | — | — | — | — | — |
 
 ### Absolute measurements
@@ -63,7 +63,7 @@ Wasm and Bun timings use the size shown, including process startup; errors are r
 | `growing-index` | — | — | — | 1000000 | 418.173 / 316.771 / 312.957 | — | — | — |
 | `growing-index-array` | — | — | — | 1000000 | 336.668 / 316.771 / 312.957 | — | — | — |
 | `interp` | — | — | — | 17 | 18.857 / 17.593 / 37.150 | — | — | — |
-| `lru` | — | — | — | 200000 | 19.154 / 17.889 / 53.800 | — | — | — |
+| `lru` | 0.340 / 0.304 / 0.693 | 10624 / 9984 / 12416 | 18544 / 18896 / 357088 | 200000 | 19.154 / 17.889 / 53.800 | — | — | — |
 | `lru-open` | — | — | — | 200000 | 20.953 / 17.889 / 21.916 | — | — | — |
 | `mandelbrot` | — | — | — | 1000 | 441.165 / 441.519 / 440.805 | — | — | — |
 | `nbody` | — | — | — | 1500000 | 867.184 / 871.789 / 720.326 | — | — | — |
@@ -86,6 +86,6 @@ Wasm and Bun timings use the size shown, including process startup; errors are r
 | `sum` | — | — | — | 3200000 | 161.783 / 142.684 / 149.521 | — | — | — |
 | `sum-reserved` | — | — | — | 3200000 | 161.783 / 142.684 / 149.521 | — | — | — |
 | `tree` | — | — | — | 17 | 56.687 / 56.779 / 140.314 | — | — | — |
-| `word-count` | — | — | — | 500000 | 235.018 / 146.468 / 381.588 | — | — | — |
-| `words` | — | — | — | 100000 | 28.383 / 22.414 / 62.226 | — | — | — |
+| `word-count` | 0.825 / 0.452 / 1.297 | 6528 / 7296 / 5600 | 44712 / 23000 / 359088 | 500000 | 235.018 / 146.468 / 381.588 | — | — | — |
+| `words` | 0.104 / 0.089 / 0.216 | 22400 / 18816 / 19572 | 41584 / 18904 / 357280 | 100000 | 28.383 / 22.414 / 62.226 | — | — | — |
 | `words-wide` | — | — | — | 100000 | 28.383 / 22.414 / 62.223 | — | — | — |

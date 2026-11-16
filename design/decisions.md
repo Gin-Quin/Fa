@@ -1763,3 +1763,26 @@ active; final workspace acceptance and CPU phases remain pending. Compiler
 sources remain unchanged from the archived 1f8e7118 build. The GCC sanitizer
 runtime harness independently ran and passed (1/1) rather than relying on the
 Clang environment's unavailable ASan probe. No additional skip was introduced.
+
+Final scalar64 validation: LLVM-enabled workspace 1,383 passed, zero failed,
+eight pre-existing ignored, 68 result groups including all 95 IR checks.
+Native 812 / freestanding 723 / wasm 791 programs pass with leak checking;
+existing documented skips remain 31 / 120 / 52. Fmt/Clippy are warning-free;
+GCC ASan/UBSan passed via both the script and actual Rust runtime harness.
+The two corrected order assumptions are the only existing tests changed.
+
+The first 21-round CPU-5 series is retained in full. Lru control 0.991 / 0.966
+fails, and word-count control 0.960 / 1.006 fails: both remain not resolved.
+Words control 0.992 / 0.999 passes; Fa/Goose 1.171 / 1.137 is behind the 1.10
+goal, Fa/Rust 0.483 / 0.464 meets its goal. After/before words 0.987 / 0.961
+has broad paired quartiles [0.848, 1.011]; do not claim the scalar64 layout
+caused a speedup in this unchanged String-key workload. Word-count still needs
+the separate reference-initializer proof, and String work remains separate.
+This item supplies the requested guarded layout, not a demonstrated map-row
+speedup. Preserve the accepted header lru series independently.
+
+Complete evidence is `benchmarks/results/2026-11-16-collections-scalar64.{json,md}`:
+all 36 profiles, three CPU phases, 315 samples, 63 round orders, binary/source
+hashes and strict-control publication. Benchmark sources and driver unchanged.
+The dataset round-trips byte-for-byte; all 27 checkpoint rows are retained.
+Part 2 remains unimplemented at this completed-item context boundary.

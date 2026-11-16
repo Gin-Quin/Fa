@@ -1,0 +1,10 @@
+-- prints: 9
+function first = (values: Array<Integer>): Integer in values throws IndexError => try values[0]
+function apply = (values: Array<Integer>): Integer in values throws IndexError => {
+	function f = (items: Array<Integer>): Integer in items throws IndexError => try first(items)
+	try f(values)
+}
+mutable values: Array<Integer> = [7]
+use n = try apply(values)
+n = 9
+console.log(values[0])

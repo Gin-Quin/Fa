@@ -1,0 +1,15 @@
+type Node = { value: Integer }
+function get = (
+	nodes: Pool<Node>
+	existing: Node in nodes
+	chooseFresh: Boolean
+): Node in nodes mutates nodes.size => {
+	mutable use result = existing
+	if chooseFresh { reuse result = nodes.add({ value = 9 }) }
+	result
+}
+mutable nodes: Pool<Node> = []
+use original = nodes.add({ value = 7 })
+use returned = get(nodes, original, false)
+nodes.delete(original)
+console.log(returned.value)

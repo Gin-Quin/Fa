@@ -1,0 +1,4 @@
+type Node = { value: Integer }
+mutable nodes: GrowingPool<Node> = []
+function make = (): Array<Node in nodes> => []
+console.log(make().length)

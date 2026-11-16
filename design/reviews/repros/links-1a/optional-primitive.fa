@@ -1,0 +1,8 @@
+function first = (values: Array<Integer>): (Integer in values)? => values.get(0)
+mutable empty: Array<Integer> = []
+use absent = first(empty)
+console.log(absent)
+mutable full: Array<Integer> = [7]
+use present = first(full)
+if present is not none { present = 9 }
+console.log(full[0])

@@ -1,0 +1,10 @@
+function first = (values: Array<Integer>): Integer in values throws IndexError => try values[0]
+function check = (): Integer throws IndexError => {
+	mutable values: Array<Integer> = [7]
+	use value = try first(values)
+	value = 9
+	values[0]
+}
+static result = @check()
+console.log(result)
+console.log(try check())

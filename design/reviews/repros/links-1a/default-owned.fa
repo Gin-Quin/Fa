@@ -1,0 +1,6 @@
+type Node = { value: Integer }
+function get = (owner: GrowingPool<Node>, node: Node in owner = { value = 7 }): Node in owner =>
+	node
+mutable owner: GrowingPool<Node> = []
+use result = get(owner)
+console.log(result.value)

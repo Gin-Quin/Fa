@@ -1,0 +1,8 @@
+type Node = { value: Integer }
+type Failure = Errors { Missing }
+function fail = (): Integer throws Failure.Missing => throw Failure.Missing
+function wrong = (nodes: GrowingPool<Node>): Node in nodes mutates nodes.size => {
+	mutable local: GrowingPool<Node> = []
+	fail() catch _e => { return local.add({ value = 7 }) }
+	nodes.add({ value = 9 })
+}

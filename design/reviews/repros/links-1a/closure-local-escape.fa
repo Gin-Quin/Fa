@@ -1,0 +1,11 @@
+type Node = { value: Integer }
+function first = (nodes: GrowingPool<Node>): (Node in nodes)? => nodes.find((_n) => true)
+type Callback = () => Integer
+function wrong = (): Callback => {
+	mutable local: GrowingPool<Node> = []
+	local.add({ value = 7 })
+	use n = first(local)
+	() => n?.value ?? 0
+}
+let escaped = wrong()
+console.log(escaped())

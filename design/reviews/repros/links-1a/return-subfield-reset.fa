@@ -1,0 +1,9 @@
+type Model = { nodes: GrowingPool<Node> = [], type Node = { data: Array<Integer> } }
+function data = (m: Model): Array<Integer> in m.nodes mutates m.nodes.size => {
+	use n = m.nodes.add({ data = [7] })
+	n.data
+}
+mutable m: Model = {}
+use result = data(m)
+m.nodes = []
+console.log(result)

@@ -1,15 +1,14 @@
 // Copies and in-place writes (advanced brief 6.5, types brief D60, values
 // brief D-81).
 //
-// Objects and collections are values in Fa: `let b = a` copies. The backend
+// Ordinary values retain value semantics; structures move or use explicit `copy`. The backend
 // generates `copy$T` per destination type, which builds the object with the
 // fields of `T` in declaration order (one hidden class per type) and reads
 // only those fields (a narrowing copy). `faCopy` is the generic version for
 // erased generic code: it keeps the properties of the source, in the
 // source's order (which is the declaration order when the value was built by
 // compiled code). Strings and primitives are immutable in JavaScript and
-// shared; functions are shared; set elements and map keys are read-only in Fa
-// and shared.
+// shared; functions and synchronization handles share their identity.
 
 import { FaHashMap, FaSet } from "./collections.js";
 import { faSharedHandle } from "./concurrency.js";
@@ -66,68 +65,61 @@ export function faCopyAs(value, plan) {
 	return result.value;
 }
 
-// @fa-helper faCopy deps: faCopyShell FaHashMap FaSet faSides faSharedHandle
+// @fa-helper faCopy deps: faCopyAs faCopyShell FaHashMap FaSet faSides faSharedHandle
 /**
- * A deep structural copy of a Fa value. Iterative: long recursive chains
- * (linked lists) don't overflow the stack.
+ * A deep structural copy of a Fa value. Children finish before a map/set
+ * entry is hashed; all traversal is iterative, including recursive keys.
  * @template T
  * @param {T} value
  * @returns {T}
  */
 export function faCopy(value) {
-	if (typeof value !== "object" || value === null) {
-		return value;
-	}
-	/** @type {any[]} */
-	const pending = [];
-	/**
-	 * @param {any} item
-	 * @returns {any}
-	 */
-	const copyLater = (item) => {
-		if (typeof item !== "object" || item === null || item[faSharedHandle] === true) {
-			return item;
+	/** @type {(value: any, target: any, key: any, work: any[]) => void} */
+	const plan = (source, owner, key, work) => {
+		if (typeof source !== "object" || source === null || source[faSharedHandle] === true) {
+			owner[key] = source;
+			return;
 		}
-		const shell = faCopyShell(item);
-		pending.push(item, shell);
-		return shell;
-	};
-	const root = copyLater(value);
-	while (pending.length > 0) {
-		const target = pending.pop();
-		const source = pending.pop();
+		const target = faCopyShell(source);
+		owner[key] = target;
 		if (Array.isArray(source)) {
-			for (let index = 0; index < source.length; index += 1) {
-				target.push(copyLater(source[index]));
-			}
+			target.length = source.length;
+			for (let index = source.length - 1; index >= 0; index--)
+				work.push([plan, source[index], target, index]);
 		} else if (source instanceof Map || source instanceof FaHashMap) {
-			for (const [key, item] of source) {
-				target.set(key, copyLater(item));
+			const entries = Array.from(source);
+			for (let index = entries.length - 1; index >= 0; index--) {
+				const entry = { key: undefined, value: undefined };
+				work.push([() => target.set(entry.key, entry.value)]);
+				work.push([plan, entries[index][1], entry, "value"]);
+				work.push([plan, entries[index][0], entry, "key"]);
 			}
 		} else if (
 			source instanceof Set ||
 			source instanceof FaSet ||
 			source[Symbol.toStringTag] === "fa:ValuePool"
 		) {
-			for (const item of source) {
-				target.add(item);
+			const entries = Array.from(source);
+			for (let index = entries.length - 1; index >= 0; index--) {
+				const entry = { value: undefined };
+				work.push([() => target.add(entry.value)]);
+				work.push([plan, entries[index], entry, "value"]);
 			}
 		} else {
-			// an element of a type with relation sides: the copy has no links
 			const sides = source[faSides];
-			for (const key of Object.keys(source)) {
-				if (sides !== undefined && sides.includes(key)) {
+			const keys = Object.keys(source);
+			// Establish the source's property order before scheduling children.
+			for (const key of keys) target[key] = undefined;
+			for (let index = keys.length - 1; index >= 0; index--) {
+				const key = keys[index];
+				if (sides !== undefined && sides.includes(key))
 					target[key] = source[key] instanceof Set ? new Set() : undefined;
-				} else {
-					target[key] = copyLater(source[key]);
-				}
+				else work.push([plan, source[key], target, key]);
 			}
-			if (sides !== undefined) {
-				target[faSides] = sides;
-			}
+			if (sides !== undefined) target[faSides] = sides;
 		}
-	}
-	return root;
+	};
+	return faCopyAs(value, plan);
 }
 
 // @fa-helper faUnlinked deps: faCopy faSides

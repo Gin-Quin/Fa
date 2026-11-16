@@ -24,6 +24,9 @@ pub fn test(test: &TypeTest, value: &Value) -> bool {
 		TypeTest::Set => matches!(value, Value::Set(_)),
 		TypeTest::Tuple(length) => matches!(value, Value::Tuple(items) if items.len() == *length),
 		TypeTest::Object => matches!(value, Value::Object(_)),
+		TypeTest::Fields(fields) => {
+			matches!(value, Value::Object(object) if fields.iter().all(|(name, test)| object.get(name).is_some_and(|value| self::test(test, value))))
+		}
 		TypeTest::Function => matches!(value, Value::Function(_)),
 		TypeTest::Range => matches!(value, Value::Range { .. }),
 		TypeTest::Literal(literal) => equals(literal, value),

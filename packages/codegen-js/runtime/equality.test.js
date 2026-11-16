@@ -223,12 +223,13 @@ describe("copies (types brief 3.2.7, D60, values brief D-81)", () => {
 		expect(faCopy({ f }).f).toBe(f);
 	});
 
-	test("collections keep their kind; keys and elements are shared", () => {
+	test("collections keep their kind and copy their owned data", () => {
 		const key = { k: 1 };
 		const map = new FaHashMap([[key, { v: 1 }]]);
 		const copied = faCopy(map);
 		expect(copied).toBeInstanceOf(FaHashMap);
-		expect([...copied.keys()][0]).toBe(key);
+		expect([...copied.keys()][0]).not.toBe(key);
+		expect([...copied.keys()][0]).toEqual(key);
 		expect(copied.get({ k: 1 })).toEqual({ v: 1 });
 		expect(copied.get({ k: 1 })).not.toBe(map.get(key));
 		const set = new FaSet(["A"], { key: (/** @type {string} */ t) => t.toLowerCase() });

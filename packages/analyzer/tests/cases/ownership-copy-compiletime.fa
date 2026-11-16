@@ -1,0 +1,28 @@
+-- Compile-time copies apply the same projections and conversions as runtime copies.
+function converted = (): Array<{ keep: Float }> => {
+	let rows = [{ keep = Float32(1.25), omitted = [2] }]
+	let result: Array<{ keep: Float }> = copy rows
+	assert rows[0].omitted.length == 1
+	result
+}
+static projected = @converted()
+console.log(projected) -- prints: [{ keep = 1.25 }]
+
+type Small = { value: Float32, extra: String, next: Small? }
+type Wide = { value: Float, next: Wide? }
+function widen = (): Wide => {
+	let small = Small { value = 1.25, extra = "head", next = Small { value = 2.5, extra = "tail" } }
+	let wide: Wide = copy small
+	assert small.extra == "head"
+	wide
+}
+static wide = @widen()
+console.log(wide.value, wide.next?.value) -- prints: 1.25 2.5
+
+function choose = (flag: Boolean): Array<Float> => {
+	let first: Array<Float32> = [1.25]
+	let second: Array<Float32> = [2.5]
+	copy (if flag { first } else { second })
+}
+static chosen = @choose(true)
+console.log(chosen.get(0)) -- prints: 1.25

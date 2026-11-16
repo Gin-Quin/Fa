@@ -8,7 +8,7 @@ use ethnum::I256;
 use crate::callbacks::{Callback, Progress};
 use crate::code::{Argument, Code, Item, Node, Op, Part, Place, Step};
 use crate::eval::{self, Error, Eval, Flow, Interpreter};
-use crate::ir::{ArithOp, CompareOp, FnKey, Num, Slot, TypeTest};
+use crate::ir::{ArithOp, CompareOp, CopyPlan, FnKey, Num, Slot, TypeTest};
 use crate::value::{Closure, Member, MemberKind, Object, Value, equals};
 use crate::{builtins, memory};
 
@@ -84,6 +84,7 @@ enum Binary {
 enum Unary {
 	Negate(Num),
 	Convert(Num),
+	Copy(Arc<CopyPlan>),
 	Not,
 	Boolean,
 	Is(TypeTest, bool),
@@ -240,6 +241,9 @@ impl<'i, 'h> Machine<'i, 'h> {
 				&mut self.locals()[*slot as usize],
 				Value::None,
 			)),
+			Op::Copy(plan, value) => {
+				self.evaluate_after(*value, Continuation::Unary(Unary::Copy(Arc::clone(plan))))
+			}
 			Op::Global(key) => Self::done(self.interpreter.host.global(*key)?),
 			Op::Function(function) => Self::done(Value::Function(Arc::new(Closure {
 				function: *function,
@@ -859,6 +863,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 		let result = match op {
 			Unary::Negate(num) => eval::negate(num, &value)?,
 			Unary::Convert(num) => eval::convert(num, &value)?,
+			Unary::Copy(plan) => crate::copies::copy(self.interpreter, &plan, &value)?,
 			Unary::Not => Value::Boolean(!boolean(value)?),
 			Unary::Boolean => Value::Boolean(boolean(value)?),
 			Unary::Is(test, negated) => {

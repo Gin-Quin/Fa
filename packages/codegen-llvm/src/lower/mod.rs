@@ -2467,6 +2467,15 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		}
 		if let Some(input) = self.analysis.copy_inputs.get(&node).copied() {
 			return if input.produces {
+				// A Copy boundary consumes coercion, not the arithmetic checks
+				// that make its operand a valid value in the first place.
+				let value = if self.flags(node).contains(NodeFlags::SINK_CHECK)
+					&& let Some(target) = self.analysis.coercion(node)
+				{
+					self.sink_check(value, target, node)?
+				} else {
+					value
+				};
 				self.explicit_copy(value, input.source, input.target, node)
 			} else {
 				Ok(value)

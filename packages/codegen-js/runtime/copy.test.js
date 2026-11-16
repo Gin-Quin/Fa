@@ -1,10 +1,29 @@
 import { describe, expect, test } from "bun:test";
 
-import { FaHashMap } from "./collections.js";
+import { FaHashMap, FaSet } from "./collections.js";
 import { FaAtomic, FaChannel, FaMutex } from "./concurrency.js";
 import { faAssign, faCopy, faCopyAs, faCopyGraph, faCopyInto } from "./copy.js";
 
 describe("copies", () => {
+	test("copied set items can be removed and changed independently", () => {
+		for (const source of [new Set([{ items: [1] }]), new FaSet([{ items: [1] }])]) {
+			const copied = faCopy(source);
+			const item = copied.values().next().value;
+			copied.delete(item);
+			item.items.push(2);
+			expect(source.values().next().value.items).toEqual([1]);
+		}
+	});
+
+	test("copied structural map keys are complete before insertion", () => {
+		const key = { items: [1] };
+		const source = new FaHashMap([[key, [2]]]);
+		const copied = faCopy(source);
+		expect(copied.get({ items: [1] })).toEqual([2]);
+		expect(copied.keys().next().value).not.toBe(key);
+		expect(copied.keys().next().value.items).not.toBe(key.items);
+	});
+
 	test("converting plans copy deep recursive values and project only retained data", () => {
 		/** @type {any} */
 		let source;

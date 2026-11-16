@@ -119,6 +119,8 @@ pub enum TypeTest {
 	Tuple(usize),
 	/// An object.
 	Object,
+	/// Fields retained by a structural alternative, with literal discriminants.
+	Fields(Vec<(Arc<str>, TypeTest)>),
 	/// A function.
 	Function,
 	/// A range.
@@ -131,6 +133,32 @@ pub enum TypeTest {
 	Error,
 	/// Any of these.
 	Union(Vec<TypeTest>),
+}
+
+/// A type-directed copy graph. Indices permit recursive types without a
+/// recursive Rust IR tree; evaluation uses an explicit work stack.
+#[derive(Clone, Debug)]
+pub struct CopyPlan {
+	pub root: u32,
+	pub steps: Vec<CopyStep>,
+}
+
+#[derive(Clone, Debug)]
+pub enum CopyStep {
+	/// Unchanged VM values retain independent copy-on-write semantics.
+	Value,
+	Convert(Num),
+	Alias(u32),
+	Array(u32),
+	Tuple(Vec<u32>),
+	Object(Vec<(Arc<str>, u32)>),
+	Set(u32),
+	Map {
+		key: u32,
+		value: u32,
+	},
+	Select(Vec<(TypeTest, u32)>),
+	MemberData(u32),
 }
 
 /// One item of a list literal or variadic argument.
@@ -190,6 +218,8 @@ pub enum Expr {
 	Local(Slot),
 	/// Transfers an owned local at its proven last use, clearing the slot.
 	Move(Slot),
+	/// Copy or convert the completed value in its expected type.
+	Copy(Arc<CopyPlan>, Box<Expr>),
 	/// A module-level value (evaluated once by the host).
 	Global(GlobalKey),
 	/// A named function as a value.

@@ -97,6 +97,7 @@ pub(crate) enum Op {
 	Const(Value),
 	Local(Slot),
 	Move(Slot),
+	Copy(Arc<ir::CopyPlan>, Node),
 	Global(GlobalKey),
 	Function(FnKey),
 	Closure(FnKey, Vec<Slot>),
@@ -220,6 +221,7 @@ impl<'a> Builder<'a> {
 				ir::Expr::Const(value) => Op::Const(value.clone()),
 				ir::Expr::Local(slot) => Op::Local(*slot),
 				ir::Expr::Move(slot) => Op::Move(*slot),
+				ir::Expr::Copy(plan, value) => Op::Copy(Arc::clone(plan), self.add(value)),
 				ir::Expr::Global(key) => Op::Global(*key),
 				ir::Expr::Function(key) => Op::Function(*key),
 				ir::Expr::Closure { function, captures } => {

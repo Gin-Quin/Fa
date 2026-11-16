@@ -1,6 +1,7 @@
 //! Expressions: names, booleans, comparisons, `if` values and the lifting of
 //! constructs that need statements (values brief §8, §13, §19).
 
+use fa_analyzer::analysis::NodeFlags;
 use fa_analyzer::builtins;
 use fa_analyzer::ids::{NodeId, TypeId};
 use fa_analyzer::symbols::{Resolution, SymbolKind};
@@ -17,6 +18,13 @@ impl Generator<'_> {
 		let value = self.expr_raw(n);
 		if let Some(input) = self.analysis.copy_inputs.get(&n).copied() {
 			return if input.produces {
+				// Keep range checks, and unchecked sized-integer wrapping,
+				// before fulfilling the copy's result conversion.
+				let value = if self.analysis.has_flags(n, NodeFlags::SINK_CHECK) {
+					self.sink(n, value)
+				} else {
+					value
+				};
 				self.copy_as(n, value, input.source, input.target)
 			} else {
 				value

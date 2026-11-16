@@ -1,0 +1,5 @@
+-- Copy preserves the operand's arithmetic checks.
+function double = (value: Int8): Int8 => copy (value * 2)
+console.log(double(5)) -- prints: 10
+console.log(double(100))
+-- exit: 101

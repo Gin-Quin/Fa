@@ -252,6 +252,7 @@ pub fn visit(expr: &Expr, f: &mut dyn FnMut(&Expr)) {
 		| Expr::Assert(value, _)
 		| Expr::Negate(_, value)
 		| Expr::Convert(_, value)
+		| Expr::Copy(_, value)
 		| Expr::Not(value)
 		| Expr::Is(value, ..)
 		| Expr::MemberData(value)

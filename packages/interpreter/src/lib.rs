@@ -26,6 +26,7 @@
 pub mod builtins;
 mod callbacks;
 mod code;
+mod copies;
 pub mod eval;
 pub mod ir;
 pub mod json;

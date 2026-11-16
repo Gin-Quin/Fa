@@ -38,6 +38,9 @@ use crate::syntax::{
 };
 use crate::types::{CollKind, FloatBits, IntStorage, NominalKind, TypeKind, TypeStore};
 
+#[path = "copy_plans.rs"]
+mod copies;
+
 thread_local! {
 	/// The modules a lowering needed that the session doesn't hold.
 	static MISSING: std::cell::RefCell<Vec<crate::ids::ModuleId>> =
@@ -591,6 +594,14 @@ impl<'a> Lowerer<'a> {
 
 	/// Lowers an expression or a statement.
 	pub fn expr(&mut self, n: NodeId) -> Expr {
+		let value = self.expr_raw(n);
+		if let Some(input) = self.a.copy_inputs.get(&n).filter(|input| input.produces) {
+			return Expr::Copy(self.copy_plan(input.source, input.target), value.boxed());
+		}
+		value
+	}
+
+	fn expr_raw(&mut self, n: NodeId) -> Expr {
 		// a value the analysis computed at compile time (`@` calls, statics)
 		if let Some(value) = self.a.constants.get(&n) {
 			return Expr::Const(value.clone());
@@ -634,7 +645,7 @@ impl<'a> Lowerer<'a> {
 					None => self.unsupported(format!("`{}`", self.text(n))),
 				},
 			},
-			// VM reads already clone values; mutation uses copy-on-write.
+			// Producers fulfill explicit Copy boundaries in `expr`.
 			View::Group(inner) | View::Copy(inner) => self.expr(inner),
 			View::EmptyGroup => Expr::none(),
 			View::Array { items } => self.array(n, items),
@@ -1798,6 +1809,32 @@ pub fn function_node(analysis: &Analysis, decl: NodeId) -> NodeId {
 #[cfg(test)]
 mod ownership_tests {
 	use super::*;
+
+	#[test]
+	fn explicit_compile_time_copies_convert_items_and_project_fields() {
+		let (session, file) = crate::analyze_source(
+			"function converted = (): Array<{ keep: Float }> => {\nlet rows = [{ keep = Float32(1.25), omitted = [2] }]\nlet result: Array<{ keep: Float }> = copy rows\nassert rows[0].omitted.length == 1\nresult\n}\nstatic result = @converted()\n",
+		);
+		assert!(
+			session.diagnostics(file).is_empty(),
+			"{:?}",
+			session.diagnostics(file)
+		);
+		let result = session
+			.analysis(file)
+			.constants
+			.values()
+			.find_map(|value| match value {
+				Value::Array(items) => Some(items),
+				_ => None,
+			})
+			.expect("the computed array");
+		let Value::Object(object) = &result[0] else {
+			panic!("a converted record")
+		};
+		assert_eq!(object.fields.len(), 1);
+		assert!(matches!(object.get("keep"), Some(Value::Float(value)) if *value == 1.25));
+	}
 
 	#[test]
 	fn checked_last_uses_lower_to_slot_transfers() {

@@ -57,3 +57,8 @@ type Status = Union {
 let statuses: Array<Status | String> = [Status.Value { count = 7 }, "text", Status.Ready]
 let moreStatuses: Array<Status | String | Integer> = copy statuses
 console.log(statuses.length, moreStatuses.length) -- prints: 3 3
+
+use borrowed = bytes
+let wideBorrow: Array<Int64> = copy borrowed
+assert wideBorrow.length > 0
+console.log(wideBorrow[0] + 1, bytes.length) -- prints: 2 2

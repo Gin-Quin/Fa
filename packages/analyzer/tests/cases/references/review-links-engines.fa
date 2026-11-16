@@ -22,7 +22,7 @@ function arrays = (): Integer throws IndexError => {
 	reuse selected = try first(values)
 	selected = 4
 	snapshot = 5
-	try values[0] + (try values[1])
+	values[0] + values[1]
 }
 function pools = (): Integer => {
 	mutable values: Pool<Node> = []

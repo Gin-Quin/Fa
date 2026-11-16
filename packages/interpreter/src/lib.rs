@@ -307,6 +307,120 @@ mod tests {
 	}
 
 	#[test]
+	fn borrowed_results_keep_the_evaluated_slot_and_export_only_data() {
+		let mut host = Functions::default();
+		let key = FnKey(0, 90);
+		host.0.insert(
+			key,
+			Arc::new(Function {
+				name: "first".into(),
+				params: vec![Param {
+					slot: 0,
+					default: Some(Expr::Array(vec![Item::One(int(7))])),
+				}],
+				captures: Vec::new(),
+				slots: 1,
+				body: Expr::Borrow(
+					Place {
+						slot: 0,
+						steps: vec![Step::Index(int(0))],
+					},
+					false,
+				),
+			}),
+		);
+		let owner = Place {
+			slot: 0,
+			steps: Vec::new(),
+		};
+		let reference = Place {
+			slot: 1,
+			steps: Vec::new(),
+		};
+		let expr = Expr::Block(vec![
+			Expr::Let(0, Expr::Array(vec![Item::One(int(7))]).boxed()),
+			Expr::Let(
+				1,
+				Expr::CallFunction(key, vec![Arg::Value(Expr::Borrow(owner, false))]).boxed(),
+			),
+			Expr::Assign(reference, int(9).boxed()),
+			Expr::Local(0),
+		]);
+		assert_eq!(
+			run(&mut host, &expr, 2),
+			Ok(Value::array(vec![Value::int(9)]))
+		);
+		// The public host entry has no lowered caller argument slot; it creates
+		// one, and materializes the reference before disposing its root frame.
+		let function = Value::Function(Arc::new(crate::value::Closure {
+			function: key,
+			captured: Vec::new(),
+			bound: Vec::new(),
+		}));
+		let value = Interpreter::new(&mut host, Limits::default())
+			.call_value(&function, vec![Value::array(vec![Value::int(9)])]);
+		assert_eq!(value, Ok(Value::int(9)));
+		let omitted = Expr::Dereference(Expr::CallFunction(key, vec![Arg::Default]).boxed());
+		assert_eq!(run(&mut host, &omitted, 0), Ok(Value::int(7)));
+	}
+
+	#[test]
+	fn borrowed_indices_are_evaluated_once_and_stale_frames_are_errors() {
+		let mut host = Functions::default();
+		let expr = Expr::Block(vec![
+			Expr::Let(
+				0,
+				Expr::Array(vec![Item::One(int(7)), Item::One(int(9))]).boxed(),
+			),
+			Expr::Let(1, int(0).boxed()),
+			Expr::Let(
+				2,
+				Expr::Borrow(
+					Place {
+						slot: 0,
+						steps: vec![Step::Index(Expr::Local(1))],
+					},
+					false,
+				)
+				.boxed(),
+			),
+			Expr::Assign(
+				Place {
+					slot: 1,
+					steps: Vec::new(),
+				},
+				int(1).boxed(),
+			),
+			Expr::Local(2),
+		]);
+		assert_eq!(run(&mut host, &expr, 3), Ok(Value::int(7)));
+		let key = FnKey(0, 91);
+		host.0.insert(
+			key,
+			Arc::new(Function {
+				name: "invalid escape".into(),
+				params: Vec::new(),
+				captures: Vec::new(),
+				slots: 1,
+				body: Expr::Block(vec![
+					Expr::Let(0, int(7).boxed()),
+					Expr::Borrow(
+						Place {
+							slot: 0,
+							steps: Vec::new(),
+						},
+						false,
+					),
+				]),
+			}),
+		);
+		let escaped = Expr::Dereference(Expr::CallFunction(key, Vec::new()).boxed());
+		assert!(
+			matches!(run(&mut host, &escaped, 0), Err(Error::Stop(message)) if message.contains("outlived its collection"))
+		);
+	}
+
+	#[test]
 	fn deep_calls_defaults_and_callbacks_use_the_explicit_stack() {
 		std::thread::Builder::new()
 			.stack_size(256 << 10)

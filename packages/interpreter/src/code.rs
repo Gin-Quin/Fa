@@ -97,6 +97,7 @@ pub(crate) enum Op {
 	Const(Value),
 	Local(Slot),
 	Global(GlobalKey),
+	BorrowGlobal(GlobalKey),
 	Function(FnKey),
 	Closure(FnKey, Vec<Slot>, bool),
 	Let(Slot, Node),
@@ -223,6 +224,7 @@ impl<'a> Builder<'a> {
 				ir::Expr::Const(value) => Op::Const(value.clone()),
 				ir::Expr::Local(slot) => Op::Local(*slot),
 				ir::Expr::Global(key) => Op::Global(*key),
+				ir::Expr::BorrowGlobal(key) => Op::BorrowGlobal(*key),
 				ir::Expr::Function(key) => Op::Function(*key),
 				ir::Expr::Closure {
 					function,

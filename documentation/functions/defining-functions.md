@@ -115,6 +115,8 @@ A default value runs during call binding, before the body. For `start`, binding 
 
 The parameters and the top-level declarations of the body share one scope: declaring a value with the name of a parameter is an error.
 
+A default for a reference parameter must itself be a reference into its declared collection. It is checked where the parameter is declared, with the preceding parameters in scope. For example, `value: Integer in owner = owner.add(7)` is valid; a literal `7` or an element of another collection is not (`REF020`).
+
 ### Named arguments
 
 Arguments can be passed by position or by name. Positional arguments come first, named arguments after:
@@ -417,7 +419,7 @@ function sumOf = (numbers: Array<Integer>): Integer => {
 }
 ```
 
-A closure that **escapes** owns immutable captures, taken when it is created. Ordinary values copy; a structure moves at its last use, and otherwise requires an explicit snapshot (`MEM004`). A borrowed parameter, [`use`](/advanced/memory-management#aliases) alias or loop item cannot surrender its owner: first create `let snapshot = copy input`, then capture `snapshot` at its last use. The closure cannot modify its owned captures. Worker transfer also obeys [thread safety](/advanced/concurrency#thread-safety-and-synchronization):
+A closure that **escapes** owns immutable captures, taken when it is created. Ordinary values copy; a structure moves at its last use, and otherwise requires an explicit snapshot (`MEM004`). A borrowed parameter, [`use`](/advanced/memory-management#aliases) alias or loop item cannot surrender its owner: first create `let snapshot = copy input`, then capture `snapshot` at its last use. An escaping closure cannot retain an element reference into a collection local to the function that returns it (`MEM004`). Capture the element's data instead, or keep the collection in an owner that outlives the closure. The closure cannot modify its owned captures. Worker transfer also obeys [thread safety](/advanced/concurrency#thread-safety-and-synchronization):
 
 ```fa
 function makeGreeter = (greeting: String) => (name: String) => "{greeting}, {name}!"
@@ -737,6 +739,6 @@ A small base case of a direct recursive call is evaluated at the call site when 
 
 ### Reference interfaces on every target
 
-Reference result and parameter contracts retain symbolic owner paths through methods, generic specialization, function values and imports. Resolve the caller's collection path after call effects. Native aliases borrow existing places without copying; JavaScript borrowed calls use internal accessor cells for exact places, including primitive subfields and erased generic items; object `use` unwraps once and keeps the target identity. Ordinary storage copies the designated data. This is an internal call ABI, not a new source-level handle type or the storage representation of a link. Direct all-return-path freshness is interface metadata; indirect calls retain the owner contract but not freshness. Link traversal effects restart at the target collection and use the ordinary overlap engine.
+Reference result and parameter contracts retain symbolic owner paths through methods, generic specialization, function values and imports. Resolve the caller's collection path after call effects. Native aliases borrow existing places without copying, and structured reference results merge their addresses. JavaScript passes and returns object references directly. Primitive and mixed-union places use cached slot cells, forwarded through aliases, defaults, parameters and results; erased generic code receives the type's representation flag. The compile-time interpreter retains evaluated frame/slot/key paths through the same calls. See the [reference ABI](/advanced/owned-references) for the storage and cache lifetime details. Ordinary storage copies the designated data. This is an internal call ABI, not a new source-level handle type or the storage representation of a link. Direct all-return-path freshness is interface metadata; indirect calls retain the owner contract but not freshness. Link traversal effects restart at the target collection and use the ordinary overlap engine.
 
 :::

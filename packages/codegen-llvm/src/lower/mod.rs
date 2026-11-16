@@ -869,6 +869,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// The representation of a node's type.
 	pub(crate) fn node_repr(&self, node: NodeId) -> Result<Repr, Error> {
+		if self.reference_control(node) {
+			return Ok(Repr::Pointer);
+		}
 		self.repr_of(self.type_of(node), node.index())
 	}
 

@@ -114,7 +114,7 @@ One entry per work package of [the dated inventory §4](reviews/inventory-2026-1
 
 ## Contained links (adopted, 2026-11-16)
 
-Owner-path function references and nested-reference-field rejection are implemented.
+Owner-path function references, reference defaults/structured results, dependent effect coverage, escaping local-reference capture rejection and reference-type rejection in every owned type position are implemented across checking, JavaScript, native/wasm and compile-time evaluation.
 Next slices follow [Pool links](pool-links.md): InlineArray separately; link binding,
 containment diagnostics and effects; dense paged native storage and Index limits;
 JavaScript direct-object links; whole-owner copy/move relinking; interpreter,

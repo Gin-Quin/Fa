@@ -16,13 +16,29 @@
 use std::collections::HashMap;
 
 use fa_analyzer::ids::{NodeId, ParamId, Sym, SymbolId, TypeId};
-pub(crate) use fa_analyzer::modules::GenericRequirement as Hidden;
+use fa_analyzer::modules::GenericRequirement;
 use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::View;
 use fa_analyzer::types::{FieldFlags, TypeKind};
 
 use crate::generate::Generator;
 use crate::js::{self, Expr, Prec};
+
+/// Backend capabilities, including the representation of an erased place.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Hidden {
+	Value(ParamId),
+	Method(ParamId, Sym),
+	ReferenceObject(ParamId),
+}
+impl From<GenericRequirement> for Hidden {
+	fn from(value: GenericRequirement) -> Self {
+		match value {
+			GenericRequirement::Value(p) => Self::Value(p),
+			GenericRequirement::Method(p, m) => Self::Method(p, m),
+		}
+	}
+}
 
 impl Generator<'_> {
 	/// The hidden parameters of a generic function declaration, in order.
@@ -39,7 +55,10 @@ impl Generator<'_> {
 			.generic_functions
 			.get(&declaration)
 		{
-			Some(summary) => hidden.extend(summary.requirements.iter().cloned()),
+			Some(summary) => {
+				hidden.extend(summary.requirements.iter().copied().map(Hidden::from));
+				hidden.extend(self.reference_flags(&info.generics));
+			}
 			None => hidden.extend(self.hidden_for_generics(&info.generics)),
 		}
 		hidden
@@ -63,7 +82,31 @@ impl Generator<'_> {
 	}
 
 	fn hidden_for_generics(&self, generics: &[ParamId]) -> Vec<Hidden> {
-		fa_analyzer::modules::generic_requirements(self.types, generics)
+		let mut hidden: Vec<_> = fa_analyzer::modules::generic_requirements(self.types, generics)
+			.into_iter()
+			.map(Hidden::from)
+			.collect();
+		hidden.extend(self.reference_flags(generics));
+		hidden
+	}
+	fn reference_flags(&self, generics: &[ParamId]) -> Vec<Hidden> {
+		generics
+			.iter()
+			.copied()
+			.filter(|&param| !self.types.param(param).value)
+			.map(Hidden::ReferenceObject)
+			.collect()
+	}
+	/// A union slot retains its carrier even while its current value is an object.
+	pub(crate) fn reference_object_flag(&self, ty: TypeId) -> String {
+		if let TypeKind::Param(param) = self.types.kind(self.without_none(ty)) {
+			return self
+				.hidden_names
+				.get(&Hidden::ReferenceObject(param))
+				.cloned()
+				.unwrap_or_else(|| "false".to_string());
+		}
+		self.is_object_reference(ty).to_string()
 	}
 
 	/// Declares the hidden parameters of a generic function being generated
@@ -74,6 +117,15 @@ impl Generator<'_> {
 		let mut names = Vec::with_capacity(hidden.len());
 		for entry in hidden {
 			match entry {
+				Hidden::ReferenceObject(param) => {
+					let wanted = format!(
+						"{}$referenceObject",
+						self.types.syms.resolve(self.types.param(param).name)
+					);
+					let name = self.declare_hidden_name(&wanted);
+					self.hidden_names.insert(entry, name.clone());
+					names.push(name);
+				}
 				Hidden::Value(param) => {
 					let name = match self.value_parameter_symbol(function, param) {
 						Some(symbol) => self.declare(symbol),
@@ -200,6 +252,9 @@ impl Generator<'_> {
 		for entry in hidden {
 			let value =
 				match entry {
+					Hidden::ReferenceObject(param) => {
+						binding(param).map(|ty| self.reference_object_flag(ty))
+					}
 					Hidden::Value(param) => match binding(param) {
 						Some(ty) => {
 							let subject = self.analysis.key_set_params.iter().find_map(
@@ -308,7 +363,17 @@ impl Generator<'_> {
 							_ => None,
 						},
 					));
-					hidden.extend(summary.requirements);
+					hidden.extend(summary.requirements.into_iter().map(Hidden::from));
+					let own: Vec<_> = self
+						.types
+						.list_items(summary.generics)
+						.iter()
+						.filter_map(|&ty| match self.types.kind(ty) {
+							TypeKind::Param(p) => Some(p),
+							_ => None,
+						})
+						.collect();
+					hidden.extend(self.reference_flags(&own));
 					return self.hidden_arguments_for(call, &generics, hidden);
 				}
 			}

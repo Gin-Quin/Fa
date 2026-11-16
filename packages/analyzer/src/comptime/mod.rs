@@ -245,6 +245,7 @@ pub fn visit(expr: &Expr, f: &mut dyn FnMut(&Expr)) {
 		Expr::Const(_)
 		| Expr::Local(_)
 		| Expr::Global(_)
+		| Expr::BorrowGlobal(_)
 		| Expr::Function(_)
 		| Expr::Closure { .. }
 		| Expr::Continue

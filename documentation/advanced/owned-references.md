@@ -23,7 +23,7 @@ A reference is either:
 - **local**: declared with `use` or `mutable use`, received as a parameter, or returned by a function. The compiler tracks it statically, call after call. This page is about local references.
 - **stored**: a field typed `(Person in people)?` or `Pool<Person in people>`. A stored reference is either a [relation](/advanced/relations), maintained on writes/deletion, or an explicit [link](/advanced/relations#links-without-a-reverse-side), contained by an owner of growing collections.
 
-A local reference can't be stored as it is: a field typed `Person` or `Person?` owns a value under the [storage rules](/advanced/memory-management#copies-moves-unique-values-and-shared-handles). To store a reference, declare a relation or an explicit link field. A local collection of references, like `Array<Person in people>`, is not allowed either: keep indices, or declare a relation `Pool`.
+A local reference can't be stored as it is: a field typed `Person` or `Person?` owns a value under the [storage rules](/advanced/memory-management#copies-moves-unique-values-and-shared-handles). To store a reference, declare a relation or an explicit link field. A local collection of references, like `Array<Person in people>`, is not allowed either: keep indices, or declare a relation `Pool`. This also applies inside aliases, tuples, generic arguments and function types, including result types (`REF010`). Only the whole parameter or result may declare a local reference; nesting it inside an owned type would lose its collection.
 
 ## Invalidation
 
@@ -312,6 +312,8 @@ function firstPerson = (persons: Array<Person>): (Person in persons)? => {
 }
 ```
 
+A reference result can be an `if`, `when`, `catch` or block expression. Every reachable result must designate an element of the declared collection; returning a local collection's element in just one branch is still an error. A reseatable reference must satisfy that rule for every place it may designate at the return. An `async` function cannot declare a reference result: return an index or an owned copy instead.
+
 The caller receives a reference whose validity is tied to its own collection: the parameter name in the return type is replaced by the argument, so `firstPerson(persons)` returns a `(Person in persons)?`. The index of the element is not known to the caller.
 
 ```fa
@@ -359,10 +361,27 @@ keeps it, while an ordinary owning store follows the data's copy/move rules.
 Relation-field borrows read the target address once, rather than aliasing the
 field that can later be reassigned. Columnar references keep their row locator.
 
-JavaScript uses the existing accessor cells at user-function call boundaries
-for primitive slots, subfields and erased generic items. An object `use` unwraps
-the cell once and retains the object itself; writes through primitive parameters
-use its getter/setter. This call ABI does not add wrappers to stored object-link
-reads. Owner paths, effects and direct-call freshness stay compile-time facts;
-they survive callable interface merging, hashing and import substitution.
+JavaScript passes and returns object references as the objects themselves, with
+`undefined` for an absent reference. Primitive and mixed-union places use a cached
+accessor cell per designated slot. A local alias, a parameter, a default argument
+and a returned reference forward that same cell; calls do not allocate another.
+The pool cache retains the slot index needed by deletion and retires it on
+removal. Field/array/map caches are weakly owned by the containing object. Erased
+generic code receives a representation flag per type parameter: object-only
+items keep the direct object ABI, while a mixed-union slot keeps its cell even
+when its current value is an object. Reads/writes dispatch on the internal cell
+tag. This is a call ABI, not the storage representation of a link.
+
+The compile-time interpreter retains evaluated places as a frame identity and
+generation, a local slot, and field/index keys evaluated once. Borrowed arguments,
+local aliases and results retain that identity; ordinary reads materialize data.
+Caller-owned argument and default temporaries remain alive until the caller
+finishes; immutable module owners remain in the evaluation's root frame. Pools
+keep stable slots through removal. Internal place carriers cannot be embedded
+as constants: only the resulting data leaves evaluation.
+
+Owner paths, effects and direct-call freshness stay compile-time facts; they
+survive callable interface merging, hashing and import substitution. Structured
+results merge addresses on native/wasm and carriers on JavaScript, with freshness
+only when every reachable result is fresh.
 :::

@@ -51,3 +51,12 @@ test("a reference to an optional primitive remains distinct from no reference", 
 	faReferenceWrite(reference, 3);
 	expect(values[0]).toBe(3);
 });
+
+test("a union slot keeps its carrier while its value changes representation", () => {
+	const values = [{ value: 7 }];
+	const reference = faBorrowSlot(values, 0, false, false);
+	faReferenceWrite(reference, 9);
+	expect(values).toEqual([9]);
+	expect(faReferenceValue(reference)).toBe(9);
+	expect(faBorrowSlot(values, 0, false, false)).toBe(reference);
+});

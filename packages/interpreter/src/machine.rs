@@ -9,7 +9,7 @@ use ethnum::I256;
 use crate::callbacks::{Callback, Progress};
 use crate::code::{Argument, Code, Item, Node, Op, Part, Place, Step};
 use crate::eval::{self, Error, Eval, Flow, Interpreter};
-use crate::ir::{ArithOp, CompareOp, FnKey, Num, Slot, TypeTest};
+use crate::ir::{ArithOp, CompareOp, FnKey, GlobalKey, Num, Slot, TypeTest};
 use crate::references::{Key, Reference};
 use crate::value::{Closure, Member, MemberKind, Object, Value, equals};
 use crate::{builtins, memory};
@@ -163,6 +163,7 @@ enum Continuation {
 pub(crate) struct Machine<'i, 'h> {
 	interpreter: &'i mut Interpreter<'h>,
 	frames: Vec<Frame>,
+	globals: HashMap<GlobalKey, Slot>,
 	next_generation: u64,
 	stack: Vec<Continuation>,
 }
@@ -202,6 +203,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 		let locals = vec![Value::None; code.slots as usize];
 		Ok(Self {
 			interpreter,
+			globals: HashMap::new(),
 			frames: vec![Frame {
 				code,
 				locals,
@@ -221,7 +223,13 @@ impl<'i, 'h> Machine<'i, 'h> {
 				Action::Call(target, arguments) => self.call_function(target, arguments),
 				Action::Done(result) => {
 					let Some(continuation) = self.stack.pop() else {
-						return result;
+						// Public evaluation returns data, never a handle into frames
+						// that are about to be destroyed.
+						return match result {
+							Ok(value) => self.read_value(value).map_err(Flow::from),
+							Err(Flow::Return(value)) => self.read_value(value).map_err(Flow::from),
+							other => other,
+						};
 					};
 					self.resume(continuation, result)
 				}
@@ -255,6 +263,24 @@ impl<'i, 'h> Machine<'i, 'h> {
 				Self::done(self.read_value(self.frame().locals[*slot as usize].clone())?)
 			}
 			Op::Global(key) => Self::done(self.interpreter.host.global(*key)?),
+			Op::BorrowGlobal(key) => {
+				let slot = if let Some(&slot) = self.globals.get(key) {
+					slot
+				} else {
+					let value = self.interpreter.host.global(*key)?;
+					self.interpreter.reserve(memory::values_size(1))?;
+					let slot = self.frames[0].locals.len() as Slot;
+					self.frames[0].locals.push(value);
+					self.globals.insert(*key, slot);
+					slot
+				};
+				Self::done(Value::Reference(Arc::new(Reference {
+					frame: 0,
+					generation: 0,
+					slot,
+					keys: Vec::new(),
+				})))
+			}
 			Op::Function(function) => Self::done(Value::Function(Arc::new(Closure {
 				function: *function,
 				captured: Vec::new(),
@@ -815,6 +841,13 @@ impl<'i, 'h> Machine<'i, 'h> {
 				)
 				.collect();
 		}
+		// Host callbacks and bound arguments also need caller-lived storage
+		// when a borrowed result is read after the callee has returned.
+		for ((slot, _), value) in code.params.iter().zip(&mut arguments) {
+			if let Some(given) = value.take() {
+				*value = Some(self.argument_storage(self.frames.len() - 1, key, *slot, given)?);
+			}
+		}
 		if self.interpreter.depth >= self.interpreter.limits.depth {
 			return Err(Error::Depth(self.interpreter.limits.depth).into());
 		}
@@ -885,6 +918,19 @@ impl<'i, 'h> Machine<'i, 'h> {
 		}
 		let function = self.frame().function.expect("a function default");
 		let caller_index = self.frames.len() - 2;
+		self.argument_storage(caller_index, function, parameter, value)
+	}
+
+	fn argument_storage(
+		&mut self,
+		caller_index: usize,
+		function: FnKey,
+		parameter: Slot,
+		value: Value,
+	) -> Result<Value, Error> {
+		if matches!(value, Value::None | Value::Reference(_)) {
+			return Ok(value);
+		}
 		let caller = &mut self.frames[caller_index];
 		let key = (function, parameter);
 		let slot = if let Some(&slot) = caller.default_slots.get(&key) {
@@ -1134,6 +1180,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 						})
 					}
 					Continuation::Callback(callback, finish) => {
+						let value = self.read_value(value)?;
 						self.callback(callback, Some(value), finish)
 					}
 					_ => unreachable!("handled control boundary"),

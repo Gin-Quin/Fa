@@ -59,7 +59,31 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				_ => pending.extend(fa_analyzer::syntax::children(self.tree, node)),
 			}
 		}
-		self.frame_mut().reference_returns = roots;
+		let mut pending: Vec<_> = roots.into_iter().collect();
+		let mut values = rustc_hash::FxHashSet::default();
+		while let Some(node) = pending.pop() {
+			values.insert(node);
+			match self.view(node) {
+				View::Group(inner) | View::Try(inner) | View::Do(inner) => pending.push(inner),
+				View::Block { statements } => pending.extend(statements.last()),
+				View::If {
+					then_body,
+					else_body,
+					..
+				} => {
+					pending.push(then_body);
+					pending.extend(else_body);
+				}
+				View::When { arms, .. } => pending.extend(arms.iter().map(|arm| arm.value)),
+				View::Catch {
+					expression,
+					handler,
+					..
+				} => pending.extend([expression, handler]),
+				_ => {}
+			}
+		}
+		self.frame_mut().reference_returns = values;
 	}
 
 	/// The declared result of a user call, separated from its address ABI.
@@ -172,6 +196,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// Evaluate a result as a borrowed address, without a copy, temporary
 	/// lifetime extension or a second evaluation of an insertion.
 	pub(super) fn borrowed_result(&mut self, value: NodeId) -> Result<Val<'ctx>, Error> {
+		if self.reference_control(value) {
+			return self.expr_inner(value);
+		}
 		let mut node = value;
 		while let View::Group(inner) | View::Try(inner) = self.view(node) {
 			node = inner;
@@ -187,6 +214,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			None => self.reference_place(node)?,
 		};
 		Ok(Val::new(Repr::Pointer, slot.pointer))
+	}
+
+	/// Structured reference values merge addresses, rather than loaded data.
+	pub(super) fn reference_control(&self, node: NodeId) -> bool {
+		self.frame().reference_returns.contains(&node)
+			&& matches!(
+				self.view(node),
+				View::Group(_)
+					| View::Try(_) | View::Do(_)
+					| View::Block { .. }
+					| View::If { .. }
+					| View::When { .. }
+					| View::Catch { .. }
+			)
 	}
 
 	/// Materialize a borrowed call for an ordinary read; `use` takes the

@@ -190,6 +190,8 @@ pub enum Expr {
 	Local(Slot),
 	/// A module-level value (evaluated once by the host).
 	Global(GlobalKey),
+	/// Retain an immutable module value for this evaluation's lifetime.
+	BorrowGlobal(GlobalKey),
 	/// A named function as a value.
 	Function(FnKey),
 	/// A lambda or local function. Nonescaping closures retain places;

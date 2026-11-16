@@ -1,0 +1,12 @@
+-- Immutable module owners outlive calls at compile time too.
+let values: Array<Integer> = [9]
+function first = (): Integer in values => values[0]
+function found = (): (Integer in values)? => values.find((value) => value == 9)
+function check = (): Integer => {
+ use value = first()
+ use match = found()
+ if match is not none { value + match - 9 } else { 0 }
+}
+static result = @check()
+console.log(result) -- prints: 9
+console.log(check()) -- prints: 9

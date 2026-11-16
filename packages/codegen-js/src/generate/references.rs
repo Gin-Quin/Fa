@@ -178,12 +178,9 @@ impl Generator<'_> {
 		let container = self.keep_value_part(Expr::primary(container));
 		let key = self.keep_value_part(Expr::primary(key));
 		let borrow = self.helper("faBorrowSlot");
-		let erased = matches!(
-			self.types.kind(self.without_none(self.type_of(node))),
-			TypeKind::Param(_)
-		);
+		let object = self.reference_object_flag(self.type_of(node));
 		let cell = format!(
-			"{borrow}({}, {}, {map}, {erased})",
+			"{borrow}({}, {}, {map}, {object})",
 			container.text, key.text
 		);
 		if parts.optional {
@@ -198,7 +195,7 @@ impl Generator<'_> {
 
 	/// An erased Pool.add returns either an object or a primitive slot.
 	/// Dispatch once at insertion and retain the exact target in the cell.
-	fn generic_pool_reference(&mut self, node: NodeId) -> Option<Expr> {
+	pub(crate) fn generic_pool_reference(&mut self, node: NodeId) -> Option<Expr> {
 		if let View::Call { callee, .. } = self.view(node)
 			&& matches!(self.analysis.call(node).map(|call| call.callee), Some(Callee::Builtin(id)) if builtins::get(id).path == "Pool#find")
 			&& matches!(self.types.kind(self.receiver_type(callee)), TypeKind::Collection(_, item, _) if matches!(self.types.kind(item), TypeKind::Param(_)))
@@ -243,7 +240,7 @@ impl Generator<'_> {
 			let borrow = self.helper("faBorrowSlot");
 			let add = self.helper("faAdd");
 			let expression = format!(
-				"({receiver}[Symbol.toStringTag] === \"fa:ValuePool\" ? {borrow}({receiver}, {receiver}.add({data}), true, true) : {add}({receiver}, {data}))"
+				"({receiver}[Symbol.toStringTag] === \"fa:ValuePool\" ? {borrow}({receiver}, {receiver}.add({data}), true, false) : {add}({receiver}, {data}))"
 			);
 
 			self.out.line(format!("const {result} = {expression};"));
@@ -258,10 +255,20 @@ impl Generator<'_> {
 	/// themselves: objects and collections (optional or not).
 	pub(crate) fn is_object_reference(&self, ty: TypeId) -> bool {
 		let ty = self.without_none(ty);
-		matches!(
-			self.types.kind(ty),
-			TypeKind::Object(_) | TypeKind::Collection(..) | TypeKind::Tuple(_) | TypeKind::Range
-		)
+		match self.types.kind(ty) {
+			TypeKind::Object(_)
+			| TypeKind::Collection(..)
+			| TypeKind::Tuple(_)
+			| TypeKind::Range
+			| TypeKind::CArray(..) => true,
+			TypeKind::Union(list) => self
+				.types
+				.list_items(list)
+				.iter()
+				.all(|&item| self.is_object_reference(item)),
+			TypeKind::Rec(_) => self.is_object_reference(self.types.unfold(ty)),
+			_ => false,
+		}
 	}
 
 	/// The type without its `none` member (`T?` → `T`).

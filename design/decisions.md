@@ -8,7 +8,7 @@ The lead adopts Option A of [Pool links](pool-links.md), including its ten propo
 Implementation sequence: reject hidden reference fields; preserve reference function owner paths; InlineArray independently; then containment/effects, engines, complete-owner copies and boundaries. Unsupported link storage remains rejected while these slices land. Reference contracts belong to callable interfaces and must survive method/parameter substitution, imports and function values; freshness crosses direct calls only, with every reachable reference result fresh.
 
 
-Reference-return implementation: keep the ordinary item TypeId for data/layout and store symbolic reference contracts separately in ParamSig/FnSig (including interface merging/hashing); this avoids losing owner identity through equal structural layouts. Alias declarations publish a reference-containing summary before erased types can hide unsupported field storage. Reference parameters retain their effect roots and use the existing reference-state engine for their declared collection provenance. Native results return borrowed addresses with the same error ABI; split object caches gain a version suffix. JavaScript uses the existing accessor-cell machinery as its internal borrowed-call ABI, covering primitive slots/subfields and erased generics uniformly. Object `use` unwraps once and keeps the target itself; ordinary stores copy the designated data. This introduces no public handle type and changes no link-field hot-read representation. Methods used as values follow the existing explicit form `Model.add`, with the owner passed as their first argument; no implicit instance capture is added. Self owner contracts normalize to the first parameter so explicit function types agree with unbound methods. Nested recursive element types retain enclosing generic arguments; relation field markers survive substitution. Reference-containing alias defaults are summarized by parameter position, so omitted defaults are rejected without rejecting an explicit owned override. Native columnar results and parameters retain their row locator, and JavaScript primitive pool cells retain their slot for deletion.
+Reference-return implementation: keep the ordinary item TypeId for data/layout and store symbolic reference contracts separately in ParamSig/FnSig (including interface merging/hashing); this avoids losing owner identity through equal structural layouts. Alias declarations publish a reference-containing summary before erased types can hide unsupported field storage. Reference parameters use the existing reference-state engine for collection provenance; declared effects may name the parameter or its containing owner path, with narrow inference (see the review decision below). Native results return borrowed addresses with the same error ABI; split object caches gain a version suffix. JavaScript passes object references directly and forwards cached slot cells for primitive and mixed-union places, including through erased generic code; ordinary stores copy the designated data. This introduces no public handle type and changes no link-field hot-read representation. Methods used as values follow the existing explicit form `Model.add`, with the owner passed as their first argument; no implicit instance capture is added. Self owner contracts normalize to the first parameter so explicit function types agree with unbound methods. Nested recursive element types retain enclosing generic arguments; relation field markers survive substitution. Reference-containing aliases and generic defaults are rejected at their declaration before their owned type can erase the reference. Native columnar results and parameters retain their row locator, and JavaScript primitive pool cells retain their slot for deletion.
 
 ## Programs and the command line
 
@@ -1528,3 +1528,36 @@ improvement. The driver has an optional `--require-control` publication policy:
 every failed control renders as `not resolved`, raw phase samples/verdicts stay
 intact, and the policy survives re-rendering of combined JSON. Its default
 historical near-threshold policy is unchanged. See the dated ports results.
+
+
+## Links reference review fixes (2026-11-16)
+
+Reference contracts name parameters of their own function, or module values;
+parameters captured from an outer function cannot accidentally become the inner
+function's parameter at the same ordinal. Validate reference defaults in the
+callee against the same owner contract as given arguments. Flow origins, rather
+than the last syntactic alias, determine every possible owner and all-path
+freshness at joins and structured returns. Reject reference types before erasure
+at every owned type-expression root. Async reference results fail at declaration.
+
+As the lead decided, writes through `node: Node in self.nodes` are covered by
+`mutates node.world` and by `mutates self.nodes[..].world`. Infer the narrow form;
+callers apply the declared form. An escaping closure cannot retain a reference
+into a local collection; MEM004 identifies the collection and suggests a data
+snapshot or an owner that outlives the closure.
+
+Objects use the direct-object JavaScript ABI through parameters and results.
+Primitive and mixed-union places cache an accessor carrier in the container (or
+its weak cache), with pool slot identity retained and retired on removal. Generic
+functions receive a hidden representation flag for each type parameter, forwarded
+through generic calls and imports; a mixed union needs a slot even when its
+current value is an object. No call creates a new object wrapper. Ordinary storage
+continues to follow its data's ownership rules.
+
+The evaluator uses evaluated frame/slot/key paths with frame generations,
+caller-lived argument/default storage and stable pool slots. Nonescaping captures
+borrow those paths; escaping data captures keep snapshots. Native structured
+results merge addresses rather than loaded values. No interpreter address or
+internal carrier is a public constant. The link/relation initialization rules
+remain as decided: link defaults are explicit; collection-maintained sides start
+empty.

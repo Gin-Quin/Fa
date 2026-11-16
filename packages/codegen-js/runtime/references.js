@@ -1,4 +1,4 @@
-import { faFind } from "./collections.js";
+import { faDeleteWhere, faFind, faSetFilter, faSetTake } from "./collections.js";
 import { faAssign } from "./copy.js";
 
 // @fa-helper faReferenceCellTag
@@ -48,13 +48,13 @@ export function faFindReference(collection, predicate) {
  * @param {any} container
  * @param {any} key
  * @param {boolean} map
- * @param {boolean} [erased]
+ * @param {boolean} [object]
  * @returns {any}
  */
-export function faBorrowSlot(container, key, map, erased = false) {
+export function faBorrowSlot(container, key, map, object = false) {
 	const value = map ? container.get(key) : container[key];
 	if (container[Symbol.toStringTag] === "fa:ValuePool") return container.reference(key);
-	if (erased && value !== null && typeof value === "object") return value;
+	if (object) return value;
 	const state = /** @type {any} */ (faBorrowSlot);
 	state.cache ??= new WeakMap();
 	let slots = state.cache.get(container);
@@ -82,4 +82,32 @@ export function faBorrowSlot(container, key, map, erased = false) {
 	};
 	slots.set(key, reference);
 	return reference;
+}
+
+// @fa-helper faErasedPoolRemove deps: faSetTake
+/**
+ * Remove the exact slot through an erased Pool<Item> parameter.
+ * @param {any} collection
+ * @param {any} reference
+ * @param {boolean} take
+ * @returns {any}
+ */
+export function faErasedPoolRemove(collection, reference, take) {
+	if (collection[Symbol.toStringTag] === "fa:ValuePool")
+		return take ? collection.take(reference.$k) : collection.delete(reference.$k);
+	return take ? faSetTake(collection, reference) : collection.delete(reference);
+}
+
+// @fa-helper faErasedPoolFilter deps: faDeleteWhere faSetFilter
+/**
+ * Keep the representation of a generic pool when selecting its elements.
+ * @param {any} collection
+ * @param {(value: any) => boolean} predicate
+ * @param {boolean} remove
+ * @returns {any}
+ */
+export function faErasedPoolFilter(collection, predicate, remove) {
+	if (collection[Symbol.toStringTag] === "fa:ValuePool")
+		return remove ? collection.deleteWhere(predicate) : collection.filter(predicate);
+	return remove ? faDeleteWhere(collection, predicate) : faSetFilter(collection, predicate);
 }

@@ -1144,7 +1144,6 @@ impl<'a> Lowerer<'a> {
 			View::Call { callee, .. } => {
 				if let Some(info) = self.a.call(value)
 					&& let Callee::Builtin(builtin) = info.callee
-					&& let Some(place) = self.receiver_place(callee)
 				{
 					let values = info
 						.arguments
@@ -1154,7 +1153,7 @@ impl<'a> Lowerer<'a> {
 							_ => None,
 						})
 						.collect();
-					return Expr::BorrowBuiltin(builtins::get(builtin).path, place, values);
+					return self.borrow_builtin(callee, builtins::get(builtin).path, values);
 				}
 			}
 			_ => {}
@@ -1167,10 +1166,78 @@ impl<'a> Lowerer<'a> {
 					.contains(&TypeId::NONE);
 			return Expr::Borrow(place, optional);
 		}
-		self.unsupported(format!(
-			"a reference to `{}` at compile time",
-			self.text(value)
-		))
+		match syntax::view(self.tree, value) {
+			View::Name(_) => {
+				let read = match self.a.resolution(value) {
+					Resolution::Local(symbol) => self.read_symbol(value, symbol),
+					resolution @ Resolution::External(_) => self.external(value, resolution),
+					_ => self.unsupported("this reference"),
+				};
+				match read {
+					Expr::Global(key) => Expr::BorrowGlobal(key),
+					other @ (Expr::Impure(_) | Expr::Unsupported(_)) => other,
+					_ => self.unsupported("a reference to this constant"),
+				}
+			}
+			View::Access { target, members } => {
+				let owner = self.borrow_value(target);
+				let slot = self.temp();
+				let mut steps = Vec::new();
+				for member in members.iter() {
+					let View::Name(name) = syntax::view(self.tree, member) else {
+						return self.unsupported("this reference field");
+					};
+					steps.push(Step::Field(Arc::from(self.tree.name(name))));
+				}
+				Expr::Block(vec![
+					Expr::Let(slot, owner.boxed()),
+					Expr::Borrow(Place { slot, steps }, false),
+				])
+			}
+			View::Index { target, index } => {
+				let owner = self.borrow_value(target);
+				let slot = self.temp();
+				let index = self.expr(index);
+				Expr::Block(vec![
+					Expr::Let(slot, owner.boxed()),
+					Expr::Borrow(
+						Place {
+							slot,
+							steps: vec![Step::Index(index)],
+						},
+						false,
+					),
+				])
+			}
+			_ => self.unsupported(format!(
+				"a reference to `{}` at compile time",
+				self.text(value)
+			)),
+		}
+	}
+
+	/// Borrow a builtin's receiver, including immutable module owners and
+	/// nested reference-returning expressions, without copying its data.
+	fn borrow_builtin(&mut self, callee: NodeId, path: &'static str, values: Vec<Expr>) -> Expr {
+		if let Some(place) = self.receiver_place(callee) {
+			return Expr::BorrowBuiltin(path, place, values);
+		}
+		let View::Access { target, members } = syntax::view(self.tree, callee) else {
+			return self.unsupported("this borrowed receiver");
+		};
+		let owner = self.borrow_value(target);
+		let slot = self.temp();
+		let mut steps = Vec::new();
+		for member in members.iter().take(members.len().saturating_sub(1)) {
+			let View::Name(name) = syntax::view(self.tree, member) else {
+				return self.unsupported("this borrowed receiver");
+			};
+			steps.push(Step::Field(Arc::from(self.tree.name(name))));
+		}
+		Expr::Block(vec![
+			Expr::Let(slot, owner.boxed()),
+			Expr::BorrowBuiltin(path, Place { slot, steps }, values),
+		])
 	}
 
 	/// `target = value`.
@@ -1624,8 +1691,7 @@ impl<'a> Lowerer<'a> {
 						| "OrderedColumnar#find"
 						| "Array#get" | "Array#find"
 						| "Map#get" | "Map#getOrInsert"
-				) && let Some(place) = self.receiver_place(callee)
-				{
+				) {
 					let values = info
 						.arguments
 						.iter()
@@ -1634,7 +1700,7 @@ impl<'a> Lowerer<'a> {
 							_ => None,
 						})
 						.collect();
-					return Expr::Dereference(Expr::BorrowBuiltin(path, place, values).boxed());
+					return Expr::Dereference(self.borrow_builtin(callee, path, values).boxed());
 				}
 				let method = path.contains('#');
 				let mut values = Vec::new();

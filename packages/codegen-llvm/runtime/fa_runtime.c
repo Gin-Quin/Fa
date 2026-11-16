@@ -2733,6 +2733,26 @@ FA_EXPORT uint8_t fa_next_utf8_byte(const uint8_t *bytes, size_t length, FaUtf8C
 	return byte;
 }
 
+/// A previously bounds-checked byte of the UTF-8 encoding. Canonical WTF-8
+/// and UTF-8 have equal byte positions; only cut heads shift them, and lone
+/// surrogates replace three bytes with three bytes. No whole encoding is made.
+FA_EXPORT __attribute__((always_inline)) uint8_t fa_string_utf8_byte(
+    const uint8_t *bytes, size_t length, size_t capacity, size_t position) {
+	if (!(capacity & STRING_SURROGATES)) { return bytes[position]; }
+	static const uint8_t replacement[] = {0xEF, 0xBF, 0xBD};
+	if (span_low_head(bytes, length)) {
+		if (position < 3) { return replacement[position]; }
+		position -= 1;
+	}
+	if (span_high_tail(bytes, length) && position >= length - 3) {
+		return replacement[position - (length - 3)];
+	}
+	if (bytes[position] == 0xED && position + 2 < length && bytes[position + 1] >= 0xA0) { return 0xEF; }
+	if (position && bytes[position - 1] == 0xED && bytes[position] >= 0xA0 && position + 1 < length) { return 0xBF; }
+	if (position >= 2 && bytes[position - 2] == 0xED && bytes[position - 1] >= 0xA0) { return 0xBD; }
+	return bytes[position];
+}
+
 /// Normalize a writable byte sequence, including joins across builder parts.
 static size_t string_join_pairs(uint8_t *bytes, size_t length, size_t *flags) {
 	size_t read = 0, written = 0;
@@ -3353,14 +3373,7 @@ FA_EXPORT void *fa_string_split_nonempty_views(const uint8_t *text, size_t lengt
 
 /// `text.codePoints()`: an `Array(UInt32)`.
 FA_EXPORT void *fa_string_code_points(const uint8_t *text, size_t length, size_t capacity) {
-	size_t count = 0;
-	if (capacity & SIMPLE) {
-		count = length;
-	} else {
-		for (size_t index = 0; index < length; index += 1) {
-			count += (text[index] & 0xC0) != 0x80;
-		}
-	}
+	size_t count = (size_t)fa_string_code_point_count(text, length, capacity);
 	FaArrayHeader *points = fa_array_new((int64_t)count, (int64_t)count, sizeof(uint32_t));
 	uint32_t *items = (uint32_t *)points->items;
 	if (count == length) {
@@ -3425,7 +3438,7 @@ FA_EXPORT int64_t fa_string_code_point_count(const uint8_t *text, size_t length,
 	for (size_t index = 0; index < length; index += 1) {
 		count += (text[index] & 0xC0) != 0x80;
 	}
-	return count;
+	return count + span_low_head(text, length);
 }
 
 /// Counts UTF-16 code units directly in WTF-8, with no Unicode tables.

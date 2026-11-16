@@ -1491,6 +1491,8 @@ static void test_utf8_input(void) {
 		FaUtf8Cursor cursor = {0};
 		for (size_t byte = 0; byte < count; byte += 1) {
 			CHECK(fa_next_utf8_byte(spans[index], lengths[index], &cursor) == (byte % 3 == 0 ? 0xEF : byte % 3 == 1 ? 0xBF : 0xBD));
+			CHECK(fa_string_utf8_byte(spans[index], lengths[index], STRING_COUNTED_VIEW | (index == 3 ? 2 : 1), byte)
+			      == (byte % 3 == 0 ? 0xEF : byte % 3 == 1 ? 0xBF : 0xBD));
 		}
 		CHECK(cursor.remaining == 0 && cursor.position == lengths[index]);
 		uint8_t copied[8] = {0};
@@ -1502,6 +1504,7 @@ static void test_utf8_input(void) {
 		CHECK(fa_string_includes(spans[index], lengths[index], capacity, copied, count));
 		CHECK(fa_string_starts_with(spans[index], lengths[index], capacity, copied, count));
 		CHECK(fa_string_ends_with(spans[index], lengths[index], capacity, copied, count));
+		CHECK(fa_string_code_point_count(spans[index], lengths[index], capacity) == (index == 3 ? 2 : 1));
 	}
 	FaFileJob *file = fa_file_job(FILE_WRITE, pair + 2, 2, pair, 3);
 	CHECK(file->path_length == 3 && file->path[3] == 0 && file->length == 3);
@@ -1561,6 +1564,10 @@ static void test_unicode_transform_counts(void) {
 	CHECK(fa_string_is_well_formed(string_bytes(&result), string_length(&result), result.capacity));
 	if (string_owned(result.capacity)) { fa_string_free(result.bytes, result.capacity); }
 	CHECK(fa_string_length(source.bytes, source.length, source.capacity) == 102);
+	FaArrayHeader *points = fa_string_code_points(bytes + 202, 2, STRING_COUNTED_VIEW | 1);
+	CHECK(points->length == 1 && ((const uint32_t *)(const void *)points->items)[0] == 0xDE00);
+	CHECK(fa_string_code_point_at(bytes + 202, 2, STRING_COUNTED_VIEW | 1, -1) == 0xDE00);
+	fa_array_free(points, sizeof(uint32_t));
 	fa_string_free(source.bytes, source.capacity);
 	fa_release_builder();
 	CHECK(allocated == before);

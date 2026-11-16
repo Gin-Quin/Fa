@@ -1125,7 +1125,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// that the code point is read from the text without building the array.
 	pub(crate) fn code_points_of(&self, node: NodeId) -> Option<NodeId> {
 		let target = match self.view(node) {
-			View::Index { target, .. } => target,
+			View::Index { target, index } if self.node_repr(index).ok() != Some(Repr::Range) => {
+				target
+			}
 			View::Call { callee, .. } => match self.view(callee) {
 				View::Access { target, members } if members.len() == 1 => target,
 				_ => return None,
@@ -1328,9 +1330,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 	}
 
-	/// The byte length of a text, as an `i64`.
+	/// The encoded UTF-8 byte length of a text, as an `i64`.
 	pub(crate) fn byte_length(&self, text: Val<'ctx>) -> Result<IntValue<'ctx>, Error> {
-		let (_, length) = self.string_parts(text)?;
+		let (bytes, physical) = self.string_parts(text)?;
+		let length = self
+			.call_value(
+				self.runtime.function("fa_string_encoded_length")?,
+				&[
+					bytes.into(),
+					physical.into(),
+					self.string_capacity(text)?.into(),
+				],
+			)?
+			.into_int_value();
 		self.int_to(
 			length,
 			IntRepr {
@@ -1367,7 +1379,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		position: IntValue<'ctx>,
 		index: NodeId,
 	) -> Result<IntValue<'ctx>, Error> {
-		let (bytes, _) = self.string_parts(text)?;
+		let (bytes, physical) = self.string_parts(text)?;
 		let length = self.byte_length(text)?;
 		let i64 = self.context.i64_type();
 		let position = if self.may_be_negative(index) {
@@ -1384,13 +1396,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let branch = self.builder.build_conditional_branch(inside, read, end)?;
 		self.likely(branch)?;
 		self.builder.position_at_end(read);
-		let address = unsafe {
-			self.builder
-				.build_in_bounds_gep(self.context.i8_type(), bytes, &[position], "")?
-		};
+		let offset = self.builder.build_int_cast(position, self.usize, "")?;
 		let byte = self
-			.builder
-			.build_load(self.context.i8_type(), address, "byte")?
+			.call_value(
+				self.runtime.function("fa_string_utf8_byte")?,
+				&[
+					bytes.into(),
+					physical.into(),
+					self.string_capacity(text)?.into(),
+					offset.into(),
+				],
+			)?
 			.into_int_value();
 		let byte = self.builder.build_int_z_extend(byte, i64, "")?;
 		self.builder.build_unconditional_branch(end)?;

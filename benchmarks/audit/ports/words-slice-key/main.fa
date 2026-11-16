@@ -1,0 +1,13 @@
+-- Representation probe for the explicit words table, not a timed variant.
+-- Goose's slots borrow word bytes; owning String keys would change the layout.
+mutable text = "alpha beta"
+
+type Slot = {
+	key: String in text
+	count: Int32
+}
+
+use word = text[0..5]
+mutable slots: Array<Slot> = []
+slots.push({ key = word, count = 1 })
+console.log(slots[0].key)

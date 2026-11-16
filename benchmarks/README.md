@@ -120,7 +120,29 @@ The defaults run in about 0.25 to 2 seconds in Rust (see the [baseline](#trunk-b
 - **`bintrees` is `binary-trees`**: the same Benchmarks Game program. `binary-trees/main.goose` is Goose's `bintrees.goose` with the output of `main.rs`. `words` stays separate from `word-count`: same idea, but a different generator, text and output.
 - The other ten benchmarks got a Goose version written for them (`main.goose`, a direct port of `main.rs` reading its size from its arguments): inline `u8[..8]` strings where the words fit (`word-count`, `sort-objects`), `dictionary` for the maps, `sort` with a block for the comparator.
 
-The ports preserve many scalar widths (`design/decisions.md`, "Benchmark ports keep the source's integer widths"): `Int32` keys/values and `UInt32` links in `lru`, `Int32` literals in `interp`, `Int32` ids in `scene`. The audit identifies remaining differences: Goose's graph ids are unsigned, its sexp/calc numbers use varints, and its words counts are `i32` rather than Fa's Integer. `calc` reuses one generator text and damages it in place with string slices (`text = text[..index] + "#" + text[index + 1..]`, edited in place natively), as its sources do. `sexp` still owns child Arrays and walks them in forward source order, whereas Goose follows reverse-order sibling links. `scene` still owns child Arrays and makes three recursive passes; Goose animates and sums with flat pool scans. Its matrix has nine Float32 fields; fixed inline `CArray<Float32, 9>` is available, but an appendable bounded list of compact child references is not specified. The current trunk compiler exposes `text.bytes()` (read in place when indexed), which these ports use; the string-redesign migration is described in the audit.
+The ports preserve many scalar widths (`design/decisions.md`, "Benchmark ports keep the source's integer widths"): `Int32` keys/values and `UInt32` links in `lru`, `Int32` literals in `interp`, `Int32` ids in `scene`. The audit identifies remaining differences: Goose's graph ids are unsigned, its sexp/calc numbers use varints, while `words` now matches Goose's `i32` counts (`words-wide` preserves the original Integer counters). `calc` reuses one generator text and damages it in place with string slices (`text = text[..index] + "#" + text[index + 1..]`, edited in place natively), as its sources do. `sexp` still owns child Arrays and walks them in forward source order, whereas Goose follows reverse-order sibling links. `scene` still owns child Arrays and makes three recursive passes; Goose animates and sums with flat pool scans. Its matrix has nine Float32 fields; fixed inline `CArray<Float32, 9>` is available, but an appendable bounded list of compact child references is not specified. The current trunk compiler exposes `text.bytes()` (read in place when indexed), which these ports use; the string-redesign migration is described in the audit.
+
+The lead has deferred the pool ports to a language study (2026-11-16).
+`tree`, `binary-trees`, `interp`, `sexp`, `scene` and `calc` are **a different data
+structure from Goose's (recursive owning values), kept until Fa has pool links**.
+`graph` keeps its nested adjacency arrays until that same decision. Do not read
+their current ratios as same-pool-layout comparisons. `words` and `lru` keep
+standard Fa Map as the main rows, with the same 1.10× Goose goal; explicit-table
+variants, where expressible, are separate comparisons with the matching Rust
+open-addressing rows.
+
+The [continuation results](results/2026-11-16-ports-2.md) record all twelve
+new mains and controls, with [raw samples and profiles](results/2026-11-16-ports-2.json).
+In the first 21-round CPU-5 series, unreserved `sum` and `blur` meet the 1.10×
+Goose goal. `particles`, `respond`, `words` and `lru` remain **not resolved**
+because their same-binary controls fail; favorable point estimates do not pass
+that gate. Of the retained variants, `sum-reserved` passes and
+`respond-interpolation` is behind with a passing control; the other four are
+unresolved. These are source and pairing corrections, without a demonstrated
+speedup over the preserved forms. Profiles identify String field appends/returns
+in `respond`, checked explicit-table operations in `lru-open`, and short-key
+hash/probe/compare in standard Map as follow-ups. No compiler changes are included.
+The historical trunk baseline below remains unchanged.
 
 #### What the ports found missing or wrong in Fa
 
@@ -178,6 +200,24 @@ safe Rust push row (reserved Vec plus indices), and the same Goose source.
 Select either name with `audit/compare.py`; `run.ts` runs the main only.
 The [port audit](audit/ports/README.md) explains the remaining differences and
 which recursive mains await language representation decisions.
+
+The continuation keeps `sum`, `particles` and `blur` as unreserved Array mains;
+`sum-reserved`, `particles-reserved` and `blur-reserved` retain the original
+sources, including the old Integer stencil sum. Main `blur` uses UInt16, as
+Goose and Rust do. `respond` emits escaping directly into one output buffer;
+`respond-interpolation` retains the original temporary quoted strings. These
+variants keep the same Rust rows: sum.rs (collect), particles.rs (elementwise),
+blur_index.rs (flat indexing), and respond_dto.rs (the DTO, not streaming).
+
+`lru-open` is the explicit 8-byte Int32-key/UInt32-index slot table with Goose's
+Fibonacci hash, linear probing and backward-shift deletion; it uses the separate
+Rust `lru/open.rs`, adapted from lru_open.rs with zero as its empty marker.
+The main `lru` keeps standard Map and lru_hashmap.rs. Main `words` keeps standard
+Map with Int32 counts to match Goose; `words-wide` preserves the original Fa and
+Rust rows with 64-bit counts. Both are paired with words_hashmap.rs in the
+corresponding width. The requested borrowed-key words table is **blocked**:
+`audit/ports/words-slice-key/main.fa` gets REL001/REL002 for storing a String slice
+reference in a slot. No owning-key or encoded-range substitute is measured.
 
 The [2026-11-16 push checkpoint](results/2026-11-16-ports.md)
 ([raw samples and provenance](results/2026-11-16-ports.json)) measures both forms

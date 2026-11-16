@@ -13,6 +13,15 @@ The single list of open work, in the order of [the journal's Next roadmap](journ
 - **Native conversion between recursive object types overflows the compiler's stack.** Found on `perf/aggregates`, present on trunk `864167d6`: `type Node = { value: Integer, next: Node? }`, `type Other = { value: Int8, next: Other? }`, `let converted: Node = Other { value = 1, next = Other { value = 2 } }` passes `fa check` and builds for Bun, but `fa build --target=native` aborts with a Rust stack overflow (the field conversion recurses over the type pair without a helper per pair). Emit one conversion helper per (source, target) pair, or report a diagnostic; add the program to the native fixtures. Coordinate with `feature/ownership` (copies and conversions).
 - **Review m3 refactoring.** Split the long `readonly_table`, `build_composition_body`, `lower_function_body`, `builtin_call` and `for_items` by responsibility, preserving their tested behavior. See the lead's `trunk-merge-review.md`.
 
+- **Analyzer: reject Array fields of stored references.**
+  `benchmarks/audit/ports/scene-children/main.fa` declares
+  `children: Array<SceneNode in nodes>`. It is accepted and prints 0 on native,
+  wasm and Bun after the original child changes to 2, silently storing owned
+  copies. The reference/relation rules prohibit this field: reject it with a
+  diagnostic instead of erasing its reference type. The pool-link language
+  study does not authorize this current missing rejection; do not fix it in
+  the benchmark-port task.
+
 ## 2. Language semantics
 
 ### Strings first: UTF-16 semantics over UTF-8 storage
@@ -114,18 +123,37 @@ One entry per work package of [the dated inventory §4](reviews/inventory-2026-1
 
 ## 4. Performance
 
-- **Faithful Goose ports (2026-11-16).** The [sixteen-port audit](../benchmarks/audit/ports/README.md)
-  records all structures/passes and intended Rust rows. Push now uses unreserved
-  GrowingArray with documented index marks; the reserved Array is `push-array`.
-  Next: unreserved sum/particles/blur (UInt16 stencil temporary), direct-output
-  respond with retained variants. Before scene/interp/sexp/calc/tree/binary-trees/
-  graph pool ports, decide compact one-way growing-pool links and bounded inline
-  ordered child references; preserve recursive variants and change Rust pairings
-  together. Decide exact words/lru slot algorithms versus standard Map comparisons;
-  words needs Int32 counts and a borrowed-key ownership policy. Sexp needs reverse
-  sibling order and its parser error path. The current scene-children probe is
-  wrongly accepted and stores values instead of rejecting Array reference fields;
-  add the missing rejection (`benchmarks/audit/ports/scene-children/main.fa`).
+- **Deferred Goose pool ports (lead, 2026-11-16).** The
+  [sixteen-port audit](../benchmarks/audit/ports/README.md) records all structures,
+  passes and intended Rust rows. Scene/interp/sexp/calc/tree/binary-trees/graph
+  wait for the language study of one-way growing-pool links, compact widths and
+  bounded inline ordered lists. Do not use CArray integer-link approximations.
+  Retain the current main rows until then; when replacing them, keep recursive
+  variants and change Rust pairings together. Sexp needs reverse sibling order
+  and its parser error path. The separate missing Array-reference-field
+  rejection is an analyzer bug in section 1.
+- **Stored borrowed slice keys for explicit words.** Standard Map remains the
+  main comparator with a 1.10-times-Goose goal (Int32 counters are delivered).
+  `benchmarks/audit/ports/words-slice-key/main.fa` gets REL001/REL002 for a
+  `key: String in text` slot field. Define owner-scoped stored slice lifetimes
+  and representation before an explicit table can match Goose; do not substitute
+  owning keys or hand-encoded ranges. Its intended Rust row is words_open.rs.
+- **Continuation collection costs, ranked (2026-11-16).** The
+  [twelve-row results](../benchmarks/results/2026-11-16-ports-2.md) preserve the
+  first CPU series and strict controls. First inspect String append mode/capacity
+  facts and last-use field returns: direct respond adds 29.72 M audit instructions
+  versus interpolation, with 189,946 cold append calls (25.72 M inclusive) and
+  40,000 slow String copies (6.50 M inclusive). Coordinate with feature/strings;
+  the copy alone does not explain the gap. Next retain masked Array-index and
+  stored-node validity facts in lru-open, including backward-shift deletion:
+  39,041 mapRemove calls cost 1.78 M inclusive instructions. Preserve checked
+  failure paths; do not add unchecked benchmark accesses. Standard Map remains
+  the main target: retain lookup probes through remove/insert and short-key
+  hash/compare facts (words has 28.38 M versus Goose 22.41 M instructions, with
+  small allocator costs). These are profile targets, not demonstrated CPU gains.
+  Sum/blur meet the CPU goal; particles/respond/words/lru and four variants fail
+  controls. Keep those eight series unresolved and append a separately labeled
+  quiet recheck later rather than replacing the first samples.
 - **GrowingArray push and scan (faithful push port).** At 3.2 M items, the scalar
   segment scan executes 25.60 M instructions versus 12.00 M for Goose's vectorized
   scan and the reserved Array control; use a plain inner loop over each segment

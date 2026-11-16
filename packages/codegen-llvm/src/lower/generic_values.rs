@@ -126,6 +126,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mut merger = self.types().merger(Some(module));
 		let global = merger.ty(generic);
 		let arguments: Vec<TypeId> = arguments.iter().map(|&ty| merger.ty(ty)).collect();
+		let module = merger.module(module);
 		drop(merger);
 		let mut scratch = TypeStore::view(self.types().global());
 		let own = scratch_generics(&scratch, global);
@@ -152,6 +153,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let global = merger.ty(ty);
 		let params: Vec<ParamId> = params.iter().map(|&param| merger.param(param)).collect();
 		let arguments: Vec<TypeId> = arguments.iter().map(|&ty| merger.ty(ty)).collect();
+		let module = merger.module(module);
 		drop(merger);
 		let mut scratch = TypeStore::view(self.types().global());
 		let instance = scratch.substitute(

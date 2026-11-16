@@ -352,6 +352,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			types: types.iter().map(|&bound| merger.ty(bound)).collect(),
 			..Default::default()
 		};
+		let module = merger.module(module);
 		drop(merger);
 		let mut scratch = fa_analyzer::types::TypeStore::view(self.types().global());
 		let substituted = scratch.substitute(global, &bindings);

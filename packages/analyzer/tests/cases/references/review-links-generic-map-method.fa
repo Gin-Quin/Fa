@@ -7,10 +7,13 @@ type Cache<Key> = {
   slot = copy value
  }
 }
+function identity = <Value>(value: Value): Value => copy value
+function cloneCache = (transform: <Value>(value: Value) => Value, value: Cache<String>): Cache<String> => transform(value)
 function exercise = (): Array<Integer> => {
  let names = Cache<String> { key = "key" }
  mutable numbers: Map<String, Integer> = [("key", 7)]
- names.write(numbers, 9)
+ let cloned = cloneCache(identity, names)
+ cloned.write(numbers, 9)
  let indexes = Cache<Int8> { key = 1 }
  mutable words: Map<Int8, String> = [(1, "old")]
  indexes.write(words, "new")

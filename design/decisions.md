@@ -1574,3 +1574,9 @@ and helper caches retain exact type bindings; map conversions require matching
 physical storage policies. Hash helpers use the same bound shape keys as copy
 and drop helpers. Generic map deletion also runs through the evaluator's existing
 mutating callback path, with separate key and value callback arguments.
+
+A scratch type store receives global module identities as well as global type
+identities. Promote the source module before merging a substituted generic
+object back out of the scratch store; otherwise its application/name metadata
+can index a nonexistent local module. This applies to call-layout substitution,
+generic function-value instances and selected method argument lists.

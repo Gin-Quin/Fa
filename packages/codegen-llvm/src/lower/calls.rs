@@ -1172,6 +1172,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.iter()
 			.map(|&argument| merger.ty(argument))
 			.collect();
+		let module = merger.module(module);
 		drop(merger);
 		let mut scratch = fa_analyzer::types::TypeStore::view(self.types().global());
 		let list = scratch.list(&arguments);

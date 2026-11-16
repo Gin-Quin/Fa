@@ -1560,14 +1560,20 @@ impl<'a> Lowerer<'a> {
 
 	/// A call, from its `CallInfo`.
 	fn call(&mut self, n: NodeId, callee: NodeId, arguments: syntax::NodeList<'_>) -> Expr {
-		let callee = self.strip_groups(callee);
+		let application = self.strip_groups(callee);
+		let mut callee = application;
+		while self.a.has_flags(callee, NodeFlags::GENERIC_APPLICATION)
+			&& let View::Call { callee: inner, .. } = syntax::view(self.tree, callee)
+		{
+			callee = self.strip_groups(inner);
+		}
 		let Some(info) = self.a.call(n).cloned() else {
 			return self.unsupported(format!("`{}`", self.text(callee)));
 		};
 
 		match info.callee {
 			Callee::Function(declaration) => {
-				let mut args = self.key_arguments(self.file, declaration, n, callee);
+				let mut args = self.key_arguments(self.file, declaration, n, application);
 				args.extend(self.arguments(&info.arguments, Some(callee)));
 				let symbol = self.a.symbols.symbol_of_decl(declaration);
 				let captures = self
@@ -1728,7 +1734,7 @@ impl<'a> Lowerer<'a> {
 					&& declared.kind == SymbolKind::Function
 				{
 					let node = declared.function.unwrap_or(decl);
-					let mut hidden = self.key_arguments(file, node, n, callee);
+					let mut hidden = self.key_arguments(file, node, n, application);
 					hidden.extend(args);
 					return Expr::CallFunction(fn_key(file, node), hidden);
 				}

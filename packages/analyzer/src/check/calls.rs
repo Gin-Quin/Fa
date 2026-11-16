@@ -89,7 +89,7 @@ impl Walker<'_> {
 		// `pool.submit(…)` of a pool without `timeout` (concurrency.rs)
 		let ty = self.submit_without_timeout(n, callee, ty);
 		// `@add(2, 4)`: evaluated while compiling (comptime.rs)
-		if comptime {
+		if comptime && !self.a.has_flags(n, NodeFlags::GENERIC_APPLICATION) {
 			self.evaluate_call(n);
 		}
 		ty

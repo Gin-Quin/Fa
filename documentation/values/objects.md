@@ -358,7 +358,7 @@ See [structural typing](/advanced/structural-typing) for how object types relate
 
 ### JavaScript and compile time
 
-Object construction separates evaluation order from field order. JavaScript emits anonymous properties in UTF-16 name order and declared properties in declaration order; moved effects are evaluated into temporaries in source order, while pure reorderings stay inline. The interpreter evaluates initializers in source order before constructing its ordered object. Reflection and schemas carry the same order recursively. Recursive JSON type-name bindings are scoped to the value being visited, so unrelated local declarations with the same name cannot reuse each other's definition.
+Object construction separates evaluation order from field order. JavaScript emits anonymous properties in UTF-16 name order and declared properties in declaration order; pure reorderings stay inline. When a reordering crosses an effect, the affected source prefix is evaluated into temporaries, preserving earlier unstable reads; the unaffected suffix stays inline. The interpreter evaluates initializers in source order before constructing its ordered object. Reflection and schemas carry the same order recursively. Recursive JSON type-name bindings are scoped to the value being visited, so unrelated local declarations with the same name cannot reuse each other's definition.
 
 ### Native
 

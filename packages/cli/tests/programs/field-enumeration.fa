@@ -18,6 +18,9 @@ static anonymousNames = @names(@typeToSchema({ z: Integer, a: Integer }))
 static declaredNames = @names(@typeToSchema(Declared))
 static unicode = @parseJson("{{\"ﬀ\": 2, \"𐐀\": 1}}")
 static unicodeNames = @names(@typeToSchema(Type<unicode>))
+console.log(unicode) -- prints: { 𐐀 = 1, ﬀ = 2 }
+static unicodePrinted = "{unicode}"
+console.log(unicodePrinted) -- prints: { 𐐀 = 1, ﬀ = 2 }
 console.log(anonymousNames, declaredNames, unicodeNames) -- prints: a,z b,a 𐐀,ﬀ
 
 function keys = <Item, fields: Keys<Item>>(_value: Item) => {

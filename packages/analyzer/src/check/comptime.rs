@@ -620,9 +620,14 @@ impl Walker<'_> {
 	/// Whether a callee is written with `@`.
 	pub(super) fn is_at_callee(&self, callee: NodeId) -> bool {
 		let mut node = callee;
-		// `@tables.squares(5)`: through a namespace
-		while let View::Access { target, .. } = self.view(node) {
-			node = target;
+		loop {
+			match self.view(node) {
+				View::Access { target, .. } | View::Group(target) => node = target,
+				View::Call { callee, .. } if syntax::is_angle_application(&self.tree, node) => {
+					node = callee
+				}
+				_ => break,
+			}
 		}
 		matches!(self.view(node), View::Name(name) if self.tree.name(name).starts_with('@'))
 	}

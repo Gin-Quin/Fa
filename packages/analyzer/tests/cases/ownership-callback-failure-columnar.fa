@@ -16,3 +16,22 @@ function inspect = (text: String): Array<Integer> => {
 	result.sort()
 }
 console.log(inspect("bad")) -- prints: [0, 1]
+
+-- Replacing an owned field must reach its column on failure as well.
+type Row = { items: Array<Integer> }
+function replaced = (text: String): Array<Integer> => {
+	mutable rows: Columnar<Row> = [{ items = [10] }, { items = [10] }, { items = [10] }]
+	mutable examined = 0
+	do {
+		rows.deleteWhere((row) => {
+			examined += 1
+			row.items = [1]
+			if examined == 2 { let _number = try Integer.parse(text) }
+			true
+		})
+	} catch _error => {}
+	mutable result: Array<Integer> = []
+	for row in rows { result.push(row.items.sum()) }
+	result.sort()
+}
+console.log(replaced("bad")) -- prints: [1, 10]

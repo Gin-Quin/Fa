@@ -926,18 +926,46 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mark = self.mark();
 		let mut arguments = before.to_vec();
 		let mut places = vec![None; before.len()];
+		let mut write_backs = Vec::new();
 		for &slot in items {
 			let expected = params.get(arguments.len()).copied().unwrap_or(slot.repr);
+			let argument = self.collection_item_view(slot, expected, node.index())?;
+			if matches!(slot.repr, Repr::Row(_)) && self.borrows_parameter(expected) {
+				// Gathered column fields are a borrowed view of the row. The
+				// callback's writes must be scattered even when it throws.
+				let view = self.alloca(expected, "callback_row")?;
+				self.builder
+					.build_store(view.pointer, argument.value.expect("a row"))?;
+				places.push(Some(view.pointer));
+				write_backs.push(crate::lower::references::WriteBack::Fields { place: slot, view });
+				arguments.push(argument);
+				continue;
+			}
 			// an item of the parameter's representation: lent in place
 			places.push(
 				(slot.repr == expected && self.borrows_parameter(expected)).then_some(slot.pointer),
 			);
-			arguments.push(self.collection_item_view(slot, expected, node.index())?);
+			arguments.push(argument);
 		}
 		arguments.extend_from_slice(after);
-		let result = self.with_destination(node, destination, |this| {
-			this.call_closure_lending(callback, ty, &arguments, &places, node)
-		})?;
+		let call = |this: &mut Self| {
+			this.with_destination(node, destination, |this| {
+				this.call_closure_lending(callback, ty, &arguments, &places, node)
+			})
+		};
+		let result = if write_backs.is_empty() {
+			call(self)?
+		} else {
+			self.callback_with_fixup(node, call, |this| {
+				for &write_back in &write_backs {
+					this.write_back(write_back)?;
+				}
+				Ok(())
+			})?
+		};
+		for write_back in write_backs {
+			self.write_back(write_back)?;
+		}
 		self.end_scope(mark, Some(result))?;
 		Ok(result)
 	}

@@ -25,6 +25,7 @@ use crate::lower::values::{Repr, Val};
 use crate::lower::{Lowering, Slot};
 
 /// What a call with a parameter passed by pointer does after the call.
+#[derive(Clone, Copy)]
 pub(crate) enum WriteBack<'ctx> {
 	/// The parameter was a view of `place`: its fields written back by name.
 	Fields { place: Slot<'ctx>, view: Slot<'ctx> },

@@ -432,6 +432,8 @@ A closure never consumes its captures. A nonescaping closure borrows them; an es
 
 A nonescaping closure borrows its captures. An escaping closure owns immutable captures, using the same storage rules: ordinary values copy, a structure can move at its last use, and otherwise needs an explicit independent value before capture. An escaping closure cannot own any unique value, even at its last use; there is no one-shot closure exception (`MEM003`). A `mutable use` cannot be captured. Module-level values and requirements retain their separate rules in [closures](/functions/defining-functions#closures).
 
+An escaping closure captures only the field paths its body uses, including fields of fields and tuple positions of a value owned by the enclosing code. For `() => holder.count`, only `holder.count` is stored: an unused sibling array or Task is neither captured nor moved. Each selected path copies, moves or is refused according to its own category. A whole-value use, passing the value, indexing into a collection inside it, or using it through a reference captures the whole binding. See the [field capture example](/functions/defining-functions#closures).
+
 ```fa
 type Reader = () => Integer
 function reader = (input: Array<Integer>): Reader => {

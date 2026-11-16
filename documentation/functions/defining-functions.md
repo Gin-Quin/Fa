@@ -336,7 +336,7 @@ At the top level of a file and inside a type, the order of declarations does not
 
 Module-level values are initialized in the order of their dependencies, whatever the order of the lines: a cycle between the initializers of module-level values is an error (see [modules](/architecture/modules)).
 
-Inside a block, a function is available after its declaration, and it can use the values declared before it in the block. It can call itself, but two functions of a block can't call each other: declare them at the top level instead.
+Inside a block, a function can be called directly before its declaration. The call borrows its captures, which must already be initialized at the call. A function without captures can also be used as a value before its declaration; a function with captures cannot, because its environment is created at the declaration. See [closures](#closures) for the declaration order required when an escaping function captures another function's handle.
 
 ```fa
 function main = () => {
@@ -444,6 +444,17 @@ function main = () => {
 	callbacks.push(() => {
 		count += 1 -- error: `count` is captured by copy, since the closure escapes
 	})
+}
+```
+
+An escaping closure captures the field paths it actually uses, including fields of fields and tuple positions of an owned enclosing value. Unused sibling fields are neither captured nor moved. Using a value as a whole, passing it, indexing into a collection inside it, or using it through a reference captures the whole binding. Each captured path follows the ordinary storage rules: an ordinary path copies, a structure path moves at its last use or needs an explicit snapshot, and a unique path cannot be captured.
+
+```fa
+function makeCounter = () => {
+	let holder = { items = [1], count = 2 }
+	function read = () => holder.count -- captures only the ordinary `count` field
+	console.log(holder.items.length) -- the sibling collection is still owned here
+	read
 }
 ```
 

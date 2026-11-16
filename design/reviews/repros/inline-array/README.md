@@ -46,3 +46,13 @@ taskset -c 0-4 "$HOME/.local/bin/node" --experimental-vm-modules --disable-warni
 
 The external review report contains severities, source locations, controls,
 validation results and suggested fixes.
+
+`generic-literal.foreign.fa` expects `drop prefix` before `failed`. Bun/Node/web
+print only `failed`; every LLVM target at O0/O3 drops the prefix correctly.
+This is the second path affected by symbolic-capacity JS lifetime dispatch.
+
+`split/` is a positive package fixture. Build it with
+`fa build design/reviews/repros/inline-array/split --target=native` (repeat for
+the other targets). Its library result crosses a compilation-unit boundary;
+the application prints `a long string crossing a compilation unit` and `2`.
+All six targets build and run correctly in the review.

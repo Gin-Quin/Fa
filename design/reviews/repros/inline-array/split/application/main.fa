@@ -1,0 +1,5 @@
+export function = () => {
+	let box = library.values.make()
+	console.log(library.values.last(box)) -- expected: a long string crossing a compilation unit
+	console.log(box.values.capacity)      -- expected: 2
+}

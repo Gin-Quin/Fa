@@ -14,9 +14,9 @@ export function = () => {
 	console.log(returned.value, item.value) -- prints: 8 7
 	let items: Array<Item> = [item]
 	mutable returnedItems = library.copies.array(items)
-	for copy in returnedItems { copy.value = 9 }
+	for duplicate in returnedItems { duplicate.value = 9 }
 	console.log(returnedItems, items) -- prints: [{ label = "original", value = 9 }] [{ label = "original", value = 7 }]
 	mutable storedItems = library.copies.stored(item)
-	for copy in storedItems { copy.value = 10 }
+	for duplicate in storedItems { duplicate.value = 10 }
 	console.log(storedItems, item.value) -- prints: [{ label = "original", value = 10 }] 7
 }

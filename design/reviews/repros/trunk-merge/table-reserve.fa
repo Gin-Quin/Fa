@@ -18,15 +18,15 @@ function chunked = (count: Integer<min = 0, max = 1000>): String => {
 	map.reserve(count)
 	for i in 0..count { map["key {i} long enough for the heap"] = "value {i}" }
 	for i in 0..count { if i %% 3 == 0 { map.delete("key {i} long enough for the heap") } }
-	mutable copy = map
-	copy.reserve(100)
-	for i in 0..40 { copy["new {i}"] = "n" }
+	mutable duplicate = map
+	duplicate.reserve(100)
+	for i in 0..40 { duplicate["new {i}"] = "n" }
 	mutable first = ""
 	for (key, value) in map {
 		first = key
 		break
 	}
-	"{map.size} {copy.size} {first} {copy.capacity >= copy.size}"
+	"{map.size} {duplicate.size} {first} {duplicate.capacity >= duplicate.size}"
 }
 function sets = (count: Integer<min = 0, max = 1000>): String => {
 	mutable set = Set.from(["a", "b"], capacity = count)

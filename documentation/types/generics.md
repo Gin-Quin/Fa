@@ -131,6 +131,19 @@ function describeAll = <Item: { describe: (self) => String }>(items: Array<Item>
 
 Any type with a `describe` method returning a `String` is accepted, and `item.describe()` calls the method of the actual type: this is how Fa gets polymorphism without traits or interfaces. This includes the types with `#private` fields: they are distinct from every other type, but they satisfy an object constraint through their public fields and methods.
 
+### Copy conditions
+
+Generic code is checked once with symbolic type parameters; storing or copying a parameter adds a semantic copy condition, checked at each instantiation and carried through imports, wrappers and permitted callbacks. No `Copyable` annotation is needed:
+
+```fa
+function duplicate = <Item>(value: Item): Item => copy value
+let values = [1, 2]
+let independent = duplicate(values)
+console.log(values, independent)
+```
+
+An explicit copy accepts ordinary values and copyable structures; a unique Task/resource instantiation is `MEM003`. Returning a borrowed `Item` without `copy` works for ordinary types and is `MEM004` for a structure. Merely reading or passing a borrowed `Item` adds no copying requirement. Conditions depending on generic synchronized payloads and mutation are resolved at specialization; reject only the instantiation whose effects or transfer cannot be proven, never all generic uses. See [copies and moves](/advanced/memory-management#explicit-copy).
+
 ### Checking generic code
 
 A generic type or function is checked **once**, against the constraints of its parameters, not once per use. Inside it, only the operations allowed by the constraints can be used:

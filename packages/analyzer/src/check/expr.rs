@@ -190,6 +190,23 @@ impl Walker<'_> {
 		self.check(inner, expected)
 	}
 
+	/// `copy value` produces a value, never a place. Concrete copyability
+	/// checks belong to the subsequent ownership-enforcement slice.
+	pub(super) fn check_copy(&mut self, inner: NodeId, expected: Option<TypeId>) -> TypeId {
+		let ty = self.check(inner, expected);
+		if let Some(expected) = expected
+			&& self
+				.s
+				.types
+				.assignable(ty, expected, crate::types::relate::Mode::Copy)
+				.is_ok()
+		{
+			self.sink(inner, ty, expected);
+			return expected;
+		}
+		ty
+	}
+
 	/// `()`: not a value (`E-TUP-1`, tuples.rs).
 	pub(super) fn check_empty_group(&mut self, n: NodeId) -> TypeId {
 		self.memo(n, |w| w.unit_tuple(n))

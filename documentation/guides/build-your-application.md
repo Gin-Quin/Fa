@@ -91,7 +91,7 @@ export function = (contents: String): Array<Score> throws ScoreError.MalformedLi
 
 A few things worth pointing out.
 
-The signature says everything the function can do: it returns an `Array<Score>`, and it can fail with a `ScoreError`. `throw` exits the function with an error, like `return` exits it with a value.
+The signature says everything the function can do: it returns an `Array<Score>`, and it can fail with a `ScoreError`. `throw` enters its lexical `do … catch`, or leaves the function with an error when uncaught; `return` exits it with a value.
 
 After `if parts.length != 2 { throw ... }`, the compiler knows that `parts` has exactly two items, so `parts[0]` and `parts[1]` cannot fail. Without the check, indexing would `throws IndexError`, and you would have to handle it.
 

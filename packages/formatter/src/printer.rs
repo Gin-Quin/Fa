@@ -561,6 +561,7 @@ impl<'a> Printer<'a> {
 			Node::Try { right } => concat!["try ", self.node(*right)],
 			Node::Throw { right } => concat!["throw ", self.node(*right)],
 			Node::Await { right } => concat!["await ", self.node(*right)],
+			Node::Copy { right } => concat!["copy ", self.node(*right)],
 			Node::Start { right } => concat!["start ", self.node(*right)],
 			Node::Assert { right } => concat!["assert ", self.node(*right)],
 			Node::InRelation { right } => concat!["in ", self.node(*right)],

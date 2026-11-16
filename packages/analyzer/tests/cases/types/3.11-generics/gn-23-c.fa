@@ -5,9 +5,9 @@ export function = <Entity, keys: Keys<Entity>>(entity: Entity): Pick<Entity, key
 export function = <Entity, keys: Keys<Entity>>(entity: Entity): Omit<Entity, keys> => omit(entity, keys)
 -- file: library/renamed.fa
 export function = (human: { name: String }, name: String): Type<human> => {
-	mutable copy = human
-	copy.name = name
-	copy
+	mutable duplicate = human
+	duplicate.name = name
+	duplicate
 }
 -- file: application/main.fa
 type User = { name: String, email: String, password: String }

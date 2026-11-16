@@ -36,10 +36,10 @@ for word in unique { console.log(word) }
 -- prints: abcdefgh
 -- prints: abcdefghijklmnop
 -- prints: é
-mutable copy = lookup
-copy["new"] = 1
-copy.delete("short")
-console.log(copy.size, copy.get("new"), lookup.size, lookup.get("short"))
+mutable duplicate = lookup
+duplicate["new"] = 1
+duplicate.delete("short")
+console.log(duplicate.size, duplicate.get("new"), lookup.size, lookup.get("short"))
 -- prints: 2 1 2 5
 mutable grown = unique
 for index in 0..100 { grown.add("item {index}") }

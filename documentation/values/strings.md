@@ -17,6 +17,15 @@ Everything between the quotes is kept as written, including the indentation of t
 
 ## Mutability
 
+`String` is an ordinary value: assignment never needs `copy`. An object containing strings but no collection or unique value is ordinary too. The sequence is immutable; changing a `mutable` string variable, including with `+=`, replaces its value and leaves previous values unchanged. See [memory management](/advanced/memory-management#ordinary-values).
+
+```fa
+mutable name = "Ana"
+let previous = name
+name += "!"
+console.log(previous, name) -- Ana Ana!
+```
+
 ```fa
 let immutableValue = "You can't change me"
 mutable mutableValue = "But you can change me"
@@ -244,7 +253,7 @@ for line in lines {
 output.reserve(1024) -- room for 1024 more bytes than its current byte length
 ```
 
-Natively, `capacity` counts storage bytes, not UTF-16 code units: it is at least the current byte length, and an inline string has room for 23 bytes (11 on wasm32). A static string reports its byte length until a reservation or append gives it owned storage. `reserve(n)` takes a number of additional bytes, so no length has to be converted from code units: it makes room for at least the current byte length plus `n`, never shrinks and never changes the text. It requires a `mutable` receiver and declares `mutates self`, like an append: references into the string must be declared again afterwards.
+Natively, `capacity` counts storage bytes, not UTF-16 code units: it is at least the current byte length, and an inline string has room for 23 bytes. A static string reports its byte length until a reservation or append gives it owned storage. `reserve(n)` takes a number of additional bytes, so no length has to be converted from code units: it makes room for at least the current byte length plus `n`, never shrinks and never changes the text. It requires a `mutable` receiver and declares `mutates self`, like an append: references into the string must be declared again afterwards.
 
 On JavaScript and during compile-time evaluation, the hints are ignored, `reserve` does nothing and `capacity` equals `length`. This keeps the property constant-time without measuring an encoding or inventing storage the engine does not expose. Use `utf8Length()` to measure an encoding, and `length` for code-unit positions. Capacity is a storage hint, not a portable limit: only `capacity >= length` holds on every target (see [capacity and reservation](/collections/arrays#capacity-and-reservation)). Copies need not preserve spare capacity.
 
@@ -257,8 +266,9 @@ The semantics are UTF-16 code units; the native storage is UTF-8. Text arrives a
 
 Interpolation constructors and appended interpolations check each addition of byte lengths against the String representation limit before allocating or reserving. The check applies at both native and wasm pointer widths; an LLVM no-wrap annotation alone does not establish the bound.
 
-- **Layout.** A `String` is 24 bytes: a pointer, a length in bytes and a capacity with flags (static, inline, ASCII, surrogates). A string of at most 23 bytes is stored inline, without allocation. A literal is stored in read-only data, with its UTF-16 length computed at compile time, and copied only when a mutable string is created from it. There are no ropes: a `mutable` string that is appended to grows in place.
+- **Layout.** A `String` is 24 bytes: a pointer, a length in bytes and a capacity with flags (static, inline, ASCII, surrogates). A string of at most 23 bytes is stored inline, without allocation. A literal is stored in read-only data, with its UTF-16 length computed at compile time; storing its value never copies its bytes. Mutation obtains writable storage before changing those bytes. There are no ropes: a `mutable` string that is appended to grows in place.
 - **Encoding.** The bytes are UTF-8, extended to lone surrogates (WTF-8): a lone surrogate is stored as the three bytes that the UTF-8 scheme gives to its value (`ED A0 80` to `ED BF BF`), and a surrogate pair is always stored as the four bytes of its code point. Equal strings therefore have equal bytes.
+- **Assignment and stores (ownership decision, 2026-11-16).** No string reference counting. At most 23 bytes copy inline like a scalar; literals use static storage. A longer string moves at last use, or becomes a view when the destination is immutable, does not outlive its source and the source stays unchanged while the view lives (proved by escape and lifetime analysis). Otherwise the store makes one allocation and one block copy of the bytes. `use` rules that copy out. This is the explicit cost contract for ordinary string semantics; no `copy` syntax is required.
 - **The ASCII flag** says that every byte is below `0x80`. It is computed for literals at compile time, kept by copies and slices, kept by an append when the suffix has it, and computed by `String.fromUtf8` while it validates. It may be missing from an ASCII string (only slower), never set on another. With it, a code unit is a byte: `length` is the byte length, indexing is a load, a position is a byte offset.
 - **The surrogates flag** says that the string may hold a lone surrogate. Only an index or a slice that cuts a surrogate pair sets it (and operations on such strings keep it). Without it, the bytes are valid UTF-8. A concatenation whose left operand ends with a lone high surrogate and whose right operand starts with a lone low one writes the four bytes of the code point.
 - **`length`** of a string without the ASCII flag is the number of bytes that are not continuation bytes, plus the number of four-byte sequences. An inline string counts its bytes; a heap string caches the count in its block header; a write clears the cache.
@@ -274,7 +284,7 @@ Interpolation constructors and appended interpolations check each addition of by
 - **`characters()`** uses the compiler's UAX #29 tables, which are linked into the program only when it calls `characters()`.
 - **Small strings never touch the heap.** Besides inline strings, a local string that doesn't escape its function (it is not returned, thrown, stored in a field, a collection or a module-level value, nor captured by an escaping closure or a task; the analyzer lists them, `Analysis::non_escaping`) lives in a stack buffer of the function, up to 64 bytes. A string goes to the heap only when it is longer, or escapes.
 - **Capacity.** `String.from(text, capacity = n)` and `reserve(additional)` allocate the heap block at once (an inline string moves to the heap when it reserves more than fits inline); `capacity` reads the capacity word without its flags (the inline room for an inline string, the byte length of a literal).
-- **The parts of `split` are views** of the text when the compiler proves that the text outlives them unchanged: the call, possibly followed by `filter`, initializes a `let`; the source is a local or module-level value that no reference designates, and no code writes it while the parts live. A view is a pointer and a byte length; keeping a part in another value copies its bytes. Parts of an inline string view a copy in the function frame, so a module initializer uses copies instead. A loop over a split by a nonempty literal reads views without testing their representation. A one-byte separator is counted first to allocate the array once.
+- **The parts of `split` are views** of the text when the compiler proves that the text outlives them unchanged: the call, possibly followed by `filter`, initializes a `let`; the source is a local or module-level value that no reference designates, and no code writes it while the parts live. A view is a pointer and a byte length; keeping a part in another value follows the same move/view/block-copy store contract, and materializes its bytes when the ancestor storage would not remain live and unchanged. Parts of an inline string view a copy in the function frame, so a module initializer uses copies instead. A loop over a split by a nonempty literal reads views without testing their representation. A one-byte separator is counted first to allocate the array once.
 
 - **Coroutine decimal appends.** A decimal string owned by a coroutine is dropped immediately after its append, inside the branch that creates it, before joining the inline and one-digit paths. It never leaves a branch-local value in the statement cleanup after that join.
 

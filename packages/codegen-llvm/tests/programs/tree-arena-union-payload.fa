@@ -12,11 +12,11 @@ function build = (depth: Integer, payload: String): Tree => if depth == 0 {
 
 function duplicate = (tree: Tree): Tree => tree
 for 0..3 {
-	let copy = do {
+	let duplicate = do {
 		let root = build(3, "an owning string beyond inline capacity".repeat(2))
 		duplicate(root)
 	}
-	assert copy is Tree.Branch
+	assert duplicate is Tree.Branch
 }
 console.log("union payload cleanup ok")
 -- prints: union payload cleanup ok

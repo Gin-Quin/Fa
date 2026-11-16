@@ -31,27 +31,18 @@ Note that the third human *is* stored: `{ name = "John", age = 22 }` is not equa
 
 Storage can be planned with `from(source, capacity = n)`, the read-only `capacity` property and `reserve(additional)`. See [capacity and reservation](/collections/arrays#capacity-and-reservation) for the shared rules and effects.
 
-## Custom key
+## Standard hashing and equality
 
-Pass a `key` function to `Set.from` when the identity of a value is carried by one of its parts, such as an id. Two values are then the same when their keys are equal, and only the key is hashed. The key can be of any type that a [map key](/collections/maps#keys) accepts:
+A set always hashes and compares its complete item using the item's standard hashing and equality. There is no `key` option: `Set.from(source, key = ...)` and `GrowingSet.from(source, key = ...)` are errors (`FN023`). Use a [map](/collections/maps) when the key is separate from the value:
 
 ```fa
-type User = {
-	id: Integer
-	email: String
-	name: String
-}
-
-let initialUsers = [
-	User { id = 1, email = "john@doe.com", name = "John Doe" }
-	User { id = 2, email = "jane@doe.com", name = "Jane Doe" }
-]
-
-mutable setOfUsers = Set.from(initialUsers, key = (user) => user.id)
-
-setOfUsers.add({ id = 1, email = "foo@bar.com", name = "Foo Bar" })
--- not added: a User with id 1 is already present
+type User = { id: Integer, name: String }
+mutable users: Map<Integer, User> = []
+users.set(1, User { id = 1, name = "Ana" })
+users.set(1, User { id = 1, name = "Bao" }) -- replaces the value at key 1
 ```
+
+Storing a collection-valued item follows the [copy and move rules](/advanced/memory-management#structures). The hash/equality rule never authorizes copying unique data.
 
 ## Adding and removing
 
@@ -221,7 +212,7 @@ The call above compiles to three `console.log` lines with no runtime lookup at a
 
 - **Reviewed storage limits.** The collection byte budget is 2 KiB; the total is 4 KiB per non-recursive frame and 512 bytes in a resolved direct-call cycle (including methods and generic instances). Literals reserve their exact aligned size. Non-recursive calls receive at most `min(2 KiB, remaining frame budget)`. In a direct-call cycle, all call-result offers share 128 bytes per frame inside the 512-byte total: each receives `min(128 − offer bytes reserved, 512 − collection bytes reserved)`, with no offer below 64 bytes. Exact literals count against the total in either lowering order; forwarded offers reserve no frame bytes. The inclusive 2× per-frame gate covers call-result offers (one and four live splits): unchecked depths must satisfy `baseline_depth ≤ 2 × final_depth + 8`, with eight frames for fixed setup overhead and native measurements under a 256 KiB stack limit. Leak-checked depths are informational; exact literals are excluded. Indirect recursion is not detected. Larger objects/tuples use caller output slots; a layout with at most two scalar leaves and 16 bytes on 64-bit targets, or exactly one scalar leaf on wasm32, returns by value. Small throwing results keep `{ value, error }`; register results store directly into their final owner. An output marked `noalias` is unreachable from arguments, captures and globals during the call. Native x86-64/aarch64 functions probe crossed stack pages.
 
-- **Immutable literals (current LLVM backend).** Constant `let` literals with supported scalar keys use read-only entries and index. Runtime local literals use a fixed frame buffer when the header, entries, index and any stable chunk directory fit the 2 KiB collection and 4 KiB non-recursive frame budgets. Captured or asynchronous values and larger constructions keep heap storage. Static drops do nothing; frame drops destroy owned elements without freeing their storage. Static values copy for a mutable owner. Runtime owning or uncertain uses choose the heap before construction, without frame-to-heap copy-out. Duplicate constant elements retain set semantics.
+- **Immutable literals (current LLVM backend).** Constant `let` literals with supported scalar keys use read-only entries and index. Runtime local literals use a fixed frame buffer when the header, entries, index and any stable chunk directory fit the 2 KiB collection and 4 KiB non-recursive frame budgets. Captured or asynchronous values and larger constructions keep heap storage. Static drops do nothing; frame drops destroy owned elements without freeing their storage. An explicit copy of static values constructs independent mutable storage. Proven moves choose suitable destination storage before construction. Runtime owning or uncertain uses choose the heap before construction, without frame-to-heap copy-out. Duplicate constant elements retain set semantics.
 
 The set is a **Swiss table** (Abseil's `flat_hash_set`, Rust's `hashbrown`, Go's maps since 1.24), with the values stored inline:
 
@@ -229,7 +220,6 @@ The set is a **Swiss table** (Abseil's `flat_hash_set`, Rust's `hashbrown`, Go's
 - **Probing.** The hash gives a starting group; a group is 16 control bytes compared at once with SIMD (SSE2, NEON; a portable 8-byte word otherwise). Each control byte equal to the hash's 7 bits is a candidate, compared with the value's `==`. A group with an empty byte ends the search. Groups are probed in triangular order.
 - **Growth.** The maximum load factor is 7/8, counting tombstones. Beyond it, the table is rebuilt: at twice the capacity when the live values exceed half the capacity, at the same capacity otherwise (to purge tombstones).
 - **Specialization.** `hash<Shape>` and `==` are derived structurally per element type, and **inlined into the probe loop** by monomorphization. A set of small flat values (integers, points) compares them with a few instructions.
-- **`key` option.** The set hashes and compares `key(value)` instead of the value. The `key` function is inlined too, so a key that reads a field (`(user) => user.id`) costs one load per probe; the key is not stored. The `key` function is part of the value, not of the type: it is inlined when the construction of the set is visible to the specialized code, and called through a pointer in the set's header otherwise.
 - **Hashing.** Fast and non-cryptographic, with a random seed per set to resist hash flooding. Tests can fix the seed.
 - **References.** A reference into a set is a pointer to the value in the table, invalidated by any `add`, `delete` or `clear`, as declared.
 
@@ -239,7 +229,5 @@ The current LLVM backend stores a set like a [map](/collections/maps) without va
 
 - A set of primitives (`Integer`, `Float`, `String`, `Boolean`, a union of literals) is a JavaScript `Set`: the engine's `includes` (`has`) is as fast as anything written by hand.
 - A set of objects or tuples can't use a JavaScript `Set` directly, which compares objects by identity. It is a JavaScript `Map` from the structural hash of the value (a 32-bit number, computed by a function generated per element type) to the value, or to an array of values when several values share a hash. `includes` hashes the value, then compares it with the generated `==`. `size` is a counter kept next to the `Map`.
-- With a `key` option, the set is keyed by `key(value)`. When the key is a primitive, the set is a JavaScript `Map` from the key to the value: `Set.from(users, key = (user) => user.id)` is a `Map` from ids to users. Otherwise, the hash and the `==` of the previous point apply to the key.
-- The `key` function is part of the value, not of the type: a `Set<User>` parameter can receive a set built with or without one. So every set that is not a plain JavaScript `Set` of primitives is a `FaSet` object implementing the interface of a JavaScript `Set` (`has`, `add`, `delete`, `size`, iteration), and the code that uses a set is the same for all of them.
-- A reference to an object value is the object itself.
+- A reference to an object value is the object itself. Hashing and equality always use the item type; the table header contains no custom key callback. Removing that legacy callback from both backends belongs to the Set implementation slices.
 :::

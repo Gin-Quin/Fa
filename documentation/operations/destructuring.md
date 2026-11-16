@@ -12,11 +12,11 @@ let { x, y } = point
 
 Destructuring works with the three declaration keywords:
 
-- `let` to copy the extracted values into immutable values,
-- `mutable` to copy them into mutable values,
+- `let` to store the extracted values immutably under the [copy and move rules](/advanced/memory-management#copies-moves-unique-values-and-shared-handles),
+- `mutable` to store them mutably under the same rules,
 - `use` to create [aliases](/advanced/memory-management#aliases), without copying.
 
-A `mutable use` can't be destructured: declare each reference on its own line.
+Pattern bindings in `when` and destructuring use the same ownership rule as a field in the same position: `use` borrows, an ordinary stored binding copies, and a stored structure moves at last use or needs an explicit source copy. A `mutable use` can't be destructured: declare each reference on its own line.
 
 ```fa
 let object = { a = 1, b = 2, nested = { c = 3 } }
@@ -44,11 +44,11 @@ let { retries = 3, verbose, timeout = 30 } = options
 
 ### Rest
 
-`...rest` collects the remaining fields into a new object, or the remaining items into a new array. The rest is always a copy, even with `use`:
+`...rest` collects the remaining fields into a new object, or remaining items into a new array. It owns those values, even with `use`. Ordinary data copies; structures must move from an exclusive last-use owner or be explicitly copied, and unique values cannot be duplicated. Write `copy` on the source when keeping it usable and an extracted/rest value is a structure:
 
 ```fa
-let { name, ...details } = person -- `details` has every field of `person` except `name`
-let [first, ...others] = items    -- `others` is a new array without the first item
+let { name, ...details } = copy person -- `details` has every field of `person` except `name`
+let [first, ...others] = copy items    -- `others` is a new array without the first item
 ```
 
 To get a single value, use regular field access: `let a = object.a`.

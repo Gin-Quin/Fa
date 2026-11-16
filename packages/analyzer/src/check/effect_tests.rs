@@ -254,7 +254,7 @@ fn last_uses_that_copy_are_moves() {
 	// pushed into a collection: moved; a local function reading it later keeps it
 	let source = "function main = () => {\n\tlet item = [1]\n\tmutable all: Array<Array<Integer>> = []\n\tall.push(item)\n}\n";
 	assert!(moved(source, 4, "item"));
-	let source = "function main = () => {\n\tlet item = [1]\n\tfunction show = () => console.log(item)\n\tlet copy = item\n\tshow()\n}\n";
+	let source = "function main = () => {\n\tlet item = [1]\n\tfunction show = () => console.log(item)\n\tlet duplicate = item\n\tshow()\n}\n";
 	assert!(!moved(source, 4, "item"));
 }
 
@@ -316,5 +316,15 @@ fn an_optional_operand_is_quoted_alone() {
 	assert!(
 		messages[0].starts_with("`x` may be `none`"),
 		"{messages:#?}"
+	);
+}
+
+#[test]
+fn copying_a_closure_keeps_its_escape_checks() {
+	assert_eq!(
+		codes(
+			"type Action = () => Void\nfunction make = (): Action => { mutable count = 0\nfunction change = () => { count += 1 }\ncopy change }\n"
+		),
+		["REF021"]
 	);
 }

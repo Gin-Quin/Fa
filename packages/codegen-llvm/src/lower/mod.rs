@@ -2740,6 +2740,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			View::Unsupported(name) => Err(self.unsupported(node.index(), name)),
 			// design/async.md §3 (`tasks.rs`)
 			View::Await(operand) => self.await_expression(node, operand),
+			View::Copy(operand) => {
+				let value = self.expr(operand)?;
+				let copied = self.emit_copy(value)?;
+				Ok(self.fresh(copied))
+			}
 			View::Start(operand) => self.start_expression(node, operand),
 			other => Err(self.unsupported(node.index(), &format!("`{}`", variant_name(&other)))),
 		}

@@ -1,6 +1,6 @@
 -- brief: → `1 2`
 let original = { count = 1 }
-mutable copy = original
-copy.count = 2
-console.log(original.count, copy.count)
+mutable duplicate = original
+duplicate.count = 2
+console.log(original.count, duplicate.count)
 -- prints: 1 2

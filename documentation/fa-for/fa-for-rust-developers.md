@@ -1,5 +1,7 @@
 # Fa for Rust developers
 
+The [copy and move rules](/advanced/memory-management#copies-moves-unique-values-and-shared-handles) distinguish ordinary values (including strings), structures (`copy` to keep both), unique values (move only), and shared synchronization handles.
+
 Fa shares Rust's goals — memory safety without a garbage collector, errors as values, zero-cost abstractions — and reaches them with a much smaller model. There is no borrow checker, no lifetime syntax, and no smart pointer zoo. Its syntax sits between Rust and TypeScript.
 
 Fa is designed for AI agents as much as for humans: like Rust, if the code compiles, it works — and everything a function does (the errors it throws, the values it requires, the data it mutates) is written in its signature.
@@ -42,7 +44,7 @@ Fa is designed for AI agents as much as for humans: like Rust, if the code compi
 Fa's memory model has five rules instead of ownership and borrowing:
 
 1. Objects live on the **stack**; collections own the **heap**.
-2. Assignment **copies** (the compiler turns it into a move when the source is dead).
+2. Ordinary values copy; structures move at last use, or require `copy` to keep both. Unique resources and Tasks only move.
 3. `use` creates an **alias**, a reference which cannot outlive what it points into.
 4. Function parameters and loop bindings are **already references**.
 5. Values are dropped at the end of scope, in reverse order.
@@ -190,7 +192,7 @@ let value = array.get(index) ?? 0  -- `get` returns an optional
 
 ## Structural, not nominal
 
-Two types with the same public data fields are the **same type** (methods and defaults don't count):
+Types with the same public data fields are structurally compatible. A join still preserves written alternatives whose methods or finalizers differ:
 
 ```fa
 type Human = { name: String }
@@ -255,7 +257,7 @@ let task = start fetch(url)       -- spawned
 
 Calling synchronously a primitive that is only asynchronous on a target (like network access on `web`) is a compile error.
 
-There are no `Send`/`Sync` bounds to write either: values crossing a thread boundary are copied, which is Fa's ordinary assignment rule, references cannot cross, and the compiler knows which types (mutexes, atomics, channels) can be shared mutably between threads.
+There are no `Send`/`Sync` bounds to write either: worker boundaries require an independent copy, a common Mutex or proven exclusive transfer invalidating the source and aliases; a Task never crosses, references cannot cross, and the compiler knows which types (mutexes, atomics, channels) can be shared mutably between threads.
 
 Tasks run on one thread, like in JavaScript: threads only come from workers and `for parallel`. Native builds use Fa's own runtime: one single-threaded executor per thread, and a work-stealing pool for `for parallel`.
 
@@ -279,7 +281,7 @@ Fa doesn't compile to Rust. To use a Rust crate, expose `#[unsafe(no_mangle)] pu
 | `unwrap()` | there is none; handle with `catch`, or propagate with `try` |
 | `&T` / `&mut T` | parameters are already references; declare `mutates name` for a mutable one |
 | `let mut r = &a; r = &b;` | `mutable use r = a`, then `reuse r = b` |
-| `clone()` | assignment already copies |
+| `clone()` | `copy value` for structures; ordinary assignment preserves value semantics |
 | `impl Trait` | a structural constraint: `Item: { field: Type }` |
 | `Box<T>` | not needed: recursion through a union or an optional is automatic |
 | `Vec::with_capacity(n)` | `Array<Integer>.from([], capacity = n)` |

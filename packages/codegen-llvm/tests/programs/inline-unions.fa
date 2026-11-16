@@ -15,11 +15,11 @@ function extend = (choice: Choice.Text) mutates choice => {
 }
 
 mutable original: Choice = Choice.Text { text = "abc".repeat(40) }
-let copy = original
+let duplicate = original
 if original is Choice.Text {
 	extend(original)
 }
-assert describe(copy) == "abc".repeat(40)
+assert describe(duplicate) == "abc".repeat(40)
 assert describe(original) == "abc".repeat(40) + "changed"
 original = Choice.Empty
 assert describe(original) == "empty"
@@ -57,7 +57,7 @@ function general = (value: Any): String => when value is {
 }
 assert general(Choice.Empty) == "empty"
 assert general(Choice.Number { value = 7 }) == "number 7"
-assert general(copy) == "abc".repeat(40)
+assert general(duplicate) == "abc".repeat(40)
 assert general(8) == "integer 8"
 
 function promote = (value: Choice?): Any? => value
@@ -68,7 +68,7 @@ if promotedBare is not none {
 } else {
 	assert false
 }
-let promotedText = promote(copy)
+let promotedText = promote(duplicate)
 if promotedText is not none {
 	assert general(promotedText) == "abc".repeat(40)
 } else {
@@ -78,7 +78,7 @@ if promotedText is not none {
 function escaped = (n: Integer): Any => if n > 0 { escaped(n - 1) } else { Choice.Empty }
 let returned = escaped(40)
 let returnedCopy = returned
-assert general(copy) == "abc".repeat(40)
+assert general(duplicate) == "abc".repeat(40)
 assert general(returned) == "empty"
 assert general(returnedCopy) == "empty"
 

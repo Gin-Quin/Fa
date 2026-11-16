@@ -1072,7 +1072,7 @@ console.log(items.length)
 	fn recursive_optionals_have_no_separate_presence_word() {
 		let ir = ir_of(
 			"nullable-edges",
-			"type Node = { value: Integer, next: Node? }\nlet list = Node { value = 1, next = Node { value = 2 } }\nmutable copy = list\ncopy.next = none\nconsole.log(list.next?.value ?? 0, copy.next?.value ?? 0)\n",
+			"type Node = { value: Integer, next: Node? }\nlet list = Node { value = 1, next = Node { value = 2 } }\nmutable duplicate = list\nduplicate.next = none\nconsole.log(list.next?.value ?? 0, duplicate.next?.value ?? 0)\n",
 		);
 		assert!(!ir.contains("{ i1, ptr }"), "{ir}");
 		assert!(ir.contains("{ ptr, i64 }"), "{ir}");
@@ -1613,7 +1613,7 @@ console.log(items.length)
 	fn non_escaping_strings_have_independent_frame_buffers() {
 		let ir = ir_of(
 			"frame-strings",
-			"function check = (prefix: String) => {\n mutable text = \"\"\n text += prefix\n let copy = text\n text = \"changed\"\n console.log(copy, text)\n}\ncheck(\"123456789012345678901234567890\")\n",
+			"function check = (prefix: String) => {\n mutable text = \"\"\n text += prefix\n let duplicate = text\n text = \"changed\"\n console.log(duplicate, text)\n}\ncheck(\"123456789012345678901234567890\")\n",
 		);
 		assert!(ir.contains("alloca [64 x i8]"), "{ir}");
 		assert!(ir.contains("@fa_string_assign_local("), "{ir}");

@@ -1,5 +1,5 @@
 type Node = { value: String, next: Node? }
 let list = Node { value = "a", next = Node { value = "b", next = none } }
-mutable copy = list
-copy.next = none
+mutable duplicate = list
+duplicate.next = none
 console.log(list.next?.value ?? "none") -- prints: b

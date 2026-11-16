@@ -53,7 +53,7 @@ function logName = (human: Human) => console.log(human.name)
 logName(superHuman) -- no copy, no truncation
 ```
 
-Two types with the same fields are the same type, so going from one to the other needs nothing at all:
+Types with the same fields are structurally compatible, so assignment needs no explicit type conversion. Written alternatives with different methods or destructors still retain their identity at a union join:
 
 ```fa
 type Animal = { name: String }
@@ -235,8 +235,8 @@ See [creating collections](/collections/arrays#creating-collections).
 
 | Situation | Mechanism | Can fail |
 | --- | --- | --- |
-| Same fields, different name | none: same type | no |
-| More fields to fewer, copied | implicit: extra fields dropped | no |
+| Same fields, different name | none: structurally compatible; written union behavior is preserved | no |
+| More fields to fewer, stored | extra fields dropped; structures move or require explicit `copy` | no |
 | More fields to fewer, referenced | implicit: narrowed view with `use` | no |
 | Object literal with an extra field | none: compile error | compile error |
 | Collection of supersets to a parameter | implicit, if the parameter is not `mutates`; otherwise a generic function. Never for `Set` elements and `Map` keys | compile error if `mutates` |

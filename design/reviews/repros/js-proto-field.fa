@@ -15,6 +15,6 @@ let Symbol = 7
 let globalThis = 8
 let faRun = 9
 console.log(undefined + NaN + Symbol + globalThis + faRun)
-let copy = w
+let duplicate = w
 let other = Weird { ...w, length = 9 }
-console.log(copy == w, other == w, other.length)
+console.log(duplicate == w, other == w, other.length)

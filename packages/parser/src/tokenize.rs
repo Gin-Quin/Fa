@@ -694,6 +694,7 @@ fn keyword_or_identifier(word: &[u8]) -> TokenKind {
 		b"try" => TokenKind::Try,
 		b"catch" => TokenKind::Catch,
 		b"start" => TokenKind::Start,
+		b"copy" => TokenKind::Copy,
 		b"provide" => TokenKind::Provide,
 		b"assert" => TokenKind::Assert,
 		b"requires" => TokenKind::Requires,
@@ -751,9 +752,10 @@ fn resolve_contextual_keywords(tokens: &mut [Token]) {
 		let is_exported = index > 0
 			&& tokens[index - 1].kind == TokenKind::Export
 			&& matches!(kind, TokenKind::Type | TokenKind::Namespace);
+		// Keep malformed declarations before reserved `copy` for the name diagnostic.
 		let declares_a_name = tokens
 			.get(index + 1)
-			.is_some_and(|token| is_identifier_like(token.kind));
+			.is_some_and(|token| is_identifier_like(token.kind) || token.kind == TokenKind::Copy);
 		// `type Error = Errors { … }` in a type: a name, reached as `Self.Error`
 		// (the word alone stays the prelude's `Error`)
 		if kind == TokenKind::Type

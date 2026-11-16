@@ -1,5 +1,7 @@
 # Fa for C and C++ developers
 
+The [copy and move rules](/advanced/memory-management#copies-moves-unique-values-and-shared-handles) distinguish ordinary values (including strings), structures (`copy` to keep both), unique values (move only), and shared synchronization handles.
+
 Fa compiles to a native binary with no runtime and no garbage collector, and gives you the control you expect over where data lives — while making dangling pointers, buffer overruns and use-after-free impossible to write.
 
 Fa is designed for AI agents as much as for humans: everything a function does — the errors it throws, the values it requires, the data it mutates — is written in its signature, and if the code compiles, it works.
@@ -44,7 +46,7 @@ The model is close to how you already think, with the rules enforced:
 
 1. **Objects are stack values.** Always. `type Point = { x: Integer, y: Integer }` is a `struct` with no hidden header, no vtable and no allocation.
 2. **Collections own the heap.** `Array`, `Set`, `Map`, `Pool`, `Columnar` — each with the allocation strategy that suits it. There is no `malloc` and no `free`.
-3. **Assignment copies.** Like a C struct assignment. The compiler turns a copy into a move when the source is dead.
+3. **Ordinary values copy**, like a C struct. Structures move at last use, or require `copy` to keep both. Unique resources and Tasks only move.
 4. **`use` creates an alias.** Like `T&`, but the compiler knows what it points into.
 5. **Everything is released at the end of its scope**, in reverse order of declaration.
 
@@ -157,7 +159,7 @@ let score = try loadScore()                -- propagate to the caller
 let score = loadScore() catch error => 0   -- handle it here
 ```
 
-The error is a typed value declared in the signature with `throws`. It carries data, cannot be ignored — every call that can fail is marked with `try` or `catch` — and there is no `errno`. `throw` exits the function like `return` does: an error is not an exception that silently crosses code that did not declare it, so there is no `-fno-exceptions` decision and no hidden cost on a code path. See [errors](/values/errors).
+The error is a typed value declared in the signature with `throws`. It carries data, cannot be ignored — every call that can fail is marked with `try` or `catch` — and there is no `errno`. `throw` enters its lexical `do … catch`, or leaves the function if uncaught: an error is not an exception that silently crosses code that did not declare it, so there is no `-fno-exceptions` decision and no hidden cost on a code path. See [errors](/values/errors).
 
 ## Tagged unions
 
@@ -177,7 +179,7 @@ let size = when value is {
 }
 ```
 
-A recursive type is built through a union or an optional (`next: Node?`), and stored on the heap automatically. The child is still a copy, owned by its parent: to share nodes, use a `Pool` and [relations](/advanced/relations). See [unions](/types/unions).
+A recursive type is built through a union or an optional (`next: Node?`), and stored on the heap automatically. The child is owned by its parent, and recursive values are structures: last use moves, otherwise write `copy` to keep both owners. To share nodes, use a `Pool` and [relations](/advanced/relations). See [unions](/types/unions).
 
 ## The preprocessor, replaced
 
@@ -213,7 +215,7 @@ See [modules](/architecture/modules).
 
 ## Concurrency without data races
 
-Values crossing a thread boundary are copied, references cannot cross at all, and only thread-safe types (mutexes, atomics, channels) can be shared mutably — so a data race does not typecheck:
+Worker boundaries require an independent copy, a common Mutex or proven exclusive transfer; a Task never crosses, references cannot cross at all, and only thread-safe types (mutexes, atomics, channels) can be shared mutably — so a data race does not typecheck:
 
 ```fa
 for parallel item, index in items {
@@ -243,7 +245,7 @@ Native builds use Fa's own runtime, with a work-stealing pool for parallel itera
 | Passing by pointer to avoid a copy | parameters are already references |
 | Passing by pointer to modify | declare `mutates name` in the signature |
 | Pointing an existing pointer elsewhere (`p = &b`) | `mutable use p = a`, then `reuse p = b` |
-| `memcpy` of a struct | assignment already copies |
+| `memcpy` of a struct | ordinary value assignment; `copy` for structure owners |
 | Out parameters | return a tuple, or declare `throws` |
 | `goto cleanup` | scope-based release |
 | Labeled `break` out of nested loops | there are no labeled loops |

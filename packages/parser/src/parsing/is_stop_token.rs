@@ -31,6 +31,7 @@ pub(crate) fn can_start_expression(kind: TokenKind) -> bool {
 			| TokenKind::Continue
 			| TokenKind::Break
 			| TokenKind::Start
+			| TokenKind::Copy
 			| TokenKind::Type
 			| TokenKind::Reactive
 			| TokenKind::Derived

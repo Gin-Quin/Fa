@@ -142,7 +142,7 @@ myObject = { foo = 14 } -- and this works as well
 
 ## References with `use`
 
-`let` and `mutable` copy the value they are given. `use` does not copy: it gives another name to an existing value. Reading or writing through the alias is reading or writing the original value.
+`let` and `mutable` store an owned value. Ordinary values (including strings) keep value semantics; structures move at last use, or require `copy value` when the source stays usable (`MEM004`). Unique values move and cannot be copied (`MEM003`); synchronization handles share state. See [copies and moves](/advanced/memory-management#copies-moves-unique-values-and-shared-handles). `use` gives another name to a place without copying or taking ownership. Reading or writing through it reads or writes the original value.
 
 ```fa
 mutable people: Array<Person> = [Person { name = "Ana" }, Person { name = "Bao" }]
@@ -262,7 +262,7 @@ Learn more about [reactivity](/advanced/reactivity).
 
 ## Function Parameters
 
-Function parameters are **immutable references**: the function reads the value given by the caller without copying it, and cannot change it.
+Function parameters are **immutable references**: the function reads the caller's value without copying it, and cannot change it. Resources borrow too; Task-consuming parameters transfer ownership as specified in [unique values](/advanced/memory-management#unique-values).
 
 ```fa
 function increaseFoo = (input: { foo: Integer, bar: Integer }) => {
@@ -383,7 +383,7 @@ A local value, a parameter or the error of a `catch` that is never used is a war
 
 ## End of scope
 
-Every value is destroyed at the end of the scope that declares it: there is no garbage collector. A `use` alias does not own anything, so it simply stops existing at the end of its scope; the value it refers to is destroyed with its own scope. See [memory management](/advanced/memory-management).
+Every owned value still held by its declaration is destroyed at the end of that scope; a moved value is destroyed by its new owner: there is no garbage collector. A `use` alias does not own anything, so it simply stops existing at the end of its scope; the value it refers to is destroyed with its own scope. See [memory management](/advanced/memory-management).
 
 ```fa
 do {
@@ -397,15 +397,16 @@ do {
 
 ### Native
 
-- `let` and `mutable` copy: a flat value is a `memcpy`, an owning value calls the generated `copy<T>`. The copy becomes a move when the source is not used afterwards and its storage can change owners. An immutable collection in static storage copies when an owner needs independent storage. A runtime collection with an owning or uncertain use starts on the heap; the compiler never adds a copy-out to keep an escaping value on the stack. Fresh return values are intended to be built directly in caller-provided storage (the general return-destination ABI remains to implement).
-- **Parameters are never copied.** Every parameter is passed by reference (a pointer to the caller's place, or to a temporary of the caller), mutated or not; only a scalar that fits in a register (a number, a boolean, a pointer) is passed by value, which is the same thing for it. A callee copies a parameter only when it stores it (an escaping use) and the analyzer can't move it.
+- Stores obey the [ownership categories](/advanced/memory-management#copies-moves-unique-values-and-shared-handles). A move transfers inline fields or collection headers and ownership flags without deep copying. Explicit `copy` calls the existing specialized copy operation. Runtime collections with owning or uncertain uses start in suitable storage; fresh returns construct directly in their destination. The compiler never inserts a deep copy to rescue an escape from frame storage.
+- Borrowed parameters are pointers to caller storage (register scalars pass by value with the same semantics). Storing a borrowed collection requires explicit `copy`; resource parameters never become callee-owned. The Task-consuming ABI transfers its owner instead.
+
 - **Module-level `let` values with a known value are constants**: folded into the code that reads them, or stored once in read-only data, never reloaded in a loop (the analyzer gives their values, `Analysis::module_constants`). Other immutable module-level values are invariant loads.
 - A `use` alias is a pointer to its place. A slice is a pointer and a length.
 - A `mutable use` is a pointer variable; `reuse` stores a new pointer.
 
 ### JavaScript
 
-- `let` and `mutable` copy an object or a collection (a generated copy function, not `structuredClone`). The copy is a plain assignment only when the source is not used afterwards (a move), or when both sides are immutable for their whole lives and have the same shape: nothing smarter, so the output is predictable. Primitives and strings need no copy.
+- Moves are JavaScript assignments. Explicit `copy` uses the type's generated copy function or the structural helper, never `structuredClone`. Ordinary object stores preserve value semantics; primitives and strings use JavaScript value semantics. The ownership checker, rather than JavaScript object identity, decides which collection stores are legal.
 - A `use` alias of an object or a collection is the JavaScript reference to it.
 - A `use` alias of a primitive place has no JavaScript equivalent: the compiler evaluates the container and the key or index once, into locals, and rewrites each use of the alias into the place (`use score = player.score` then `score += 1` compiles to `player.score += 1`).
 - A `mutable use` of a primitive place is a pair of locals (container, key or index), which `reuse` reassigns.

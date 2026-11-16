@@ -11,8 +11,8 @@ assert size(find(0)) == 0
 assert size(find(3)) == 3
 let empty = find(0)
 assert empty is not none
-let copy = empty
-assert copy.length == 0
+let duplicate = empty
+assert duplicate.length == 0
 
 type Holder = { name: String, items: Array<Integer>?, nested: Array<Array<Integer>?> }
 mutable holders: Array<Holder> = []

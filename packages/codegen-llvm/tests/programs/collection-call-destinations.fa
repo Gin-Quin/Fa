@@ -6,8 +6,8 @@ function read = (source: Array<String>): Integer => {
 }
 
 function copied = (source: Array<String>): Integer => {
-	let copy = Array.from(source)
-	return copy.length + source.length
+	let duplicate = Array.from(source)
+	return duplicate.length + source.length
 }
 
 console.log(read(["keep", "drop", "another"]), copied(["first", "second"]))

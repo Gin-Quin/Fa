@@ -271,6 +271,7 @@ fn token_type_of(kind: TokenKind) -> Option<TokenType> {
 		| K::Continue
 		| K::Break
 		| K::Start
+		| K::Copy
 		| K::Type
 		| K::Reactive
 		| K::Derived
@@ -565,6 +566,29 @@ mod tests {
 				)
 			})
 			.collect()
+	}
+
+	#[test]
+	fn reserved_copy_is_always_a_keyword_like_await() {
+		let classified = classes(
+			"copy(value)\ncopy[0]\ncopy -value\ncopy source.items\nsource.copy(value)\nsource.await(value)",
+		);
+		let keywords: Vec<&str> = classified
+			.iter()
+			.map(String::as_str)
+			.filter(|name| name.starts_with("copy:") || name.starts_with("await:"))
+			.collect();
+		assert_eq!(
+			keywords,
+			[
+				"copy:Keyword",
+				"copy:Keyword",
+				"copy:Keyword",
+				"copy:Keyword",
+				"copy:Keyword",
+				"await:Keyword"
+			]
+		);
 	}
 
 	#[test]

@@ -638,7 +638,7 @@ fn parse_catch(context: &mut Context<'_>, left: usize, stop_at: &[TokenKind]) ->
 		context.go_to_next_token();
 		name
 	} else {
-		context.error_at_token(
+		context.error_expected_name(
 			"Expected the name of the error after `catch`, like `catch error => ...`",
 		);
 		Name::new(context.last_end(), context.last_end())

@@ -999,11 +999,12 @@ async fn completion_offers_the_keywords() {
 		.collect();
 	assert!(labels.contains(&"let"));
 	assert!(labels.contains(&"function"));
+	assert!(labels.contains(&"copy"));
 	let keyword = result
 		.as_array()
 		.unwrap()
 		.iter()
-		.find(|item| item["label"] == "let")
+		.find(|item| item["label"] == "copy")
 		.unwrap();
 	assert_eq!(keyword["kind"], 14, "keyword");
 }

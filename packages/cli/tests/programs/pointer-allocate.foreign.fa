@@ -4,8 +4,8 @@
 type Farm = { name: String, animals: Int32 }
 let farm = Pointer.allocate(Farm { name = "Green Acres", animals = 3 })
 console.log(farm.read().name)
-mutable copy = farm.read()
-copy.animals = 99
+mutable duplicate = farm.read()
+duplicate.animals = 99
 console.log(farm.read().animals)
 farm.write(Farm { name = "Blue Hills", animals = 5 })
 console.log(farm.read().animals)

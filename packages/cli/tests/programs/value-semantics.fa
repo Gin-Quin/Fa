@@ -1,9 +1,9 @@
 -- Objects and arrays are values: a `mutable` copy never changes the original.
 let original = { count = 1, items = [1, 2] }
-mutable copy = original
-copy.count = 2
-copy.items.push(3)
-console.log(original, copy)
+mutable duplicate = original
+duplicate.count = 2
+duplicate.items.push(3)
+console.log(original, duplicate)
 -- prints: { count = 1, items = [1, 2] } { count = 2, items = [1, 2, 3] }
 mutable numbers = [1, 2, 3]
 let snapshot = numbers

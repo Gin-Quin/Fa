@@ -79,14 +79,14 @@ fn locals_read_in_place_stay_in_their_frame() {
 		 \tfor character in label {\n\
 		 \t\tconsole.log(character)\n\
 		 \t}\n\
-		 \tlet copy = label\n\
-		 \tconsole.log(copy)\n\
+		 \tlet duplicate = label\n\
+		 \tconsole.log(duplicate)\n\
 		 }\n\
 		 run(1)\n",
 	);
 	assert!(stays(&session, file, "label"));
 	assert!(stays(&session, file, "line"));
-	assert!(stays(&session, file, "copy"));
+	assert!(stays(&session, file, "duplicate"));
 }
 
 #[test]

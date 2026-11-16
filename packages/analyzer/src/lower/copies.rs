@@ -221,4 +221,31 @@ mod tests {
 			.any(|n| is_move(tree, analysis, n));
 		assert!(moved, "the read of `a` in `mutable b = a` is a move");
 	}
+	#[test]
+	fn explicit_copy_is_fresh_and_preserves_type_and_length() {
+		let source = "let original = [1, 2]\nmutable duplicate = copy original\nconsole.log(original[0], duplicate[1])\n";
+		let (session, file) = crate::analyze_source(source);
+		assert!(
+			session.diagnostics(file).is_empty(),
+			"{:?}",
+			session.diagnostics(file)
+		);
+		let tree = session.tree(file);
+		let analysis = session.analysis(file);
+		let mut found = false;
+		for index in 0..tree.nodes.len() {
+			let node = NodeId::new(index);
+			if let View::Copy(inner) = syntax::view(tree, node) {
+				found = true;
+				assert_eq!(analysis.type_of(node), analysis.type_of(inner));
+				assert!(!is_move(tree, analysis, inner));
+				assert!(!copies(tree, analysis, node, true, true));
+				assert!(place_root(tree, analysis, node).is_none());
+			}
+			if let View::Index { .. } = syntax::view(tree, node) {
+				assert!(!analysis.has_flags(node, NodeFlags::INDEX_CHECK));
+			}
+		}
+		assert!(found);
+	}
 }

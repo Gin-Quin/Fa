@@ -367,7 +367,7 @@ Valid:
 - T-DECL-2 `mutable count = 0 · count = 1 · count += 2 · console.log(count)` → `3`
 - T-DECL-3 `let value = 1 · do { · let value = 2 · console.log(value) · } · console.log(value)` → `2 / 1`
 - T-DECL-4 `let x = 1 · do { · let x = x + 1 · console.log(x) · }` → `2` (right side sees the outer `x`)
-- T-DECL-5 `let original = { count = 1 } · mutable copy = original · copy.count = 2 · console.log(original.count, copy.count)` → `1 2`
+- T-DECL-5 `let original = { count = 1 } · mutable duplicate = original · duplicate.count = 2 · console.log(original.count, duplicate.count)` → `1 2`
 - T-DECL-6 `mutable people = [{ name = "Ana" }, { name = "Bao" }] · use r = people[1] · r.name = "Cleo" · console.log(people[1].name)` → `Cleo`
 - T-DECL-7 `mutable people = [{ name = "Ana" }, { name = "Bao" }] · let c = people[1] · mutable d = c · d.name = "X" · console.log(people[1].name)` → `Bao`
 - T-DECL-8 `mutable players = [{ name = "Ana", score = 3 }, { name = "Bao", score = 7 }] · mutable use best = players[0] · for p in players { · if p.score > best.score { · reuse best = p · } · } · best.score += 10 · console.log(players[1].score)` → `17`
@@ -1102,7 +1102,7 @@ Field values are evaluated in written order; spreads at their position; then def
 
 ### Tests
 
-- T-OBJ-1 `let original = { count = 1 } · mutable copy = original · copy.count = 2 · console.log(original.count, copy)` → `1 { count = 2 }`
+- T-OBJ-1 `let original = { count = 1 } · mutable duplicate = original · duplicate.count = 2 · console.log(original.count, duplicate)` → `1 { count = 2 }`
 - T-OBJ-2 `type Point = { x: Integer, y: Integer } · let origin: Point = { x = 0, y = 0 } · let other = Point { x = 1, y = 2 } · console.log(origin, other)` → `{ x = 0, y = 0 } { x = 1, y = 2 }`
 - T-OBJ-3 `type M = { s: String, d = "Hello", o: String?, od: String? = "Hi" } · let m = M { s = "a" } · console.log(m)` → `{ s = "a", d = "Hello", o = none, od = "Hi" }`
 - T-OBJ-4 `let name = "Ana" · let age = 30 · type Person = { name: String, age: Integer } · let p = Person { name, age = 31 } · console.log(p)` → `{ name = "Ana", age = 31 }`

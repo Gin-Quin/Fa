@@ -19,9 +19,9 @@ function duplicate = (tree: Expression): Expression => tree
 
 for 0..3 {
 	let root = build(11)
-	let copy = duplicate(root)
+	let snapshot = duplicate(root)
 	assert evaluate(root) == 2048
-	assert evaluate(copy) == 2048
+	assert evaluate(snapshot) == 2048
 	when root is {
 		Expression.Add as { left, right } => {
 			let subtree = duplicate(left)

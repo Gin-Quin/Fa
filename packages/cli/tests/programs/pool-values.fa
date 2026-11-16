@@ -12,9 +12,9 @@ console.log(scores.map((score) => score * 10))
 console.log(scores.reduce((total, score) => total + score, 0), scores.sum())
 console.log(scores.some((score) => score == 9), scores.every((score) => score > 0))
 console.log(scores.includes(10), scores.includes(4), scores.isEmpty())
-mutable copy = scores
-copy.add(1)
-console.log(copy.size, scores.size)
+mutable duplicate = scores
+duplicate.add(1)
+console.log(duplicate.size, scores.size)
 use nine = scores.find((score) => score == 9)
 if nine is not none {
 	let taken = scores.take(nine)

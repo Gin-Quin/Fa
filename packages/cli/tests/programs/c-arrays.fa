@@ -10,11 +10,11 @@ mutable vertex = Vertex { position = [1.0, 2.0, 3.0], color = [255, 0, 0, 255] }
 console.log(vertex.position, vertex.color)
 vertex.position[1] = 5.5
 console.log(vertex.position[1], vertex.color.length, vertex.color[-1])
-mutable copy = vertex
-copy.color[0] = 9
-console.log(copy.color[0], vertex.color[0])
+mutable duplicate = vertex
+duplicate.color[0] = 9
+console.log(duplicate.color[0], vertex.color[0])
 mutable vertices: Array<Vertex> = [vertex, Vertex { position = [0.0, 0.0, 0.0], color = [1, 2, 3, 4] }]
-console.log(vertices.length, copy == vertex)
+console.log(vertices.length, duplicate == vertex)
 mutable total = 0
 for value, index in vertex.color {
 	total += value + index

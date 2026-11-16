@@ -164,7 +164,11 @@ In a foreign file, a type can declare a `destroy` function. It runs when a value
 - A type with `destroy`, and every type that contains one, is **move-only**, like a [`Task`](/advanced/concurrency#tasks): assigning it moves it, and using the source afterwards is a compile error. A C resource is therefore released exactly once.
 - `destroy` takes `self`, and can't throw or be `async`.
 
-This is the only kind of destructor in Fa: since these values can't be copied, the moment the compiler moves a value stays invisible.
+`copy resource` is an error (`MEM003`); create a new instance with `open`, `create` or a constructor when two resources are needed. A resource parameter borrows: the callee never destroys it, including when it owns a Task. It cannot return or store that borrowed resource as an owner. Moving an owner invalidates its aliases too (`MEM002`). An escaping closure cannot own a resource.
+
+A destructor still owns every field when it runs. Never move a field out from under it: move the whole resource, or use `copy resource.items` for a copyable data field. A function adapter cannot silently copy a resource result into plain data; write the projection and any required `copy` in the function itself.
+
+Finalization binds the exact written owner and its generic arguments and lexical capabilities at construction. A different type with equal fields cannot supply its destructor. Local methods and finalizers retain the environment they capture; structural equality does not choose a default or finalizer.
 
 ## Generating bindings
 
@@ -314,7 +318,7 @@ If the module imports C functions from its host, pass them to `open({ functionNa
 
 To support several targets, branch with [`@if target`](/advanced/metaprogramming) around the code that uses the binding.
 
-A `CArray<T, n>` is initialized with an array literal of exactly `n` items. It has `length`, supports indexing (negative indices count from the end), writes and iteration. Copying its `CStruct` copies the array.
+A fixed inline `CArray` inherits the ownership category of its items; inline scalar storage alone does not require `copy`. A `CArray<T, n>` is initialized with an array literal of exactly `n` items. It has `length`, supports indexing (negative indices count from the end), writes and iteration. Copying its `CStruct` copies the array.
 
 :::implementation
 ## Implementation details
@@ -348,6 +352,6 @@ A `CArray<T, n>` is initialized with an array literal of exactly `n` items. It h
 
 - Analyzer: C declarations, pointers, fixed arrays, resources and C-library APIs are checked. C unions, bit fields and variadic functions are rejected (`FFI007`).
 - Native: `@extern` calls, `CStruct` by value under x86-64 System V, AAPCS64 and wasm32 ABIs, `CString`, arrays and addresses, callbacks, resource destruction, `build.link`, and C libraries on Linux and macOS. Windows x64 struct classification and `DllMain` remain unimplemented. Multi-file programs are supported. A temporary C string is currently heap allocated.
-- JavaScript: Bun supports C structs passed by value through a shim compiled on first use by `bun:ffi`'s `cc`; generated code lays out the arguments in C memory and the shim applies the platform ABI. Resource destruction runs at scope exit for owning locals and parameters, inside composites and collections, when a value is replaced, and for discarded new values. A resource's destructor is imported when its type is declared in another file. A drop flag tracks moves, including a resource whose bytes are all zero.
+- JavaScript: Bun supports C structs passed by value through a shim compiled on first use by `bun:ffi`'s `cc`; generated code lays out the arguments in C memory and the shim applies the platform ABI. Resource destruction runs at scope exit for owning locals and fresh default temporaries; resource parameters borrow and never finalize the caller's value, inside composites and collections, when a value is replaced, and for discarded new values. A resource's destructor is imported when its type is declared in another file. A drop flag tracks moves, including a resource whose bytes are all zero.
 - WebAssembly: `@extern` calls are `env` imports unless C objects in `build.link` define them. The loader gets host functions from `env.mjs` next to it, copied from the program or package root; that module can export `attach(exports)` to reach memory. Missing functions are reported by name. C-library exports remain to be implemented.
 :::

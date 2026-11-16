@@ -41,7 +41,7 @@ type Box<Item> = {
 }
 mutable box = Box<String> {}
 box.set("source")
-let copy = box
+let duplicate = box
 box.set("changed")
-console.log(copy.read(), box.read())
+console.log(duplicate.read(), box.read())
 -- prints: source changed

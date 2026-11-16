@@ -1351,3 +1351,21 @@ The external Codec reference checkout was `/home/claude-dev/projects/codec`, bra
 The proposed split-aggregate optimization remains unimplemented: for a proven immutable `let parts = text.split(sep)` used only by `parts.length` and `parts.join(literal).length`, evaluate the source/separator once and retain a count and byte length when both are simple ASCII without CR, the separator is nonempty, and the join literal is also simple ASCII without CR. Otherwise keep the ordinary array. The proof excludes other reads, captures, aliases and `use`; joining computes `bytes - (count - 1) * sep.length + (count - 1) * literal.length`. Test mutated inputs after declaration, empty/non-simple strings, evaluation order and leaks. Split views already reduce the allocation cost, so measure before implementing it and revisit the proof under the string redesign.
 
 Full LLVM workspace validations share `/tmp/fa-compiler-full-suite.lock` (`flock --close`, so children do not inherit the lock), use `CARGO_BUILD_JOBS=2` and two test threads, and keep sanitizer runs outside virtual-memory caps. The current Node/web harness enforces resident memory instead: JavaScript engines reserve sparse address space, so the former resume note's virtual-memory limit is not carried forward.
+
+## Trunk performance baseline (implementation, 2026-11-16)
+
+- One checked-manifest audit driver, `benchmarks/audit/compare.py`, replaces the
+  overlapping first-audit shell pipeline and variant timer. The quick TypeScript
+  runner remains a wall-time smoke check, not the CPU acceptance measurement.
+- Native CPU uses default inputs, 21 rotating/reversing rounds with Fa, Goose,
+  Rust and a second label of the exact Fa binary. Preserve all samples, ratio of
+  medians, paired median and type-7 paired quartiles. Apply the existing ±0.05
+  threshold/control rule to both statistics; disagreement is unresolved.
+- Profiles use the audit inputs and explicit cache geometry; secondary targets
+  use those smaller inputs for a tractable order-of-magnitude comparison. Record
+  errors and sizes explicitly. Keep CPU, instruction, modeled cache miss, RSS and
+  executable-size measurements separate, with checked output for every execution.
+- Schema-2 phase JSON includes full compiler/artifact provenance and load at each
+  boundary. Combine phases into a dated JSON and generate Markdown from it.
+  Fa has no source DWARF: line-level profile attribution is to assembly/IR, with
+  source locations established by inspection, not invented source-line counts.

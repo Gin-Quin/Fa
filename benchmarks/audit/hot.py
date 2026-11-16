@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Prints the hottest instructions of an executable from a callgrind profile taken with
---dump-instr=yes (profile.sh), interleaved with their disassembly (objdump), grouped into runs of
+--dump-instr=yes (compare.py --mode profile), interleaved with their disassembly (objdump), grouped into runs of
 consecutive hot instructions, so that the inlined loops of `main` can be read with their cost.
 
 Usage: hot.py <callgrind.out> <main.s> [--top N] [--min-share 0.002] [--calls]
@@ -13,7 +13,7 @@ import sys
 from collections import defaultdict
 
 
-def parse_callgrind(path, executable):
+def parse_callgrind(path, executable, event="Ir"):
     """Self cost per instruction address of the executable, and its call edges
     (address, caller, callee, calls, inclusive cost). Positions are `instr line`."""
     self_cost = defaultdict(int)
@@ -24,6 +24,7 @@ def parse_callgrind(path, executable):
     in_executable = False
     pending_call = None
     last_address = 0
+    event_index = 0
 
     def resolve(table, rest):
         match = re.match(r"\((\d+)\)(?: (.*))?", rest)
@@ -37,6 +38,9 @@ def parse_callgrind(path, executable):
         for line in file:
             line = line.rstrip("\n")
             if not line:
+                continue
+            if line.startswith("events: "):
+                event_index = line.split()[1:].index(event)
                 continue
             if line.startswith("ob="):
                 in_executable = resolve(objects, line[3:]).endswith(executable)
@@ -65,7 +69,7 @@ def parse_callgrind(path, executable):
             else:
                 address = last_address
             last_address = address
-            cost = int(fields[2]) if len(fields) > 2 else 0
+            cost = int(fields[2 + event_index]) if len(fields) > 2 + event_index else 0
             if pending_call is not None:
                 if in_executable:
                     calls.append((address, current_fn, pending_call[0], pending_call[1], cost))
@@ -98,6 +102,9 @@ def main():
     top = 40
     min_share = 0.002
     show_calls = False
+    event = "Ir"
+    if "--event" in arguments:
+        event = arguments[arguments.index("--event") + 1]
     if "--top" in arguments:
         top = int(arguments[arguments.index("--top") + 1])
     if "--min-share" in arguments:
@@ -106,7 +113,7 @@ def main():
         show_calls = True
     profile, disassembly = arguments[0], arguments[1]
     executable = os.path.abspath(disassembly)[:-2]  # main.s -> main
-    self_cost, calls = parse_callgrind(profile, executable)
+    self_cost, calls = parse_callgrind(profile, executable, event)
     total = sum(self_cost.values())
     instructions, function_of = parse_objdump(disassembly)
     # with PIE executables callgrind reports load addresses: find the offset that matches
@@ -121,7 +128,9 @@ def main():
                     break
             else:
                 offset = (hottest & ~0xFFF) - (low & ~0xFFF) if hottest > low else 0
-    print(f"total self cost {total:,}")
+    print(f"total self cost {total:,} ({event})")
+    if not total:
+        return
     by_function = defaultdict(int)
     for address, cost in self_cost.items():
         by_function[function_of.get(address - offset, "?")] += cost
@@ -157,4 +166,5 @@ def main():
             print(f"  {caller} -> {callee}: {count:,} calls, {cost:,} ({cost / total:.1%})")
 
 
-main()
+if __name__ == "__main__":
+    main()

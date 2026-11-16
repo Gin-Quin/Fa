@@ -1721,3 +1721,16 @@ Shared fixtures separately cover full-width extrema, mutable/static/frame maps,
 copy independence, small-key alignment, references and deleteWhere/GrowingMap
 fallbacks. IR checks require firing and the three fallbacks on native and wasm.
 Full validation and controlled measurements follow.
+
+Actual benchmark IR check: word-count uses KEY64-eligible integer fields, but
+its numeric map retains stable chunks. `facts::short_reference` rejects the
+named `random.next` call inside getOrInsert: it scans the initializer as well
+as the statements after the reference. The String map already uses dense
+entries. Preserve this existing reference-proof boundary in this item, as
+required; do not change ownership/fact analysis or the benchmark to force a
+layout. Scalar64 fires in the new eligible programs and remains unavailable
+where the existing reference proof declines it. The pre-reference argument
+call case is a separately recorded proof follow-up, so this item must not be
+reported as solving word-count even if a noisy CPU point estimate improves.
+
+Item 3 checkpoint: 27/36 instruction profiles completed, all within +1%; lru 19,047,821 → 19,153,936 Ir (+0.557%). Complete validation and remaining profiles/CPU phases are pending. Preserve these partial rows as the work checkpoint, not an acceptance claim. Full Bun/Node/web program suites and multi-file packages pass. Manual O0 native/wasm IR confirms KEY64 frame payload 232 bytes rounded to an aligned 240-byte buffer.

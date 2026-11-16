@@ -1,0 +1,30 @@
+-- asynchronous: false
+-- file: package.fa
+export = { name = "objectArrayRegions" }
+-- file: library/model.fa
+export namespace = {
+	type Tree = { value: Integer, children: Array<Tree> }
+}
+-- file: library/build.fa
+export function = (depth: Integer): model.Tree => {
+	mutable tree = model.Tree { value = depth, children = [] }
+	if depth > 0 {
+		for index in 0..2 { tree.children.push(build(depth - 1)) }
+	}
+	tree
+}
+-- file: library/sum.fa
+export function = (tree: model.Tree): Integer => {
+	mutable total = tree.value
+	for child in tree.children { total += sum(child) }
+	total
+}
+-- file: application/main.fa
+export function = () => {
+	mutable tree = library.build(2)
+	let original = tree
+	tree.value = 10
+	assert library.sum(original) == 4
+	assert library.sum(tree) == 12
+	console.log("split object array regions") -- prints: split object array regions
+}

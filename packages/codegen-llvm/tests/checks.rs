@@ -1868,6 +1868,39 @@ console.log(try read(T.One { child = T.Leaf { value = 7 } }, false))
 	}
 
 	#[test]
+	fn recursive_object_array_regions_require_closed_structural_edges() {
+		let fixture = ir_of("object-array-region-copy-fixture", include_str!("programs/region-object-arrays.fa"));
+		assert!(fixture.contains("@fa.build.arena("), "{fixture}");
+		assert!(fixture.contains("@fa.copy.region_children"), "{fixture}");
+		let source = "type Tree = { value: Integer, children: Array<Tree> }\nfunction build = (depth: Integer): Tree => { mutable tree = Tree { value = depth, children = [] }\nif depth > 0 { for index in 0..3 { tree.children.push(build(depth - 1)) } }\ntree }\nfunction change = (tree: Tree): Void mutates tree => { tree.value += 1\nfor child in tree.children { change(child) } }\nmutable root = build(2)\nchange(root)\nconsole.log(root)\n";
+		for (suffix, region, exact) in [
+			("", true, true),
+			("root.children.push(build(0))\n", false, true),
+			("let mutator = change\nmutator(root)\n", false, true),
+			(
+				"use alias = root.children\nconsole.log(alias)\n",
+				false,
+				true,
+			),
+			("console.log(root.children.capacity)\n", true, false),
+		] {
+			for (name, target) in [("native", Target::Native), ("wasm", Target::Wasm)] {
+				let ir = ir_at_target(
+					&format!("object-array-region-{name}-{region}-{}", suffix.len()),
+					&format!("{source}{suffix}"),
+					true,
+					OptLevel::O0,
+					target,
+				);
+				assert_eq!(ir.contains("@fa.build.arena("), region, "{ir}");
+				let build = function(&ir, if region { "fa.build.arena" } else { "fa.build" });
+				assert_eq!(build.contains("@fa_array_reserve("), exact, "{build}");
+				assert_eq!(ir.contains("@fa_array_new_region_exact("), region, "{ir}");
+			}
+		}
+	}
+
+	#[test]
 	fn region_string_slices_only_borrow_stable_immediate_sources() {
 		let prefix =
 			"type Tree = Union { Leaf = { text: String }, Branch = { left: Tree, right: Tree } }\n";

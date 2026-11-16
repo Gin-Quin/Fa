@@ -388,7 +388,7 @@ impl<'a> RegionFile<'a> {
 						}
 						_ => false,
 					};
-					if optional {
+					if optional || self.root_array(field.ty, ty) {
 						recursive = true;
 					} else if !self.passive(field.ty, false) {
 						return None;
@@ -578,7 +578,42 @@ impl<'a> RegionFile<'a> {
 		let View::Access { target, members } = self.view(callee) else {
 			return None;
 		};
-		(members.len() == 1).then_some(target)
+		match members.len() {
+			0 => None,
+			1 => Some(target),
+			length => members.iter().nth(length - 2),
+		}
+	}
+
+	/// A direct child-array field of an independent builder local. Parameters,
+	/// aliases, globals and deeper projections cannot publish new region edges.
+	fn builder_array_field(&self, call: NodeId, owner: Option<NodeId>, root: &Root) -> bool {
+		let Some(owner) = owner else { return false };
+		if root.nominal.is_some() {
+			return false;
+		}
+		let View::Call { callee, .. } = self.view(call) else {
+			return false;
+		};
+		let View::Access { target, members } = self.view(callee) else {
+			return false;
+		};
+		if members.len() != 2 || !self.direct_root(self.analysis.type_of(target), root.ty) {
+			return false;
+		}
+		let Resolution::Local(symbol) = self.analysis.resolution(target) else {
+			return false;
+		};
+		let symbol = self.analysis.symbols.symbol(symbol);
+		matches!(symbol.kind, SymbolKind::Mutable | SymbolKind::Let)
+			&& self.owners[symbol.decl_node.index()] == Some(owner)
+	}
+
+	/// Writing finite, non-owning data cannot detach or invalidate a region
+	/// edge. Union payloads retain their immutable compact-layout contract.
+	fn passive_write(&self, target: NodeId, root: &Root) -> bool {
+		let ty = self.analysis.type_of(target);
+		root.nominal.is_none() && !self.contains(ty, root.ty) && self.passive(ty, false)
 	}
 
 	fn array_projection(&self, node: NodeId, root: &Root) -> bool {
@@ -829,14 +864,30 @@ impl<'a> RegionFile<'a> {
 				reject(claims);
 				continue;
 			};
-			for (_, value) in &object.fields {
+			for (name, value) in &object.fields {
 				let crate::analysis::FieldValue::Given(value) = *value else {
+					if root.nominal.is_none()
+						&& self
+							.types
+							.fields_of(object.ty)
+							.iter()
+							.any(|field| field.name == *name && self.root_array(field.ty, root.ty))
+					{
+						reject(claims);
+					}
 					continue;
 				};
-				if self.root_array(self.analysis.type_of(value), root.ty)
-					&& !self.child_array_origin(value, function, root)
-				{
-					reject(claims);
+				if self.root_array(self.analysis.type_of(value), root.ty) {
+					if !self.child_array_origin(value, function, root) {
+						reject(claims);
+					} else if let Some(array) =
+						stable_type_name(self.types, self.analysis.type_of(value))
+					{
+						claims.insert(format!(
+							"child-array{SEPARATOR}{}{SEPARATOR}{}{SEPARATOR}{array}",
+							root.name, self.function_names[&function]
+						));
+					}
 				}
 			}
 		}
@@ -885,6 +936,7 @@ impl<'a> RegionFile<'a> {
 						&& matches!(self.analysis.resolution(target), Resolution::Local(symbol) if self.analysis.symbols.symbol(symbol).kind == SymbolKind::Mutable && self.owners[self.analysis.symbols.symbol(symbol).decl_node.index()] == owner)
 						&& matches!(self.view(target), View::Name(_));
 					if self.place_contains(target, root)
+						&& !self.passive_write(target, root)
 						&& (!own_local
 							|| self.root_array(self.analysis.type_of(target), root.ty)
 								&& value.is_some_and(|value| {
@@ -899,6 +951,7 @@ impl<'a> RegionFile<'a> {
 				} else if let View::CompoundAssignment { target, .. }
 				| View::UpdateFields { target, .. } = self.view(node)
 					&& self.place_contains(target, root)
+					&& !self.passive_write(target, root)
 				{
 					reject(claims);
 				}
@@ -970,7 +1023,14 @@ impl<'a> RegionFile<'a> {
 								matches!(symbol.kind, SymbolKind::Mutable | SymbolKind::Let)
 									&& self.owners[symbol.decl_node.index()] == self.owners[index]
 							}) && matches!(builtin, Some("Array#push" | "Array#reserve"));
-					if !allowed_array {
+					let builder_field = self.root_array(self.analysis.type_of(value), root.ty)
+						&& self.builder_array_field(node, owner, root)
+						&& matches!(builtin, Some("Array#push" | "Array#reserve"));
+					// Every body contributes its stores to this same closed proof.
+					// An indirect/imported function value has no such body identity.
+					let checked_call =
+						root.nominal.is_none() && matches!(call.callee, Callee::Function(_));
+					if !allowed_array && !builder_field && !checked_call {
 						reject(claims);
 					}
 				}
@@ -1421,6 +1481,44 @@ console.log(saved)
 			resolved.iter().any(|fact| fact.starts_with("type\u{1f}")),
 			"{claims:#?}"
 		);
+	}
+
+	#[test]
+	fn recursive_object_arrays_keep_edges_closed_while_passive_fields_change() {
+		let (claims, resolved) = facts(include_str!("../../../benchmarks/scene/main.fa"));
+		assert!(
+			resolved.iter().any(|key| key.starts_with("type\u{1f}")),
+			"{claims:#?}"
+		);
+		assert!(
+			resolved
+				.iter()
+				.any(|key| key.starts_with("child-array\u{1f}")),
+			"{claims:#?}"
+		);
+	}
+
+	#[test]
+	fn recursive_object_array_edges_cannot_be_mutated_or_aliased_by_readers() {
+		let tree = "type Tree = { value: Integer, children: Array<Tree> }\nfunction build = (depth: Integer): Tree => { mutable tree = Tree { value = depth, children = [] }\nif depth > 0 { for index in 0..2 { tree.children.push(build(depth - 1)) } }\ntree }\n";
+		for suffix in [
+			"mutable tree = build(2)\ntree.children.push(build(0))\nconsole.log(tree)",
+			"function grow = (tree: Tree) mutates tree => { tree.children.push(build(0)) }\nmutable tree = build(2)\ngrow(tree)",
+			"mutable tree = build(2)\nuse children = tree.children\nconsole.log(children)",
+			"mutable tree = build(2)\ntry tree.children[0] = build(0)\nconsole.log(tree)",
+			"let holder = { tree = build(2) }\nconsole.log(holder)",
+		] {
+			let (claims, resolved) = facts(&format!("{tree}\n{suffix}\n"));
+			assert!(resolved.is_empty(), "{suffix}: {claims:#?}");
+		}
+	}
+
+	#[test]
+	fn recursive_object_array_defaults_keep_ordinary_ownership() {
+		let (claims, resolved) = facts(
+			"type Tree = { value: Integer, children: Array<Tree> = [] }\nfunction build = (value: Integer): Tree => Tree { value }\nconsole.log(build(1))\n",
+		);
+		assert!(resolved.is_empty(), "{claims:#?}");
 	}
 
 	#[test]

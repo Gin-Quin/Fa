@@ -9998,8 +9998,8 @@ define hidden noundef ptr @fa_array_compact(ptr noundef %0, i64 noundef %1) loca
   %67 = load ptr, ptr %57, align 8, !tbaa !109
   br label %68
 
-68:                                               ; preds = %56, %66
-  %69 = phi ptr [ %61, %56 ], [ %67, %66 ]
+68:                                               ; preds = %66, %56
+  %69 = phi ptr [ %67, %66 ], [ %61, %56 ]
   store i64 %11, ptr %63, align 8, !tbaa !118
   %70 = load ptr, ptr %0, align 8, !tbaa !109
   %71 = load i64, ptr %10, align 8, !tbaa !118
@@ -10161,8 +10161,8 @@ define hidden noundef ptr @fa_array_into_region(ptr noundef %0, i64 noundef %1) 
   %69 = load ptr, ptr %59, align 8, !tbaa !109
   br label %70
 
-70:                                               ; preds = %58, %68
-  %71 = phi ptr [ %63, %58 ], [ %69, %68 ]
+70:                                               ; preds = %68, %58
+  %71 = phi ptr [ %69, %68 ], [ %63, %58 ]
   store i64 %13, ptr %65, align 8, !tbaa !118
   %72 = load ptr, ptr %0, align 8, !tbaa !109
   %73 = load i64, ptr %12, align 8, !tbaa !118
@@ -10183,7 +10183,7 @@ define hidden noundef ptr @fa_array_into_region(ptr noundef %0, i64 noundef %1) 
   store ptr %78, ptr %0, align 8, !tbaa !109
   br label %79
 
-79:                                               ; preds = %76, %77, %2
+79:                                               ; preds = %2, %76, %77
   %80 = phi ptr [ %0, %2 ], [ %59, %77 ], [ %59, %76 ]
   ret ptr %80
 }
@@ -10578,29 +10578,31 @@ define internal fastcc void @region_array_reserve(ptr noundef %0, i64 noundef %1
   %21 = mul i32 %20, %19
   %22 = getelementptr inbounds i8, ptr %0, i32 24
   %23 = load i64, ptr %22, align 1
-  %24 = and i64 %23, 4
+  %24 = and i64 %23, 16
   %25 = icmp eq i64 %24, 0
-  %26 = icmp ult i64 %1, 5
-  %27 = and i1 %26, %25
-  br i1 %27, label %28, label %32
+  br i1 %25, label %35, label %26
 
-28:                                               ; preds = %18
-  %29 = load ptr, ptr %0, align 8, !tbaa !109
-  %30 = getelementptr inbounds i8, ptr %0, i32 32
-  %31 = icmp eq ptr %29, %30
-  br i1 %31, label %75, label %32
+26:                                               ; preds = %18
+  %27 = and i64 %23, 4
+  %28 = icmp eq i64 %27, 0
+  %29 = icmp ult i64 %1, 5
+  %30 = and i1 %29, %28
+  br i1 %30, label %31, label %58
 
-32:                                               ; preds = %28, %18
-  %33 = and i64 %23, 16
-  %34 = icmp ne i64 %33, 0
-  %35 = icmp ugt i32 %21, 992
-  %36 = or i1 %35, %34
+31:                                               ; preds = %26
+  %32 = load ptr, ptr %0, align 8, !tbaa !109
+  %33 = getelementptr inbounds i8, ptr %0, i32 32
+  %34 = icmp eq ptr %32, %33
+  br i1 %34, label %75, label %58
+
+35:                                               ; preds = %18
+  %36 = icmp ugt i32 %21, 992
   br i1 %36, label %58, label %37
 
-37:                                               ; preds = %32
+37:                                               ; preds = %35
   %38 = icmp eq i32 %21, 0
   %39 = add nuw nsw i32 %21, 7
-  %40 = and i32 %39, -8
+  %40 = and i32 %39, 2040
   %41 = select i1 %38, i32 8, i32 %40
   %42 = load ptr, ptr @tree_bump, align 4, !tbaa !6
   %43 = ptrtoint ptr %42 to i32
@@ -10625,7 +10627,7 @@ define internal fastcc void @region_array_reserve(ptr noundef %0, i64 noundef %1
   %57 = tail call fastcc ptr @arena_refill(i32 noundef %41, i32 noundef 16) #62
   br label %64
 
-58:                                               ; preds = %32
+58:                                               ; preds = %26, %31, %35
   %59 = tail call ptr @fa_alloc(i32 noundef %21, i32 noundef 16) #63
   %60 = and i64 %23, 24
   %61 = icmp eq i64 %60, 0
@@ -10653,7 +10655,7 @@ define internal fastcc void @region_array_reserve(ptr noundef %0, i64 noundef %1
   store ptr %66, ptr %0, align 8, !tbaa !109
   br label %75
 
-75:                                               ; preds = %28, %64
+75:                                               ; preds = %31, %64
   store i64 %1, ptr %4, align 8, !tbaa !112
   br label %76
 
@@ -13805,7 +13807,7 @@ define hidden noundef ptr @fa_array_new_region(i64 noundef %0, i64 noundef %1, i
   %47 = tail call fastcc ptr @arena_refill(i32 noundef %31, i32 noundef 16) #62
   br label %48
 
-48:                                               ; preds = %43, %46
+48:                                               ; preds = %46, %43
   %49 = phi ptr [ %44, %43 ], [ %47, %46 ]
   %50 = shl nuw i64 %2, 5
   %51 = or disjoint i64 %50, 2
@@ -13825,9 +13827,95 @@ define hidden noundef ptr @fa_array_new_region(i64 noundef %0, i64 noundef %1, i
   tail call fastcc void @region_array_reserve(ptr noundef nonnull %49, i64 noundef %4, i64 noundef %2) #62
   br label %59
 
-59:                                               ; preds = %58, %48
+59:                                               ; preds = %48, %58
   store i64 %0, ptr %55, align 8, !tbaa !118
   ret ptr %49
+}
+
+; Function Attrs: alwaysinline nounwind optsize
+define hidden noundef ptr @fa_array_new_region_exact(i64 noundef %0, i64 noundef %1, i64 noundef %2) local_unnamed_addr #16 {
+  %4 = tail call i64 @llvm.smax.i64(i64 %1, i64 %0)
+  %5 = or i64 %4, %0
+  %6 = icmp slt i64 %5, 0
+  %7 = add i64 %2, -576460752303423488
+  %8 = icmp ult i64 %7, -576460752303423487
+  %9 = or i1 %6, %8
+  br i1 %9, label %16, label %10
+
+10:                                               ; preds = %3
+  %11 = udiv i64 4294967295, %2
+  %12 = icmp ugt i64 %4, %11
+  br i1 %12, label %16, label %13
+
+13:                                               ; preds = %10
+  %14 = udiv i64 9223372036854775807, %2
+  %15 = icmp ugt i64 %4, %14
+  br i1 %15, label %16, label %17
+
+16:                                               ; preds = %13, %10, %3
+  tail call fastcc void @out_of_memory() #66
+  unreachable
+
+17:                                               ; preds = %13
+  %18 = trunc i64 %4 to i32
+  %19 = trunc i64 %2 to i32
+  %20 = tail call { i32, i1 } @llvm.umul.with.overflow.i32(i32 %19, i32 %18)
+  %21 = extractvalue { i32, i1 } %20, 1
+  %22 = mul i32 %18, %19
+  %23 = select i1 %21, i32 -1, i32 %22
+  %24 = icmp ult i32 %23, 961
+  %25 = add i32 %23, 32
+  %26 = select i1 %24, i32 %25, i32 32
+  %27 = icmp eq i32 %26, 0
+  %28 = add i32 %26, 7
+  %29 = and i32 %28, -8
+  %30 = select i1 %27, i32 8, i32 %29
+  %31 = load ptr, ptr @tree_bump, align 4, !tbaa !6
+  %32 = ptrtoint ptr %31 to i32
+  %33 = sub i32 0, %32
+  %34 = and i32 %33, 15
+  %35 = load ptr, ptr @tree_end, align 4, !tbaa !6
+  %36 = ptrtoint ptr %35 to i32
+  %37 = sub i32 %36, %32
+  %38 = icmp ule i32 %34, %37
+  %39 = sub i32 %37, %34
+  %40 = icmp ule i32 %30, %39
+  %41 = select i1 %38, i1 %40, i1 false
+  br i1 %41, label %42, label %45, !prof !75
+
+42:                                               ; preds = %17
+  %43 = getelementptr inbounds i8, ptr %31, i32 %34
+  %44 = getelementptr inbounds i8, ptr %43, i32 %30
+  store ptr %44, ptr @tree_bump, align 4, !tbaa !6
+  br label %47
+
+45:                                               ; preds = %17
+  %46 = tail call fastcc ptr @arena_refill(i32 noundef %30, i32 noundef 16) #62
+  br label %47
+
+47:                                               ; preds = %45, %42
+  %48 = phi ptr [ %43, %42 ], [ %46, %45 ]
+  %49 = shl nuw i64 %2, 5
+  %50 = or disjoint i64 %49, 2
+  %51 = getelementptr inbounds i8, ptr %48, i32 24
+  store i64 %50, ptr %51, align 1
+  %52 = getelementptr inbounds i8, ptr %48, i32 32
+  %53 = select i1 %24, ptr %52, ptr null
+  store ptr %53, ptr %48, align 8, !tbaa !109
+  %54 = getelementptr inbounds %struct.FaArrayHeader, ptr %48, i32 0, i32 1
+  store i64 0, ptr %54, align 8, !tbaa !118
+  %55 = select i1 %24, i64 %4, i64 0
+  %56 = getelementptr inbounds %struct.FaArrayHeader, ptr %48, i32 0, i32 2
+  store i64 %55, ptr %56, align 8, !tbaa !112
+  br i1 %24, label %58, label %57
+
+57:                                               ; preds = %47
+  tail call fastcc void @region_array_reserve(ptr noundef nonnull %48, i64 noundef %4, i64 noundef %2) #62
+  br label %58
+
+58:                                               ; preds = %47, %57
+  store i64 %0, ptr %54, align 8, !tbaa !118
+  ret ptr %48
 }
 
 ; Function Attrs: alwaysinline nounwind optsize
@@ -13877,6 +13965,128 @@ define hidden void @fa_array_init_region_local(ptr noundef %0, i64 noundef %1, i
 29:                                               ; preds = %28, %18
   store i64 %1, ptr %23, align 8, !tbaa !118
   ret void
+}
+
+; Function Attrs: alwaysinline nounwind optsize
+define hidden noundef ptr @fa_array_into_region_exact(ptr noundef %0, i64 noundef %1) local_unnamed_addr #16 {
+  %3 = getelementptr inbounds i8, ptr %0, i32 24
+  %4 = load i64, ptr %3, align 1
+  %5 = and i64 %4, 16
+  %6 = icmp eq i64 %5, 0
+  %7 = and i64 %4, 18
+  %8 = icmp eq i64 %7, 2
+  br i1 %8, label %78, label %9
+
+9:                                                ; preds = %2
+  %10 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i32 0, i32 2
+  %11 = load i64, ptr %10, align 8, !tbaa !112
+  %12 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i32 0, i32 1
+  %13 = load i64, ptr %12, align 8, !tbaa !118
+  %14 = tail call i64 @llvm.smax.i64(i64 %11, i64 %13)
+  %15 = or i64 %14, %13
+  %16 = icmp slt i64 %15, 0
+  %17 = add i64 %1, -576460752303423488
+  %18 = icmp ult i64 %17, -576460752303423487
+  %19 = or i1 %18, %16
+  br i1 %19, label %26, label %20
+
+20:                                               ; preds = %9
+  %21 = udiv i64 4294967295, %1
+  %22 = icmp ugt i64 %14, %21
+  br i1 %22, label %26, label %23
+
+23:                                               ; preds = %20
+  %24 = udiv i64 9223372036854775807, %1
+  %25 = icmp ugt i64 %14, %24
+  br i1 %25, label %26, label %27
+
+26:                                               ; preds = %23, %20, %9
+  tail call fastcc void @out_of_memory() #66
+  unreachable
+
+27:                                               ; preds = %23
+  %28 = trunc i64 %14 to i32
+  %29 = trunc i64 %1 to i32
+  %30 = tail call { i32, i1 } @llvm.umul.with.overflow.i32(i32 %29, i32 %28)
+  %31 = extractvalue { i32, i1 } %30, 1
+  %32 = mul i32 %28, %29
+  %33 = select i1 %31, i32 -1, i32 %32
+  %34 = icmp ult i32 %33, 961
+  %35 = add i32 %33, 32
+  %36 = select i1 %34, i32 %35, i32 32
+  %37 = icmp eq i32 %36, 0
+  %38 = add i32 %36, 7
+  %39 = and i32 %38, -8
+  %40 = select i1 %37, i32 8, i32 %39
+  %41 = load ptr, ptr @tree_bump, align 4, !tbaa !6
+  %42 = ptrtoint ptr %41 to i32
+  %43 = sub i32 0, %42
+  %44 = and i32 %43, 15
+  %45 = load ptr, ptr @tree_end, align 4, !tbaa !6
+  %46 = ptrtoint ptr %45 to i32
+  %47 = sub i32 %46, %42
+  %48 = icmp ule i32 %44, %47
+  %49 = sub i32 %47, %44
+  %50 = icmp ule i32 %40, %49
+  %51 = select i1 %48, i1 %50, i1 false
+  br i1 %51, label %52, label %55, !prof !75
+
+52:                                               ; preds = %27
+  %53 = getelementptr inbounds i8, ptr %41, i32 %44
+  %54 = getelementptr inbounds i8, ptr %53, i32 %40
+  store ptr %54, ptr @tree_bump, align 4, !tbaa !6
+  br label %57
+
+55:                                               ; preds = %27
+  %56 = tail call fastcc ptr @arena_refill(i32 noundef %40, i32 noundef 16) #62
+  br label %57
+
+57:                                               ; preds = %55, %52
+  %58 = phi ptr [ %53, %52 ], [ %56, %55 ]
+  %59 = shl nuw i64 %1, 5
+  %60 = or disjoint i64 %59, 2
+  %61 = getelementptr inbounds i8, ptr %58, i32 24
+  store i64 %60, ptr %61, align 1
+  %62 = getelementptr inbounds i8, ptr %58, i32 32
+  %63 = select i1 %34, ptr %62, ptr null
+  store ptr %63, ptr %58, align 8, !tbaa !109
+  %64 = getelementptr inbounds %struct.FaArrayHeader, ptr %58, i32 0, i32 1
+  store i64 0, ptr %64, align 8, !tbaa !118
+  %65 = select i1 %34, i64 %14, i64 0
+  %66 = getelementptr inbounds %struct.FaArrayHeader, ptr %58, i32 0, i32 2
+  store i64 %65, ptr %66, align 8, !tbaa !112
+  br i1 %34, label %69, label %67
+
+67:                                               ; preds = %57
+  tail call fastcc void @region_array_reserve(ptr noundef nonnull %58, i64 noundef %14, i64 noundef %1) #62
+  %68 = load ptr, ptr %58, align 8, !tbaa !109
+  br label %69
+
+69:                                               ; preds = %67, %57
+  %70 = phi ptr [ %68, %67 ], [ %62, %57 ]
+  store i64 %13, ptr %64, align 8, !tbaa !118
+  %71 = load ptr, ptr %0, align 8, !tbaa !109
+  %72 = load i64, ptr %12, align 8, !tbaa !118
+  %73 = trunc i64 %72 to i32
+  %74 = mul i32 %73, %29
+  tail call fastcc void @copy_bytes(ptr noundef %70, ptr noundef %71, i32 noundef %74) #62
+  tail call fastcc void @free_array_items(ptr noundef nonnull %0, i64 noundef %1) #62
+  br i1 %6, label %75, label %76
+
+75:                                               ; preds = %69
+  tail call void @fa_free(ptr noundef nonnull %0, i32 noundef 32, i32 noundef 8) #63
+  br label %78
+
+76:                                               ; preds = %69
+  store i64 0, ptr %10, align 8, !tbaa !112
+  store i64 0, ptr %12, align 8, !tbaa !118
+  %77 = getelementptr inbounds i8, ptr %0, i32 32
+  store ptr %77, ptr %0, align 8, !tbaa !109
+  br label %78
+
+78:                                               ; preds = %2, %75, %76
+  %79 = phi ptr [ %0, %2 ], [ %58, %76 ], [ %58, %75 ]
+  ret ptr %79
 }
 
 ; Function Attrs: nounwind optsize

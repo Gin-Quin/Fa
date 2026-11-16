@@ -4,6 +4,13 @@ The angle-bracket rewrite has arrived. Its pending notes were applied to the rew
 
 ## Native root-region proof
 
+The 2026-11-16 aggregate work also admits recursive object child arrays whose
+structural writes are confined to independent builder locals, while finite
+non-owning payload fields may change. Unknown mutating calls, aliases and unproven
+defaults/spreads retain ordinary ownership. Array/memory implementation notes now
+describe the exact region header/buffer and independent root-copy path; retain
+that distinction when reconciling the broader union/array notes below.
+
 When updating the memory-management implementation notes, describe the closed proof in `fa_analyzer::regions` and `design/decisions.md`: whole-module and per-unit compilation require identical facts from every scanned module. Missing or opaque contributions reject the optimization. Child arrays in a recursive union belong to its root region, ordinary arrays own independent roots, and copying a subtree out never shares its owner's lifetime. Generic/unknown payloads, resources/tasks, escaping references, mutations and foreign entry points are conservatively excluded. The backend retains target layout guards; the proof alone does not enable every array-bearing shape. The single shared address band for compressed links is unchanged.
 
 ## `documentation/values/strings.md`, `:::implementation` (frame buffers)

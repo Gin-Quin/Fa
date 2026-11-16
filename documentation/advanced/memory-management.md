@@ -270,6 +270,19 @@ unpredictable synchronous memory compaction with that advice. Large blocks on
 Linux use their own mappings, which grow by moving pages. Ordinary allocations
 impose no additional size limit on values.
 
+A closed proof over every scanned module can place a recursive object's child
+arrays in one root-owned region. It admits fresh construction arrays and finite,
+non-owning data, permits passive data writes, and rejects structural graph writes
+outside independent builder locals, escaping arrays/references, captures, unknown
+mutating calls and opaque contributions. Defaults and spreads without an ownership
+proof retain ordinary storage. Child objects remain inline in their arrays. Small
+headers/buffers use exact region allocations; larger buffers have a region cleanup
+record. Root destruction releases the region without a recursive node walk. Copying
+a root or escaping subtree recreates the descendants under an independent owner;
+ordinary arrays outside builders retain one owner per root element. Split builds
+share the same semantic facts and keep the ordinary pointer/header ABI for this
+shape. Async and unsupported layouts retain the general ownership path.
+
 On 64-bit Linux, arena-allocated recursive edges use 32-bit links: the node's
 address divided by eight. Arena pages share the address range from 2 GiB to
 32 GiB, so a tree of two optional children takes eight bytes. Exhausting this

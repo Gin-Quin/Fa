@@ -166,6 +166,7 @@ fn emit(
 			}
 		}
 	}
+	crate::optimize::materialize_aggregate_copies(module, machine)?;
 	crate::compile::keep_huge_functions_unoptimized(module);
 	let pipeline = if split.lto {
 		if options.size {

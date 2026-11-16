@@ -1017,10 +1017,32 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				self.freeze_union_padding(&self.builder, Repr::Object(element), value.into());
 			return Ok(Val::new(Repr::Object(element), value));
 		}
+		// A wide value remains a snapshot of this evaluation even if a later
+		// argument changes its source. Keep that snapshot in memory: feeding
+		// capacity-sized SSA values to several helpers defeats LLVM's SROA
+		// limits and can promote them back into thousands of wasm arguments.
+		let snapshot = self.wide_aggregate(slot.repr);
+		let pointer = if snapshot {
+			let target = self.alloca(slot.repr, "aggregate_snapshot")?;
+			self.builder.build_memcpy(
+				target.pointer,
+				1,
+				slot.pointer,
+				1,
+				self.usize
+					.const_int(self.collection_data_size(self.llvm_type(slot.repr)), false),
+			)?;
+			target.pointer
+		} else {
+			slot.pointer
+		};
 		let value = self
 			.builder
-			.build_load(self.llvm_type(slot.repr), slot.pointer, "")?;
+			.build_load(self.llvm_type(slot.repr), pointer, "")?;
 		if let Some(instruction) = inkwell::values::BasicValue::as_instruction_value(&value) {
+			if snapshot {
+				crate::optimize::mark_aggregate_snapshot(value)?;
+			}
 			self.tag(instruction, false)?;
 			// a module `let` read by a function: initialized before any call
 			if self

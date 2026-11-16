@@ -95,6 +95,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if !value.is_struct_value() {
 			return Ok(value);
 		}
+		if let Some(pointer) = crate::optimize::aggregate_snapshot(value) {
+			return Ok(pointer.into());
+		}
 		let slot = self.helper_slot(builder, value.get_type())?;
 		builder.build_store(slot, value)?;
 		Ok(slot.into())
@@ -127,8 +130,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		value: BasicValueEnum<'ctx>,
 	) -> Result<BasicValueEnum<'ctx>, Error> {
 		if self.llvm_type(repr).is_struct_type() {
-			let loaded =
-				builder.build_load(self.llvm_type(repr), value.into_pointer_value(), "")?;
+			let mut pointer = value.into_pointer_value();
+			let snapshot = self.wide_aggregate(repr);
+			if snapshot {
+				let target = self.helper_slot(builder, self.llvm_type(repr))?;
+				builder.build_memcpy(
+					target,
+					1,
+					pointer,
+					1,
+					self.usize
+						.const_int(self.collection_data_size(self.llvm_type(repr)), false),
+				)?;
+				pointer = target;
+			}
+			let loaded = builder.build_load(self.llvm_type(repr), pointer, "")?;
+			if snapshot {
+				crate::optimize::mark_aggregate_snapshot(loaded)?;
+			}
 			Ok(self.freeze_union_padding(builder, repr, loaded))
 		} else {
 			Ok(value)
@@ -540,7 +559,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if self.llvm_type(repr).is_struct_type() {
 			let out = self.helper_slot(builder, self.llvm_type(repr))?;
 			builder.build_call(function, &[out.into(), value.into()], "")?;
-			return Ok(builder.build_load(self.llvm_type(repr), out, "")?);
+			let value = builder.build_load(self.llvm_type(repr), out, "")?;
+			if self.wide_aggregate(repr) {
+				crate::optimize::mark_aggregate_snapshot(value)?;
+			}
+			return Ok(value);
 		}
 		Ok(builder
 			.build_call(function, &[value.into()], "")?

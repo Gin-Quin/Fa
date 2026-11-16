@@ -202,9 +202,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	pub(super) fn inline_view(&self, value: Val<'ctx>, ty: TypeId) -> Result<Val<'ctx>, Error> {
-		let slot = self.alloca(value.repr, "inline.value")?;
-		self.builder
-			.build_store(slot.pointer, value.value.expect("an inline array"))?;
+		let pointer = self
+			.helper_argument(&self.builder, value.value.expect("an inline array"))?
+			.into_pointer_value();
+		let slot = Slot {
+			pointer,
+			repr: value.repr,
+		};
 		self.inline_view_at(slot, ty)
 	}
 

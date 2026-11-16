@@ -16,3 +16,7 @@ console.log(bytes.capacity, words.capacity) -- prints: 255 256
 static largest = Schema.InlineArray { item = Schema.String, capacity = 4294967295 }
 type Largest = TypeFromSchema<largest>
 assert @typeToSchema(Largest) == largest
+
+type Sized<capacity: UInt32> = TypeFromSchema<@typeToSchema(InlineArray<String, capacity>)>
+let sized: Sized<2> = ["bounded"]
+console.log(sized, sized.capacity) -- prints: ["bounded"] 2

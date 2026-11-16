@@ -1518,3 +1518,7 @@ The lead explicitly retains `std.json`'s existing native-freestanding AN004 rest
 
 Explicit `characters()` follows Unicode 17.0.0 extended grapheme clusters, UAX #29 revision 47. The runtime uses generated combined Grapheme_Cluster_Break, Extended_Pictographic and Indic_Conjunct_Break ranges, with algorithmic Hangul syllables. Unicode's source files and license are checked in; generation is offline and verifies their hashes. All official segmentation cases are sanitizer-tested. Ordinary string operations do not retain the tables after linking. ASCII character collections retain compact byte storage when they contain no CRLF; a CRLF is one grapheme cluster while still counting as two UTF-16 units.
 
+## Native ASCII string reads (2026-11-16)
+
+Numeric indexing dispatches on the ASCII flag before checking byte bounds, keeping successful byte loads apart from Unicode cache writes and missing-unit sentinels. Locally caught end-of-input is an unweighted branch, and unused IndexError payloads are never built. Helpers retain their truthful memory effects. Call sites state the actual result ranges; successful ASCII fallback reads narrow through a byte before extending to UInt16. The whole-program frozen-field proof also permits borrowing inline bytes directly from the field throughout a synchronous method call. ASCII region slices finish directly from normalized bounds, preserving the existing short-view and long-copy policy without reloading the result descriptor.
+

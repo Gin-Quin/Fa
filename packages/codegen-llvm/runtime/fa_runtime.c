@@ -2659,6 +2659,7 @@ FA_EXPORT uint8_t fa_next_utf8_byte(const uint8_t *bytes, size_t length, FaUtf8C
 /// surrogates replace three bytes with three bytes. No whole encoding is made.
 FA_EXPORT __attribute__((always_inline)) uint8_t fa_string_utf8_byte(
     const uint8_t *bytes, size_t length, size_t capacity, size_t position) {
+	if (capacity & SIMPLE) { return bytes[position]; }
 	if (!(capacity & STRING_SURROGATES)) { return bytes[position]; }
 	static const uint8_t replacement[] = {0xEF, 0xBF, 0xBD};
 	if (span_low_head(bytes, length)) {
@@ -3780,6 +3781,15 @@ FA_EXPORT const void *fa_string_slice_view(const uint8_t *text, size_t length, s
 
 FA_EXPORT const void *fa_string_slice_region(const uint8_t *text, size_t length, size_t capacity,
                                              int64_t start, int64_t end, int8_t flags, FaString *out) {
+	if (capacity & SIMPLE) {
+		int64_t from, to;
+		const void *error = slice_bounds((int64_t)length, start, end, flags, &from, &to);
+		if (error) { return error; }
+		size_t size = (size_t)(to - from);
+		if (size > INLINE_STRING_BYTES) { *out = owned_copy_with(text + from, size, SIMPLE); }
+		else { *out = (FaString){text + from, size, SIMPLE | KIND_MASK}; }
+		return 0;
+	}
 	const void *error = string_slice(text, length, capacity, start, end, flags, out, 2);
 	if (!error && string_length(out) > INLINE_STRING_BYTES &&
 	    ((out->capacity & KIND_MASK) == KIND_MASK || string_counted_view(out->capacity))) {

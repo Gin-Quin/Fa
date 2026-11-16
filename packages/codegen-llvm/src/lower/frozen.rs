@@ -457,7 +457,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.build_struct_gep(structure, slot.pointer, index, "")?;
 			let value = self.load(Slot { pointer, repr })?;
 			if repr == Repr::Str {
-				let (bytes, length) = self.string_parts(value)?;
+				// The whole-program field proof also fixes inline payload
+				// storage for this call. Borrow it instead of snapshotting it.
+				let (bytes, length) = self.string_place_parts(value, pointer)?;
 				self.frozen_string_parts.push(FrozenParts {
 					value: value.value.expect("a string"),
 					bytes,

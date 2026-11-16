@@ -1015,6 +1015,7 @@ console.log(items.length)
 			"{words}"
 		);
 		assert_eq!(count(words, inline_test), 1, "{words}");
+		assert!(!words.contains("inline_snapshot"), "{words}");
 		for (name, change) in [
 			("frozen-field-written", "scanner.text = \"x\"\n"),
 			("frozen-field-appended", "scanner.text += \"x\"\n"),
@@ -1093,6 +1094,13 @@ console.log(try equal("é", 0), try choose("a", 0))
 			let body = function(&ir, name);
 			assert!(body.contains("@string_ascii_unit_fallback("), "{body}");
 			assert!(body.contains("@string_code_unit_slow("), "{body}");
+			assert!(
+				body.lines()
+					.filter(|line| line.contains("@string_ascii_unit_fallback(")
+						|| line.contains("@string_code_unit_slow("))
+					.all(|line| line.contains("!range")),
+				"{body}"
+			);
 			assert!(body.contains("load i8"), "{body}");
 			assert!(!body.contains("@fa_string_get("), "{body}");
 		}

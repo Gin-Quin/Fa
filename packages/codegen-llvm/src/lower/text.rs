@@ -404,6 +404,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				&[bytes.into(), length.into(), position.into()],
 			)?
 			.into_int_value();
+		self.code_unit_range(ascii_unit, 256)?;
 		let finish = |this: &mut Self,
 		              unit: IntValue<'ctx>,
 		              ascii_only: bool|
@@ -436,6 +437,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					})
 				})?;
 			}
+			if ascii_only {
+				let byte = this
+					.builder
+					.build_int_truncate(unit, this.context.i8_type(), "")?;
+				return Ok(this
+					.builder
+					.build_int_z_extend(byte, this.context.i16_type(), "")?);
+			}
 			Ok(this
 				.builder
 				.build_int_truncate(unit, this.context.i16_type(), "")?)
@@ -458,6 +467,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				],
 			)?
 			.into_int_value();
+		self.code_unit_range(unit, 65536)?;
 		let unit = finish(self, unit, false)?;
 		let unicode_end = self
 			.builder
@@ -478,6 +488,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}),
 			result.as_basic_value(),
 		))
+	}
+
+	/// Runtime decoders return -1 or an unsigned unit. State this before
+	/// inlining so joins retain the narrow range without inspecting the body.
+	fn code_unit_range(&self, value: IntValue<'ctx>, upper: u64) -> Result<(), Error> {
+		let metadata = self.context.metadata_node(&[
+			value.get_type().const_all_ones().into(),
+			value.get_type().const_int(upper, false).into(),
+		]);
+		value
+			.as_instruction_value()
+			.expect("a code unit call")
+			.set_metadata(metadata, self.context.get_kind_id("range"))
+			.map_err(|error| Error::Llvm(error.to_string()))
 	}
 
 	/// Inline strings have zero padding after their bytes. Two such values

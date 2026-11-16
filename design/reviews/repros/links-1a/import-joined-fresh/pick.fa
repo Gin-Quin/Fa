@@ -1,0 +1,4 @@
+export function = (nodes: Pool<Node>, existing: Node in nodes, fresh: Boolean): Node in nodes mutates nodes.size => {
+	if fresh { return nodes.add({ value = 9 }) }
+	existing
+}

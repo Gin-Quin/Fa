@@ -1,0 +1,1 @@
+export function = (value: Integer): Node in nodes mutates nodes.size => nodes.add({ value })

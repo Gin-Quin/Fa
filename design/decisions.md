@@ -720,8 +720,25 @@ require a further structural-mutation/lifetime proof; they are not inferred from
 this capacity permission. No traversal is reordered: floating-point folds,
 exceptions and observable effects prevent a blanket allocation-order rewrite.
 
-Measurements and remaining distance are recorded in the generated aggregate
-results and `/home/claude-dev/fa-lead/reports/perf-aggregates.md` after validation.
+At audit size 9, `scene` falls from 9,538,351 to 9,479,696 instructions
+(−0.615%; Fa/Goose 1.208 → 1.201). All 28 other audit rows remain within
++0.0122%, below the +1% limit. At default depth 12, Fa falls from 147,351,353
+to 146,392,565 instructions; modeled LL data read misses 658,815 → 1,022,
+total LL data misses 776,875 → 96,420 (Goose 76,194). Exact child slots remove
+2,731,568 raw bytes before allocator rounding. GNU-time peak RSS is 7,552 KiB
+versus the baseline 9,984 KiB and Goose 6,656 KiB.
+
+The first 21-round CPU series interleaves the preserved compiler's original
+executable, the candidate, an identical candidate control, Goose and Rust.
+Point ratios are old/Goose 2.805 and candidate/Goose 1.483; candidate/old
+0.529 (paired median 0.532 [0.490, 0.603]). The control is 0.9635/0.9638,
+which fails strict 3%: **CPU improvement not resolved**. Retain that primary
+series; a longer 63-round supplemental series gives 1.540 / 1.467 [1.334, 1.674]
+against Goose and 0.555 / 0.539 [0.518, 0.599] against the original Fa. Its
+control also fails (0.9328/0.9111), so CPU remains not resolved. Both are retained
+in the generated aggregate JSON. The remaining layout/traversal work and measurements
+are in `benchmarks/results/2026-11-16-aggregates.json` and
+`/home/claude-dev/fa-lead/reports/perf-aggregates.md`.
 
 ## Compact payloads in proven root regions (2026-11-07)
 

@@ -1452,7 +1452,7 @@ console.log(items, stable, words, maybe)
 	}
 
 	#[test]
-	fn range_reversal_versions_only_plain_scalar_swap_loops() {
+	fn range_reversal_retains_the_checked_swap_loop() {
 		let body = "let left = try items[low]\nlet right = try items[high]\ntry items[low] = right\ntry items[high] = left\nlow += 1\nhigh -= 1";
 		let source = |item: &str, body: &str| {
 			format!(
@@ -1468,9 +1468,7 @@ console.log(items, stable, words, maybe)
 				target,
 			);
 			let reverse = function(&ir, "fa.reverse");
-			assert!(reverse.contains("reverse_range:"), "{reverse}");
-			assert!(reverse.contains("reverse_checked:"), "{reverse}");
-			assert!(reverse.contains("reverse_left"), "{reverse}");
+			assert!(!reverse.contains("reverse_range:"), "{reverse}");
 			assert_eq!(count(reverse, "@fa_error_index("), 4, "{reverse}");
 		}
 		for (name, item, body) in [
@@ -1495,15 +1493,7 @@ console.log(items, stable, words, maybe)
 			false,
 			OptLevel::O0,
 		);
-		assert!(ir.contains("reverse_range:"), "{ir}");
-		let ir = optimized_ir(
-			"reversal-fannkuch-vector",
-			include_str!("../../../benchmarks/fannkuch-redux/main.fa"),
-		);
-		assert!(
-			ir.contains("shufflevector") || ir.contains("@llvm.vector.reverse."),
-			"{ir}"
-		);
+		assert!(!ir.contains("reverse_range:"), "{ir}");
 	}
 
 	#[test]

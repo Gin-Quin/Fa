@@ -1925,12 +1925,13 @@ layouts and all value assertions. No expected-skip list changes.
 
 ## Array performance — guarded range reversal (2026-11-16)
 
-- Recognize the ordinary six-statement two-ended swap over one scalar Array.
+- Rejected after controlled CPU measurement. The candidate recognized the
+  ordinary six-statement two-ended swap over one scalar Array.
   Both counters must be local mutable i64 values, distinct from the item storage;
   copied scalar temporaries have no observable copy/drop effects. Representation
   conversions, references, shared/reactive places and asynchronous programs
   withhold the proof. Different steps or extra statements keep their loops.
-- Version the loop with `0 <= low < high < length`. The inclusive span and all
+- It versioned the loop with `0 <= low < high < length`. The inclusive span and all
   pair indices then fit i64 and stay in bounds. One typed pair loop replaces
   its checks, with final low/high written exactly as after the original rounds.
   Its two halves are disjoint; scoped alias declarations apply once per reversal
@@ -1941,6 +1942,16 @@ layouts and all value assertions. No expected-skip list changes.
 - Portable oracle, extreme bounds, generic/function-value/callback/capture,
   async and per-unit cases cover firing and fallback behavior on every target.
   Performance/validation records live in the array report and dated audit data.
+- Although fannkuch N=9 instructions fell 9.63% and all 40 instruction gates
+  passed, the first N=10 CPU series has after/before point estimates
+  1.024733 / 1.036930 with a passing same-binary control. There is no demonstrated
+  CPU gain. Restore ordinary checked loops; retain the behavioral fixtures and
+  all evidence. The firing/vectorization assertion belongs to the rejected
+  implementation and is replaced by a check that ordinary loops remain checked.
+  The Goose goal is unresolved; Rust passes the task's point-estimator policy.
+  No statistical significance is inferred from that policy or the quartiles.
+  Two read-only committee reviews agreed to close this attempt without a tuning
+  sweep or selecting a favorable same-binary repeat.
 
 ## Array performance — GrowingArray loop facts (2026-11-16)
 

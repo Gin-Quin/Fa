@@ -288,13 +288,13 @@ while cursor is not none {
 console.log(list.head) -- the owner is still usable
 ```
 
-Keeping a child as a second owner requires `copy`; a reference needs `use`:
+Keeping a child as a second owner while reading that same child again requires `copy`; a reference needs `use`. Reading only sibling fields permits a [partial move](#partial-field-moves): reading `list.head` alone does not keep ownership of `list.tail`.
 
 ```fa
 type List = { head: Integer, tail: List? }
 let list = List { head = 1, tail = none }
 let rest = list.tail -- error: MEM004: use `use rest = list.tail` or `copy list.tail`
-console.log(list.head, rest)
+console.log(list.tail, rest)
 ```
 
 

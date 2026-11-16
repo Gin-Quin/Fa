@@ -1634,3 +1634,10 @@ place; field cleanup observes their writes. The object-cache ABI suffix advances
 to `inline-length-4` for these calling conventions. Closure captures transfer
 unique ownership only when the closure escapes; aggregate literal fields and
 items publish that escape just as assignment does.
+
+Destructor lookup searches matching declarations for the method, rather than
+letting an empty alias declaration hide its nominal Resource's `destroy`.
+This applies to local and other-file native lowering and JavaScript. The
+generated Resource rows check construction-derived destruction counts as well
+as the cross-engine trace, so agreement between two missing destructors cannot
+serve as a passing oracle.

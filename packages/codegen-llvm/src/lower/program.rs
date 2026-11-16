@@ -122,14 +122,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		ty: TypeId,
 	) -> Option<inkwell::values::FunctionValue<'ctx>> {
 		self.other_files.values().find_map(|state| {
-			let declaration = state
+			state
 				.analysis
 				.type_decls
 				.values()
-				.find(|decl| self.same_type(decl.ty, ty))?;
-			declaration
-				.functions
-				.iter()
+				.filter(|decl| self.same_type(decl.ty, ty))
+				.flat_map(|decl| &decl.functions)
 				.map(|&function| state.analysis.symbols.symbol(function))
 				.find(|symbol| self.session.types().syms.resolve(symbol.name) == "destroy")
 				.and_then(|symbol| state.functions.get(&symbol.decl_node))

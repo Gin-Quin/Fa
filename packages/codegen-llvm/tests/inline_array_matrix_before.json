@@ -11,273 +11,315 @@
 			"exit": 102,
 			"passed": false,
 			"mismatched_rows": [5, 8, 9, 11, 13],
-			"reason": "leak: 6 blocks"
+			"reason": "leak: 6 blocks",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "anonymous_union_owned.foreign.fa",
 			"exit": 102,
 			"passed": false,
 			"mismatched_rows": [5, 8, 9, 11, 13],
-			"reason": "leak: 11 blocks"
+			"reason": "leak: 11 blocks",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "array.foreign.fa",
 			"exit": 102,
 			"passed": false,
 			"mismatched_rows": [5, 8, 9, 11, 13],
-			"reason": "leak: 6 blocks"
+			"reason": "leak: 6 blocks",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "boolean.foreign.fa",
 			"exit": 0,
 			"passed": false,
 			"mismatched_rows": [5, 8, 9, 11, 13],
-			"reason": "output differs"
+			"reason": "output differs",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "enum.foreign.fa",
 			"exit": 1,
 			"passed": false,
 			"mismatched_rows": [],
-			"reason": "/tmp/fa-inline-final-baseline/enum.foreign.fa:59:24: converting a value from Enum(NominalId(2147483660)) to Enum(NominalId(0)) is not supported by the native backend yet"
+			"reason": "/tmp/fa-inline-final-baseline/enum.foreign.fa:59:24: converting a value from Enum(NominalId(2147483660)) to Enum(NominalId(0)) is not supported by the native backend yet",
+			"unobserved_rows": 14
 		},
 		{
 			"file": "float32.foreign.fa",
 			"exit": 0,
 			"passed": false,
 			"mismatched_rows": [5, 8, 9, 11, 13],
-			"reason": "output differs"
+			"reason": "output differs",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "float64.foreign.fa",
 			"exit": 0,
 			"passed": false,
 			"mismatched_rows": [5, 8, 9, 11, 13],
-			"reason": "output differs"
+			"reason": "output differs",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "int128.foreign.fa",
 			"exit": 0,
 			"passed": false,
 			"mismatched_rows": [5, 8, 9, 11, 13],
-			"reason": "output differs"
+			"reason": "output differs",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "int16.foreign.fa",
 			"exit": 0,
 			"passed": false,
 			"mismatched_rows": [5, 8, 9, 11, 13],
-			"reason": "output differs"
+			"reason": "output differs",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "int32.foreign.fa",
 			"exit": 0,
 			"passed": false,
 			"mismatched_rows": [5, 8, 9, 11, 13],
-			"reason": "output differs"
+			"reason": "output differs",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "int64.foreign.fa",
 			"exit": 0,
 			"passed": false,
 			"mismatched_rows": [5, 8, 9, 11, 13],
-			"reason": "output differs"
+			"reason": "output differs",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "int8.foreign.fa",
 			"exit": 0,
 			"passed": false,
 			"mismatched_rows": [5, 8, 9, 11, 13],
-			"reason": "output differs"
+			"reason": "output differs",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "integer.foreign.fa",
 			"exit": 0,
 			"passed": false,
 			"mismatched_rows": [5, 8, 9, 11, 13],
-			"reason": "output differs"
+			"reason": "output differs",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "long_string.foreign.fa",
 			"exit": 102,
 			"passed": false,
 			"mismatched_rows": [5, 8, 9, 11, 13],
-			"reason": "leak: 6 blocks"
+			"reason": "leak: 6 blocks",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "named_union.foreign.fa",
 			"exit": 102,
 			"passed": false,
 			"mismatched_rows": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
-			"reason": "leak: 6 blocks"
+			"reason": "leak: 6 blocks",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "named_union_owned.foreign.fa",
 			"exit": 102,
 			"passed": false,
 			"mismatched_rows": [5, 8, 9, 11, 13],
-			"reason": "leak: 11 blocks"
+			"reason": "leak: 11 blocks",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "nested.foreign.fa",
 			"exit": 0,
 			"passed": false,
 			"mismatched_rows": [5, 8, 9, 11, 13],
-			"reason": "output differs"
+			"reason": "output differs",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "object.foreign.fa",
 			"exit": 0,
 			"passed": false,
 			"mismatched_rows": [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 13],
-			"reason": "output differs"
+			"reason": "output differs",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "optional.foreign.fa",
 			"exit": 0,
 			"passed": false,
 			"mismatched_rows": [5, 8, 9, 11, 13],
-			"reason": "output differs"
+			"reason": "output differs",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "short_string.foreign.fa",
 			"exit": 0,
 			"passed": false,
 			"mismatched_rows": [5, 8, 9, 11, 13],
-			"reason": "output differs"
+			"reason": "output differs",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "structure.foreign.fa",
 			"exit": 102,
 			"passed": false,
 			"mismatched_rows": [5, 8, 9, 11, 13],
-			"reason": "leak: 6 blocks"
+			"reason": "leak: 6 blocks",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "sync_anonymous_union_owned.foreign.fa",
 			"exit": 0,
 			"passed": true,
 			"mismatched_rows": [],
-			"reason": ""
+			"reason": "",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "sync_integer.foreign.fa",
 			"exit": 0,
 			"passed": true,
 			"mismatched_rows": [],
-			"reason": ""
+			"reason": "",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "sync_long_string.foreign.fa",
 			"exit": 0,
 			"passed": true,
 			"mismatched_rows": [],
-			"reason": ""
+			"reason": "",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "sync_named_union.foreign.fa",
 			"exit": 0,
 			"passed": false,
 			"mismatched_rows": [0, 1, 2],
-			"reason": "output differs"
+			"reason": "output differs",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "sync_named_union_owned.foreign.fa",
 			"exit": 0,
 			"passed": true,
 			"mismatched_rows": [],
-			"reason": ""
+			"reason": "",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "sync_nested.foreign.fa",
 			"exit": 0,
 			"passed": true,
 			"mismatched_rows": [],
-			"reason": ""
+			"reason": "",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "sync_object.foreign.fa",
 			"exit": 0,
 			"passed": false,
 			"mismatched_rows": [0, 2],
-			"reason": "output differs"
+			"reason": "output differs",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "sync_structure.foreign.fa",
 			"exit": 0,
 			"passed": true,
 			"mismatched_rows": [],
-			"reason": ""
+			"reason": "",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "sync_unique.foreign.fa",
 			"exit": 1,
 			"passed": false,
 			"mismatched_rows": [],
-			"reason": "4 errors"
+			"reason": "4 errors",
+			"unobserved_rows": 3
 		},
 		{
 			"file": "sync_unique_owned.foreign.fa",
 			"exit": 1,
 			"passed": false,
 			"mismatched_rows": [],
-			"reason": "4 errors"
+			"reason": "4 errors",
+			"unobserved_rows": 3
 		},
 		{
 			"file": "tuple.foreign.fa",
 			"exit": 0,
 			"passed": false,
 			"mismatched_rows": [5, 8, 9, 11, 13],
-			"reason": "output differs"
+			"reason": "output differs",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "uint128.foreign.fa",
 			"exit": 0,
 			"passed": false,
 			"mismatched_rows": [5, 8, 9, 11, 13],
-			"reason": "output differs"
+			"reason": "output differs",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "uint16.foreign.fa",
 			"exit": 0,
 			"passed": false,
 			"mismatched_rows": [5, 8, 9, 11, 13],
-			"reason": "output differs"
+			"reason": "output differs",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "uint32.foreign.fa",
 			"exit": 0,
 			"passed": false,
 			"mismatched_rows": [5, 8, 9, 11, 13],
-			"reason": "output differs"
+			"reason": "output differs",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "uint64.foreign.fa",
 			"exit": 0,
 			"passed": false,
 			"mismatched_rows": [5, 8, 9, 11, 13],
-			"reason": "output differs"
+			"reason": "output differs",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "uint8.foreign.fa",
 			"exit": 0,
 			"passed": false,
 			"mismatched_rows": [5, 8, 9, 11, 13],
-			"reason": "output differs"
+			"reason": "output differs",
+			"unobserved_rows": 0
 		},
 		{
 			"file": "unique.foreign.fa",
 			"exit": 1,
 			"passed": false,
 			"mismatched_rows": [],
-			"reason": "24 errors"
+			"reason": "24 errors",
+			"unobserved_rows": 13
 		},
 		{
 			"file": "unique_owned.foreign.fa",
 			"exit": 1,
 			"passed": false,
 			"mismatched_rows": [],
-			"reason": "24 errors"
+			"reason": "24 errors",
+			"unobserved_rows": 13
 		}
-	]
+	],
+	"rows": 434,
+	"mismatched_rows": 151,
+	"unobserved_rows": 46
 }

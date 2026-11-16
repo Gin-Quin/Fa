@@ -148,6 +148,11 @@ if pause { await Task.yield() }
         else:
             await_call = 'await ' if prefix else ''
             source += f'console.log("{position}", try {await_call}{function}())\n'
+    if unique:
+        # Ten Resource constructions per exercise, including the rejected
+        # push; local also constructs and clears its literal before exercise.
+        rows = 3 if synchronous else len(list(positions(unique)))
+        source += f'\n-- destroys: {rows * 10 + (0 if synchronous else 1)}\n'
     (directory / f'{"sync_" if synchronous else ""}{name}.foreign.fa').write_text(source)
     if synchronous:
         return

@@ -97,6 +97,20 @@ describe("indexing", () => {
 		expect(xs).toEqual([7, 0]);
 	});
 
+	test("checked writes destroy the replaced or rejected owner once", () => {
+		const first = { id: 1 };
+		const next = { id: 2 };
+		const rejected = { id: 3 };
+		const items = [first];
+		const destroyed = [];
+		const drop = (value) => destroyed.push(value.id);
+		faIndexSet(items, -1, next, drop);
+		expect(items).toEqual([next]);
+		expect(errorOf(() => faIndexSet(items, 9, rejected, drop))).toBeInstanceOf(IndexError);
+		expect(items).toEqual([next]);
+		expect(destroyed).toEqual([1, 3]);
+	});
+
 	test("get returns none (undefined)", () => {
 		const items = ["a", "b"];
 		expect(faArrayGet(items, 1)).toBe("b");

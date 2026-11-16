@@ -25,6 +25,37 @@ use crate::generate::Generator;
 use crate::js::{Expr, Prec};
 
 impl Generator<'_> {
+	/// Printing borrows a place, but owns a fresh result. In particular
+	/// pop/take transfer an item while get/find still borrow their collection.
+	pub(crate) fn printed_resource_drop(&mut self, mut node: NodeId) -> Option<String> {
+		while let View::Group(inner) | View::Try(inner) | View::Await(inner) = self.view(node) {
+			node = inner;
+		}
+		let owned = match self.view(node) {
+			View::Call { .. } => self
+				.analysis
+				.call(node)
+				.is_some_and(|call| match call.callee {
+					fa_analyzer::analysis::Callee::Builtin(id) => {
+						let path = fa_analyzer::builtins::get(id).path;
+						path.ends_with("#pop") || path.ends_with("#take")
+					}
+					fa_analyzer::analysis::Callee::Conversion(_) => false,
+					_ => true,
+				}),
+			View::TypedObject { .. }
+			| View::Object { .. }
+			| View::Tuple { .. }
+			| View::Array { .. } => true,
+			_ => false,
+		};
+		if owned {
+			self.drop_function(self.type_of(node))
+		} else {
+			None
+		}
+	}
+
 	/// The JavaScript function of the `destroy` of a resource type: of this
 	/// file, or imported from the file declaring the type.
 	fn destroy_call(&mut self, ty: TypeId) -> Option<String> {
@@ -35,17 +66,18 @@ impl Generator<'_> {
 		let key = self.types.nominal(nominal).key;
 		let module = self.types.decl_key_data(key).module;
 		if self.types.module_path(module) == self.session.module(self.file) {
-			let declaration = self
+			let destroy = self
 				.analysis
 				.type_decls
 				.values()
-				.find(|decl| decl.ty == ty)?;
-			let destroy = declaration.functions.iter().copied().find(|&function| {
-				self.types
-					.syms
-					.resolve(self.analysis.symbols.symbol(function).name)
-					== "destroy"
-			})?;
+				.filter(|decl| decl.ty == ty)
+				.flat_map(|decl| decl.functions.iter().copied())
+				.find(|&function| {
+					self.types
+						.syms
+						.resolve(self.analysis.symbols.symbol(function).name)
+						== "destroy"
+				})?;
 			return Some(self.name_of(destroy));
 		}
 		// another file's: by its interface (the type's functions, their export names)

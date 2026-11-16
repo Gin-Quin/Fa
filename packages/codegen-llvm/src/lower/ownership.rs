@@ -79,6 +79,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	pub(super) fn wide_aggregate(&self, repr: Repr) -> bool {
+		if !repr.has_value() {
+			return false;
+		}
 		let ty = self.llvm_type(repr);
 		ty.is_struct_type() && self.collection_data_size(ty) > 256
 	}

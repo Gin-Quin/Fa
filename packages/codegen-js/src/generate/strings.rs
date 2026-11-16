@@ -63,6 +63,23 @@ impl Generator<'_> {
 			};
 			return Piece::Text(text);
 		}
+		if let Some(drop) = self.printed_resource_drop(node) {
+			if !self.guard_frames.is_empty() {
+				let temp = self.inline_temp();
+				self.guard_frames
+					.last_mut()
+					.expect("a statement")
+					.push(format!("{drop}({temp});"));
+				let value = Expr::primary(format!("({temp} = {})", value.at(Prec::Assign)));
+				return self.top_level_piece(value, ty);
+			}
+			let temp = self.temp();
+			let formatted = self.format_top(Expr::name(temp.clone(), false), ty);
+			return Piece::Value(Expr::primary(format!(
+				"(({temp}) => {{ try {{ return {}; }} finally {{ {drop}({temp}); }} }})({})",
+				formatted.text, value.text
+			)));
+		}
 		self.top_level_piece(value, ty)
 	}
 

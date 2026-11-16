@@ -120,10 +120,19 @@ export function faIndex(array, index) {
  * @param {T[]} array
  * @param {number} index
  * @param {T} value
+ * @param {((value: T) => void) | undefined} [drop]
  * @returns {void}
  */
-export function faIndexSet(array, index, value) {
-	array[faNormalizeIndex(array.length, index)] = value;
+export function faIndexSet(array, index, value, drop) {
+	let position;
+	try {
+		position = faNormalizeIndex(array.length, index);
+	} catch (error) {
+		drop?.(value);
+		throw error;
+	}
+	drop?.(array[position]);
+	array[position] = value;
 }
 
 // @fa-helper faArrayGet

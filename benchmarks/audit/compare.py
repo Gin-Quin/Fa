@@ -78,6 +78,8 @@ def profile(command, directory, expected):
     assembly = Path(command[0]).with_suffix(".s")
     hot = execute([sys.executable, Path(__file__).with_name("hot.py"), path, assembly,
                    "--calls", "--top", "20"])
+    if hot.startswith(b"total self cost 0 "):
+        raise RuntimeError(f"{command[0]}: no executable instruction addresses matched the profile")
     (directory / "hot.txt").write_bytes(hot)
     cache = {}
     for event in ("D1mr", "D1mw", "DLmr", "DLmw"):

@@ -66,7 +66,11 @@ cache, 64-byte lines; these are modeled misses, not hardware counters. Retained
 profiles have instruction addresses, exclusive/inclusive function annotations and
 hot assembly runs. Fa currently emits no source DWARF: attribution by “line” means
 machine instruction/disassembly, checked against the retained optimized IR and
-benchmark sources; it does not pretend to be source-line DWARF attribution.
+benchmark sources; it does not pretend to be source-line DWARF attribution. If Valgrind loses the
+main ELF's object name, the postprocessor recovers anonymous PCs only when at
+least 90% of their instruction-weighted addresses match the saved executable's
+disassembly at one known load base. Empty executable instruction maps fail the
+profile step; they are not published as a successful attribution.
 Rust HashMap keeps its randomized default hasher for fairness: lru, words and
 word-count retain three Rust profiles and use the median-Ir execution, with every
 event set retained so hash-probe variation is visible. No deterministic hasher is

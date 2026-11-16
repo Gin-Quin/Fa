@@ -85,6 +85,14 @@ class Statistics(unittest.TestCase):
         other['supplemental'] = True
         output = tables.markdown({'series': [phase, other]})
         self.assertNotIn('`example@16`', output)
+        secondary = copy.deepcopy(phase)
+        secondary['mode'] = 'secondary'
+        secondary['benchmarks']['example'] = {'size': 10, 'targets': {
+            'wasm': {'error': 'program: memory limit 524288 KiB exceeded'},
+            'bun': {'error': 'long build path: error[E-NUM-19]: too wide'}}}
+        output = tables.markdown({'series': [phase, secondary]})
+        self.assertIn('> 512 MiB', output)
+        self.assertIn('refused E-NUM-19', output)
 
 
 if __name__ == '__main__':

@@ -21,6 +21,23 @@ class ProfileEvents(unittest.TestCase):
             self.assertEqual(dict(costs), {0x1000: 3, 0x1004: 0, 0x1008: 1})
             self.assertEqual(calls[0][-1], 5)
 
+    def test_anonymous_pie_object_is_recovered_only_with_strong_address_overlap(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'callgrind.out'
+            path.write_text('positions: instr line\nevents: Ir Dr Dw D1mr\n'
+                            'ob=(4) ???\nfn=(1) 0x109000\n'
+                            '0x109000 0 100 20 1 8\n+4 0 200 30 1 9\n'
+                            'cfn=(2) 0x109100\ncalls=2 0x109100 0\n'
+                            '* 0 10000 4 2 50\n'
+                            'fn=(3) trampoline\n0x483d000 0 1 1 0 1\n')
+            addresses = {0x1000, 0x1004, 0x1100}
+            costs, calls = parse_callgrind(path, '/tmp/main', 'D1mr', addresses)
+            self.assertEqual(dict(costs), {0x109000: 8, 0x109004: 9})
+            self.assertEqual(len(calls), 1)
+            costs, calls = parse_callgrind(path, '/tmp/main', 'Ir', {0x1000})
+            self.assertEqual(dict(costs), {})
+            self.assertEqual(calls, [])
+
 
 if __name__ == '__main__':
     unittest.main()

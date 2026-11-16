@@ -1,6 +1,7 @@
 """Generate reviewable Markdown directly from schema-2 benchmark series."""
 
 import json
+import re
 from pathlib import Path
 
 
@@ -56,7 +57,16 @@ def markdown(report):
         ins = " / ".join(number(profile[side]["events"]["Ir"] / 1e6) for side in ("fa", "goose", "rust")) if "fa" in profile else "—"
         def target(name):
             result = secondary.get("targets", {}).get(name, {})
-            return number(result["cpu"]) if "cpu" in result else result.get("error", "—").replace("\n", " ").replace("|", "\\|")[:120]
+            if "cpu" in result:
+                return number(result["cpu"])
+            error = result.get("error", "—")
+            code = re.search(r"\[(E-[A-Z]+-\d+|[A-Z]+\d+)\]", error)
+            if code:
+                return "refused " + code[1]
+            memory = re.search(r"memory limit (\d+) KiB", error)
+            if memory:
+                return f"> {int(memory[1]) / 1024:g} MiB"
+            return error.replace("\n", " ").replace("|", "\\|")[-120:]
         lines.append(f"| `{name}` | {triple(cpu, 'cpu')} | {triple(cpu, 'gnu_peak_rss_kib')} | {triple(cpu, 'stripped_bytes')} | {profile.get('size', '—')} | {ins} | {secondary.get('size', '—')} | {target('wasm')} | {target('bun')} |")
     return "\n".join(lines) + "\n"
 

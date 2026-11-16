@@ -68,6 +68,8 @@ if planetIndex is not none {
 let position = text.indexOf("planet") ?? 0
 ```
 
+An empty search is included in every string, including `""`: `includes("")`, `startsWith("")` and `endsWith("")` are `true`. `indexOf("")` is `0`; `lastIndexOf("")` is the string's length. A search longer than the text gives `false` or `none`, respectively.
+
 ## Replace and split
 
 ```fa
@@ -82,6 +84,22 @@ let joined = parts.join(", ")         -- "a, b, c"
 ```fa
 assert "a-b".replace("-", "$&") == "a$&b"
 ```
+
+Matches are consumed from left to right without overlapping. For example, `"aaa".replaceAll("aa", "x")` is `"xa"`. A missing match (including a search longer than the text) leaves the text unchanged.
+
+An empty search in `replace` inserts the replacement once at the start. In `replaceAll`, it inserts at every code unit boundary, including both ends; an empty text gets one insertion. A boundary inside a surrogate pair may create lone surrogates: `"😀".replaceAll("", "-")` has five code units and is not well-formed.
+
+`split` retains every empty field, including leading, trailing and repeated separators: `",a,,".split(",")` gives `["", "a", "", ""]`. With no match, it gives `[text]`. `"".split("")` gives `[]`; `"".split(",")` gives `[""]`.
+
+## Padding, repetition, case and trimming
+
+`padStart` and `padEnd` return the text unchanged when the target is no larger than its current length, including zero or a negative target, or when the filler is empty. Otherwise they repeat and cut the filler to the exact number of code units needed. The cut may split a pair: `"x".padEnd(2, "😀")` ends with a lone high surrogate.
+
+`repeat(0)` and repeating an empty string give `""`. Impossible repetition or padding sizes use the existing allocation and overflow stops: they never wrap and introduce no declared error.
+
+Case conversion preserves lone surrogates and follows Unicode's default full, context-sensitive mapping, without a locale: `"ΟΣ".toLowerCase()` is `"ος"` (final sigma), and `"ß".toUpperCase()` is `"SS"`. Casing and `characters()` use the JavaScript engine's Unicode tables on JavaScript targets, and the compiler's tables natively and at compile time; results can depend on that Unicode version.
+
+`trim`, `trimStart` and `trimEnd` remove exactly the ECMAScript white space and line terminators: U+0009–U+000D, U+0020, U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, U+3000 and U+FEFF. U+0085 and U+200B are retained. No normalization is performed.
 
 ## Methods
 
@@ -100,7 +118,7 @@ No method changes the string it is called on, except `reserve`: a `mutable` stri
 | `includes(search: String)`, `startsWith(search: String)`, `endsWith(search: String)` | `Boolean` |
 | `indexOf(search: String)`, `lastIndexOf(search: String)` | `Integer?` |
 | `toUpperCase()`, `toLowerCase()` | `String`, with the Unicode rules, independent of the locale (`"ß".toUpperCase()` is `"SS"`) |
-| `trim()`, `trimStart()`, `trimEnd()` | `String`, without the leading or trailing Unicode white space |
+| `trim()`, `trimStart()`, `trimEnd()` | `String`, without the leading or trailing ECMAScript white space and line terminators |
 | `padStart(length: Integer, filler: String = " ")`, `padEnd(...)` | `String`; `length` is in code units |
 | `repeat(count: Integer<min = 0>)` | `String` |
 | `replace(search: String, replacement: String)` | `String`, with the first match replaced |

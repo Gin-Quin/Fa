@@ -1325,7 +1325,7 @@ impl<'a> Lowerer<'a> {
 	/// An assignable place: a local and the fields and items below it.
 	fn place(&mut self, n: NodeId) -> Option<Place> {
 		match syntax::view(self.tree, n) {
-			View::Group(inner) => self.place(inner),
+			View::Group(inner) | View::Try(inner) => self.place(inner),
 			View::Name(_) => match self.a.resolution(n) {
 				Resolution::Local(symbol) => {
 					if let Some(place) = self.aliases.get(&symbol) {

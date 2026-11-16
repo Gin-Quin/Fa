@@ -28,6 +28,8 @@ for byte in data {
 }
 ```
 
+Slices share the [range rules](/values/ranges#slicing-with-a-range) of arrays and strings: normalize negative endpoints, allow `start == length`, return an empty slice for reversed normalized bounds, and allow `[..]` on an empty value. An inclusive end must name an existing byte; length is a valid end only for an exclusive range. For example, `Bytes.filled(2)[0..=2]` is a compile error.
+
 The bytes of a `mutable` value can be replaced, and `use` declares a slice without copying, as for an array:
 
 ```fa
@@ -67,7 +69,7 @@ let text = try String.fromUtf8(bytes) -- "héllo"
 | `String.fromUtf8(bytes)` | `String`; `throws Utf8Error` when the bytes are not valid UTF-8. A byte order mark is kept, as the character `U+FEFF` |
 | `String.fromUtf8Lossy(bytes)` | `String`; each invalid sequence becomes `U+FFFD` instead of an error |
 
-`Utf8Error` has one field, `position: Integer`: the index of the first byte that is not valid UTF-8.
+Decoding follows the WHATWG UTF-8 algorithm on every target and at compile time. Lossy decoding writes one U+FFFD per maximal invalid subpart; for example, the truncated bytes `[240, 159]` decode to one replacement character, while `[237, 160, 128]` decode to three. `Utf8Error.position: Integer` is the index of the first byte of the first invalid subpart. A byte order mark is retained.
 
 The `length` of a string is not the number of its bytes: it counts UTF-16 code units, as in JavaScript. A limit expressed in bytes is checked with `utf8Length()`:
 
@@ -94,12 +96,14 @@ Each one has a text variant, named with `Text`, which decodes or encodes UTF-8:
 
 Parsers of text formats take either: `Json.parse` accepts `Bytes` as well as a `String`, and reads the bytes directly, without building a string first.
 
+The current `TcpStream` buffers still use `Array<Byte>`; their migration to `Bytes` is deferred to the standard library pass.
+
 `console.log` writes text. `@readFile` gives a `String` at compile time: the file must be valid UTF-8.
 
 :::implementation
 ## Implementation details
 
-The analyzer rejects whole-slice assignment before lowering, including through aliases and after `reuse`; assigning items and reseating references are separate operations. A contiguous copy loop over flat items can be lowered to one block copy. No replacement of a view's header may silently leave its owner unchanged.
+The shared slice proof requires an inclusive end to name an existing byte and checks unproven bounds at runtime. The analyzer rejects whole-slice assignment before lowering, including through aliases and after `reuse`; assigning items and reseating references are separate operations. A contiguous copy loop over flat items can be lowered to one block copy. No replacement of a view's header may silently leave its owner unchanged.
 
 ### Native
 

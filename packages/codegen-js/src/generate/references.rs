@@ -142,6 +142,11 @@ impl Generator<'_> {
 				(false, false) => "const ",
 			};
 			self.out.line(format!("{keyword}{name} = {};", value.text));
+			// A string slice is an immutable JS value, but a mutable use
+			// still needs its local slot when `reuse` selects another slice.
+			if mutable {
+				self.references.insert(symbol, Reference::Object);
+			}
 			return;
 		}
 		// a reference read by functions: its module-level pair, prepared

@@ -1,0 +1,3 @@
+function rule = (text: String): String => "{text.replaceAll("aa", "x")} {text.split("aa")} {text.includes("longer")} {text.startsWith("longer")} {text.endsWith("longer")} {text.indexOf("longer")} {text.replace("longer", "x")} {text.replaceAll("longer", "x")}"
+static result = @rule("aaa")
+console.log(result, rule("aaa") == result) -- prints: xa ["", "a"] false false false none aaa aaa true

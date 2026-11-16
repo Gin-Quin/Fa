@@ -880,6 +880,7 @@ impl Walker<'_> {
 			}
 		});
 		self.revalidate_fields(target, members);
+		self.reject_slice_structural_method(n);
 		// a field moved out of its local (foreign.rs)
 		self.check_moved_fields(n, target, false);
 		ty
@@ -1560,7 +1561,13 @@ impl Walker<'_> {
 			None => {
 				let index_ty = self.check(index, Some(TypeId::INTEGER));
 				let ty = self.memo(n, |w| w.index_type(n, target, root.ty, index, index_ty));
-				self.check_index_bounds(n, target, index);
+				// A string unit is never an assignment target. Its rejection
+				// must not also ask the caller to handle a bounds error.
+				if !crate::builtins::strings::is_string_like(&self.s.types, root.ty)
+					|| index_ty == TypeId::RANGE
+				{
+					self.check_index_bounds(n, target, index);
+				}
 				ty
 			}
 		};

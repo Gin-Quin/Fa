@@ -494,3 +494,54 @@ fn computed_literal_types_reject_surrogates_at_each_entry_point() {
 		);
 	}
 }
+
+#[test]
+fn inclusive_slice_end_is_an_item_and_views_cannot_resize() {
+	for (source, span) in [
+		("let value = \"ab\"[0..=2]", "\"ab\"[0..=2]"),
+		("let value = [1, 2][0..=2]", "[1, 2][0..=2]"),
+		(
+			"let value = Bytes.filled(2)[0..=2]",
+			"Bytes.filled(2)[0..=2]",
+		),
+	] {
+		assert_diagnostic(
+			source,
+			"E-NUM-17",
+			span,
+			&["inclusive end", "existing item", "..length"],
+		);
+	}
+	for source in [
+		"mutable text = \"ab\"\ntext[0] = \"x\"",
+		"mutable text = \"ab\"\nmutable use unit = text[0]\nunit = \"x\"",
+	] {
+		assert_diagnostic(
+			source,
+			"E-DECL-3",
+			if source.contains("unit =") {
+				"unit"
+			} else {
+				"text[0]"
+			},
+			&["no item assignment", "new string", "owner"],
+		);
+	}
+	for (method, argument) in [("push", "3"), ("clear", ""), ("reserve", "1")] {
+		let source = format!(
+			"mutable items = [1, 2]\nmutable use part = items[..]\npart.{method}({argument})"
+		);
+		assert_diagnostic(
+			&source,
+			"REF016",
+			&format!("part.{method}"),
+			&["structural operations", "owner", "reuse"],
+		);
+	}
+	assert_flags(
+		"function cut = (end: Integer): String throws IndexError => try \"ab\"[0..=end]",
+		"\"ab\"[0..=end]",
+		NodeFlags::INDEX_CHECK | NodeFlags::CAN_FAIL,
+		NodeFlags::empty(),
+	);
+}

@@ -192,7 +192,9 @@ With `let` or `mutable`, a slice is a copy: modifying it never modifies the orig
 
 `use` keeps a view of the range instead. For example, `mutable use part = items[0..2]` refers to those items without copying them. You can assign its items through a mutable view, or reseat the reference with `reuse`. You cannot assign the view as a whole: `part = [7, 7]` is an error even when the lengths match. Assign the items in a loop to copy a range, or use `reuse part = items[2..4]` to change what the reference designates. An ordinary `mutable` copy of a slice remains assignable.
 
-A bound of a slice can be negative, counting from the end, like an index: `data[-2..]` is `[4, 5]`. A slice whose start is after its end is empty: `data[3..1]` is `[]`. The bounds themselves are checked like an index, from `-length` to `length`: `data[2..10]` doesn't stop at the end of the array, it `throws IndexError` unless the compiler proves the bounds valid.
+Negative endpoints are normalized from the end: `data[-2..]` is `[4, 5]`. A start equal to `length` is allowed and gives an empty slice; reversed normalized bounds are empty, and `[..]` on an empty array succeeds. Bounds must remain within `-length` and `length`, with one exception: an inclusive end must designate an existing item. `data[0..=data.length]` is rejected; use `data[0..data.length]` to include every item. Certain invalid bounds are compile errors; unproven bounds throw `IndexError` rather than being clamped. These rules also apply to strings and `Bytes`.
+
+A slice view has no structural operation: `part.push(7)`, `part.clear()` and `part.reserve(8)` are errors. The same applies to inserting, deleting, taking or popping items and `deleteWhere`. Change the owner, then `reuse` the view. Item assignments through a mutable view remain valid.
 
 ## Common methods
 
@@ -341,7 +343,7 @@ This is why Fa needs no `get_unchecked`: there is a single indexing syntax, chec
 :::implementation
 ## Implementation details
 
-The analyzer rejects whole-slice assignment, including through reference aliases and after `reuse`. Item writes remain writes through the view; `reuse` only reseats the reference. A contiguous copy loop over flat items can be lowered to one block copy.
+The shared slice proof checks normalized endpoints, with an inclusive end strictly below length; unproven bounds keep their runtime check. The analyzer rejects structural operations and whole-slice assignment, including through reference aliases and after `reuse`. Item writes remain writes through the view; `reuse` only reseats the reference. A contiguous copy loop over flat items can be lowered to one block copy.
 
 ### Native
 
@@ -374,6 +376,6 @@ The analyzer rejects whole-slice assignment, including through reference aliases
 - Negative indices compile to `array[array.length + index]` after the bound check. A proven index needs no check.
 - A reference to an object item is the object itself. A reference to a primitive item is its index: the type of the reference names the array, so the index is enough, and `score *= 10` in a loop compiles to `scores[i] *= 10`.
 - Since a reference to an object item is the object, writing a whole object into a place that a live reference may designate (`users[0] = other`, `mutates self[index]`) assigns it field by field into the existing object (a generated `assign` function), so that the reference sees the new value. Elsewhere, the value is simply replaced.
-- Slicing is `slice()`, followed by a copy of each item when the items own memory (objects are values in Fa, not shared pointers).
+- Owning slices use `slice()`, followed by a copy of each item when the items own memory (objects are values in Fa, not shared pointers). A `use` range is a live Array proxy over its owner and normalized bounds: indexed reads/writes, iteration and ordinary array methods use the selected items without copying them. `reuse` replaces that view; structural operations and whole-view assignment are rejected before lowering.
 - `sortInPlace` and `reverseInPlace` are `sort` and `reverse`; `sort()` and `reverse()` work on a copy (`toSorted`, `toReversed`).
 :::

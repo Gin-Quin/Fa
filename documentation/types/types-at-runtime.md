@@ -99,7 +99,7 @@ A named union or enumeration is described by `Schema.Named`, whose definition is
 
 ## `TypeFromSchema<Schema>: Type`
 
-`Schema.StringLiteral` must contain a well-formed string: a literal type cannot hold a lone surrogate. A compile-time string value with a lone surrogate has the type `String`, without an exact literal type. Using it as a literal type, including through `TypeFromSchema` or a `static` used as a type, is an error: use `String`, or make the value well-formed first.
+When known at compile time or reconstructed as a type, `Schema.StringLiteral` must contain a well-formed string: a literal type cannot hold a lone surrogate. A compile-time string value with a lone surrogate has the type `String`, without an exact literal type. Using it as a literal type, including through `TypeFromSchema` or a `static` used as a type, is an error: use `String`, or make the value well-formed first.
 
 The inverse: a type function that builds a type from a schema known at compile time. A `Schema.Named` gives a type distinct from every other one, like any named type; applying the same declaration to equal schemas gives the same type, so builds stay deterministic. Combined with `@typeToSchema` and an ordinary function called at compile time, it lets you transform types programmatically.
 
@@ -143,6 +143,8 @@ when value is {
 This works because the members of a union are always [distinguishable at runtime](/types/unions#members-must-be-distinguishable): by their kind of value, by their literal values, by their fields, or by the name of a named union member. On a value that is not a union, there is nothing to test at runtime: `is` with a type is decided while compiling.
 
 Reflection is only needed when you want the *shape* of a type as data: for schema validation, serialization, or generating a form from a type. For that, use `@typeToSchema`.
+
+A runtime `Schema.StringLiteral` is ordinary data and may carry an unknown `String`, including a lone surrogate. Known compile-time construction and reconstruction with `TypeFromSchema` enforce the well-formed literal-type rule.
 
 :::implementation
 ## Implementation details

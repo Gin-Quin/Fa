@@ -68,7 +68,7 @@ impl Walker<'_> {
 
 	/// Follow the analyzer's resolved field sources, including spreads, rather
 	/// than guessing which written initializer supplies the final value.
-	fn known_schema_field(&self, n: NodeId, name: &str, depth: u32) -> Option<(NodeId, Value)> {
+	fn known_schema_field(&mut self, n: NodeId, name: &str, depth: u32) -> Option<(NodeId, Value)> {
 		use crate::analysis::FieldValue;
 		if depth > 64 {
 			return None;
@@ -77,18 +77,30 @@ impl Walker<'_> {
 		if let Some(Value::Object(object)) = self.a.constants.get(&n) {
 			return object.get(name).cloned().map(|value| (n, value));
 		}
-		let object = self.a.objects.get(&n)?;
-		let (_, source) = object
+		let source = self
+			.a
+			.objects
+			.get(&n)?
 			.fields
 			.iter()
-			.find(|(field, _)| self.s.types.syms.resolve(*field) == name)?;
-		match *source {
-			FieldValue::Given(value) | FieldValue::Default(value) => self
-				.a
-				.constants
-				.get(&self.strip_groups(value))
-				.cloned()
-				.map(|known| (value, known)),
+			.find(|(field, _)| self.s.types.syms.resolve(*field) == name)?
+			.1;
+		match source {
+			FieldValue::Given(value) | FieldValue::Default(value) => {
+				let value = self.strip_groups(value);
+				let known = self.a.constants.get(&value).cloned().or_else(|| {
+					if !self.is_constant_expression(value, 0) {
+						return None;
+					}
+					// This is a known-data check, not a new compile-time
+					// requirement on otherwise runtime schema construction.
+					self.quiet += 1;
+					let computed = self.evaluate_at(value, value);
+					self.quiet -= 1;
+					computed
+				})?;
+				Some((value, known))
+			}
 			FieldValue::Spread(value) => self.known_schema_field(value, name, depth + 1),
 			FieldValue::Constant(index) => self
 				.a

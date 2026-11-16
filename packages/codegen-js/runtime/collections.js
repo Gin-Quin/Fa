@@ -100,6 +100,66 @@ export function faArrayGet(array, index) {
 	return position >= 0 && position < array.length ? array[position] : undefined;
 }
 
+// @fa-helper faArrayView deps: faSliceBounds
+/**
+ * A live range view, without copying its items. The proxy stays an Array for
+ * ordinary iteration, methods, copying, equality and formatting. The analyzer
+ * forbids whole-view assignment and structural operations.
+ * @template T
+ * @param {T[]} array
+ * @param {number | undefined} start
+ * @param {number | undefined} end
+ * @param {boolean} inclusive
+ * @returns {T[]}
+ */
+export function faArrayView(array, start, end, inclusive) {
+	const [from, to] = faSliceBounds(array.length, start, end, inclusive);
+	const length = to - from;
+	/** @param {string | symbol} key */
+	const index = (key) => {
+		const value = typeof key === "string" && key !== "" ? Number(key) : -1;
+		return Number.isInteger(value) && value >= 0 && String(value) === key ? value : -1;
+	};
+	return new Proxy(/** @type {T[]} */ ([]), {
+		get(target, key, receiver) {
+			if (key === "length") return length;
+			const position = index(key);
+			if (position >= 0) return position < length ? array[from + position] : undefined;
+			return Reflect.get(target, key, receiver);
+		},
+		set(target, key, value) {
+			const position = index(key);
+			if (position >= 0) {
+				if (position >= length) return false;
+				array[from + position] = value;
+				return true;
+			}
+			if (key === "length") return value === length;
+			return Reflect.set(target, key, value);
+		},
+		has(target, key) {
+			const position = index(key);
+			return position >= 0 ? position < length : Reflect.has(target, key);
+		},
+		ownKeys() {
+			return [...Array.from({ length }, (_, position) => String(position)), "length"];
+		},
+		getOwnPropertyDescriptor(target, key) {
+			const position = index(key);
+			if (position >= 0 && position < length) {
+				return {
+					value: array[from + position],
+					writable: true,
+					enumerable: true,
+					configurable: true,
+				};
+			}
+			const descriptor = Reflect.getOwnPropertyDescriptor(target, key);
+			return key === "length" ? { ...descriptor, value: length } : descriptor;
+		},
+	});
+}
+
 // @fa-helper faArraySlice deps: faSliceBounds
 /**
  * `array[start..end]`: a new array (throws `IndexError` like

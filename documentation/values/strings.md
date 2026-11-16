@@ -44,6 +44,8 @@ A literal is always well-formed Unicode: `\x80` to `\xFF` are errors (use `\u{..
 
 A string literal **type** also always holds a well-formed string. A compile-time string value containing a lone surrogate has the type `String`; its exact literal type is not kept. Trying to use that value as a literal type, directly or through `Schema.StringLiteral` and `TypeFromSchema`, is an error: use `String`, or make the value well-formed first.
 
+A runtime `Schema.StringLiteral` is ordinary data; an unknown runtime payload is not required to be well-formed until a schema becomes a type. Known compile-time schema construction is checked too.
+
 ## Template strings
 
 Any string can interpolate expressions with `{}`:
@@ -135,6 +137,8 @@ let fromSecond = someString[1..]   -- "ello"
 let last = someString[-1]          -- "o"
 ```
 
+Negative slice endpoints are normalized from the end. A start equal to `length` is allowed; reversed normalized bounds give an empty slice, and `""[..]` succeeds. An inclusive end must designate an existing code unit: `"ab"[0..=2]` is rejected, while `"ab"[0..2]` is valid. Certain invalid bounds are compile errors; unproven ones are checked at runtime.
+
 Ranges follow the same rules everywhere in Fa: `..` excludes the upper bound, `..=` includes it. See [ranges](/values/ranges).
 
 As with collections, an index or a range that the compiler cannot prove to be in bounds `throws IndexError` (JavaScript gives `undefined` instead). Use `get` to receive an optional:
@@ -145,6 +149,10 @@ let maybeUnit = text.get(index) -- String?
 ```
 
 See [errors](/values/errors) and [optionals](/values/optionals).
+
+`get` and `codeUnitAt` use the same negative indices as `[]`: `"ab".get(-1)` is `"b"`. Outside the bounds, `get` returns `none` and `codeUnitAt` throws `IndexError`.
+
+A string has no item assignment: `text[0] = "x"` is an error, including through an alias of that item. Build a new string and assign the owner instead.
 
 `codeUnitAt(index)` gives the code unit as a number (JavaScript's `charCodeAt`), which is what a lexer compares:
 
@@ -170,6 +178,8 @@ console.log(word) -- error: `word` was invalidated: declare it again with `use w
 A string owns its storage, so any mutation of the string invalidates its slices: appending to it, or replacing it, as in `person.name = "Bao"`. See [mutations](/advanced/owned-references#mutations).
 
 A slice is a view of a range of code units, not an independently replaceable string. Assigning the whole view, with `word = "other"` or `word += "!"`, is an error, even for a `mutable use`. Replace the owning string instead, or reseat a `mutable use` reference with `reuse`.
+
+A view has no structural operations: `word.reserve(8)` is an error on a `use` slice. Change or reserve the owning string, then `reuse` the view.
 
 ### Surrogate pairs
 
@@ -223,7 +233,7 @@ assert accented.length == 2
 assert accented.characters().length == 1
 ```
 
-It is the only string operation that depends on the Unicode tables: the segmentation follows the Unicode rules (UAX #29) of the Unicode version supported by the compiler, and, on JavaScript targets, of the JavaScript engine (`Intl.Segmenter`). Every other operation works on code units: a search can match a part of a grapheme cluster (`"e\u{301}".includes("e")` is `true`), as in JavaScript.
+Grapheme segmentation and case conversion depend on Unicode tables: the segmentation follows the Unicode rules (UAX #29) of the Unicode version supported by the compiler, and, on JavaScript targets, of the JavaScript engine (`Intl.Segmenter`). Position-based operations work on code units: a search can match a part of a grapheme cluster (`"e\u{301}".includes("e")` is `true`), as in JavaScript.
 
 `==` compares the code units exactly, with no Unicode normalization, as in JavaScript: `"é"` written as one code point is not equal to `"e\u{301}"`.
 
@@ -259,7 +269,7 @@ On JavaScript and during compile-time evaluation, the hints are ignored, `reserv
 
 The semantics are UTF-16 code units; the native storage is UTF-8. Text arrives and leaves as UTF-8 (files, the network, C), so nothing is transcoded at these boundaries, and ASCII text, the common case, pays nothing: one byte is one code unit.
 
-String literal types store well-formed UTF-8. An exact compile-time value containing a lone surrogate widens to `String`; schema reconstruction or using that value as a literal type must diagnose it rather than replace or encode away the surrogate.
+String literal types store well-formed UTF-8. A runtime `Schema.StringLiteral` is data: the well-formedness restriction applies to known compile-time construction and whenever a schema becomes a type, not to an unknown runtime payload. An exact compile-time value containing a lone surrogate widens to `String`; schema reconstruction or using that value as a literal type must diagnose it rather than replace or encode away the surrogate.
 
 ### Native
 

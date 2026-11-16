@@ -816,8 +816,8 @@ impl Generator<'_> {
 		))
 	}
 
-	/// Strings and bytes use their native slice operations. Only unchecked
-	/// range bounds need the shared validation helper.
+	/// Strings and bytes use native slices; borrowed arrays use a live view.
+	/// Ordinary array slice copies are handled separately.
 	pub(crate) fn native_slice(
 		&mut self,
 		n: NodeId,
@@ -826,7 +826,12 @@ impl Generator<'_> {
 		view: bool,
 	) -> Option<Expr> {
 		let bytes = self.types.kind(self.type_of(target)) == TypeKind::Bytes;
-		if !bytes && self.kind(self.type_of(target)) != Kind::Text {
+		let array = view
+			&& matches!(
+				self.types.kind(self.type_of(target)),
+				TypeKind::Collection(CollKind::Array, ..)
+			);
+		if !array && !bytes && self.kind(self.type_of(target)) != Kind::Text {
 			return None;
 		}
 		let (container, start, end, inclusive) = if let View::Range {
@@ -863,6 +868,18 @@ impl Generator<'_> {
 		} else {
 			return None;
 		};
+		if array {
+			let helper = self.helper("faArrayView");
+			return Some(js::call(
+				helper,
+				&[
+					container.text,
+					start.unwrap_or_else(|| "undefined".into()),
+					end.unwrap_or_else(|| "undefined".into()),
+					inclusive,
+				],
+			));
+		}
 		let method = if bytes && view { "subarray" } else { "slice" };
 		let mut start = start.unwrap_or_else(|| "0".to_string());
 		let mut end = end.unwrap_or_else(|| "undefined".to_string());

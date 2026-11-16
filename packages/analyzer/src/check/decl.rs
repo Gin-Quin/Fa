@@ -611,7 +611,7 @@ impl Walker<'_> {
 		};
 		// a name assigned as a whole is written, not used (foreign.rs)
 		self.access_roots.insert(self.strip_groups(target));
-		let (place, slice) = self.assignment_place(target);
+		let (place, rejected) = self.assignment_place(target);
 		// a name assigned as a whole is written, not read: it has its declared
 		// type, and no narrowing to re-validate in the next rounds of a loop
 		let name = self.strip_groups(target);
@@ -623,7 +623,7 @@ impl Walker<'_> {
 		let actual = self.check(value, expected);
 		self.sink(value, actual, place.ty);
 		let ty = self.memo(n, |w| {
-			if slice {
+			if rejected {
 				return TypeId::VOID;
 			}
 			let parameter = !place.below
@@ -726,7 +726,16 @@ impl Walker<'_> {
 	pub(super) fn assignment_place(&mut self, target: NodeId) -> (PlaceInfo, bool) {
 		let mut place = self.check_place(target);
 		let slice = self.is_slice_assignment_target(target);
-		if slice {
+		let unit = self.is_string_item_assignment_target(target);
+		if unit {
+			place.assignable = false;
+			let diagnostic = self.diagnostic(
+				&E_DECL_3,
+				target,
+				"a string has no item assignment: build a new string and assign the owner instead",
+			);
+			self.report_flow(diagnostic);
+		} else if slice {
 			place.assignable = false;
 			let text = self.tree.text(target.index());
 			let fix = if crate::builtins::strings::is_string_like(&self.s.types, place.ty) {
@@ -743,7 +752,7 @@ impl Walker<'_> {
 			);
 			self.report_flow(diagnostic);
 		}
-		(place, slice)
+		(place, slice || unit)
 	}
 
 	/// A declaration the analyzer doesn't handle yet: `AN001`, and its names

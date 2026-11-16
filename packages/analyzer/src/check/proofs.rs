@@ -175,24 +175,62 @@ impl Walker<'_> {
 		self.body.flow.set_fact(place, id);
 	}
 
-	/// Whether the bounds of a slice `target[a..b]` are proven between
-	/// `-length` and `length` (values brief §12): a range literal whose bounds
-	/// are known, on a collection whose length is known; `target[..]` always.
-	fn slice_proven(&mut self, target: NodeId, index: NodeId) -> bool {
-		let View::Range { start, end, .. } = syntax::view(&self.tree, self.strip_groups(index))
-		else {
-			return false;
-		};
-		if start.is_none() && end.is_none() {
-			return true;
+	/// Prove normalized endpoints, or reject a bound certainly beyond the
+	/// longest possible length. An inclusive end must name an existing item.
+	fn slice_proven(&mut self, n: NodeId, target: NodeId, index: NodeId) -> bool {
+		let index = self.strip_groups(index);
+		let mut bounds = Vec::with_capacity(2);
+		let mut known = true;
+		match self.view(index) {
+			View::Range {
+				start,
+				end,
+				inclusive,
+			} => {
+				for (bound, item) in [(start, false), (end, inclusive)] {
+					if let Some(bound) = bound {
+						match self.value_set(bound) {
+							Some(set) => bounds.push((set.hull, item)),
+							None => known = false,
+						}
+					}
+				}
+			}
+			_ => match self.a.constants.get(&index) {
+				Some(fa_interpreter::Value::Range {
+					start,
+					end,
+					inclusive,
+				}) => {
+					bounds.extend(start.iter().map(|&v| (Interval::exact(v), false)));
+					bounds.extend(end.iter().map(|&v| (Interval::exact(v), *inclusive)));
+				}
+				_ => return false,
+			},
+		}
+		if bounds.is_empty() {
+			return known;
 		}
 		let Some(length) = self.expression_length(target) else {
 			return false;
 		};
-		[start, end].into_iter().flatten().all(|bound| {
-			self.value_set(bound)
-				.is_some_and(|set| set.hull.lo >= -length.lo && set.hull.hi <= length.lo)
-		})
+		let mut proven = known;
+		for (bound, item) in bounds {
+			let adjustment = if item { I256::ONE } else { I256::ZERO };
+			if bound.lo > length.hi - adjustment || bound.hi < -length.hi {
+				let fix = if item {
+					"an inclusive end must designate an existing item; use `..length` for an exclusive end, or `..=length - 1` for the last item"
+				} else {
+					"use bounds from `-length` to `length`"
+				};
+				let diagnostic =
+					self.diagnostic(&E_NUM_17, n, format!("this slice is out of bounds: {fix}"));
+				self.report_flow(diagnostic);
+				return true;
+			}
+			proven &= bound.lo >= -length.lo && bound.hi <= length.lo - adjustment;
+		}
+		proven
 	}
 
 	/// `c.length` on a local (`Some(c)`).
@@ -400,7 +438,7 @@ impl Walker<'_> {
 		}
 		// a slice `items[1..3]`: its bounds between `-length` and `length`
 		if error == "IndexError" && self.type_of(self.strip_groups(index)) == TypeId::RANGE {
-			if !self.slice_proven(target, index) {
+			if !self.slice_proven(n, target, index) {
 				self.set_flag(n, NodeFlags::INDEX_CHECK);
 				let error = self.builtin_error(error);
 				self.can_fail(n, error);

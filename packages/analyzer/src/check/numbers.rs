@@ -1463,8 +1463,8 @@ impl Walker<'_> {
 		target: NodeId,
 		value: NodeId,
 	) -> TypeId {
-		let (mut place, slice) = self.assignment_place(target);
-		if slice {
+		let (mut place, rejected) = self.assignment_place(target);
+		if rejected {
 			self.check(value, None);
 			return self.memo(n, |_| TypeId::VOID);
 		}

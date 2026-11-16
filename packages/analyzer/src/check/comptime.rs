@@ -456,6 +456,9 @@ impl Walker<'_> {
 	/// arithmetic, comparisons and logic of constants, lists, tuples and
 	/// objects of constants, and the names of statics and module constants.
 	pub(super) fn is_constant_expression(&self, n: NodeId, depth: u32) -> bool {
+		if self.a.constants.contains_key(&n) {
+			return true;
+		}
 		if depth > 64 {
 			return false;
 		}

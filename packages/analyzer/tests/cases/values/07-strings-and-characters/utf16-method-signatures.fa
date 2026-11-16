@@ -17,4 +17,4 @@ let implicitSearch = text.lastIndexOf(1) -- error: E-TYPE-1
 let implicitReplacement = text.replace(" ", 1) -- error: E-TYPE-1
 let implicitSeparator = text.split(1) -- error: E-TYPE-1
 let implicitJoin = [1, 2].join(",") -- error: E-OBJ-5
-text[0] = "a" -- error: E-DECL-4
+text[0] = "a" -- error: E-DECL-3

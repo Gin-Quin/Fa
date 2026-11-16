@@ -11,6 +11,7 @@ import {
 	faArraySort,
 	faArraySortInPlace,
 	faArrayTake,
+	faArrayView,
 	faComparator,
 	faDeleteWhere,
 	FaHashMap,
@@ -582,5 +583,45 @@ describe("FaValuePool", () => {
 		expect(pool.size).toBe(2);
 		expect(faDeepEquals(copy, pool)).toBe(false);
 		expect([...pool.filter((value) => value === "b")]).toEqual(["b"]);
+	});
+});
+
+describe("live array range views", () => {
+	test("writes and overlapping reads share the owner's items", () => {
+		const owner = [1, 2, 3, 4];
+		const source = faArrayView(owner, 0, 3, false);
+		const destination = faArrayView(owner, 1, 4, false);
+		for (let index = 0; index < source.length; index++) destination[index] = source[index];
+		expect(owner).toEqual([1, 1, 1, 1]);
+		const nested = faArrayView(destination, -2, undefined, false);
+		nested[0] = 7;
+		expect(owner).toEqual([1, 1, 7, 1]);
+		expect(Array.isArray(nested)).toBe(true);
+		expect([...nested]).toEqual([7, 1]);
+	});
+
+	test("methods, reflection, formatting and copies see the selected range", () => {
+		const owner = [0, 3, 1, 2, 9];
+		const view = faArrayView(owner, 1, 4, false);
+		expect(Object.keys(view)).toEqual(["0", "1", "2"]);
+		expect(Object.getOwnPropertyDescriptor(view, "length").value).toBe(3);
+		expect(view.slice()).toEqual([3, 1, 2]);
+		expect(view.map((value) => value * 2)).toEqual([6, 2, 4]);
+		expect(JSON.stringify(view)).toBe("[3,1,2]");
+		expect(faFormat(view)).toBe("[3, 1, 2]");
+		const copy = faCopy(view);
+		copy[0] = 8;
+		expect(owner[1]).toBe(3);
+		view.sort((a, b) => a - b);
+		expect(owner).toEqual([0, 1, 2, 3, 9]);
+		view.reverse();
+		expect(owner).toEqual([0, 3, 2, 1, 9]);
+	});
+
+	test("bounds use the common strict slice rule", () => {
+		expect([...faArrayView([1, 2], -2, -1, true)]).toEqual([1, 2]);
+		expect([...faArrayView([1, 2], 2, 0, false)]).toEqual([]);
+		expect([...faArrayView([], undefined, undefined, false)]).toEqual([]);
+		expect(() => faArrayView([1, 2], 0, 2, true)).toThrow(IndexError);
 	});
 });

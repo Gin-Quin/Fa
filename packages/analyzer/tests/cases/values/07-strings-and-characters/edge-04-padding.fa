@@ -1,0 +1,9 @@
+function rule = (text: String): String => {
+	let front = text.padStart(2, "😀")
+	let back = text.padEnd(2, "😀")
+	let first = front.codeUnitAt(0) catch error => 0
+	let last = back.codeUnitAt(1) catch error => 0
+	"{text.padStart(-1) == text} {text.padEnd(0) == text} {text.padStart(1) == text} {text.padStart(20, "") == text} {text.padEnd(20, "") == text} {front.length} {front.isWellFormed()} {first} {back.length} {back.isWellFormed()} {last} {text.padEnd(6, "ab") == "xababa"}"
+}
+static result = @rule("x")
+console.log(result, rule("x") == result) -- prints: true true true true true 2 false 55357 2 false 55357 true true

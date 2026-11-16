@@ -682,10 +682,15 @@ impl TypeStore {
 		self.union(&[ty, TypeId::NONE])
 	}
 
-	/// An object type. Fields are sorted by name bytes.
+	/// An object type. Fields are sorted by UTF-16 name units.
 	pub fn object(&mut self, fields: &[FieldEntry], nominal: Option<NominalId>) -> TypeId {
 		let mut sorted: smallvec::SmallVec<[FieldEntry; 8]> = fields.into();
-		sorted.sort_by(|a, b| self.syms.resolve(a.name).cmp(self.syms.resolve(b.name)));
+		sorted.sort_by(|a, b| {
+			self.syms
+				.resolve(a.name)
+				.encode_utf16()
+				.cmp(self.syms.resolve(b.name).encode_utf16())
+		});
 		let fields = self.field_lists.intern(&sorted);
 		let shape = ShapeId(self.shapes.intern(Shape { fields, nominal }));
 		self.intern(TypeKind::Object(shape))

@@ -13,6 +13,8 @@ let text = Json.stringify(person)
 
 `Json.stringify` writes a lone surrogate as its `\uXXXX` escape, using lowercase hexadecimal digits. JSON text is therefore always well-formed. Parsing that text preserves every UTF-16 code unit: `Json.parse(Json.stringify(text))` gives back the original string. The same rule holds at compile time and on every target.
 
+Object fields follow the [type's field order](/values/objects#field-order): declaration order for a declared type, UTF-16 field-name order for an anonymous type. Literal spelling does not change that order.
+
 `Json.parse` accepts a lone-surrogate escape and produces that surrogate as a String code unit. An escaped high surrogate immediately followed by an escaped low surrogate becomes the pair.
 
 `std.json` is currently unavailable on `native-freestanding` (AN004); float parsing and printing without libc are separate standard-library work.

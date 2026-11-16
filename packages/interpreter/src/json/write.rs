@@ -20,11 +20,13 @@ pub(crate) fn stringify(
 	while let Some(task) = pending.pop() {
 		writer.interpreter.step().map_err(Error::from)?;
 		match task {
+			Task::RestoreNames(length) => writer.names.truncate(length),
 			Task::Raw(text) => writer.push(text)?,
 			Task::Key(text) => writer.quote(&text.into())?,
 			Task::Text(text) => writer.quote(text)?,
 			Task::Value(value, schema) => {
 				writer.tasks(&mut pending, 2)?;
+				pending.push(Task::RestoreNames(writer.names.len()));
 				let schema = writer.resolve(value, schema);
 				if kind(schema) == "Fields" {
 					let bits = value.as_int().unwrap_or_default();
@@ -179,7 +181,23 @@ fn omitted(value: &Value) -> bool {
 	matches!(value, Value::None | Value::Function(_))
 }
 
+/// Anonymous object unions are distinguished by missing fields or disjoint
+/// literal fields. Inspect those discriminants without walking recursive data.
+fn discriminant_matches(value: &Value, schema: &Value) -> bool {
+	match kind(schema) {
+		"StringLiteral" | "BooleanLiteral" => property(schema, "value") == Some(value),
+		"Integer" => value.as_int().is_some_and(|number| {
+			property(schema, "min").and_then(Value::as_int).is_none_or(|min| number >= min)
+				&& property(schema, "max").and_then(Value::as_int).is_none_or(|max| number <= max)
+		}),
+		"Union" => list_property(schema, "items").iter().any(|member| discriminant_matches(value, member)),
+		"Named" => discriminant_matches(value, property(schema, "definition").unwrap_or(&Value::None)),
+		_ => true,
+	}
+}
+
 enum Task<'a> {
+	RestoreNames(usize),
 	Raw(&'static str),
 	Key(&'a str),
 	Text(&'a Text),
@@ -246,9 +264,7 @@ impl<'s> Writer<'_, '_, 's> {
 						.and_then(Value::as_str)
 						.unwrap_or("");
 					schema = property(schema, "definition").unwrap_or(&Value::None);
-					if !self.names.iter().any(|(n, _)| *n == name) {
-						self.names.push((name, schema));
-					}
+					self.names.push((name, schema));
 				}
 				"Reference" => {
 					let name = property(schema, "name")
@@ -275,21 +291,33 @@ impl<'s> Writer<'_, '_, 's> {
 	}
 
 	fn matches(&mut self, value: &Value, schema: &'s Value) -> bool {
+		let names = self.names.len();
 		let schema = self.resolve(value, schema);
-		match kind(schema) {
+		let matched = match kind(schema) {
 			"None" => matches!(value, Value::None),
 			"Boolean" => matches!(value, Value::Boolean(_)),
-			"String" | "StringLiteral" => matches!(value, Value::String(_)),
-			"Integer" | "Fields" => matches!(value, Value::Integer(_)),
+			"String" => matches!(value, Value::String(_)),
+			"StringLiteral" | "BooleanLiteral" | "Integer" => discriminant_matches(value, schema),
+			"Fields" => matches!(value, Value::Integer(_)),
 			"Float" => matches!(value, Value::Float(_)),
-			"Object" => matches!(value, Value::Object(_)),
-			"Tuple" => matches!(value, Value::Tuple(_)),
-			"Collection" => matches!(value, Value::Array(_) | Value::Set(_) | Value::Map(_)),
+			"Object" => matches!(value, Value::Object(object) if list_property(schema, "properties").iter().all(|field| {
+				let Some(name) = property(field, "name").and_then(Value::as_str) else { return false };
+				object.get(name).is_some_and(|value| discriminant_matches(value, property(field, "definition").unwrap_or(&Value::None)))
+			})),
+			"Tuple" => matches!(value, Value::Tuple(items) if items.len() == list_property(schema, "items").len()),
+			"Collection" => match property(schema, "kind").and_then(Value::as_str) {
+				Some("Array" | "GrowingArray") => matches!(value, Value::Array(_)),
+				Some("Set" | "GrowingSet") => matches!(value, Value::Set(_)),
+				Some("Map" | "GrowingMap") => matches!(value, Value::Map(_)),
+				_ => false,
+			},
 			"Enum" | "NamedUnion" => {
 				matches!(value, Value::Member(m) if list_property(schema,"members").iter().any(|e| property(e,"name").and_then(Value::as_str) == m.name.rsplit('.').next()))
 			}
 			_ => false,
-		}
+		};
+		self.names.truncate(names);
+		matched
 	}
 
 	fn fields(

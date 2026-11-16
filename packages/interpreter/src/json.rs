@@ -1,5 +1,5 @@
 //! `@parseJson(text)` (advanced brief §12.5): JSON to a value whose exact
-//! type the analyzer computes. Objects keep their key order, integral
+//! type the analyzer computes. Anonymous objects use name order, integral
 //! numbers written without a fraction or an exponent are integers, other
 //! numbers floats, `null` is `none`. Malformed JSON is a thrown
 //! `ParseError` (`META005` at the call).
@@ -172,15 +172,16 @@ impl Parser<'_> {
 					.collect(),
 			)));
 		}
-		let fields = fields
+		let mut fields = fields
 			.into_iter()
 			.map(|(key, v)| {
 				let key = key.as_str().ok_or_else(|| {
 					self.error("a compile-time object field name must be well-formed text")
 				})?;
-				Ok((Arc::from(key), v))
+				Ok((Arc::<str>::from(key), v))
 			})
 			.collect::<Result<Vec<_>, Error>>()?;
+		fields.sort_by(|(a, _), (b, _)| a.encode_utf16().cmp(b.encode_utf16()));
 		Ok(Value::Object(Arc::new(Object { fields })))
 	}
 

@@ -320,8 +320,8 @@ impl Generator<'_> {
 	}
 
 	/// The code of the formatter of an object type: its fields in
-	/// declaration order, relation sides and private fields left out; `None`
-	/// for an anonymous type, whose literals may order the fields their way.
+	/// declaration order, or UTF-16 name order for an anonymous type,
+	/// with relation sides and private fields left out.
 	fn object_formatter(&mut self, ty: TypeId) -> Option<String> {
 		let mut fields: Vec<(String, TypeId)> = self
 			.types
@@ -329,10 +329,8 @@ impl Generator<'_> {
 			.iter()
 			.map(|field| (self.types.syms.resolve(field.name).to_string(), field.ty))
 			.collect();
-		// the declaration order, when the type is declared, or the
-		// order an inline member's data is written in; otherwise
-		// literals of the type may write the fields in any order, which
-		// their properties keep: printed from the representation
+		// Declared and inline member types carry their field order;
+		// anonymous shapes already store fields in UTF-16 name order.
 		let order: Vec<String> = match self.analysis.type_decls.values().find(|decl| decl.ty == ty)
 		{
 			Some(decl) => decl
@@ -343,10 +341,14 @@ impl Generator<'_> {
 			None => self
 				.analysis
 				.inline_field_orders
-				.get(&ty)?
-				.iter()
-				.map(|&name| self.types.syms.resolve(name).to_string())
-				.collect(),
+				.get(&ty)
+				.map(|names| {
+					names
+						.iter()
+						.map(|&name| self.types.syms.resolve(name).to_string())
+						.collect()
+				})
+				.unwrap_or_else(|| fields.iter().map(|(name, _)| name.clone()).collect()),
 		};
 		fields.sort_by_key(|(name, _)| order.iter().position(|field| field == name));
 		// printing omits relation sides (D21)

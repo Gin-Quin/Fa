@@ -97,7 +97,16 @@ impl Generator<'_> {
 
 	/// An object literal of an object type: the fields in declaration order.
 	fn object_value(&mut self, info: &fa_analyzer::analysis::ObjectInfo) -> Expr {
-		let info = info.clone();
+		let mut info = info.clone();
+		if info.decl.is_none() && info.member.is_none() {
+			info.fields.sort_by(|(a, _), (b, _)| {
+				self.types
+					.syms
+					.resolve(*a)
+					.encode_utf16()
+					.cmp(self.types.syms.resolve(*b).encode_utf16())
+			});
+		}
 		let spreads = info
 			.fields
 			.iter()
@@ -296,7 +305,15 @@ impl Generator<'_> {
 			.map(|&(_, index)| slots[index].expect("a value"))
 			.collect();
 		let values = self.in_order(&nodes, &mut f);
-		let reordered = order.windows(2).any(|pair| pair[0].1 > pair[1].1);
+		let reordered = order.iter().enumerate().any(|(left, &(_, position))| {
+			order
+				.iter()
+				.enumerate()
+				.skip(left + 1)
+				.any(|(right, &(_, later))| {
+					position > later && (!values[left].pure || !values[right].pure)
+				})
+		});
 		let mut by_slot: Vec<Option<Expr>> = vec![None; slots.len()];
 		for (&(_, index), value) in order.iter().zip(values) {
 			let value = if reordered && !value.stable {

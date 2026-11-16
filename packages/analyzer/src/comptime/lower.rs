@@ -1482,11 +1482,28 @@ impl<'a> Lowerer<'a> {
 		};
 		let mut spreads: FxHashMap<NodeId, Slot> = FxHashMap::default();
 		let mut statements = Vec::new();
+		let mut given: Vec<_> = info
+			.fields
+			.iter()
+			.filter_map(|(_, value)| match value {
+				FieldValue::Given(node) | FieldValue::Spread(node) => Some(*node),
+				_ => None,
+			})
+			.collect();
+		given.sort_by_key(|node| self.tree.spans[node.index()].start);
+		given.dedup();
+		for node in given {
+			let slot = self.temp();
+			let expression = self.expr(node);
+			statements.push(Expr::Let(slot, expression.boxed()));
+			spreads.insert(node, slot);
+		}
+
 		let mut fields = Vec::with_capacity(info.fields.len());
 		for (name, value) in &info.fields {
 			let name: Arc<str> = Arc::from(self.session.types.syms.resolve(*name));
 			let value = match *value {
-				FieldValue::Given(value) => self.expr(value),
+				FieldValue::Given(value) => Expr::Local(spreads[&value]),
 				FieldValue::Default(value) => self.expr(value),
 				FieldValue::Constant(index) => match self.a.field_constants.get(index as usize) {
 					Some(value) => Expr::Const(value.clone()),
@@ -1509,6 +1526,10 @@ impl<'a> Lowerer<'a> {
 			};
 			fields.push((name, value));
 		}
+		if info.decl.is_none() && info.member.is_none() {
+			fields.sort_by(|(a, _), (b, _)| a.encode_utf16().cmp(b.encode_utf16()));
+		}
+
 		let object = Expr::Object(fields);
 		let value = match info.member {
 			Some(member) => match self.types().kind(member) {

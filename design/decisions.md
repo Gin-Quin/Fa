@@ -1762,3 +1762,8 @@ The comparison uses separately frozen release executables for unmodified trunk a
 - JavaScript direct UTF-8 loops encode once through the shared TextEncoder and index the resulting temporary. Per-byte generator resumption was a measured regression and is removed. Size-related host RangeErrors become the existing out-of-memory stop, while unrelated host errors keep their report.
 - Compile-time JSON serialization follows runtime rules through an explicit work stack and the argument type schema, including lone-surrogate escapes, pinned enums, flags, field order and omission. String/Bytes union parsing dispatches once without copying or re-evaluating the input.
 - Differential testing has a fixed seeded quick tier and a complete `FA_STRINGS_DIFFERENTIAL_FULL=1` tier. Three bounded workers execute shards; every string change must pass the complete tier before landing. Coverage grows by source/storage/operation classes, rather than one case per discovered symptom.
+
+
+## Field enumeration belongs to the type (lead decision, 2026-11-16)
+
+Fields enumerate in declaration order for declared types and in UTF-16 name order for anonymous object types. Literal field order is evaluation order, never part of the type or stored value. Printing, JSON, reflection/schemas and key enumeration follow the same rule on every backend and at compile time. JavaScript constructs properties in type order while staging expressions only when moved effects require source-order evaluation. Native printing no longer consults a first literal's spelling; structural shape fields use UTF-16 ordering, and schema metadata preserves declared order recursively. The compile-time JSON writer scopes recursive schema names by work-stack entries rather than a process-wide name dictionary.

@@ -604,6 +604,54 @@ console.log([...values.map(v=>units(JSON.stringify(v))),units(text),units(text)]
 
 
 
+
+def field_cases(output, bun):
+    # Same anonymous type, different spellings; declared order; nested and
+    # recursive values; two unrelated recursive types with the same name.
+    prelude = '-- skip-target: native-freestanding\nuse { Json } = std.json\n' + PRELUDE.split("function probe",1)[0] + r"""
+type Declared = { b: String, a: String }
+type Forward = { kind: "forward", z: String, a: String }
+type Reverse = { a: String, z: String, kind: "reverse" }
+function variant = (value: Forward | Reverse): String => Json.stringify(value)
+function distinct = (value: { z: String } | { a: String }): String => Json.stringify(value)
+type Node = { z: String, next: Node? }
+function outside = (text: String): Node => Node { next = Node { next = none, z = text }, z = text }
+function schemaNames = (schema: Schema): String => when schema is {
+    Schema.Named as named => schemaNames(named.definition)
+    Schema.Object as object => object.properties.map((property) => property.name).join(",")
+    else => "none"
+}
+static names = @schemaNames(@typeToSchema({ z: String, a: String }))
+function keys = <Item, fields: Keys<Item>>(value: Item): String => {
+    mutable names: Array<String> = []
+    @for key in fields { names.push(key) }
+    names.join(",")
+}
+function fieldProbe = (text: String): String => {
+    let left = { z = text, a = "a" }
+    let right = { a = "a", z = text }
+    let nested = { z = left, a = right }
+    let declared = Declared { a = "a", b = text }
+    type Node = { text: String, next: Node? }
+    let inside = Node { next = Node { next = none, text = text }, text = text }
+    let pair = { outside = outside(text), inside = inside }
+    let printed = left.toString().startsWith("{{ a = ") and right.toString().startsWith("{{ a = ") and nested.toString().startsWith("{{ a = {{ a = ") and declared.toString().startsWith("{{ b = ")
+    let reflected = names + ":" + keys<@typeOf(left), { z, a }>(left) + ":" + keys<@typeOf(right), { a, z }>(right)
+    [printed.toString(), reflected, units(Json.stringify(left)), units(Json.stringify(right)), units(Json.stringify(nested)), units(Json.stringify(declared)), units(Json.stringify(pair)), units(Json.stringify([copy pair, pair])), units(variant(Forward { a = "a", z = text, kind = "forward" })), units(variant(Reverse { kind = "reverse", z = text, a = "a" })), units(distinct({ z = text })), units(distinct({ a = text }))].join("|")
+}
+"""
+    oracle = r"""
+const units=s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i)).join(",");
+for(const text of JSON.parse(await Bun.stdin.text())) {
+    const left={a:"a",z:text},right={a:"a",z:text},nested={a:right,z:left},declared={b:text,a:"a"};
+    const pair={inside:{text,next:{text}},outside:{z:text,next:{z:text}}};
+    console.log(["true","a,z:a,z:a,z",...[left,right,nested,declared,pair,[pair,pair],{kind:"forward",z:text,a:"a"},{a:"a",z:text,kind:"reverse"},{z:text},{a:text}].map(value=>units(JSON.stringify(value)))].join("|"));
+}
+"""
+    values = subjects()
+    references = subprocess.run([bun,"-e",oracle],input=json.dumps(values,ensure_ascii=True),text=True,capture_output=True,check=True).stdout.splitlines()
+    write_cases(output,"field-enumeration",prelude,[(literal(text),) for text in values],references,"fieldProbe",16)
+
 def split_cases(output, bun):
     needles = ["", "\ud83d", "\ude00", ","]
     pairs = [(text, needles[index % 4]) for index, text in enumerate(subjects())]
@@ -719,6 +767,7 @@ async function crossing = (text: String): String throws IndexError => {
     allocation_cases(output)
     large_cases(output,bun)
     split_cases(output,bun)
+    field_cases(output,bun)
     decoded = byte_cases(output,bun)
     json_cases(output,bun)
     cuts=edge_cases(output,bun)

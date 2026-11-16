@@ -22,7 +22,7 @@ pub(super) fn schema(
 	file: FileId,
 	ty: TypeId,
 ) -> (Value, Vec<FnKey>) {
-	let mut schema = super::schema::schema(types, ty);
+	let mut schema = super::schema::with_analysis(types, analysis, ty);
 	let mut defaults = Vec::new();
 	decorate(types, analysis, file, ty, &mut schema, &mut defaults, 0);
 	(schema, defaults)
@@ -82,7 +82,7 @@ fn decorate(
 			let mut definition = if payload.is_unset() || payload == TypeId::NONE {
 				Value::None
 			} else {
-				super::schema::schema(types, payload)
+				super::schema::with_analysis(types, analysis, payload)
 			};
 			if !matches!(definition, Value::None) {
 				decorate(

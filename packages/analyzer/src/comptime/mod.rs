@@ -125,7 +125,7 @@ fn exact(types: &mut TypeStore, value: &Value, depth: u32) -> TypeId {
 			types.tuple(&items)
 		}
 		Value::Object(object) => {
-			let mut fields: Vec<FieldEntry> = object
+			let fields: Vec<FieldEntry> = object
 				.fields
 				.iter()
 				.map(|(name, value)| FieldEntry {
@@ -134,7 +134,6 @@ fn exact(types: &mut TypeStore, value: &Value, depth: u32) -> TypeId {
 					flags: FieldFlags::empty(),
 				})
 				.collect();
-			fields.sort_by(|a, b| types.syms.resolve(a.name).cmp(types.syms.resolve(b.name)));
 			types.object(&fields, None)
 		}
 		Value::Range { .. } => TypeId::RANGE,

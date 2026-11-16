@@ -730,7 +730,6 @@ impl Walker<'_> {
 		if parts.incomplete {
 			return TypeId::UNKNOWN;
 		}
-		let names: Vec<crate::ids::Sym> = parts.fields.iter().map(|field| field.name).collect();
 		let entries: Vec<crate::types::FieldEntry> = parts
 			.fields
 			.iter()
@@ -742,7 +741,15 @@ impl Walker<'_> {
 			.collect();
 		let ty = self.s.types.object(&entries, None);
 		// the order `Keys<T>` lists them in (fields.rs)
-		self.record_field_order(ty, names);
+		self.record_field_order(
+			ty,
+			self.s
+				.types
+				.fields_of(ty)
+				.iter()
+				.map(|field| field.name)
+				.collect(),
+		);
 		ty
 	}
 

@@ -49,6 +49,17 @@ Anonymous objects only contain data. They can contain function pointers, but no 
 
 The type of a field without annotation is the widened type of its value (see [inferred types](/values/declaring-values#inferred-types)): `helloString` is a `String`, `someNumber` an `Integer`.
 
+### Field order
+
+Fields are enumerated in an order determined by the type alone: declaration order for a declared type, and field-name order by UTF-16 code units for an anonymous object type. Two literals that write the same anonymous type in different orders therefore enumerate their fields in the same order. This applies to printing, JSON serialization, reflection and schemas, and loops over keys, on every target and at compile time.
+
+```fa
+console.log({ z = 2, a = 1 }) -- { a = 1, z = 2 }
+console.log({ a = 1, z = 2 }) -- { a = 1, z = 2 }
+```
+
+The expressions of a literal are still evaluated from left to right in source order. Changing the enumeration order never reorders their effects.
+
 ### Field shorthand
 
 A field written alone in an object literal takes the value of the name with the same name: `{ id }` means `{ id = id }`.
@@ -344,6 +355,10 @@ See [structural typing](/advanced/structural-typing) for how object types relate
 
 :::implementation
 ## Implementation details
+
+### JavaScript and compile time
+
+Object construction separates evaluation order from field order. JavaScript emits anonymous properties in UTF-16 name order and declared properties in declaration order; moved effects are evaluated into temporaries in source order, while pure reorderings stay inline. The interpreter evaluates initializers in source order before constructing its ordered object. Reflection and schemas carry the same order recursively. Recursive JSON type-name bindings are scoped to the value being visited, so unrelated local declarations with the same name cannot reuse each other's definition.
 
 ### Native
 

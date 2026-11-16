@@ -606,6 +606,9 @@ pub struct Analysis {
 	/// target type of a union injection, `Integer` ↔ `Int64`, `Float32` →
 	/// `Float`, `Character` → `String`, and of a `SINK_CHECK` range check.
 	pub coercions: FxHashMap<NodeId, TypeId>,
+	/// Result-path nodes inside an explicit Copy operand, by Copy boundary.
+	/// Their conversions are performed by the Copy operation, exactly once.
+	pub copy_inputs: FxHashMap<NodeId, CopyInput>,
 	/// The nodes whose value is another node's, copied to their own type:
 	/// `pick(value, { foo })`, `omit(value, { foo })` (the backends copy the
 	/// value's fields that the node's type has).
@@ -966,6 +969,16 @@ pub struct AwaitInfo {
 	/// (`await start f()`, `await Task.all(…)`): a direct call of the async
 	/// instance, without a queue round-trip (A15).
 	pub immediate_task: bool,
+}
+
+/// One produced operand value of an explicit Copy, before its conversion.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CopyInput {
+	pub boundary: NodeId,
+	pub source: TypeId,
+	pub target: TypeId,
+	/// True at actual value producers; enclosing result nodes only join them.
+	pub produces: bool,
 }
 
 /// A `start` node (`design/async.md` §2.2).
@@ -1562,6 +1575,7 @@ impl Analysis {
 			diagnostics: Vec::new(),
 			arith: FxHashMap::default(),
 			coercions: FxHashMap::default(),
+			copy_inputs: FxHashMap::default(),
 			forwards: FxHashMap::default(),
 			compositions: FxHashMap::default(),
 			intervals: FxHashMap::default(),

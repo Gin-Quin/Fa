@@ -21,6 +21,29 @@ use crate::ids::{NodeId, SymbolId};
 use crate::symbols::{Resolution, SymbolKind};
 use crate::syntax::{self, View};
 
+/// Immediate values contributing to an expression's result. Constructor
+/// fields, collection items and call arguments compute their own stores;
+/// they do not inherit the surrounding result's Copy boundary.
+pub fn result_inputs(tree: &TypedSyntaxTree, node: NodeId) -> Option<Vec<NodeId>> {
+	Some(match syntax::view(tree, node) {
+		View::Group(inner) | View::Do(inner) | View::Try(inner) => vec![inner],
+		View::If {
+			then_body,
+			else_body,
+			..
+		} => std::iter::once(then_body).chain(else_body).collect(),
+		View::When { arms, .. } => arms.iter().map(|arm| arm.value).collect(),
+		View::Catch {
+			expression,
+			handler,
+			..
+		} => vec![expression, handler],
+		View::Fallback { operands } => operands.iter().collect(),
+		View::Block { statements } => statements.last().into_iter().collect(),
+		_ => return None,
+	})
+}
+
 /// The local symbol at the root of a place expression (`a`, `a.b`,
 /// `a[i].b`), if the node reads a place.
 pub fn place_root(tree: &TypedSyntaxTree, analysis: &Analysis, n: NodeId) -> Option<SymbolId> {

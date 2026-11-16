@@ -69,24 +69,11 @@ impl Walker<'_> {
 	/// a call's result does not authorize conversions of its arguments.
 	fn is_copy_operand_value(&self, mut value: NodeId) -> bool {
 		while let Some(parent) = self.parent(value) {
-			let result = match self.view(parent) {
-				View::Copy(operand) => return operand == value,
-				View::Group(inner) | View::Do(inner) | View::Try(inner) => inner == value,
-				View::Block { statements } => statements.last() == Some(value),
-				View::If {
-					then_body,
-					else_body,
-					..
-				} => then_body == value || else_body == Some(value),
-				View::When { arms, .. } => arms.iter().any(|arm| arm.value == value),
-				View::Catch {
-					expression,
-					handler,
-					..
-				} => expression == value || handler == value,
-				View::Fallback { operands } => operands.iter().any(|operand| operand == value),
-				_ => false,
-			};
+			if let View::Copy(operand) = self.view(parent) {
+				return operand == value;
+			}
+			let result = crate::lower::copies::result_inputs(&self.tree, parent)
+				.is_some_and(|inputs| inputs.contains(&value));
 			if !result {
 				return false;
 			}
@@ -638,5 +625,71 @@ mod tests {
 		analyzed(&format!(
 			"{declarations}let box: {{ items: Array<Integer> }} = {{ items = copy small }}\nconsole.log(box)\n"
 		));
+	}
+	#[test]
+	fn copy_inputs_keep_each_producers_type_before_coercion() {
+		let source = "function choose = (flag: Boolean, first: Array<Int8>, second: Array<Int16>): Array<Integer> => copy (if flag { first } else { second })\n";
+		let (session, file) = analyzed(source);
+		let tree = session.tree(file);
+		let analysis = session.analysis(file);
+		let mut values: Vec<_> = analysis
+			.copy_inputs
+			.iter()
+			.filter(|(_, input)| input.produces)
+			.map(|(&node, input)| {
+				(
+					tree.text(node.index()).to_string(),
+					session.display_type(input.source),
+					session.display_type(input.target),
+				)
+			})
+			.collect();
+		values.sort();
+		assert_eq!(
+			values,
+			[
+				(
+					"first".into(),
+					"Array<Int8>".into(),
+					"Array<Integer>".into()
+				),
+				(
+					"second".into(),
+					"Array<Int16>".into(),
+					"Array<Integer>".into()
+				)
+			]
+		);
+		assert!(
+			analysis
+				.copy_inputs
+				.iter()
+				.filter(|(_, input)| !input.produces)
+				.all(|(_, input)| session.display_type(input.target) == "Array<Integer>")
+		);
+	}
+
+	#[test]
+	fn fallback_inputs_preserve_none_until_the_fallback_selects_a_value() {
+		let (session, file) = analyzed(
+			"function choose = (first: Array<Int8>?, last: Array<Int16>): Array<Integer> => copy (first ?? last)\n",
+		);
+		let analysis = session.analysis(file);
+		let tree = session.tree(file);
+		let first = analysis
+			.copy_inputs
+			.iter()
+			.find(|(node, input)| input.produces && tree.text(node.index()) == "first")
+			.map(|(_, input)| input)
+			.unwrap();
+		assert_eq!(session.display_type(first.source), "Array<Int8>?");
+		assert_eq!(session.display_type(first.target), "Array<Integer>?");
+		let last = analysis
+			.copy_inputs
+			.iter()
+			.find(|(node, input)| input.produces && tree.text(node.index()) == "last")
+			.map(|(_, input)| input)
+			.unwrap();
+		assert_eq!(session.display_type(last.target), "Array<Integer>");
 	}
 }

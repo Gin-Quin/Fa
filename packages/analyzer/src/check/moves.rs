@@ -15,7 +15,6 @@ use crate::analysis::NodeFlags;
 use crate::check::Walker;
 use crate::ids::{NodeId, SymbolId, TypeId};
 use crate::symbols::SymbolKind;
-use crate::syntax::View;
 use crate::types::TypeKind;
 
 mod concrete;
@@ -82,27 +81,10 @@ impl Walker<'_> {
 		let mut pending = vec![node];
 		while let Some(node) = pending.pop() {
 			let node = self.strip_groups(node);
-			match self.view(node) {
-				View::Do(inner) | View::Try(inner) => pending.push(inner),
-				View::If {
-					then_body,
-					else_body,
-					..
-				} => {
-					pending.push(then_body);
-					pending.extend(else_body);
-				}
-				View::When { arms, .. } => pending.extend(arms.iter().map(|arm| arm.value)),
-				View::Catch {
-					expression,
-					handler,
-					..
-				} => pending.extend([expression, handler]),
-				View::Fallback { operands } => pending.extend(operands.iter()),
-				View::Block { statements } => pending.extend(statements.last()),
-				_ => {
-					self.copy_sites.insert(node);
-				}
+			if let Some(inputs) = crate::lower::copies::result_inputs(&self.tree, node) {
+				pending.extend(inputs);
+			} else {
+				self.copy_sites.insert(node);
 			}
 		}
 	}

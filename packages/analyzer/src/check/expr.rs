@@ -190,11 +190,16 @@ impl Walker<'_> {
 		self.check(inner, expected)
 	}
 
-	/// `copy value` produces a value, never a place. Concrete copyability
-	/// checks belong to the subsequent ownership-enforcement slice.
-	pub(super) fn check_copy(&mut self, inner: NodeId, expected: Option<TypeId>) -> TypeId {
+	/// `copy value` produces an independent value in the expected type.
+	/// Record actual producers before coercion, including result branches.
+	pub(super) fn check_copy(
+		&mut self,
+		boundary: NodeId,
+		inner: NodeId,
+		expected: Option<TypeId>,
+	) -> TypeId {
 		let ty = self.check(inner, expected);
-		if let Some(expected) = expected
+		let target = if let Some(expected) = expected
 			&& self
 				.s
 				.types
@@ -202,9 +207,37 @@ impl Walker<'_> {
 				.is_ok()
 		{
 			self.sink(inner, ty, expected);
-			return expected;
+			expected
+		} else {
+			ty
+		};
+		let mut pending = vec![(inner, target)];
+		while let Some((value, target)) = pending.pop() {
+			let inputs = crate::lower::copies::result_inputs(&self.tree, value);
+			self.a.copy_inputs.insert(
+				value,
+				crate::analysis::CopyInput {
+					boundary,
+					source: self.a.type_of(value),
+					target,
+					produces: inputs.is_none(),
+				},
+			);
+			if let Some(inputs) = inputs {
+				let optional = matches!(self.view(value), View::Fallback { .. });
+				let count = inputs.len();
+				for (index, input) in inputs.into_iter().enumerate() {
+					let target = if optional && index + 1 < count {
+						self.s.types.optional(target)
+					} else {
+						target
+					};
+					pending.push((input, target));
+				}
+			}
 		}
-		ty
+
+		target
 	}
 
 	/// `()`: not a value (`E-TUP-1`, tuples.rs).

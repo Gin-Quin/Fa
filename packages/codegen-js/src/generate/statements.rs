@@ -525,7 +525,6 @@ impl Generator<'_> {
 		// `for (key, value) in map`: the entries of the map
 		if let Some(pattern) = pattern
 			&& let View::TuplePattern { items } = self.view(pattern)
-			&& self.analysis.pattern(pattern).is_none()
 			&& matches!(
 				self.types.kind(self.type_of(iterable)),
 				fa_analyzer::types::TypeKind::Collection(

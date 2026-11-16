@@ -432,6 +432,34 @@ mod tests {
 	}
 
 	#[test]
+	fn compile_time_loops_and_patterns_borrow_original_items() {
+		let (session, file) = crate::analyze_source(include_str!(
+			"../../tests/cases/ownership-compiletime-loops.fa"
+		));
+		assert!(
+			session.diagnostics(file).is_empty(),
+			"{:?}",
+			session.diagnostics(file)
+		);
+		for (name, expected) in [("scalar", 23), ("record", 0), ("entry", 23)] {
+			let analysis = session.analysis(file);
+			let symbol = analysis
+				.symbols
+				.symbols()
+				.iter()
+				.position(|symbol| session.types().syms.resolve(symbol.name) == name)
+				.unwrap();
+			assert_eq!(
+				analysis
+					.static_values
+					.get(&crate::ids::SymbolId(symbol as u32)),
+				Some(&Value::int(expected)),
+				"{name}"
+			);
+		}
+	}
+
+	#[test]
 	fn compile_time_places_validate_prefixes_and_evaluate_targets_once_before_values() {
 		let (session, file) = crate::analyze_source(include_str!(
 			"../../tests/cases/ownership-compiletime-place-order.fa"

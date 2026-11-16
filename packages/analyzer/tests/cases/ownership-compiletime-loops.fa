@@ -1,0 +1,33 @@
+-- prints: 23 23
+-- prints: 0 0
+-- prints: 23 23
+
+function numbers = (): Integer => {
+	mutable values = [1, 2]
+	for value in values { value += 1 }
+	values[0] * 10 + values[1]
+}
+
+type Person = { score: Integer }
+function reset = (people: Array<Person>) mutates people[..].score => {
+	for person in people { person.score = 0 }
+}
+function records = (): Integer => {
+	mutable people = [Person { score = 1 }, Person { score = 2 }]
+	reset(people)
+	people[0].score + people[1].score
+}
+
+function score = (scores: Map<String, Integer>, name: String): Integer throws KeyNotFound => try scores[name]
+function entries = (): Integer => do {
+	mutable scores: Map<String, Integer> = [("a", 1), ("b", 2)]
+	for (_name, value) in scores { value += 1 }
+	score(scores, "a") * 10 + score(scores, "b")
+} catch _error => -1
+
+static scalar = @numbers()
+static record = @records()
+static entry = @entries()
+console.log(scalar, numbers())
+console.log(record, records())
+console.log(entry, entries())

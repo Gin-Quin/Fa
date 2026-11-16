@@ -48,7 +48,7 @@ fn text(value: &Value) -> Result<&str, Error> {
 		.ok_or_else(|| stop(format!("`{}` is not a string", value.to_text())))
 }
 
-fn integer(value: &Value) -> Result<I256, Error> {
+pub(crate) fn integer(value: &Value) -> Result<I256, Error> {
 	value
 		.as_int()
 		.ok_or_else(|| stop(format!("`{}` is not an integer", value.to_text())))
@@ -230,7 +230,7 @@ pub fn field_mut<'v>(value: &'v mut Value, name: &str) -> Result<&'v mut Value, 
 	}
 }
 
-fn position(index: I256, length: usize) -> Result<usize, Error> {
+pub(crate) fn position(index: I256, length: usize) -> Result<usize, Error> {
 	usize_of(index)
 		.filter(|&position| position < length)
 		.ok_or_else(|| index_error(index, length))

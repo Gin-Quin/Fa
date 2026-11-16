@@ -18,6 +18,83 @@ pub(crate) enum Step {
 	Index(Value),
 	Capture(usize),
 	Bound(usize),
+	Item(usize),
+	Entry(usize),
+}
+
+/// A map entry is a tuple view of its stored key and value, not an owned
+/// tuple containing copies of them.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum View<'v> {
+	Value(&'v Value),
+	Entry(&'v (Value, Value)),
+}
+
+impl<'v> View<'v> {
+	pub fn materialize(self) -> Value {
+		match self {
+			Self::Value(value) => value.clone(),
+			Self::Entry((key, value)) => Value::Tuple(Arc::new(vec![key.clone(), value.clone()])),
+		}
+	}
+
+	pub fn project(self, step: &Step) -> Result<Self, crate::Error> {
+		use crate::{Error, builtins};
+		if let Self::Entry(pair) = self {
+			let position = match step {
+				Step::Index(key) => builtins::position(builtins::integer(key)?, 2)?,
+				Step::Item(index) if *index < 2 => *index,
+				_ => {
+					return Err(Error::Stop(
+						"internal: a map entry is projected by tuple position".into(),
+					));
+				}
+			};
+			return Ok(Self::Value(if position == 0 { &pair.0 } else { &pair.1 }));
+		}
+		let Self::Value(value) = self else {
+			unreachable!()
+		};
+		Ok(Self::Value(match step {
+			Step::Field(name) => builtins::field_ref(value, name)?,
+			Step::Index(index) => builtins::index_ref(value, index)?,
+			Step::Item(index) => match value {
+				Value::Array(items) | Value::Tuple(items) | Value::Set(items) => {
+					items.get(*index).ok_or_else(|| {
+						Error::Stop("internal: an iterated item was invalidated".into())
+					})?
+				}
+				_ => {
+					return Err(Error::Stop(
+						"internal: an item view requires a collection".into(),
+					));
+				}
+			},
+			Step::Entry(index) => {
+				let Value::Map(entries) = value else {
+					return Err(Error::Stop("internal: an entry view requires a map".into()));
+				};
+				return Ok(Self::Entry(entries.get(*index).ok_or_else(|| {
+					Error::Stop("internal: an iterated entry was invalidated".into())
+				})?));
+			}
+			Step::Capture(index) | Step::Bound(index) => {
+				let Value::Function(closure) = value else {
+					return Err(Error::Stop(
+						"internal: an environment root is not a function".into(),
+					));
+				};
+				let found = if matches!(step, Step::Bound(_)) {
+					closure.bound.get(*index).map(|(_, value)| value)
+				} else {
+					closure.captured.get(*index)
+				};
+				found.ok_or_else(|| {
+					Error::Stop("internal: an environment entry is missing".into())
+				})?
+			}
+		}))
+	}
 }
 
 #[derive(Clone, Default, Debug)]

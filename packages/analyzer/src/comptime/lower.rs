@@ -217,7 +217,18 @@ impl<'a> Lowerer<'a> {
 				syntax::view(self.tree, param.node)
 			{
 				let source = Expr::Local(self.slots[&param.symbol]);
-				prologue.push(self.destructure(pattern, source));
+				let borrow = !self
+					.types()
+					.parameter_can_be_consumed(self.a.symbols.symbol(param.symbol).ty);
+				let source = if borrow {
+					Expr::Lend(Place {
+						slot: self.slots[&param.symbol],
+						steps: Vec::new(),
+					})
+				} else {
+					source
+				};
+				prologue.push(self.destructure(pattern, source, borrow));
 			}
 		}
 		let body = self.body(info.body);
@@ -807,7 +818,7 @@ impl<'a> Lowerer<'a> {
 			},
 			View::Destructuring { pattern, value, .. } => {
 				let value = self.expr(value);
-				self.destructure(pattern, value)
+				self.destructure(pattern, value, false)
 			}
 			View::Assignment { target, value, .. } => self.assignment(target, value),
 			View::UpdateFields { target, value } => self.update_fields(target, value),
@@ -1150,7 +1161,7 @@ impl<'a> Lowerer<'a> {
 				let slot = self.bind(symbol);
 				Expr::Let(slot, Expr::Local(temp).boxed())
 			}
-			None => self.destructure(pattern, Expr::Local(temp)),
+			None => self.destructure(pattern, Expr::Local(temp), false),
 		};
 		let body = self.expr(body);
 		Expr::Loop(
@@ -1185,17 +1196,27 @@ impl<'a> Lowerer<'a> {
 		}
 		let iterable = match (compile_time, self.a.unrolled.get(&n)) {
 			(true, Some(items)) => Expr::Const(Value::array(items.clone())),
-			_ => self.expr(iterable),
+			_ => self.bound(iterable),
 		};
 		let (item, prologue) = match pattern {
 			Some(pattern) => match syntax::view(self.tree, pattern) {
 				View::Name(_) => match self.a.symbols.symbol_of_decl(pattern) {
-					Some(symbol) => (Some(self.bind(symbol)), None),
+					Some(symbol) => {
+						self.borrowed_symbols.insert(symbol);
+						(Some(self.bind(symbol)), None)
+					}
 					None => (None, None),
 				},
 				_ => {
 					let temp = self.temp();
-					let destructure = self.destructure(pattern, Expr::Local(temp));
+					let destructure = self.destructure(
+						pattern,
+						Expr::Lend(Place {
+							slot: temp,
+							steps: Vec::new(),
+						}),
+						true,
+					);
 					(Some(temp), Some(destructure))
 				}
 			},
@@ -1749,18 +1770,27 @@ impl<'a> Lowerer<'a> {
 	}
 
 	/// A destructuring pattern bound from a value (`patterns`).
-	fn destructure(&mut self, pattern: NodeId, source: Expr) -> Expr {
+	fn destructure(&mut self, pattern: NodeId, source: Expr, borrow: bool) -> Expr {
 		let Some(info) = self.a.pattern(pattern).cloned() else {
 			return match self.a.symbols.symbol_of_decl(pattern) {
 				Some(symbol) => {
 					let slot = self.bind(symbol);
-					Expr::Let(slot, source.boxed())
+					if borrow {
+						self.borrowed_symbols.insert(symbol);
+						Expr::Bind(slot, source.boxed())
+					} else {
+						Expr::Let(slot, source.boxed())
+					}
 				}
 				None => self.unsupported("this pattern"),
 			};
 		};
 		let temp = self.temp();
-		let mut statements = vec![Expr::Let(temp, source.boxed())];
+		let mut statements = vec![if borrow {
+			Expr::Bind(temp, source.boxed())
+		} else {
+			Expr::Let(temp, source.boxed())
+		}];
 		for (position, element) in info.elements.iter().enumerate() {
 			let read = match element.field {
 				Some(field) => Expr::Field(
@@ -1773,22 +1803,49 @@ impl<'a> Lowerer<'a> {
 					Expr::Const(Value::int(position as i64)).boxed(),
 				),
 			};
+			let read = if borrow {
+				let step = match element.field {
+					Some(field) => Step::Field(Arc::from(self.session.types.syms.resolve(field))),
+					None => Step::Index(Expr::Const(Value::int(position as i64))),
+				};
+				Expr::Lend(Place {
+					slot: temp,
+					steps: vec![step],
+				})
+			} else {
+				read
+			};
 			let read = if element.absent {
 				element
 					.default
 					.map_or_else(Expr::none, |default| self.expr(default))
 			} else {
 				match element.default {
-					Some(default) => Expr::Fallback(read.boxed(), self.expr(default).boxed()),
+					Some(default) => Expr::Fallback(
+						read.boxed(),
+						(if borrow {
+							self.bound(default)
+						} else {
+							self.expr(default)
+						})
+						.boxed(),
+					),
 					None => read,
 				}
 			};
 			match element.binding {
 				PatternBinding::Symbol(symbol) => {
 					let slot = self.bind(symbol);
-					statements.push(Expr::Let(slot, read.boxed()));
+					statements.push(if borrow {
+						self.borrowed_symbols.insert(symbol);
+						Expr::Bind(slot, read.boxed())
+					} else {
+						Expr::Let(slot, read.boxed())
+					});
 				}
-				PatternBinding::Nested(nested) => statements.push(self.destructure(nested, read)),
+				PatternBinding::Nested(nested) => {
+					statements.push(self.destructure(nested, read, borrow))
+				}
 				PatternBinding::None => {}
 			}
 		}

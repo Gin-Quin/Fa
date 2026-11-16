@@ -773,6 +773,7 @@ impl Walker<'_> {
 				);
 				w.report(diagnostic);
 			}
+			let mut elements = Vec::with_capacity(items.len());
 			for (index, part) in items.iter().enumerate() {
 				let ty = parts.get(index).copied().unwrap_or(TypeId::UNKNOWN);
 				match syntax::view(&tree, part) {
@@ -781,15 +782,37 @@ impl Walker<'_> {
 							w.declare(part, name, SymbolKind::LoopVariable { copy: false });
 						w.a.symbols.symbol_mut(symbol).ty = ty;
 						w.set_type(part, ty);
+						elements.push(crate::analysis::PatternElement {
+							field: None,
+							binding: crate::analysis::PatternBinding::Symbol(symbol),
+							ty,
+							default: None,
+							absent: false,
+						});
 						if index == 0 && parts.len() == 2 {
 							w.readonly_elements.insert(symbol);
 						}
 					}
 					_ => {
 						w.set_type(part, TypeId::UNKNOWN);
+						elements.push(crate::analysis::PatternElement {
+							field: None,
+							binding: crate::analysis::PatternBinding::None,
+							ty: TypeId::UNKNOWN,
+							default: None,
+							absent: false,
+						});
 					}
 				}
 			}
+			w.a.patterns.insert(
+				pattern,
+				crate::analysis::PatternInfo {
+					ty: item,
+					elements,
+					rest: None,
+				},
+			);
 			item
 		});
 	}

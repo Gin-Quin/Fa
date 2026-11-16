@@ -10,7 +10,7 @@ use crate::callbacks::{Callback, Progress};
 use crate::code::{Argument, Call, Code, Item, Node, Op, Part, Place, Step};
 use crate::eval::{self, Error, Interpreter};
 use crate::ir::{ArithOp, CompareOp, CopyPlan, FnKey, Num, Slot, TypeTest};
-use crate::loans::{Loan, Out, Owner, Step as PlaceStep};
+use crate::loans::{Loan, Out, Owner, Step as PlaceStep, View as PlaceView};
 use crate::value::{Closure, Member, MemberKind, Object, Value, equals};
 use crate::{builtins, memory};
 
@@ -149,8 +149,10 @@ enum Iteration {
 		finished: bool,
 	},
 	Values {
-		values: Arc<Vec<Value>>,
+		source: Loan,
+		length: usize,
 		position: usize,
+		entries: bool,
 	},
 }
 
@@ -159,6 +161,7 @@ struct For {
 	index: Option<Slot>,
 	position: i64,
 	values: Iteration,
+	temporary: Option<Owner>,
 	body: Node,
 }
 
@@ -288,11 +291,11 @@ impl<'i, 'h> Machine<'i, 'h> {
 	fn value(&self, value: Out) -> Result<Value, Flow> {
 		match value {
 			Out::Value(value) => Ok(value),
-			Out::Loan(loan) => Ok(self.read_loan(&loan)?.clone()),
+			Out::Loan(loan) => Ok(self.read_loan(&loan)?.materialize()),
 		}
 	}
 
-	fn read_loan(&self, loan: &Loan) -> Result<&Value, Flow> {
+	fn read_loan(&self, loan: &Loan) -> Result<PlaceView<'_>, Flow> {
 		self.interpreter.reserve(loan.lookup_bytes())?;
 		let frame = self
 			.frames
@@ -304,30 +307,11 @@ impl<'i, 'h> Machine<'i, 'h> {
 				Error::Stop("internal: a loan must designate an owning root".into()).into(),
 			);
 		};
-		let mut value = mut_value;
+		let mut value = PlaceView::Value(mut_value);
 		for step in loan.steps() {
-			value = match step {
-				PlaceStep::Field(name) => builtins::field_ref(value, name)?,
-				PlaceStep::Index(index) => builtins::index_ref(value, index)?,
-				PlaceStep::Capture(index) => Self::environment_value(value, *index, false)?,
-				PlaceStep::Bound(index) => Self::environment_value(value, *index, true)?,
-			};
+			value = value.project(step)?;
 		}
 		Ok(value)
-	}
-
-	fn environment_value(value: &Value, index: usize, bound: bool) -> Result<&Value, Flow> {
-		let Value::Function(closure) = value else {
-			return Err(
-				Error::Stop("internal: an environment root is not a function".into()).into(),
-			);
-		};
-		let value = if bound {
-			closure.bound.get(index).map(|(_, value)| value)
-		} else {
-			closure.captured.get(index)
-		};
-		value.ok_or_else(|| Error::Stop("internal: an environment entry is missing".into()).into())
 	}
 
 	fn loan(&self, place: &ResolvedPlace) -> Result<Loan, Flow> {
@@ -652,7 +636,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 			}
 		}
 		match state.action {
-			PlaceAction::Read => Self::done(self.read_loan(&state.loan)?.clone()),
+			PlaceAction::Read => Self::done(self.read_loan(&state.loan)?.materialize()),
 			PlaceAction::Lend => {
 				self.read_loan(&state.loan)?;
 				Self::done(Out::Loan(state.loan))
@@ -675,22 +659,28 @@ impl<'i, 'h> Machine<'i, 'h> {
 		let insert = state.remaining.len() == 0 && matches!(state.action, PlaceAction::Assign(_));
 		match &mut step {
 			PlaceStep::Index(key) => {
-				if !insert || !matches!(parent, Value::Map(_)) {
-					builtins::index_ref(parent, key)?;
+				if !insert || !matches!(parent, PlaceView::Value(Value::Map(_))) {
+					parent.project(&PlaceStep::Index(key.clone()))?;
 				}
 				// A reference designates the position selected now, including
 				// when its index was written relative to the end.
-				if let (Value::Array(items) | Value::Tuple(items), Value::Integer(index)) =
-					(parent, key) && *index < I256::ZERO
+				if let (
+					PlaceView::Value(Value::Array(items) | Value::Tuple(items)),
+					Value::Integer(index),
+				) = (parent, key)
+					&& *index < I256::ZERO
 				{
 					*index += I256::from(items.len() as u64);
 				}
 			}
 			PlaceStep::Field(name) if !insert => {
-				builtins::field_ref(parent, name)?;
+				parent.project(&PlaceStep::Field(Arc::clone(name)))?;
 			}
 			PlaceStep::Field(_) => {}
-			PlaceStep::Capture(_) | PlaceStep::Bound(_) => {
+			PlaceStep::Capture(_)
+			| PlaceStep::Bound(_)
+			| PlaceStep::Item(_)
+			| PlaceStep::Entry(_) => {
 				unreachable!("source projections are fields and indices")
 			}
 		}
@@ -770,7 +760,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 			}
 			Finish::Mutate(path, loan) => {
 				if Callback::mutating(path) {
-					let receiver = self.read_loan(&loan)?.clone();
+					let receiver = self.read_loan(&loan)?.materialize();
 					let mut arguments = values;
 					arguments.insert(0, receiver);
 					self.start_callback(path, arguments, CallbackFinish::Mutate(loan))
@@ -797,10 +787,52 @@ impl<'i, 'h> Machine<'i, 'h> {
 			);
 		};
 		let mut current = mut_value;
-		for step in place.steps() {
+		let steps = place.steps();
+		let mut steps = steps.into_iter();
+		while let Some(step) = steps.next() {
 			current = match step {
 				PlaceStep::Field(name) => builtins::field_mut(current, name)?,
 				PlaceStep::Index(key) => builtins::index_mut(current, key.clone())?,
+				PlaceStep::Item(index) => match current {
+					Value::Array(items) | Value::Tuple(items) | Value::Set(items) => {
+						Arc::make_mut(items).get_mut(*index).ok_or_else(|| {
+							Error::Stop("internal: an iterated item was invalidated".into())
+						})?
+					}
+					_ => {
+						return Err(Error::Stop(
+							"internal: an item view requires a collection".into(),
+						)
+						.into());
+					}
+				},
+				PlaceStep::Entry(index) => {
+					let Value::Map(entries) = current else {
+						return Err(
+							Error::Stop("internal: an entry view requires a map".into()).into()
+						);
+					};
+					let pair = Arc::make_mut(entries).get_mut(*index).ok_or_else(|| {
+						Error::Stop("internal: an iterated entry was invalidated".into())
+					})?;
+					let position = match steps.next() {
+						Some(PlaceStep::Index(key)) => {
+							builtins::position(builtins::integer(key)?, 2)?
+						}
+						Some(PlaceStep::Item(index)) if *index < 2 => *index,
+						_ => {
+							return Err(Error::Stop(
+								"internal: an entry write requires a tuple position".into(),
+							)
+							.into());
+						}
+					};
+					if position == 0 {
+						&mut pair.0
+					} else {
+						&mut pair.1
+					}
+				}
 				PlaceStep::Capture(_) | PlaceStep::Bound(_) => {
 					return Err(
 						Error::Stop("internal: cannot modify an owned capture".into()).into(),
@@ -1012,8 +1044,8 @@ impl<'i, 'h> Machine<'i, 'h> {
 			},
 			Continuation::ForBody(state) => match result {
 				Ok(_) | Err(Flow::Continue) => self.for_next(state),
-				Err(Flow::Break(_)) => Self::done(Value::None),
-				Err(flow) => Err(flow),
+				Err(Flow::Break(_)) => self.finish_for(state, Ok(Value::None.into())),
+				Err(flow) => self.finish_for(state, Err(flow)),
 			},
 			Continuation::Catch(slot, handler) => match result {
 				Err(Flow::Error(Error::Thrown(error))) => {
@@ -1053,7 +1085,9 @@ impl<'i, 'h> Machine<'i, 'h> {
 					Continuation::Fallback(right) => {
 						let none = match &value {
 							Out::Value(value) => matches!(value, Value::None),
-							Out::Loan(loan) => matches!(self.read_loan(loan)?, Value::None),
+							Out::Loan(loan) => {
+								matches!(self.read_loan(loan)?, PlaceView::Value(Value::None))
+							}
 						};
 						if none {
 							Ok(Action::Eval(right))
@@ -1099,37 +1133,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 						}
 					}
 					Continuation::ForIterable(item, index, body) => {
-						let values = match self.value(value)? {
-							Value::Range {
-								start,
-								end,
-								inclusive,
-							} => Iteration::Range {
-								current: start.ok_or_else(|| {
-									Error::Stop("a range without a start can't be iterated".into())
-								})?,
-								end,
-								inclusive,
-								finished: false,
-							},
-							Value::Array(values) | Value::Set(values) | Value::Tuple(values) => {
-								Iteration::Values {
-									values,
-									position: 0,
-								}
-							}
-							other => Iteration::Values {
-								values: Arc::new(builtins::iterate(&other)?),
-								position: 0,
-							},
-						};
-						self.for_next(For {
-							item,
-							index,
-							position: 0,
-							values,
-							body,
-						})
+						self.for_iterable(value, item, index, body)
 					}
 					Continuation::Callback(callback, finish) => {
 						self.callback(callback, Some(self.value(value)?), finish)
@@ -1169,7 +1173,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 				// An empty optional reference has no designated place. Keep it
 				// empty when the source reference is subsequently reseated.
 				let value = if let Out::Loan(loan) = &value
-					&& matches!(self.read_loan(loan)?, Value::None)
+					&& matches!(self.read_loan(loan)?, PlaceView::Value(Value::None))
 				{
 					Value::None.into()
 				} else {
@@ -1238,41 +1242,215 @@ impl<'i, 'h> Machine<'i, 'h> {
 		})
 	}
 
-	fn for_next(&mut self, mut state: For) -> Result<Action, Flow> {
-		let value = match &mut state.values {
-			Iteration::Values { values, position } => match values.get(*position) {
-				Some(value) => {
-					*position += 1;
-					value.clone()
-				}
-				None => return Self::done(Value::None),
+	/// A fresh receiver/iterable needs storage while callbacks or the loop
+	/// borrow it. Source places keep their original root without a clone.
+	fn rooted(&mut self, value: Out) -> Result<(Loan, Option<Owner>), Flow> {
+		if let Out::Loan(loan) = value {
+			self.read_loan(&loan)?;
+			return Ok((loan, None));
+		}
+		let locals = &self.frame().locals;
+		let allocation = if locals.len() == locals.capacity() {
+			locals
+				.len()
+				.saturating_add(1)
+				.saturating_mul(2 * size_of::<Out>())
+		} else {
+			0
+		};
+		self.interpreter.reserve(allocation)?;
+		let owner = Owner {
+			frame: self.frames.len() - 1,
+			generation: self.frame().generation,
+			slot: self.frame().locals.len() as Slot,
+		};
+		self.locals().push(value);
+		Ok((Loan::new(owner), Some(owner)))
+	}
+
+	fn release_root(&mut self, temporary: Option<Owner>, result: Eval) -> Eval {
+		let Some(owner) = temporary else {
+			return result;
+		};
+		let retain = |value: Out| match &value {
+			Out::Loan(loan) if loan.owner == owner => self.value(value).map(Out::Value),
+			_ => Ok(value),
+		};
+		let result = match result {
+			Ok(value) => retain(value),
+			Err(Flow::Return(value)) => match retain(value) {
+				Ok(value) => Err(Flow::Return(value)),
+				Err(flow) => Err(flow),
 			},
-			Iteration::Range {
-				current,
-				end,
-				inclusive,
-				finished,
-			} => {
-				if *finished
-					|| end.is_some_and(|end| {
-						if *inclusive {
-							*current > end
-						} else {
-							*current >= end
-						}
-					}) {
-					return Self::done(Value::None);
-				}
-				let value = Value::Integer(*current);
-				match current.checked_add(I256::ONE) {
-					Some(next) => *current = next,
-					None => *finished = true,
+			Err(Flow::Break(value)) => match retain(value) {
+				Ok(value) => Err(Flow::Break(value)),
+				Err(flow) => Err(flow),
+			},
+			other => other,
+		};
+		let Some(frame) = self
+			.frames
+			.get_mut(owner.frame)
+			.filter(|frame| frame.generation == owner.generation)
+		else {
+			return Err(
+				Error::Stop("internal: a temporary owner outlived its frame".into()).into(),
+			);
+		};
+		if owner.slot as usize + 1 != frame.locals.len() {
+			return Err(Error::Stop(
+				"internal: temporary roots must be released in nesting order".into(),
+			)
+			.into());
+		}
+		frame.locals.pop();
+		result
+	}
+
+	fn for_iterable(
+		&mut self,
+		value: Out,
+		item: Option<Slot>,
+		index: Option<Slot>,
+		body: Node,
+	) -> Result<Action, Flow> {
+		let view = match &value {
+			Out::Value(value) => PlaceView::Value(value),
+			Out::Loan(loan) => self.read_loan(loan)?,
+		};
+		if let PlaceView::Value(Value::Range {
+			start,
+			end,
+			inclusive,
+		}) = view
+		{
+			let values = Iteration::Range {
+				current: start.ok_or_else(|| {
+					Error::Stop("a range without a start can't be iterated".into())
+				})?,
+				end: *end,
+				inclusive: *inclusive,
+				finished: false,
+			};
+			return self.for_next(For {
+				item,
+				index,
+				position: 0,
+				values,
+				temporary: None,
+				body,
+			});
+		}
+		let (length, entries) = match view {
+			PlaceView::Value(Value::Array(items) | Value::Set(items) | Value::Tuple(items)) => {
+				(items.len(), false)
+			}
+			PlaceView::Value(Value::Map(entries)) => (entries.len(), true),
+			PlaceView::Entry(_) => (2, false),
+			_ => {
+				let value = self.value(value)?;
+				self.interpreter
+					.reserve(memory::values_size(builtins::count(&value).unwrap_or(0)))?;
+				let items = builtins::iterate(&value)?;
+				let length = items.len();
+				let (source, temporary) = self.rooted(Value::array(items).into())?;
+				let values = Iteration::Values {
+					source,
+					length,
+					position: 0,
+					entries: false,
 				};
-				value
+				return self.for_next(For {
+					item,
+					index,
+					position: 0,
+					values,
+					temporary,
+					body,
+				});
 			}
 		};
+		let (source, temporary) = self.rooted(value)?;
+		let values = Iteration::Values {
+			source,
+			length,
+			position: 0,
+			entries,
+		};
+		self.for_next(For {
+			item,
+			index,
+			position: 0,
+			values,
+			temporary,
+			body,
+		})
+	}
+
+	fn finish_for(&mut self, state: For, result: Eval) -> Result<Action, Flow> {
 		if let Some(slot) = state.item {
-			self.locals()[slot as usize] = value.into();
+			self.locals()[slot as usize] = Value::None.into();
+		}
+		Ok(Action::Done(self.release_root(state.temporary, result)))
+	}
+
+	fn for_next(&mut self, mut state: For) -> Result<Action, Flow> {
+		let value: Result<Option<Out>, Flow> = (|| {
+			Ok(match &mut state.values {
+				Iteration::Values {
+					source,
+					length,
+					position,
+					entries,
+				} => {
+					if *position >= *length {
+						None
+					} else {
+						self.interpreter.reserve(Loan::projection_bytes(1))?;
+						let mut loan = source.clone();
+						loan.push(if *entries {
+							PlaceStep::Entry(*position)
+						} else {
+							PlaceStep::Item(*position)
+						});
+						self.read_loan(&loan)?;
+						*position += 1;
+						Some(Out::Loan(loan))
+					}
+				}
+				Iteration::Range {
+					current,
+					end,
+					inclusive,
+					finished,
+				} => {
+					if *finished
+						|| end.is_some_and(|end| {
+							if *inclusive {
+								*current > end
+							} else {
+								*current >= end
+							}
+						}) {
+						None
+					} else {
+						let value = Value::Integer(*current);
+						match current.checked_add(I256::ONE) {
+							Some(next) => *current = next,
+							None => *finished = true,
+						}
+						Some(value.into())
+					}
+				}
+			})
+		})();
+		let value = match value {
+			Ok(Some(value)) => value,
+			Ok(None) => return self.finish_for(state, Ok(Value::None.into())),
+			Err(flow) => return self.finish_for(state, Err(flow)),
+		};
+		if let Some(slot) = state.item {
+			self.locals()[slot as usize] = value;
 		}
 		if let Some(slot) = state.index {
 			self.locals()[slot as usize] = Value::int(state.position).into();
@@ -1329,6 +1507,87 @@ mod ownership_tests {
 	}
 
 	#[test]
+	fn iterated_map_values_keep_their_original_storage() {
+		let code = Arc::new(Code::expression(&Expr::none(), 2, || Ok(())).unwrap());
+		let mut host = EmptyHost;
+		let mut interpreter = Interpreter::new(&mut host, crate::Limits::default());
+		let mut machine = Machine::new(&mut interpreter, Arc::clone(&code)).unwrap();
+		machine.locals()[0] = Value::Map(Arc::new(vec![(
+			Value::string("key"),
+			Value::array(vec![Value::int(1)]),
+		)]))
+		.into();
+		let source = machine
+			.loan(&ResolvedPlace {
+				slot: 0,
+				steps: Vec::new(),
+			})
+			.unwrap();
+		machine
+			.for_iterable(Out::Loan(source), Some(1), None, code.body)
+			.unwrap();
+		let value = machine
+			.loan(&ResolvedPlace {
+				slot: 1,
+				steps: vec![PlaceStep::Index(Value::int(1))],
+			})
+			.unwrap();
+		let PlaceView::Value(Value::Array(items)) = machine.read_loan(&value).unwrap() else {
+			panic!("a map value")
+		};
+		assert_eq!(Arc::strong_count(items), 1);
+		let original = Arc::as_ptr(items);
+		builtins::mutate_internal(
+			machine.interpreter,
+			"Array#push",
+			Machine::locate(&mut machine.frames, &value).unwrap(),
+			vec![Value::int(2)],
+		)
+		.unwrap();
+		let PlaceView::Value(Value::Array(items)) = machine.read_loan(&value).unwrap() else {
+			panic!("a map value")
+		};
+		assert_eq!(Arc::as_ptr(items), original);
+		assert_eq!(items.len(), 2);
+	}
+
+	#[test]
+	fn fresh_iteration_roots_are_released_on_break_and_failure() {
+		let code = Arc::new(Code::expression(&Expr::none(), 1, || Ok(())).unwrap());
+		let mut host = EmptyHost;
+		let mut interpreter = Interpreter::new(&mut host, crate::Limits::default());
+		let mut machine = Machine::new(&mut interpreter, Arc::clone(&code)).unwrap();
+		for failure in [false, true] {
+			machine
+				.for_iterable(
+					Value::array(vec![Value::int(1)]).into(),
+					Some(0),
+					None,
+					code.body,
+				)
+				.unwrap();
+			assert_eq!(machine.frame().locals.len(), 2);
+			let continuation = machine.stack.pop().unwrap();
+			let result = if failure {
+				Err(Flow::Error(Error::Thrown(Value::error(
+					"Failure",
+					Vec::new(),
+				))))
+			} else {
+				Err(Flow::Break(Value::None.into()))
+			};
+			let action = machine.resume(continuation, result).unwrap();
+			assert!(matches!(
+				(failure, action),
+				(false, Action::Done(Ok(_)))
+					| (true, Action::Done(Err(Flow::Error(Error::Thrown(_)))))
+			));
+			assert_eq!(machine.frame().locals.len(), 1);
+			assert!(matches!(machine.frame().locals[0], Out::Value(Value::None)));
+		}
+	}
+
+	#[test]
 	fn closure_creation_and_invocation_borrow_the_original_capture() {
 		let expr = Expr::Closure {
 			function: FnKey(0, 0),
@@ -1359,7 +1618,7 @@ mod ownership_tests {
 			})
 			.unwrap();
 		assert_eq!(loan.owner.frame, 0);
-		let Value::Array(items) = machine.read_loan(&loan).unwrap() else {
+		let PlaceView::Value(Value::Array(items)) = machine.read_loan(&loan).unwrap() else {
 			panic!("a captured array")
 		};
 		assert_eq!(Arc::strong_count(items), 1);
@@ -1371,7 +1630,7 @@ mod ownership_tests {
 			vec![Value::int(2)],
 		)
 		.unwrap();
-		let Value::Array(items) = machine.read_loan(&loan).unwrap() else {
+		let PlaceView::Value(Value::Array(items)) = machine.read_loan(&loan).unwrap() else {
 			panic!("a captured array")
 		};
 		assert_eq!(Arc::as_ptr(items), original);
@@ -1432,7 +1691,7 @@ mod ownership_tests {
 				steps: Vec::new(),
 			})
 			.unwrap();
-		let Value::Array(items) = machine.read_loan(&loan).unwrap() else {
+		let PlaceView::Value(Value::Array(items)) = machine.read_loan(&loan).unwrap() else {
 			panic!("an owned capture")
 		};
 		assert_eq!(Arc::strong_count(items), 1);
@@ -1474,7 +1733,7 @@ mod ownership_tests {
 		));
 		let forwarded = machine.loan(&source).unwrap();
 		assert_eq!(forwarded.owner, loan.owner);
-		let Value::Array(current) = machine.read_loan(&forwarded).unwrap() else {
+		let PlaceView::Value(Value::Array(current)) = machine.read_loan(&forwarded).unwrap() else {
 			panic!("an array loan")
 		};
 		assert_eq!(Arc::strong_count(current), 1);
@@ -1485,7 +1744,7 @@ mod ownership_tests {
 			vec![Value::int(2)],
 		)
 		.unwrap();
-		let Value::Array(current) = machine.read_loan(&forwarded).unwrap() else {
+		let PlaceView::Value(Value::Array(current)) = machine.read_loan(&forwarded).unwrap() else {
 			panic!("an array loan")
 		};
 		assert_eq!(Arc::strong_count(current), 1);

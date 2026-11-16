@@ -17,7 +17,6 @@ use crate::error::Error;
 
 const EXTERNAL: u64 = 1 << 62;
 const SIMPLE: u64 = 1 << 63;
-const SURROGATES: u64 = 1 << 61;
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	fn stable_string_storage(&self, node: NodeId) -> bool {
@@ -205,83 +204,51 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			"",
 		)?;
 		let external = b.build_int_compare(IntPredicate::NE, external, i64.const_zero(), "")?;
-		let function = b
-			.get_insert_block()
-			.expect("a block")
-			.get_parent()
-			.expect("a function");
-		let outside = self.context.append_basic_block(function, "external_text");
-		let inside = b.get_insert_block().expect("a block");
-		let end = self.context.append_basic_block(function, "text_view");
-		let bytes = self.payload_offset(b, pointer, if packed { 4 } else { 16 })?;
-		let inline_length = b.build_and(
+		let length = b.build_and(
 			flags,
-			i64.const_int(if packed { 0x1fff } else { SURROGATES - 1 }, false),
+			i64.const_int(if packed { 0x3fff } else { EXTERNAL - 1 }, false),
 			"",
 		)?;
-		b.build_conditional_branch(external, outside, end)?;
-		b.position_at_end(outside);
-		// An external string is longer than one arena chunk, hence never inline.
-		let external_header = self.payload_offset(b, pointer, if packed { 8 } else { 16 })?;
-		let external_bytes = b
-			.build_load(self.pointer_type(), external_header, "")?
-			.into_pointer_value();
-		let external_length = if packed {
-			let field = b.build_struct_gep(self.string_type, external_header, 1, "")?;
-			let value = b.build_load(self.usize, field, "")?.into_int_value();
-			b.build_int_cast(value, i64, "")?
-		} else {
-			inline_length
-		};
-		b.build_unconditional_branch(end)?;
-		b.position_at_end(end);
-		let bytes_view = b.build_phi(self.pointer_type(), "text_bytes")?;
-		bytes_view.add_incoming(&[(&bytes, inside), (&external_bytes, outside)]);
-		let length = b.build_phi(i64, "text_length")?;
-		length.add_incoming(&[(&inline_length, inside), (&external_length, outside)]);
-		let length = b.build_int_cast(length.as_basic_value().into_int_value(), self.usize, "")?;
+		let length = b.build_int_cast(length, self.usize, "")?;
 		let simple = b.build_and(
 			flags,
 			i64.const_int(if packed { 0x4000 } else { SIMPLE }, false),
 			"",
 		)?;
 		let simple = b.build_int_compare(IntPredicate::NE, simple, i64.const_zero(), "")?;
-		let simple = b.build_select(simple, self.simple_flag(), self.usize.const_zero(), "")?;
-		// These bytes belong to a root, including an external string retained
-		// by its cleanup. A stored copy must materialize before that root dies.
-		// Kind zero denotes an immortal literal and would leak this borrow.
-		let surrogates = b.build_and(
-			flags,
-			i64.const_int(if packed { 0x2000 } else { SURROGATES }, false),
-			"",
-		)?;
-		let surrogates = b.build_int_compare(IntPredicate::NE, surrogates, i64.const_zero(), "")?;
-		let surrogates = b
-			.build_select(
-				surrogates,
-				self.string_surrogates_flag(),
-				self.usize.const_zero(),
-				"",
-			)?
+		let encoding = b
+			.build_select(simple, self.simple_flag(), self.usize.const_zero(), "")?
 			.into_int_value();
-		let encoding = b.build_or(simple.into_int_value(), surrogates, "")?;
-		let capacity = b.build_or(encoding, self.string_kind_mask(), "")?;
-		let value = b.build_insert_value(
-			self.string_type.get_undef(),
-			bytes_view.as_basic_value(),
-			0,
+		let slot = self.helper_alloca(b, self.string_type.into(), "arena_view")?;
+		let external = b.build_int_z_extend(external, self.context.i32_type(), "")?;
+		b.build_call(
+			self.runtime.function("fa_string_read_arena_view")?,
+			&[
+				pointer.into(),
+				length.into(),
+				encoding.into(),
+				self.context
+					.i32_type()
+					.const_int(packed as u64, false)
+					.into(),
+				external.into(),
+				slot.into(),
+			],
 			"",
 		)?;
-		let value = b.build_insert_value(value, length, 1, "")?;
-		let value = b.build_insert_value(value, capacity, 2, "")?;
-		Ok(b.build_insert_value(
-			self.object_type(data).get_undef(),
-			value.into_struct_value(),
-			0,
-			"",
-		)?
-		.into_struct_value()
-		.into())
+		let value = b
+			.build_load(self.string_type, slot, "text_view")?
+			.into_struct_value();
+		let capacity = b.build_extract_value(value, 2, "")?.into_int_value();
+		let capacity = b.build_and(capacity, self.string_inline_flag().const_not(), "")?;
+		let value = b
+			.build_insert_value(value, capacity, 2, "")?
+			.into_struct_value();
+		Ok(
+			b.build_insert_value(self.object_type(data).get_undef(), value, 0, "")?
+				.into_struct_value()
+				.into(),
+		)
 	}
 
 	fn register_external_text(
@@ -338,37 +305,45 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let (bytes, length) = self.string_parts_with(b, string)?;
 		let pair = value.into_struct_value();
 		let capacity = b.build_extract_value(pair, 2, "")?.into_int_value();
+		let units = b
+			.build_call(
+				self.runtime.function("fa_string_length")?,
+				&[bytes.into(), length.into(), capacity.into()],
+				"",
+			)?
+			.try_as_basic_value()
+			.basic()
+			.expect("a count")
+			.into_int_value();
 		let simple = b.build_and(capacity, self.simple_flag(), "")?;
-		let simple = b.build_int_compare(IntPredicate::NE, simple, self.usize.const_zero(), "")?;
-		let i64 = self.context.i64_type();
-		let simple = b
+		let is_simple =
+			b.build_int_compare(IntPredicate::NE, simple, self.usize.const_zero(), "")?;
+		let extra = b
 			.build_select(
-				simple,
+				is_simple,
+				self.usize.const_zero(),
+				self.usize.const_int(2, false),
+				"",
+			)?
+			.into_int_value();
+		let i64 = self.context.i64_type();
+		let encoding = b
+			.build_select(
+				is_simple,
 				i64.const_int(if packed { 0x4000 } else { SIMPLE }, false),
 				i64.const_zero(),
 				"",
 			)?
 			.into_int_value();
-		let surrogates = b.build_and(capacity, self.string_surrogates_flag(), "")?;
-		let surrogates =
-			b.build_int_compare(IntPredicate::NE, surrogates, self.usize.const_zero(), "")?;
-		let surrogates = b
-			.build_select(
-				surrogates,
-				i64.const_int(if packed { 0x2000 } else { SURROGATES }, false),
-				i64.const_zero(),
-				"",
-			)?
-			.into_int_value();
-		let encoding = b.build_or(simple, surrogates, "")?;
 		let long_length = b.build_int_cast(length, i64, "")?;
 		let flags = b.build_or(long_length, encoding, "")?;
 		let header = (5 * u64::from(self.usize.get_bit_width() / 8)).next_multiple_of(16);
 		let maximum = super::trees::ARENA_CHUNK_BYTES - header - prefix_bytes;
-		let maximum = if packed { maximum.min(0x1fff) } else { maximum };
+		let maximum = if packed { maximum.min(0x3fff) } else { maximum };
+		let needed = b.build_int_add(length, extra, "")?;
 		let fits = b.build_int_compare(
 			IntPredicate::ULE,
-			length,
+			needed,
 			self.usize.const_int(maximum, false),
 			"",
 		)?;
@@ -382,7 +357,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let end = self.context.append_basic_block(function, "frozen_text");
 		b.build_conditional_branch(fits, inline, external)?;
 		b.position_at_end(inline);
-		let size = b.build_int_add(length, self.usize.const_int(prefix_bytes, false), "")?;
+		let size = b.build_int_add(needed, self.usize.const_int(prefix_bytes, false), "")?;
 		let node = b
 			.build_call(
 				self.runtime.function("fa_arena_alloc")?,
@@ -402,13 +377,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			b.build_store(node, i64.const_int(id, false))?;
 			b.build_store(self.payload_word(b, node, 1)?, flags)?;
 		}
-		b.build_memcpy(
-			self.payload_offset(b, node, prefix_bytes)?,
-			1,
-			bytes,
-			1,
-			length,
-		)?;
+		let target = self.payload_offset(b, node, prefix_bytes)?;
+		let target = b
+			.build_call(
+				self.runtime.function("fa_string_write_arena_count")?,
+				&[target.into(), units.into(), capacity.into()],
+				"",
+			)?
+			.try_as_basic_value()
+			.basic()
+			.expect("text bytes")
+			.into_pointer_value();
+		b.build_memcpy(target, 1, bytes, 1, length)?;
 		if !copy {
 			self.call_drop(b, Repr::Str, value)?;
 		}
@@ -439,6 +419,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else {
 			value
 		};
+		let owned_pair = owned.into_struct_value();
+		let owned_bytes = b.build_extract_value(owned_pair, 0, "")?;
+		let owned_length = b.build_extract_value(owned_pair, 1, "")?;
+		let owned_capacity = b.build_extract_value(owned_pair, 2, "")?;
+		b.build_call(
+			self.runtime.function("fa_string_set_unit_count")?,
+			&[
+				owned_bytes.into(),
+				owned_length.into(),
+				owned_capacity.into(),
+				units.into(),
+			],
+			"",
+		)?;
 		b.build_store(
 			self.payload_offset(b, outside, if packed { 8 } else { 16 })?,
 			owned,

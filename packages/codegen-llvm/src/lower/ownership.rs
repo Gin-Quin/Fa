@@ -763,6 +763,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.usize.const_zero(),
 					"",
 				)?;
+				// Counted views use LITERAL together with SURROGATES; unlike
+				// immortal well-formed literals, their bytes must be copied.
+				let surrogates = builder.build_and(capacity, self.string_surrogates_flag(), "")?;
+				let well_formed_kind = builder.build_int_compare(
+					IntPredicate::EQ,
+					surrogates,
+					self.usize.const_zero(),
+					"",
+				)?;
+				let literal = builder.build_and(literal, well_formed_kind, "")?;
 				let empty = builder.build_int_compare(
 					IntPredicate::EQ,
 					length,

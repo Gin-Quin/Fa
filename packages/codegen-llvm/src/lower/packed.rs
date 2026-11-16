@@ -495,18 +495,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let length64 = self
 						.builder
 						.build_int_z_extend_or_bit_cast(length, i64, "")?;
-					// ASCII and well-formed short strings keep their one-byte header.
-					// A possible surrogate uses the extended header, with its flag.
-					let surrogates =
-						self.builder
-							.build_and(capacity, self.string_surrogates_flag(), "")?;
-					let tagged = self.builder.build_or(length, surrogates, "")?;
-					let tagged = self
+					let units = self
+						.call_value(
+							self.runtime.function("fa_string_length")?,
+							&[bytes.into(), length.into(), capacity.into()],
+						)?
+						.into_int_value();
+					let metadata = self
+						.call_value(
+							self.runtime.function("fa_string_view_count_size")?,
+							&[units.into(), capacity.into()],
+						)?
+						.into_int_value();
+					let metadata = self
 						.builder
-						.build_int_z_extend_or_bit_cast(tagged, i64, "")?;
+						.build_int_z_extend_or_bit_cast(metadata, i64, "")?;
 					let short = self.builder.build_int_compare(
 						IntPredicate::ULT,
-						tagged,
+						length64,
 						i64.const_int(127, false),
 						"",
 					)?;
@@ -519,11 +525,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let size = self
 						.builder
 						.build_int_add(header.into_int_value(), length64, "")?;
+					let size = self.builder.build_int_add(size, metadata, "")?;
 					variable = Some(match variable {
 						Some(sum) => self.builder.build_int_add(sum, size, "")?,
 						None => size,
 					});
-					values.push((leaf.repr, loaded, Some((bytes, length, capacity, short))));
+					values.push((
+						leaf.repr,
+						loaded,
+						Some((bytes, length, capacity, units, short)),
+					));
 				} else {
 					fixed += self.leaf_size(leaf.repr);
 					values.push((leaf.repr, loaded, None));
@@ -562,9 +573,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						cursor =
 							self.packed_offset(cursor, i64.const_int(self.leaf_size(repr), false))?;
 					}
-					Some((bytes, length, capacity, short)) => {
-						cursor =
-							self.packed_store_string(cursor, bytes, length, capacity, short)?;
+					Some((bytes, length, capacity, units, short)) => {
+						cursor = self
+							.packed_store_string(cursor, bytes, length, capacity, units, short)?;
 					}
 				}
 			}
@@ -593,6 +604,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		bytes: PointerValue<'ctx>,
 		length: IntValue<'ctx>,
 		capacity: IntValue<'ctx>,
+		units: IntValue<'ctx>,
 		short: IntValue<'ctx>,
 	) -> Result<PointerValue<'ctx>, Error> {
 		let i8 = self.context.i8_type();
@@ -628,11 +640,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.set_alignment(1)
 			.map_err(|e| Error::Llvm(e.to_string()))?;
 		let word_pointer = self.packed_offset(cursor, usize.const_int(1, false))?;
-		let surrogates = self
-			.builder
-			.build_and(capacity, self.string_surrogates_flag(), "")?;
-		let extended = self.builder.build_or(word, surrogates, "")?;
-		let store = self.builder.build_store(word_pointer, extended)?;
+		let store = self.builder.build_store(word_pointer, word)?;
 		store
 			.set_alignment(1)
 			.map_err(|e| Error::Llvm(e.to_string()))?;
@@ -643,6 +651,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let destination = self.builder.build_phi(self.pointer_type(), "")?;
 		destination.add_incoming(&[(&short_bytes, short_block), (&long_bytes, long_block)]);
 		let destination = destination.as_basic_value().into_pointer_value();
+		let destination = self
+			.call_value(
+				self.runtime.function("fa_string_write_view_count")?,
+				&[destination.into(), units.into(), capacity.into()],
+			)?
+			.into_pointer_value();
 		self.builder
 			.build_memcpy(destination, 1, bytes, 1, length)
 			.map_err(|e| Error::Llvm(e.to_string()))?;
@@ -686,42 +700,46 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(join);
 		// Merge the encoded word before decoding. Keeping the masks after
-		// the phi proves these borrowed views are never inline or literal.
+		// the phi exposes the byte length and ASCII flag before metadata is read.
 		let word = self.builder.build_phi(usize, "")?;
 		word.add_incoming(&[(&short_word, short_block), (&long_word, long_block)]);
 		let bytes = self.builder.build_phi(self.pointer_type(), "")?;
 		bytes.add_incoming(&[(&short_bytes, short_block), (&long_bytes, long_block)]);
 		let bytes = bytes.as_basic_value().into_pointer_value();
 		let word = word.as_basic_value().into_int_value();
-		let surrogates = self
+		let length = self
 			.builder
-			.build_and(word, self.string_surrogates_flag(), "")?;
-		let payload =
-			self.builder
-				.build_and(word, self.string_surrogates_flag().const_not(), "")?;
-		let length =
-			self.builder
-				.build_right_shift(payload, usize.const_int(1, false), false, "")?;
+			.build_right_shift(word, usize.const_int(1, false), false, "")?;
 		let ascii = self.builder.build_left_shift(
 			word,
 			usize.const_int(u64::from(usize.get_bit_width() - 1), false),
 			"",
 		)?;
-		let encoding = self.builder.build_or(ascii, surrogates, "")?;
+		let slot = self.alloca(Repr::Str, "packed_view")?;
+		let after = self
+			.call_value(
+				self.runtime.function("fa_string_read_packed_view")?,
+				&[
+					bytes.into(),
+					length.into(),
+					ascii.into(),
+					slot.pointer.into(),
+				],
+			)?
+			.into_pointer_value();
+		let loaded = self.load(slot)?.value.expect("a view").into_struct_value();
 		let capacity = self
 			.builder
-			.build_or(encoding, self.string_kind_mask(), "")?;
-		let mut value = self.string_type.get_undef();
-		for (index, part) in [BasicValueEnum::from(bytes), length.into(), capacity.into()]
-			.into_iter()
-			.enumerate()
-		{
-			value = self
-				.builder
-				.build_insert_value(value, part, index as u32, "")?
-				.into_struct_value();
-		}
-		let after = self.packed_offset(bytes, length)?;
+			.build_extract_value(loaded, 2, "")?
+			.into_int_value();
+		// Make the external representation explicit after the helper's join.
+		let capacity =
+			self.builder
+				.build_and(capacity, self.string_inline_flag().const_not(), "")?;
+		let value = self
+			.builder
+			.build_insert_value(loaded, capacity, 2, "")?
+			.into_struct_value();
 		Ok((value.into(), after))
 	}
 

@@ -110,6 +110,7 @@ typedef struct {
 #define STRING_INLINE ((size_t)1 << (sizeof(size_t) * 8 - 3))
 #define STRING_SURROGATES ((size_t)1 << (sizeof(size_t) * 8 - 2))
 #define STRING_LITERAL ((size_t)1 << (sizeof(size_t) * 8 - 4))
+#define STRING_COUNTED_VIEW (STRING_LITERAL | STRING_SURROGATES)
 #define STRING_FLAGS (SIMPLE | STRING_SURROGATES)
 #define KIND_MASK (~(SIMPLE | STRING_INLINE | STRING_SURROGATES | STRING_LITERAL))
 #define STRING_FRAME ((size_t)1)
@@ -138,6 +139,58 @@ static void inline_string_tag(FaString *string, size_t length, size_t simple) {
 static int string_owned(size_t capacity) {
 	size_t kind = capacity & ~(STRING_FLAGS);
 	return kind != 0 && kind < KIND_MASK && !(kind & STRING_FRAME);
+}
+
+static int string_static(size_t capacity) {
+	return !(capacity & STRING_INLINE) &&
+	       ((capacity & ~(SIMPLE)) == 0 ||
+	        (capacity & (STRING_LITERAL | STRING_SURROGATES)) == STRING_LITERAL);
+}
+
+static int string_counted_view(size_t capacity) {
+	return !(capacity & STRING_INLINE) &&
+	       (capacity & STRING_COUNTED_VIEW) == STRING_COUNTED_VIEW;
+}
+
+/// A counted view never owns bytes. ASCII keeps the existing compact tag;
+/// literals cannot collide with the counted-view kind (they are well formed).
+static size_t string_view_capacity(size_t flags, size_t units) {
+	return flags & SIMPLE ? SIMPLE | KIND_MASK : STRING_COUNTED_VIEW | (units & KIND_MASK);
+}
+
+/// Unicode-only metadata in compact stored strings. ASCII retains exactly
+/// its old header and payload; no count field is emitted or read.
+FA_EXPORT __attribute__((always_inline)) size_t fa_string_view_count_size(size_t units, size_t flags) {
+	if (flags & SIMPLE) { return 0; }
+	size_t size = 1;
+	while (units >= 128) { units >>= 7; size += 1; }
+	return size;
+}
+
+FA_EXPORT __attribute__((always_inline)) uint8_t *fa_string_write_view_count(uint8_t *cursor,
+                                                                          size_t units, size_t flags) {
+	if (flags & SIMPLE) { return cursor; }
+	do {
+		uint8_t byte = (uint8_t)(units & 127);
+		units >>= 7;
+		*cursor++ = (uint8_t)(byte | (units ? 128 : 0));
+	} while (units);
+	return cursor;
+}
+
+FA_EXPORT __attribute__((always_inline)) const uint8_t *fa_string_read_packed_view(
+    const uint8_t *cursor, size_t length, size_t flags, FaString *out) {
+	size_t units = length;
+	if (!(flags & SIMPLE)) {
+		units = 0;
+		for (unsigned shift = 0; shift < sizeof(size_t) * 8; shift += 7) {
+			uint8_t byte = *cursor++;
+			units |= (size_t)(byte & 127) << shift;
+			if (!(byte & 128)) { break; }
+		}
+	}
+	*out = (FaString){cursor, length, string_view_capacity(flags, units)};
+	return cursor + length;
 }
 
 static __attribute__((always_inline)) inline int string_frame(size_t capacity) {
@@ -308,11 +361,25 @@ static StringHeader *string_header(const uint8_t *bytes) {
 
 /// The prefix is reserved with the block so appending non-ASCII text
 /// never breaks an existing reservation. ASCII operations never touch it.
-static uint8_t *string_alloc(size_t *capacity, size_t flags) {
-	if (*capacity > KIND_MASK - sizeof(StringHeader)) { out_of_memory(); }
-	StringHeader *header = fa_alloc(sizeof(StringHeader) + *capacity, sizeof(size_t));
+static __attribute__((always_inline)) uint8_t *string_alloc_block(size_t capacity, size_t flags) {
+	if (capacity > KIND_MASK - sizeof(StringHeader)) { out_of_memory(); }
+	StringHeader *header = fa_alloc(sizeof(StringHeader) + capacity, sizeof(size_t));
 	if (!(flags & SIMPLE)) { header->bytes = SIZE_MAX; header->lock = 0; }
 	return (uint8_t *)(header + 1);
+}
+
+static __attribute__((noinline)) uint8_t *string_alloc_ascii(size_t capacity) {
+	return string_alloc_block(capacity, SIMPLE);
+}
+
+static __attribute__((noinline)) uint8_t *string_alloc_unicode(size_t capacity) {
+	return string_alloc_block(capacity, 0);
+}
+
+/// Keep allocation out of growing caller loops, while specializing away
+/// cache initialization and its live flag register for known ASCII text.
+static __attribute__((always_inline)) uint8_t *string_alloc(size_t *capacity, size_t flags) {
+	return flags & SIMPLE ? string_alloc_ascii(*capacity) : string_alloc_unicode(*capacity);
 }
 
 static void string_clear(StringHeader *header) {
@@ -3138,6 +3205,52 @@ FA_EXPORT __attribute__((always_inline)) size_t fa_string_length(const uint8_t *
 	                              : unit_count(text, length);
 }
 
+/// A freshly constructed or exclusively transferred external arena owner
+/// keeps the count already obtained from its source, before any view is read.
+FA_EXPORT __attribute__((always_inline)) void fa_string_set_unit_count(
+    const uint8_t *bytes, size_t length, size_t capacity, size_t units) {
+	if ((capacity & SIMPLE) || !string_owned(capacity)) { return; }
+	StringHeader *header = string_header(bytes);
+	if (header->bytes == length) { return; }
+	string_clear(header);
+	header->units = units;
+	header->breadcrumbs = 0;
+	header->bytes = length;
+}
+
+FA_EXPORT __attribute__((always_inline)) uint8_t *fa_string_write_arena_count(
+    uint8_t *cursor, size_t units, size_t flags) {
+	if (flags & SIMPLE) { return cursor; }
+	uint16_t count = (uint16_t)units;
+	__builtin_memcpy(cursor, &count, sizeof count);
+	return cursor + sizeof count;
+}
+
+/// Inline arena text adds a two-byte count only on the Unicode path.
+/// An external node retains its existing owning descriptor and eager cache.
+FA_EXPORT __attribute__((always_inline)) void fa_string_read_arena_view(
+    const uint8_t *node, size_t byte_length, size_t flags, int32_t packed, int32_t external,
+    FaString *out) {
+	const uint8_t *bytes;
+	size_t units;
+	if (external) {
+		const FaString *owner = (const FaString *)(const void *)(node + (packed ? 8 : 16));
+		bytes = owner->bytes;
+		if (packed) { byte_length = owner->length; }
+		units = flags & SIMPLE ? byte_length : fa_string_length(bytes, byte_length, owner->capacity);
+	} else {
+		bytes = node + (packed ? 4 : 16);
+		units = byte_length;
+		if (!(flags & SIMPLE)) {
+			uint16_t count;
+			__builtin_memcpy(&count, bytes, sizeof count);
+			units = count;
+			bytes += sizeof count;
+		}
+	}
+	*out = (FaString){bytes, byte_length, string_view_capacity(flags, units)};
+}
+
 /// A position is twice its byte offset, plus one for the low half of an
 /// astral code point. Breadcrumbs can therefore land inside a pair.
 static size_t unit_position(const uint8_t *text, size_t length, size_t capacity, size_t index) {
@@ -3259,15 +3372,17 @@ FA_EXPORT int32_t fa_string_get(const uint8_t *text, size_t length, size_t capac
 static void unit_slice(const uint8_t *text, size_t length, size_t capacity,
                        size_t from, size_t to, FaString *out, int view) {
 	if (from == to) {
-		*out = (FaString){view ? text + unit_position(text, length, capacity, from) / 2 : (const uint8_t *)"", 0, (capacity & STRING_FLAGS) | (view ? KIND_MASK : 0)};
+		*out = (FaString){view ? text + unit_position(text, length, capacity, from) / 2 : (const uint8_t *)"", 0, view ? string_view_capacity(capacity, 0) : SIMPLE};
 		return;
 	}
 	size_t first = unit_position(text, length, capacity, from);
 	size_t last = unit_position(text, length, capacity, to);
 	if (!(first & 1) && !(last & 1)) {
 		size_t bytes = last / 2 - first / 2;
-		if (view || (((capacity & ~STRING_FLAGS) == 0 || (!(capacity & STRING_INLINE) && (capacity & STRING_LITERAL))) && bytes > 1)) {
-			*out = (FaString){text + first / 2, bytes, (capacity & STRING_FLAGS) | KIND_MASK};
+		if (view || (string_static(capacity) && bytes > 1)) {
+			size_t tag = view ? string_view_capacity(capacity, to - from)
+			                  : (capacity & SIMPLE) ? SIMPLE : STRING_LITERAL | (to - from);
+			*out = (FaString){text + first / 2, bytes, tag};
 		} else { *out = owned_copy_with(text + first / 2, bytes, capacity & STRING_FLAGS); }
 		return;
 	}
@@ -3290,6 +3405,13 @@ static void unit_slice(const uint8_t *text, size_t length, size_t capacity,
 		FaString unit;
 		unit_string(unit_at_position(text, length, last & ~(size_t)1), &unit);
 		copy_bytes(bytes + offset, (uint8_t *)&unit, 3);
+	}
+	if (string_owned(out->capacity)) {
+		StringHeader *header = string_header(out->bytes);
+		header->units = to - from;
+		header->breadcrumbs = 0;
+		header->conversions = 0;
+		header->bytes = size;
 	}
 }
 
@@ -3326,12 +3448,13 @@ FA_EXPORT const void *fa_string_slice_view(const uint8_t *text, size_t length, s
 FA_EXPORT const void *fa_string_slice_region(const uint8_t *text, size_t length, size_t capacity,
                                              int64_t start, int64_t end, int8_t flags, FaString *out) {
 	const void *error = string_slice(text, length, capacity, start, end, flags, out, 1);
-	if (!error && string_length(out) > INLINE_STRING_BYTES && (out->capacity & KIND_MASK) == KIND_MASK) {
+	if (!error && string_length(out) > INLINE_STRING_BYTES &&
+	    ((out->capacity & KIND_MASK) == KIND_MASK || string_counted_view(out->capacity))) {
 		*out = owned_copy_with(string_bytes(out), string_length(out), out->capacity & STRING_FLAGS);
 	}
 	// Only a short immediate result may borrow a nonstatic source here.
 	if (!error && string_length(out) <= INLINE_STRING_BYTES && !(out->capacity & STRING_INLINE)) {
-		out->capacity = (out->capacity & STRING_FLAGS) | KIND_MASK;
+		out->capacity = string_view_capacity(out->capacity, fa_string_length(string_bytes(out), string_length(out), out->capacity));
 	}
 	return error;
 }

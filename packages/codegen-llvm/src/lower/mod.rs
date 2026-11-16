@@ -1007,6 +1007,28 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		Ok(Slot { pointer, repr })
 	}
 
+	/// Scratch for a helper builder, always in that builder's function entry.
+	/// This must not allocate repeatedly when the access is inside a loop.
+	pub(crate) fn helper_alloca(
+		&self,
+		builder: &Builder<'ctx>,
+		ty: BasicTypeEnum<'ctx>,
+		name: &str,
+	) -> Result<PointerValue<'ctx>, Error> {
+		let function = builder
+			.get_insert_block()
+			.expect("a block")
+			.get_parent()
+			.expect("a function");
+		let entry = function.get_first_basic_block().expect("an entry");
+		let allocation = self.context.create_builder();
+		match entry.get_first_instruction() {
+			Some(first) => allocation.position_before(&first),
+			None => allocation.position_at_end(entry),
+		}
+		Ok(allocation.build_alloca(ty, name)?)
+	}
+
 	fn load(&self, slot: Slot<'ctx>) -> Result<Val<'ctx>, Error> {
 		self.load_place(slot, true)
 	}

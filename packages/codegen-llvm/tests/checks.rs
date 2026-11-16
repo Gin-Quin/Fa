@@ -62,7 +62,8 @@ mod with_llvm {
 		let mut keep = false;
 		for line in ir.lines() {
 			if line.starts_with("define ") {
-				keep = line.contains("@main(") || line.contains("@fa.");
+				keep =
+					line.contains("@main(") || line.contains("@_start(") || line.contains("@fa.");
 			}
 			if keep {
 				kept.push_str(line);
@@ -1082,6 +1083,47 @@ console.log(try equal("é", 0), try choose("a", 0))
 			let body = function(&ir, name);
 			assert!(body.contains("@fa_string_code_unit_at("), "{body}");
 			assert!(!body.contains("@fa_string_get("), "{body}");
+		}
+	}
+
+	#[test]
+	fn ascii_packed_text_keeps_its_short_and_extended_headers() {
+		let source = format!(
+			r#"
+type Entry = Union {{ Text = {{ id: Int32, text: String }}, Number = {{ value: Integer }} }}
+mutable entries: Array<Entry> = []
+entries.push(Entry.Text {{ id = 0, text = "abc" }})
+entries.push(Entry.Text {{ id = 0, text = "{}" }})
+entries.push(Entry.Number {{ value = 1 }})
+mutable total = 0
+for entry in entries {{
+	total += when entry is {{ Entry.Text as item => Integer(item.id) + item.text.length, Entry.Number as item => item.value }}
+}}
+console.log(total)
+"#,
+			"x".repeat(128)
+		);
+		for (name, target, extended) in [
+			("packed-ascii-64", Target::Native, 142),
+			("packed-ascii-32", Target::Wasm, 138),
+		] {
+			let ir = ir_at_target(name, &source, false, OptLevel::O3, target);
+			let grows: Vec<_> = ir
+				.lines()
+				.filter(|line| line.contains("@packed_grow("))
+				.collect();
+			assert!(
+				grows.iter().any(|line| line.contains("i64 noundef 9)")),
+				"{name}: {grows:?}; IR bytes {} packed {}",
+				ir.len(),
+				count(&ir, "packed")
+			);
+			assert!(
+				grows
+					.iter()
+					.any(|line| line.contains(&format!("i64 noundef {extended})"))),
+				"{grows:?}"
+			);
 		}
 	}
 

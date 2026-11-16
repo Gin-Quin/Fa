@@ -45,13 +45,13 @@ function checked = (value: String, index: Integer): UInt16 throws IndexError => 
 console.log(checked("é😀", -1) catch _error => 0, checked("", 0) catch _error => 999, checked("x", -2) catch _error => 999) -- prints: 56832 999 999
 
 type Cell = Union {
-	Text = { text: String }
+	Text = { id: Int32, text: String }
 	Number = { number: Integer }
 }
 mutable cells: Array<Cell> = []
-cells.push(Cell.Text { text = "é" })
-cells.push(Cell.Text { text = text[3] })
-cells.push(Cell.Text { text = "x".repeat(130) + text[4] })
+cells.push(Cell.Text { id = 0, text = "é" })
+cells.push(Cell.Text { id = 0, text = text[3] })
+cells.push(Cell.Text { id = 0, text = "x".repeat(130) + text[4] })
 for cell in cells {
 	when cell is {
 		Cell.Text as value => console.log(value.text.length, value.text.isWellFormed(), try value.text.codeUnitAt(-1))

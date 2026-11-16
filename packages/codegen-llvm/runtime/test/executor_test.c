@@ -917,6 +917,43 @@ static void test_utf16_strings(void) {
 	CHECK(__builtin_memcmp(encoded, "\xef\xbf\xbd", 3) == 0);
 	CHECK(fa_string_compare((const uint8_t *)"\xf0\x90\x80\x80", 4, (const uint8_t *)"\xee\x80\x80", 3) < 0);
 	CHECK(fa_string_compare(string_bytes(&low), 3, (const uint8_t *)"\xee\x80\x80", 3) < 0);
+	FaString counted;
+	CHECK(!fa_string_slice_view(text, sizeof(text) - 1, 0, 1, 3, 3, &counted));
+	CHECK(counted.bytes == text + 1 && counted.length == 5);
+	CHECK(string_counted_view(counted.capacity) && (counted.capacity & KIND_MASK) == 2);
+	CHECK(fa_string_length(counted.bytes, counted.length, counted.capacity) == 2);
+	CHECK(!string_owned(counted.capacity) && !string_static(counted.capacity));
+	// ASCII compact storage has no extra field. Unicode counts are bounded
+	// unsigned LEB128 values and preserve the full representation range.
+	uint8_t metadata[16] = "ascii";
+	CHECK(fa_string_view_count_size(5, SIMPLE) == 0);
+	CHECK(fa_string_write_view_count(metadata, 5, SIMPLE) == metadata);
+	CHECK(metadata[0] == 'a');
+	CHECK(fa_string_read_packed_view(metadata, 5, SIMPLE, &counted) == metadata + 5);
+	CHECK(counted.bytes == metadata && counted.length == 5 && counted.capacity == (SIMPLE | KIND_MASK));
+	const size_t counts[] = {0, 1, 127, 128, 16383, 16384, KIND_MASK - 1};
+	const size_t sizes[] = {1, 1, 1, 2, 2, 3, (sizeof(size_t) * 8 - 4 + 6) / 7};
+	for (size_t i = 0; i < sizeof counts / sizeof counts[0]; i += 1) {
+		uint8_t *end = fa_string_write_view_count(metadata, counts[i], 0);
+		CHECK((size_t)(end - metadata) == sizes[i]);
+		CHECK(fa_string_view_count_size(counts[i], 0) == sizes[i]);
+		CHECK(fa_string_read_packed_view(metadata, 0, 0, &counted) == end);
+		CHECK(string_counted_view(counted.capacity) && (counted.capacity & KIND_MASK) == counts[i]);
+	}
+	// Arena text preserves its four-byte compact or sixteen-byte ordinary
+	// ASCII prefix. Only Unicode carries the additional two-byte count.
+	uint8_t arena[32] = {0};
+	for (int32_t packed = 0; packed <= 1; packed += 1) {
+		uint8_t *payload = arena + (packed ? 4 : 16);
+		CHECK(fa_string_write_arena_count(payload, 5, SIMPLE) == payload);
+		fa_string_read_arena_view(arena, 5, SIMPLE, packed, 0, &counted);
+		CHECK(counted.bytes == payload && counted.length == 5);
+		CHECK(counted.capacity == (SIMPLE | KIND_MASK));
+		CHECK(fa_string_write_arena_count(payload, 3, 0) == payload + 2);
+		fa_string_read_arena_view(arena, 7, 0, packed, 0, &counted);
+		CHECK(counted.bytes == payload + 2 && counted.length == 7);
+		CHECK(string_counted_view(counted.capacity) && (counted.capacity & KIND_MASK) == 3);
+	}
 	// Materializing a conservative view makes the inline surrogate flag exact.
 	FaString view = {(const uint8_t *)"\xc3\xa9", 2, STRING_SURROGATES | KIND_MASK};
 	FaString materialized = {0};

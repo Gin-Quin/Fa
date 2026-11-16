@@ -473,3 +473,87 @@ fn a_remote_capacity_read_rebuilds_compact_array_payloads() {
 	// two-element buffer. Reusing its old, compacted payload would print 2.
 	run("4\n4\n");
 }
+
+#[test]
+fn remote_array_and_opaque_uses_invalidate_exact_extents() {
+	if !fa_codegen_llvm::llvm_available() {
+		eprintln!("{}", fa_codegen_llvm::LLVM_MISSING);
+		return;
+	}
+	let directory = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("fa-array-extent-cache");
+	let _ = std::fs::remove_dir_all(&directory);
+	std::fs::create_dir_all(&directory).unwrap();
+	let mut files: Vec<(String, String)> = [
+		("package.fa", "export = { name = \"extentCache\" }"),
+		("library/model.fa", "export namespace = { type Cell = { value: Float } }"),
+		("library/shape.fa", "function extent = (items: Array<model.Cell>): Integer => items.length\nexport function = (): Integer => { mutable items: Array<model.Cell> = [{ value = 1.0 }, { value = 2.0 }, { value = 3.0 }, { value = 4.0 }, { value = 5.0 }]\nfor item in items { item.value += 0.25 }\nitems.reserve(100)\nextent(items) }"),
+		("library/probe.fa", "export function = (): Integer => 0"),
+		("application/main.fa", "export function = () => console.log(library.shape() + library.probe())"),
+	].into_iter().map(|(path, source)| (path.into(), source.into())).collect();
+	let names = ["model", "shape", "probe", "main"];
+	let run = |expected: &str| {
+		let output = std::process::Command::new(directory.join("main"))
+			.output()
+			.unwrap();
+		assert!(output.status.success(), "{output:?}");
+		assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
+		assert!(output.stderr.is_empty(), "{output:?}");
+	};
+	let first = build_files(&directory, &files, &names);
+	run("5\n");
+	let consulted = std::fs::read_dir(directory.join("objects"))
+		.unwrap()
+		.flatten()
+		.filter_map(|entry| {
+			let name = entry.file_name().to_string_lossy().into_owned();
+			(name.contains("shape") && name.ends_with(".facts"))
+				.then(|| std::fs::read_to_string(entry.path()).unwrap())
+		})
+		.collect::<String>();
+	assert!(
+		consulted.contains("proofs.claims\topaque\t0\n"),
+		"{consulted}"
+	);
+	assert!(
+		consulted
+			.lines()
+			.any(|line| line.starts_with("proofs.claims\ti\u{1f}array:") && line.ends_with("\t0")),
+		"{consulted}"
+	);
+	let again = build_files(&directory, &files, &names);
+	assert!(rebuilt(&first, &again).is_empty());
+	let mut baseline = again;
+	for (probe, expected) in [
+		(
+			"export function = (): Integer => { let items: Array<model.Cell> = []\nitems.length }",
+			"5\n",
+		),
+		(
+			"export function = (): Integer => { let parsed: Integer = std.json.Json.parse(\"1\") catch _error => 0\nparsed }",
+			"6\n",
+		),
+	] {
+		std::thread::sleep(std::time::Duration::from_millis(20));
+		files
+			.iter_mut()
+			.find(|(path, _)| path == "library/probe.fa")
+			.unwrap()
+			.1 = probe.into();
+		let changed = build_files(&directory, &files, &names);
+		assert!(
+			rebuilt(&baseline, &changed).contains(&"shape".to_string()),
+			"{changed:?}"
+		);
+		run(expected);
+		std::thread::sleep(std::time::Duration::from_millis(20));
+		files
+			.iter_mut()
+			.find(|(path, _)| path == "library/probe.fa")
+			.unwrap()
+			.1 = "export function = (): Integer => 0".into();
+		let restored = build_files(&directory, &files, &names);
+		assert!(rebuilt(&changed, &restored).contains(&"shape".to_string()));
+		run("5\n");
+		baseline = restored;
+	}
+}

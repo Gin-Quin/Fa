@@ -1953,6 +1953,30 @@ layouts and all value assertions. No expected-skip list changes.
   Two read-only committee reviews agreed to close this attempt without a tuning
   sweep or selecting a favorable same-binary repeat.
 
+## Array performance — closed array extents (2026-11-16)
+
+- Extend the existing analyzer array-family walk with a separate exact-length
+  fact. Minimum-length index proofs continue to allow push; exact extents
+  require no push anywhere in the family. The single root must be a direct
+  passive literal, with no spread, call, implicit default, conversion, failure
+  or reactive observation during construction. Generic/unknown types, escapes,
+  replacement and opaque inputs withhold the stronger fact.
+- Reuse the private-array and direct-call claims across compilation units;
+  explicitly consult program opacity independently of the index prover.
+  Record absent private-array/opaque exclusions and advance the object-cache
+  version. Changes to either exclusion must invalidate consuming units.
+- Substitute only an Array header loaded from a source slot, after every
+  local/global binding of that address has the same known extent. Unknown or
+  conflicting provenance retains the header load. Reserve may move storage,
+  so the items pointer remains an actual load. C-library exports and key-loop
+  snapshots retain their conservative paths.
+- Keep existing per-outer-iteration distinct-index scopes. Constant trip counts
+  allow LLVM to choose unrolling and register promotion without cloning source
+  loops, changing layouts or adding floating-point reassociation/contract flags.
+  Exact floating-state, generic/function-value/callback/capture/async, O0/leak
+  and whole/split/cache tests cover the proof and its fallbacks. Measurements
+  and final acceptance follow in the array performance report.
+
 ## Array performance — GrowingArray loop facts (2026-11-16)
 
 - Ordinary GrowingArray scans use one counted inner loop per live segment,

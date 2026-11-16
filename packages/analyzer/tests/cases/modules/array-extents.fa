@@ -1,0 +1,40 @@
+-- require-split: true
+-- file: library/extent.fa
+type Cell = { value: Float }
+function measure = (items: Array<Cell>): Integer => items.length
+export function = (): Integer => {
+	mutable items: Array<Cell> = [
+		{ value = 1.0 }, { value = 2.0 }, { value = 3.0 }
+		{ value = 4.0 }, { value = 5.0 }
+	]
+	for item in items { item.value += 0.25 }
+	items.reserve(100)
+	measure(items)
+}
+-- file: library/generic.fa
+export function = <Tag>(tag: Tag): Integer => {
+	mutable items: Array<{ value: Float, tag: Tag }> = [
+		{ value = 1.0, tag }, { value = 2.0, tag }, { value = 3.0, tag }
+		{ value = 4.0, tag }, { value = 5.0, tag }
+	]
+	function count = (values: Array<{ value: Float, tag: Tag }>) => values.length
+	let stored = count
+	assert stored(items) == 5
+	function captured = () => items.length
+	function callback = (_index: Integer) => items.length
+	assert captured() == 5
+	assert [0, 1].map(callback) == [5, 5]
+	items.push({ value = 6.0, tag })
+	assert stored(items) == 6
+	assert captured() == 6
+	items.length
+}
+-- file: application/main.fa
+export function = () => {
+	assert library.extent() == 5
+	let stored = library.generic<Integer>
+	assert stored(17) == 6
+	assert library.generic(true) == 6
+	assert library.generic("an owned generic tag beyond inline storage") == 6
+	console.log("split array extents ok") -- prints: split array extents ok
+}

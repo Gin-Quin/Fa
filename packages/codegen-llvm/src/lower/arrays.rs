@@ -11,7 +11,7 @@ use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::{NodeList, View};
 use inkwell::IntPredicate;
 use inkwell::types::StructType;
-use inkwell::values::{IntValue, PointerValue};
+use inkwell::values::{BasicValue, InstructionOpcode, IntValue, PointerValue};
 
 use crate::error::Error;
 use crate::lower::values::{IntRepr, Repr, Scalar, Val};
@@ -134,6 +134,35 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.into_pointer_value())
 	}
 
+	/// Substitute only a loaded source slot with agreeing exact-length facts.
+	/// Coalescing/inlining can map several symbols to the same address; every
+	/// such binding must qualify. Storage itself may still move on reserve.
+	fn fixed_array_extent(&self, array: PointerValue<'ctx>) -> Option<u64> {
+		if self.c_library.is_some() {
+			return None;
+		}
+		let load = array.as_instruction_value()?;
+		if load.get_opcode() != InstructionOpcode::Load {
+			return None;
+		}
+		let address = load.get_operand(0)?.value()?.into_pointer_value();
+		let mut length = None;
+		for (&symbol, slot) in self.slots.iter().chain(&self.global_slots) {
+			if slot.pointer != address {
+				continue;
+			}
+			if !matches!(slot.repr, Repr::Array(_)) {
+				return None;
+			}
+			let known = self.fixed_array_length(symbol)?;
+			if length.is_some_and(|prior| prior != known) {
+				return None;
+			}
+			length = Some(known);
+		}
+		length
+	}
+
 	/// The items pointer and the length of an array.
 	pub(crate) fn array_parts(
 		&self,
@@ -148,10 +177,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let items = self
 			.builder
 			.build_load(self.pointer_type(), items_pointer, "items")?;
-		let length_pointer = self.builder.build_struct_gep(header, array, 1, "")?;
-		let length = self
-			.builder
-			.build_load(self.context.i64_type(), length_pointer, "length")?;
+		let length = if let Some(length) = self.fixed_array_extent(array) {
+			self.context.i64_type().const_int(length, false).into()
+		} else {
+			let length_pointer = self.builder.build_struct_gep(header, array, 1, "")?;
+			self.builder
+				.build_load(self.context.i64_type(), length_pointer, "length")?
+		};
 		for loaded in [items, length] {
 			if let Some(instruction) = inkwell::values::BasicValue::as_instruction_value(&loaded) {
 				self.tag(instruction, true)?;

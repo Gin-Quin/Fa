@@ -1452,6 +1452,104 @@ console.log(items, stable, words, maybe)
 	}
 
 	#[test]
+	fn exact_array_extents_require_a_closed_never_resized_family() {
+		let literal =
+			"[{ value = 1.0 }, { value = 2.0 }, { value = 3.0 }, { value = 4.0 }, { value = 5.0 }]";
+		let source = |initializer: &str, extra: &str| {
+			format!(
+				"type Cell = {{ value: Float }}\nfunction extent = (items: Array<Cell>): Integer => items.length\nmutable cells: Array<Cell> = {initializer}\n{extra}\nconsole.log(extent(cells))\n"
+			)
+		};
+		for target in [Target::Native, Target::NativeFreestanding, Target::Wasm] {
+			let ir = ir_at_target(
+				&format!("array-extent-{}", target.name()),
+				&source(
+					literal,
+					"cells.reserve(100)\nfor cell in cells { cell.value += 0.25 }",
+				),
+				false,
+				OptLevel::O0,
+				target,
+			);
+			let body = function(&ir, "fa.extent");
+			assert!(body.contains("ret i64 5"), "{body}");
+		}
+		for (name, initializer, extra) in [
+			("push", literal.to_string(), "cells.push({ value = 6.0 })"),
+			("replace", literal.to_string(), "cells = [{ value = 6.0 }]"),
+			(
+				"second",
+				literal.to_string(),
+				"let other: Array<Cell> = []\nconsole.log(extent(other))",
+			),
+			(
+				"function-value",
+				literal.to_string(),
+				"let _stored = extent",
+			),
+			(
+				"initializer-call",
+				"[{ value = Float(arguments.length) }]".to_string(),
+				"",
+			),
+		] {
+			let ir = ir_of(
+				&format!("array-extent-reject-{name}"),
+				&source(&initializer, extra),
+			);
+			let body = function(&ir, "fa.extent");
+			assert!(!body.contains("ret i64 5"), "{name}: {body}");
+			assert!(body.contains("length"), "{name}: {body}");
+		}
+		// Native array spreads are still unsupported; check their withheld
+		// extent directly in the analyzer rather than asking native to emit one.
+		let mut session = Session::new();
+		let file = session.set_source("main", Arc::from(source(&format!("[...{literal}]"), "")));
+		session.analyze_file(file);
+		let analysis = session.analysis(file);
+		let facts = fa_analyzer::proofs::index_facts(
+			session.tree(file),
+			analysis,
+			session.types(),
+			fa_analyzer::proofs::ProofScope::WholeFile,
+			false,
+		);
+		assert!((0..analysis.symbols.symbols().len()).all(|symbol| {
+			facts
+				.fixed_array_length(fa_analyzer::ids::SymbolId(symbol as u32))
+				.is_none()
+		}));
+		let defaults = source("[{}, {}, {}, {}, {}]", "").replace(
+			"type Cell = { value: Float }",
+			"type Cell = { value: Float = Float(arguments.length) }",
+		);
+		let ir = ir_of("array-extent-reject-defaults", &defaults);
+		let body = function(&ir, "fa.extent");
+		assert!(body.contains("length"), "{body}");
+		let ir = ir_at(
+			"array-extent-nbody",
+			include_str!("../../../benchmarks/nbody/main.fa"),
+			false,
+			OptLevel::O0,
+		);
+		let body = function(&ir, "fa.advance");
+		assert!(
+			!body
+				.lines()
+				.any(|line| line.contains(" = load i64,") && line.contains("%length")),
+			"{body}"
+		);
+		assert!(body.contains(", 5"), "{body}");
+		let ir = optimized_ir(
+			"array-extent-nbody-optimized",
+			include_str!("../../../benchmarks/nbody/main.fa"),
+		);
+		for flag in [" fast ", " reassoc ", " contract ", " afn "] {
+			assert!(!ir.contains(flag), "unexpected FP flag {flag}: {ir}");
+		}
+	}
+
+	#[test]
 	fn range_reversal_retains_the_checked_swap_loop() {
 		let body = "let left = try items[low]\nlet right = try items[high]\ntry items[low] = right\ntry items[high] = left\nlow += 1\nhigh -= 1";
 		let source = |item: &str, body: &str| {

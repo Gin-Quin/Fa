@@ -167,19 +167,24 @@ impl Walker<'_> {
 		};
 		if path.is_none() && self.reported_once.insert((owner, "REF008")) {
 			let text = self.tree.text(owner.index()).to_string();
-			let function = self
-				.body
-				.functions
-				.last()
-				.and_then(|cx| self.a.functions.get(&cx.node))
-				.and_then(|info| info.declaration)
-				.and_then(|declaration| self.a.symbols.symbol_of_decl(declaration))
-				.map(|symbol| {
-					self.s
-						.types
-						.syms
-						.resolve(self.a.symbols.symbol(symbol).name)
-				});
+			let mut context_node = self.a.symbols.scope(self.body.scope).owner;
+			let function = loop {
+				if let Some(symbol) = self.a.symbols.symbol_of_decl(context_node)
+					&& self.a.symbols.symbol(symbol).kind == SymbolKind::Function
+				{
+					break Some(
+						self.s
+							.types
+							.syms
+							.resolve(self.a.symbols.symbol(symbol).name)
+							.to_string(),
+					);
+				}
+				let Some(parent) = self.parent(context_node) else {
+					break None;
+				};
+				context_node = parent;
+			};
 			let context = function
 				.map(|name| format!(" of `{name}`"))
 				.unwrap_or_else(|| " of this function".into());
@@ -231,10 +236,7 @@ impl Walker<'_> {
 		self.ensure_builtin_reference(value);
 		self.places_of(value)
 			.into_iter()
-			.map(|place| {
-				let place = self.reference_field_target(place);
-				place
-			})
+			.map(|place| self.reference_field_target(place))
 			.collect()
 	}
 
@@ -248,10 +250,14 @@ impl Walker<'_> {
 			return;
 		}
 		let fresh = self.reference_is_fresh(value);
+		let layout = self.reference_result_layout(value, owner);
 		if let Some(cx) = self.body.functions.last_mut()
 			&& cx.ref_owner == Some(owner)
 		{
 			cx.ref_fresh &= fresh;
+			if let Some(layout) = layout {
+				cx.ref_layout = Some(cx.ref_layout.map_or(layout, |old| old.joined(layout)));
+			}
 		}
 		let origins = self.evaluated_origins(value);
 		let places = self.reference_origins(value);
@@ -271,6 +277,39 @@ impl Walker<'_> {
 		let diagnostic = self.diagnostic(&crate::diagnostics::codes::advanced::REF009, value,
 			format!("`{text}` is not inside `{owner_text}`, the declared owner: return an element of `{owner_text}`, or change the return type"));
 		self.report_flow(diagnostic);
+	}
+
+	pub(super) fn reference_result_layout(
+		&self,
+		value: NodeId,
+		owner: PlaceId,
+	) -> Option<crate::analysis::ReferenceLayout> {
+		use crate::analysis::ReferenceLayout;
+		let origins = self.evaluated_origins(value);
+		if origins.places.is_empty() {
+			return None;
+		}
+		if origins.opaque || origins.owned {
+			return Some(ReferenceLayout::General);
+		}
+		if self.place_type(owner).is_some_and(|ty| match self.s.types.kind(ty) { TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, _, key) => self.s.types.union_members(&key).contains(&TypeId::NONE) || matches!(self.s.types.kind(key), TypeKind::Param(_) | TypeKind::Unknown), _ => false }) { return Some(ReferenceLayout::General); }
+		if origins.places.iter().all(|&place| {
+			self.places.get(place).parent == Some(owner)
+				&& matches!(self.places.get(place).step, Some(Step::Index(_)))
+		}) {
+			return Some(ReferenceLayout::Owner);
+		}
+		let mut field = None;
+		for place in origins.places {
+			let Some(Step::Field(name)) = self.places.get(place).step else {
+				return Some(ReferenceLayout::General);
+			};
+			if field.is_some_and(|field| field != name) {
+				return Some(ReferenceLayout::General);
+			}
+			field = Some(name);
+		}
+		field.map(ReferenceLayout::Field)
 	}
 
 	/// Check dependent arguments before the call effects; publish the result
@@ -518,6 +557,16 @@ impl Walker<'_> {
 	/// A representative for the alias declaration's runtime type metadata.
 	/// Validity and ownership always use `reference_origins` instead.
 	pub(super) fn reference_place(&mut self, value: NodeId) -> Option<PlaceId> {
+		let mut node = self.strip_groups(value);
+		while let View::Try(inner) = self.view(node) {
+			node = self.strip_groups(inner);
+		}
+		if !matches!(
+			self.view(node),
+			View::Name(_) | View::Access { .. } | View::Index { .. } | View::Call { .. }
+		) {
+			return None;
+		}
 		self.reference_origins(value).first().copied()
 	}
 
@@ -765,40 +814,46 @@ impl Walker<'_> {
 	/// Capturing an alias cannot extend its collection's lifetime. Check the
 	/// same collection origins as returned references, including joined aliases.
 	pub(super) fn check_escaping_references(&mut self, lambda: NodeId, at: NodeId) {
-		let captures = self
-			.a
-			.functions
-			.get(&lambda)
-			.map(|info| info.captures.clone())
-			.unwrap_or_default();
-		for symbol in captures {
-			let origins = self.symbol_places(symbol);
-			for place in origins {
-				let place = self.canonical_reference_place(place);
-				let Some(owner) = self.owner_place(place) else {
-					continue;
-				};
-				if self.place_symbol(owner).is_some_and(|root| {
-					self.declared_outside_functions(root)
-						&& matches!(
-							self.a.symbols.symbol(root).kind,
-							SymbolKind::Let | SymbolKind::Static
-						)
-				}) {
-					continue;
-				}
-				if !self.reported_once.insert((at, "MEM004")) {
-					continue;
-				}
-				let owner = self.place_text(owner);
-				let name = self
-					.s
-					.types
-					.syms
-					.resolve(self.a.symbols.symbol(symbol).name);
-				let diagnostic = self.diagnostic(&crate::diagnostics::codes::advanced::MEM004, at,
+		let mut pending = vec![lambda];
+		let mut visited = rustc_hash::FxHashSet::default();
+		while let Some(lambda) = pending.pop() {
+			if !visited.insert(lambda) {
+				continue;
+			}
+			let captures = self
+				.capture_origins
+				.get(&lambda)
+				.cloned()
+				.unwrap_or_default();
+			for (symbol, origins, closures) in captures {
+				pending.extend(closures);
+				for place in origins {
+					let place = self.canonical_reference_place(place);
+					let Some(owner) = self.owner_place(place) else {
+						continue;
+					};
+					if self.place_symbol(owner).is_some_and(|root| {
+						self.declared_outside_functions(root)
+							&& matches!(
+								self.a.symbols.symbol(root).kind,
+								SymbolKind::Let | SymbolKind::Static
+							)
+					}) {
+						continue;
+					}
+					if !self.reported_once.insert((at, "MEM004")) {
+						continue;
+					}
+					let owner = self.place_text(owner);
+					let name = self
+						.s
+						.types
+						.syms
+						.resolve(self.a.symbols.symbol(symbol).name);
+					let diagnostic = self.diagnostic(&crate::diagnostics::codes::advanced::MEM004, at,
 					format!("this escaping closure captures `{name}`, a reference into `{owner}`, whose elements may not outlive the closure: capture the value's data instead, or keep `{owner}` in an owner that outlives the closure"));
-				self.report(diagnostic);
+					self.report(diagnostic);
+				}
 			}
 		}
 	}

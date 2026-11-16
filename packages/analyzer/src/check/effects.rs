@@ -2350,6 +2350,13 @@ impl Walker<'_> {
 		if self.s.types.is_recovering(self.a.symbols.symbol(symbol).ty) {
 			return true;
 		}
+		if let Some(state) = self.body.flow.ref_state(symbol) {
+			let places = &self.facts.refs.get(state).places;
+			return !places.is_empty()
+				&& places
+					.iter()
+					.all(|&place| self.place_writable(place) == Writable::Yes);
+		}
 		match self.aliases.get(&symbol) {
 			Some(&place) => self.place_writable(place) == Writable::Yes,
 			None => false,

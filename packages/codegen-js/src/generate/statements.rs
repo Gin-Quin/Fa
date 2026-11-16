@@ -105,8 +105,7 @@ impl Generator<'_> {
 					| View::Call { .. }
 					| View::None
 			) {
-			let cell = self.reference_cell(n);
-			self.out.line(format!("return {};", cell.text));
+			self.reference_return(n);
 			return;
 		}
 		match self.view(n) {

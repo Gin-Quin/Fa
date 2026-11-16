@@ -29,7 +29,6 @@ use crate::js::{self, Expr};
 pub(crate) enum Hidden {
 	Value(ParamId),
 	Method(ParamId, Sym),
-	ReferenceObject(ParamId),
 }
 impl From<GenericRequirement> for Hidden {
 	fn from(value: GenericRequirement) -> Self {
@@ -57,14 +56,13 @@ impl Generator<'_> {
 		{
 			Some(summary) => {
 				hidden.extend(summary.requirements.iter().copied().map(Hidden::from));
-				hidden.extend(self.reference_flags(&info.generics));
 			}
 			None => hidden.extend(self.hidden_for_generics(&info.generics)),
 		}
 		hidden
 	}
 
-	fn function_generics(&self, function: NodeId) -> Vec<ParamId> {
+	pub(super) fn function_generics(&self, function: NodeId) -> Vec<ParamId> {
 		let mut params = self.owner_parameters(function);
 		if let Some(info) = self.analysis.function(function) {
 			params.extend(info.generics.iter().copied());
@@ -72,7 +70,7 @@ impl Generator<'_> {
 		params
 	}
 
-	fn owner_parameters(&self, function: NodeId) -> Vec<ParamId> {
+	pub(super) fn owner_parameters(&self, function: NodeId) -> Vec<ParamId> {
 		self.analysis
 			.function_owners
 			.get(&function)
@@ -82,31 +80,11 @@ impl Generator<'_> {
 	}
 
 	fn hidden_for_generics(&self, generics: &[ParamId]) -> Vec<Hidden> {
-		let mut hidden: Vec<_> = fa_analyzer::modules::generic_requirements(self.types, generics)
+		let hidden: Vec<_> = fa_analyzer::modules::generic_requirements(self.types, generics)
 			.into_iter()
 			.map(Hidden::from)
 			.collect();
-		hidden.extend(self.reference_flags(generics));
 		hidden
-	}
-	fn reference_flags(&self, generics: &[ParamId]) -> Vec<Hidden> {
-		generics
-			.iter()
-			.copied()
-			.filter(|&param| !self.types.param(param).value)
-			.map(Hidden::ReferenceObject)
-			.collect()
-	}
-	/// A union slot retains its carrier even while its current value is an object.
-	pub(crate) fn reference_object_flag(&self, ty: TypeId) -> String {
-		if let TypeKind::Param(param) = self.types.kind(self.without_none(ty)) {
-			return self
-				.hidden_names
-				.get(&Hidden::ReferenceObject(param))
-				.cloned()
-				.unwrap_or_else(|| "false".to_string());
-		}
-		self.is_object_reference(ty).to_string()
 	}
 
 	/// Declares the hidden parameters of a generic function being generated
@@ -117,15 +95,6 @@ impl Generator<'_> {
 		let mut names = Vec::with_capacity(hidden.len());
 		for entry in hidden {
 			match entry {
-				Hidden::ReferenceObject(param) => {
-					let wanted = format!(
-						"{}$referenceObject",
-						self.types.syms.resolve(self.types.param(param).name)
-					);
-					let name = self.declare_hidden_name(&wanted);
-					self.hidden_names.insert(entry, name.clone());
-					names.push(name);
-				}
 				Hidden::Value(param) => {
 					let name = match self.value_parameter_symbol(function, param) {
 						Some(symbol) => self.declare(symbol),
@@ -204,6 +173,15 @@ impl Generator<'_> {
 		generics: &[ParamId],
 		hidden: Vec<Hidden>,
 	) -> Vec<String> {
+		let (bindings, methods) = self.generic_call_bindings(call, generics);
+		self.hidden_arguments_bound(call, generics, hidden, &bindings, &methods)
+	}
+
+	pub(super) fn generic_call_bindings(
+		&self,
+		call: NodeId,
+		generics: &[ParamId],
+	) -> (Vec<TypeId>, Vec<fa_analyzer::analysis::GenericMethod>) {
 		let mut bindings: Vec<TypeId> = self
 			.analysis
 			.instantiation(call)
@@ -228,7 +206,7 @@ impl Generator<'_> {
 			methods.extend(owner.methods.iter().cloned());
 			bindings.splice(0..0, prefix);
 		}
-		self.hidden_arguments_bound(call, generics, hidden, &bindings, &methods)
+		(bindings, methods)
 	}
 
 	fn hidden_arguments_bound(
@@ -257,9 +235,6 @@ impl Generator<'_> {
 		for entry in hidden {
 			let value =
 				match entry {
-					Hidden::ReferenceObject(param) => {
-						binding(param).map(|ty| self.reference_object_flag(ty))
-					}
 					Hidden::Value(param) => match binding(param) {
 						Some(ty) => {
 							let subject = self.analysis.key_set_params.iter().find_map(
@@ -371,16 +346,6 @@ impl Generator<'_> {
 						},
 					));
 					hidden.extend(summary.requirements.into_iter().map(Hidden::from));
-					let own: Vec<_> = self
-						.types
-						.list_items(summary.generics)
-						.iter()
-						.filter_map(|&ty| match self.types.kind(ty) {
-							TypeKind::Param(p) => Some(p),
-							_ => None,
-						})
-						.collect();
-					hidden.extend(self.reference_flags(&own));
 					return self.hidden_arguments_for(call, &generics, hidden);
 				}
 			}
@@ -512,7 +477,7 @@ impl Generator<'_> {
 		})
 	}
 
-	fn external_owner_parameters(&self, key: fa_analyzer::ids::DeclKey) -> Vec<ParamId> {
+	pub(super) fn external_owner_parameters(&self, key: fa_analyzer::ids::DeclKey) -> Vec<ParamId> {
 		let Some((module, keyed)) = self.session.keyed(key) else {
 			return Vec::new();
 		};
@@ -602,6 +567,7 @@ impl Generator<'_> {
 		} else {
 			Vec::new()
 		};
+		let value = self.reference_function_value(node, value);
 		self.bind_function_hidden(value, hidden)
 	}
 
@@ -644,7 +610,8 @@ impl Generator<'_> {
 				(self.expr(callee).primary_text(), hidden)
 			}
 		};
-		Some(self.bind_function_hidden(Expr::name(function, true), hidden))
+		let value = self.select_reference_body_value(n, callee, Expr::name(function, true));
+		Some(self.bind_function_hidden(value, hidden))
 	}
 
 	/// The name of a hidden parameter (`$Item$describe`: Fa names never

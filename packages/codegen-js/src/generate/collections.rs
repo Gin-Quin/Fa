@@ -39,8 +39,8 @@ impl Generator<'_> {
 	pub(crate) fn is_value_pool(&self, ty: TypeId) -> bool {
 		matches!(
 			self.types.kind(ty),
-			TypeKind::Collection(CollKind::Pool | CollKind::GrowingPool, item, _)
-				if !self.is_object_reference(item) && !matches!(self.types.kind(item), TypeKind::Param(_))
+			TypeKind::Collection(CollKind::Pool | CollKind::GrowingPool | CollKind::Columnar | CollKind::GrowingColumnar, item, _)
+				if !self.is_object_reference(item)
 		)
 	}
 
@@ -54,11 +54,6 @@ impl Generator<'_> {
 			CollKind::Set | CollKind::GrowingSet => self.set_class(item),
 			_ if is_pool(kind) && self.is_value_pool(self.type_of(n)) => {
 				self.helper("FaValuePool").to_string()
-			}
-			_ if is_pool(kind) && matches!(self.types.kind(item), TypeKind::Param(_)) => {
-				let flag = self.reference_object_flag(item);
-				let pool = self.helper("FaValuePool");
-				format!("({flag} ? Set : {pool})")
 			}
 			_ if is_pool(kind) => "Set".to_string(),
 			CollKind::Map | CollKind::GrowingMap => self.map_class(key),
@@ -244,11 +239,6 @@ impl Generator<'_> {
 				let class = self.helper("FaValuePool");
 				Expr::primary(format!("new {class}({})", items.text))
 			}
-			"Pool.from" if matches!(self.types.kind(item), TypeKind::Param(_)) => {
-				let flag = self.reference_object_flag(item);
-				let pool = self.helper("FaValuePool");
-				Expr::primary(format!("new ({flag} ? Set : {pool})({})", items.text))
-			}
 			"Pool.from" => Expr::primary(format!("new Set({})", items.text)),
 			"Set.from" => match key.map(|_| values[1].clone()) {
 				Some(key) => {
@@ -422,11 +412,6 @@ impl Generator<'_> {
 			return self.array_method(n, callee, &format!("Array#{name}"), arguments);
 		}
 
-		if let TypeKind::Collection(_, item, _) = self.types.kind(receiver_type)
-			&& matches!(self.types.kind(item), TypeKind::Param(_))
-		{
-			return self.erased_pool_call(n, callee, name, arguments);
-		}
 		let receiver = self.receiver(callee);
 		let nodes: Vec<NodeId> = arguments
 			.iter()
@@ -497,62 +482,6 @@ impl Generator<'_> {
 				js::call(helper, &all)
 			}
 			// `clear()` after unlinking: the elements are removed one by one
-			_ => self.collection_method(n, &format!("Set#{name}"), receiver, values),
-		}
-	}
-
-	fn erased_pool_call(
-		&mut self,
-		n: NodeId,
-		callee: NodeId,
-		name: &str,
-		arguments: &[Argument],
-	) -> Expr {
-		if matches!(name, "add" | "find")
-			&& let Some(reference) = self.generic_pool_reference(n)
-		{
-			let read = self.helper("faReferenceValue");
-			return js::call(read, &[reference.text]);
-		}
-		let receiver = self.receiver(callee);
-		let nodes: Vec<_> = arguments
-			.iter()
-			.filter_map(|arg| {
-				if let Argument::Given(n) = arg {
-					Some(*n)
-				} else {
-					None
-				}
-			})
-			.collect();
-		let (lines, values) = self.capture(|g| {
-			g.in_order(&nodes, |g, node| {
-				if matches!(name, "delete" | "take") {
-					g.reference_cell(node)
-				} else {
-					g.expr(node)
-				}
-			})
-		});
-		let receiver = self.keep_before(receiver, &lines);
-		self.out.append(lines);
-		let mut all = vec![receiver.text.clone()];
-		all.extend(values.iter().map(|v| v.text.clone()));
-		match name {
-			"delete" | "take" => {
-				all.push((name == "take").to_string());
-				let helper = self.helper("faErasedPoolRemove");
-				js::call(helper, &all)
-			}
-			"deleteWhere" | "filter" => {
-				all.push((name == "deleteWhere").to_string());
-				let helper = self.helper("faErasedPoolFilter");
-				js::call(helper, &all)
-			}
-			"includes" => {
-				let helper = self.helper("faArrayIncludes");
-				js::call(helper, &all)
-			}
 			_ => self.collection_method(n, &format!("Set#{name}"), receiver, values),
 		}
 	}

@@ -1157,8 +1157,12 @@ impl<'a> Lowerer<'a> {
 
 	fn borrow_value(&mut self, value: NodeId) -> Expr {
 		match syntax::view(self.tree, value) {
-			View::If { .. } | View::When { .. } | View::Catch { .. } | View::Do(_)
-			| View::Block { .. } | View::Loop(_) => {
+			View::If { .. }
+			| View::When { .. }
+			| View::Catch { .. }
+			| View::Do(_)
+			| View::Block { .. }
+			| View::Loop(_) => {
 				self.mark_reference_result(value);
 				return self.expr(value);
 			}

@@ -135,7 +135,7 @@ move(x = 1, 2) -- error: a positional argument can't follow a named argument
 move(1, 2, x = 3) -- error: `x` is already given
 ```
 
-Named arguments and default values belong to the declaration: they work in direct calls, not through a value of a [function type](#function-types). Defaults come from the exact written declaration, including across files and generic instantiations; structural type equality never selects another declaration's defaults. When an anonymous nested annotation has no written default owner, supply the argument explicitly.
+Named arguments and default values belong to the declaration: they work in direct calls, not through a value of a [function type](#function-types). Writing a default in a function type is an error (`FN030`): put it on the function declaration, or pass the argument explicitly. Defaults come from the exact written declaration, including across files and generic instantiations; structural type equality never selects another declaration's defaults. When an anonymous nested annotation has no written default owner, supply the argument explicitly.
 
 ### Variadic parameters
 

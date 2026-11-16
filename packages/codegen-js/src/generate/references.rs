@@ -1,75 +1,44 @@
-//! References, requirements and escaping closures (advanced brief §4,
-//! §5.11, §6.6, §9.7; `values/declaring-values.md`, implementation section).
-//!
-//! - `use x = place` of an object or a collection is the JavaScript
-//!   reference to it: `const x = place`; `mutable use` is a `let`, which
-//!   `reuse` reassigns. A whole write through it (`x = value`) is done in
-//!   place (`faAssign`), so that every reference keeps seeing the value.
-//! - Primitive places use cached accessor cells. A local alias and every call
-//!   forward the same carrier; `mutable use` reseats its carrier. Pool cells
-//!   retain the slot index for delete/take and retire with that slot. Generic
-//!   references carry either that primitive cell or the bare object itself.
-//! - D60: a whole write of an object or a collection into a place rooted at
-//!   a value some reference designates is an in-place write (`faAssign`),
-//!   so that the reference sees the new value; union and optional places
-//!   are replaced.
-//! - Requirements: one hidden parameter per requirement, after the regular
-//!   ones, in the order of `FnSig::requires`; a call passes, per
-//!   `Analysis::requirement_args`, the temporary of a `provide` (a `const`
-//!   evaluated once at the statement), the provided place read again at the
-//!   call (a primitive place), or its own hidden parameter.
-//! - An escaping closure (`Analysis::escapes`) copies the captures that may
-//!   change after its creation into `const`s, declared just before it.
-
+//! References use existing objects or evaluated container/key pairs. No cells.
 use std::collections::HashSet;
 
-use fa_analyzer::analysis::{Argument, Callee, FnInfo, NodeFlags, RequirementArg};
+use fa_analyzer::analysis::{Argument, Callee, FnInfo, NodeFlags, ReferenceLayout, RequirementArg};
 use fa_analyzer::builtins;
 use fa_analyzer::ids::{NodeId, SymbolId, TypeId};
 use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::View;
-use fa_analyzer::types::{CollKind, TypeKind};
+use fa_analyzer::types::{CollKind, PathRoot, PathStep, TypeKind};
 
 use crate::generate::{Dest, Generator, Kind};
 use crate::js::{self, Expr};
 
-/// How a reference is held.
 #[derive(Clone, Debug)]
 pub(crate) enum Reference {
-	/// An object or a collection: its JavaScript name holds it.
 	Object,
-	/// An erased item: either the object itself or a primitive cell.
-	Cell { carrier: String, erased: bool },
+	Place(Parts),
 }
 
-/// What designates a primitive place, evaluated once.
+#[derive(Clone, Debug)]
 enum Key {
-	/// The whole place, as written (a local name, an `export mutable` value),
-	/// with its map slot when it is itself a value of a map.
 	Whole(String, Option<(String, String)>),
-	/// A field (a constant property) of the container.
 	Field(String),
-	/// An item of an array.
 	Index(Expr),
-	/// A value of a map.
 	Entry(Expr),
-	/// A value computed once (a slice, a character: strings are immutable).
+	/// The innermost container can be an object, array or map.
+	Dynamic(Expr),
 	Value(Expr),
 }
 
-/// A place designated by a reference: its container and key.
-struct Parts {
+#[derive(Clone, Debug)]
+pub(crate) struct Parts {
 	container: Option<Expr>,
 	key: Key,
-	/// The container is `undefined` when the reference is `none` (`get`).
 	optional: bool,
 }
 
 impl Generator<'_> {
-	/// A borrowed result retains the designated place instead of copying data.
 	pub(crate) fn returns_reference(&self) -> bool {
 		self.current_function()
-			.and_then(|function| self.analysis.function(function))
+			.and_then(|node| self.analysis.function(node))
 			.and_then(|info| info.sig)
 			.is_some_and(|sig| self.types.sig(sig).reference.is_some())
 	}
@@ -88,10 +57,10 @@ impl Generator<'_> {
 		let TypeKind::Function(sig) = self.types.kind(self.type_of(callee)) else {
 			return false;
 		};
-		let params = self.types.params(self.types.sig(sig).params);
 		let Some(info) = self.analysis.call(call) else {
 			return false;
 		};
+		let params = self.types.params(self.types.sig(sig).params);
 		let skip = info.arguments.len().saturating_sub(params.len());
 		params
 			.iter()
@@ -102,151 +71,38 @@ impl Generator<'_> {
 			})
 	}
 
-	pub(crate) fn bind_reference_parameter(&mut self, info: &FnInfo, position: usize, name: &str) {
-		let Some(sig) = info.sig else {
-			return;
-		};
-		if !self
+	pub(crate) fn bind_reference_parameter(
+		&mut self,
+		info: &FnInfo,
+		position: usize,
+		name: &str,
+	) -> Option<String> {
+		let param = self
 			.types
-			.params(self.types.sig(sig).params)
-			.get(position)
-			.is_some_and(|param| param.reference.is_some())
-		{
-			return;
+			.params(self.types.sig(info.sig?).params)
+			.get(position)?;
+		param.reference?;
+		let symbol = info.params[position].symbol;
+		if self.is_object_reference(param.ty) {
+			self.references.insert(symbol, Reference::Object);
+			return None;
 		}
-		let param = &info.params[position];
-		let ty = self.analysis.symbols.symbol(param.symbol).ty;
-		if self.is_object_reference(ty) {
-			self.references.insert(param.symbol, Reference::Object);
-			return;
-		}
-		self.reference_cells.insert(param.symbol, name.to_string());
-		if matches!(self.types.kind(self.without_none(ty)), TypeKind::Param(_)) {
-			self.bind_erased_reference(param.symbol, name);
-			return;
-		}
-		let access = if self.may_be_none(ty) { "?." } else { "." };
-		self.alias(param.symbol, format!("{name}{access}$v"));
-	}
-
-	fn bind_erased_reference(&mut self, symbol: SymbolId, carrier: &str) {
-		let read = self.helper("faReferenceValue");
-		self.alias(symbol, format!("{read}({carrier})"));
-		self.reference_cells.insert(symbol, carrier.to_string());
-		self.references.insert(
+		let key = format!("{name}$key");
+		self.bind_reference_parts(
 			symbol,
-			Reference::Cell {
-				carrier: carrier.to_string(),
-				erased: true,
+			Parts {
+				container: Some(Expr::name(name.to_string(), true)),
+				key: Key::Dynamic(Expr::name(key.clone(), true)),
+				optional: self.may_be_none(param.ty),
 			},
 		);
+		Some(key)
 	}
 
-	/// Produce the address carrier before reading the designated value.
-	pub(crate) fn reference_cell(&mut self, value: NodeId) -> Expr {
-		let node = self.strip_reference(value);
-		if matches!(self.view(node), View::None) {
-			return Expr::constant("undefined", crate::js::Prec::Primary);
-		}
-		if let Resolution::Local(symbol) = self.analysis.resolution(node)
-			&& let Some(cell) = self.reference_cells.get(&symbol)
-		{
-			return Expr::name(cell.clone(), true);
-		}
-		if self.call_returns_reference(node) {
-			let View::Call { callee, arguments } = self.view(node) else {
-				unreachable!()
-			};
-			return self.call(node, callee, arguments);
-		}
-		if let Some(cell) = self.generic_pool_reference(node) {
-			return cell;
-		}
-		if self.is_object_reference(self.type_of(node)) {
-			return self.expr(node);
-		}
-		let Some(parts) = self.reference_parts(node, false) else {
-			return self.unsupported(node, "this returned reference place");
-		};
-		self.cell_from_parts(node, &parts)
-	}
-
-	fn cell_from_parts(&mut self, node: NodeId, parts: &Parts) -> Expr {
-		let Some((container, key, map)) = self.pair_of(parts) else {
-			return self.unsupported(node, "this returned reference place");
-		};
-		let container = self.keep_value_part(Expr::primary(container));
-		let key = self.keep_value_part(Expr::primary(key));
-		let borrow = self.helper("faBorrowSlot");
-		let object = self.reference_object_flag(self.type_of(node));
-		let cell = format!(
-			"{borrow}({}, {}, {map}, {object})",
-			container.text, key.text
-		);
-		if parts.optional {
-			Expr::primary(format!(
-				"({} === undefined ? undefined : {cell})",
-				container.text
-			))
-		} else {
-			Expr::primary(cell)
-		}
-	}
-
-	/// Retain either the direct object or the exact slot through erased
-	/// pool/columnar insertion and lookup, including ordered columns.
-	pub(crate) fn generic_pool_reference(&mut self, node: NodeId) -> Option<Expr> {
-		let View::Call { callee, .. } = self.view(node) else {
-			return None;
-		};
-		let Some(Callee::Builtin(id)) = self.analysis.call(node).map(|call| call.callee) else {
-			return None;
-		};
-		let path = builtins::get(id).path;
-		let ("Pool" | "Columnar" | "OrderedColumnar", method @ ("add" | "find")) =
-			path.split_once('#')?
-		else {
-			return None;
-		};
-		let TypeKind::Collection(_, item, _) = self.types.kind(self.receiver_type(callee)) else {
-			return None;
-		};
-		if !matches!(self.types.kind(item), TypeKind::Param(_)) {
-			return None;
-		}
-		let receiver = self.receiver(callee);
-		let receiver = self.keep_value_part(receiver);
-		let argument = self
-			.analysis
-			.call(node)?
-			.arguments
-			.iter()
-			.find_map(|argument| match argument {
-				Argument::Given(node) => Some(*node),
-				_ => None,
-			})?;
-		let value = self.expr(argument);
-		let value = if method == "add" {
-			self.copy_stored(argument, value)
-		} else {
-			value
-		};
-		let flag = self.reference_object_flag(item);
-		let helper = self.helper(if method == "add" {
-			"faAddReference"
-		} else {
-			"faFindReference"
-		});
-		Some(js::call(helper, &[receiver.text, value.text, flag]))
-	}
-
-	// ── `use`, `mutable use`, `reuse` ────────────────────────────────────
-
-	/// Whether references to values of a type are the JavaScript values
-	/// themselves: objects and collections (optional or not).
 	pub(crate) fn is_object_reference(&self, ty: TypeId) -> bool {
 		let ty = self.without_none(ty);
 		match self.types.kind(ty) {
+			TypeKind::Param(param) => self.reference_parameter_object(param),
 			TypeKind::Object(_)
 			| TypeKind::Collection(..)
 			| TypeKind::Tuple(_)
@@ -262,15 +118,14 @@ impl Generator<'_> {
 		}
 	}
 
-	/// The type without its `none` member (`T?` → `T`).
 	pub(crate) fn without_none(&self, ty: TypeId) -> TypeId {
 		if let TypeKind::Union(list) = self.types.kind(ty) {
-			let others: Vec<TypeId> = self
+			let others: Vec<_> = self
 				.types
 				.list_items(list)
 				.iter()
 				.copied()
-				.filter(|&member| member != TypeId::NONE)
+				.filter(|&item| item != TypeId::NONE)
 				.collect();
 			if let [only] = others.as_slice() {
 				return *only;
@@ -279,151 +134,544 @@ impl Generator<'_> {
 		ty
 	}
 
-	/// `use x = place`, `mutable use x = place`.
-	pub(crate) fn use_declaration(&mut self, n: NodeId, value: NodeId, mutable: bool) {
-		let Some(symbol) = self.analysis.symbols.symbol_of_decl(n) else {
+	pub(super) fn reference_layout_suffix(layout: ReferenceLayout) -> &'static str {
+		match layout {
+			ReferenceLayout::Owner => "$key",
+			ReferenceLayout::Field(_) => "$field",
+			ReferenceLayout::General => "",
+		}
+	}
+
+	pub(super) fn reference_call_layout(&self, node: NodeId) -> ReferenceLayout {
+		let Some(call) = self.analysis.call(node) else {
+			return ReferenceLayout::General;
+		};
+		if self.is_object_reference(self.type_of(node)) {
+			return ReferenceLayout::General;
+		}
+		if let View::Call { callee, .. } = self.view(node)
+			&& let TypeKind::Function(sig) = self.types.kind(self.type_of(callee))
+			&& let Some(path) = self.types.sig(sig).reference
+		{
+			let index = match self.types.path_data(path).0.root {
+				PathRoot::Param(index) => Some(index as usize),
+				PathRoot::SelfParam => Some(0),
+				_ => None,
+			};
+			if index.is_some_and(|index| {
+				!matches!(
+					call.arguments.get(index),
+					Some(Argument::Given(_) | Argument::Receiver(_))
+				)
+			}) {
+				return ReferenceLayout::General;
+			}
+		}
+
+		match call.callee {
+			Callee::Function(declaration) => self
+				.analysis
+				.reference_layouts
+				.get(&declaration)
+				.copied()
+				.unwrap_or(ReferenceLayout::General),
+			Callee::Value => {
+				let View::Call { callee, .. } = self.view(node) else {
+					return ReferenceLayout::General;
+				};
+				let named = match self.view(self.strip_groups(callee)) {
+					View::Access { members, .. } => members.last().unwrap_or(callee),
+					_ => callee,
+				};
+				let Some((module, declaration)) =
+					self.session.external_node(self.analysis.resolution(named))
+				else {
+					return ReferenceLayout::General;
+				};
+				self.session
+					.interface(module)
+					.and_then(|interface| interface.reference_layouts.get(&declaration))
+					.copied()
+					.unwrap_or(ReferenceLayout::General)
+			}
+			_ => ReferenceLayout::General,
+		}
+	}
+
+	pub(crate) fn read_reference_call(&mut self, node: NodeId) -> Expr {
+		let View::Call { callee, .. } = self.view(node) else {
+			return self.unsupported(node, "this reference call");
+		};
+		let Some(parts) = self.call_reference_parts(node, callee) else {
+			return self.unsupported(node, "this reference call");
+		};
+		self.read_parts(&parts)
+	}
+
+	pub(super) fn reference_call_owner(&mut self, node: NodeId) -> Option<(Expr, Option<bool>)> {
+		let View::Call { callee, .. } = self.view(node) else {
+			return None;
+		};
+		let TypeKind::Function(sig) = self.types.kind(self.type_of(callee)) else {
+			return None;
+		};
+		let sig = self.types.sig(sig);
+		let (data, steps) = self.types.path_data(sig.reference?);
+		let steps = steps.to_vec();
+		let (mut value, mut ty) = match data.root {
+			PathRoot::Param(index) => (
+				self.call_arguments
+					.get(&node)?
+					.get(index as usize)?
+					.clone()?,
+				self.types.params(sig.params).get(index as usize)?.ty,
+			),
+			PathRoot::SelfParam => (
+				self.call_arguments.get(&node)?.first()?.clone()?,
+				self.types.params(sig.params).first()?.ty,
+			),
+			PathRoot::ModuleValue(key) => {
+				if let Some((module, keyed)) = self.session.keyed(key) {
+					if module == self.session.module_id(self.file) {
+						let symbol = self.analysis.symbols.symbol_of_decl(keyed.node)?;
+						(
+							self.name_of(symbol),
+							self.analysis.symbols.symbol(symbol).ty,
+						)
+					} else {
+						let resolution = Resolution::External(key);
+						let value = self.external(resolution)?;
+						let interface = self.session.interface(module)?;
+						let ty = interface.export.iter().chain(interface.members.values()).find(|export| export.decl == keyed.node).map(|export| export.ty).unwrap_or(TypeId::UNKNOWN);
+						(self.import(&value.path, &value.export), ty)
+					}
+				} else {
+					return None;
+				}
+			}
+			_ => return None,
+		};
+		for step in steps {
+			match step {
+				PathStep::Field(name) | PathStep::Private(name) => {
+					value.push('.');
+					value.push_str(&Self::property(self.types.syms.resolve(name)));
+					ty = self
+						.types
+						.fields_of(ty)
+						.iter()
+						.find(|field| {
+							self.types.syms.resolve(field.name) == self.types.syms.resolve(name)
+						})?
+						.ty;
+				}
+				_ => return None,
+			}
+		}
+		let map = match self.types.kind(ty) { TypeKind::Collection(CollKind::Map | CollKind::GrowingMap | CollKind::Pool | CollKind::GrowingPool | CollKind::Columnar | CollKind::GrowingColumnar, ..) => Some(true), TypeKind::Collection(..) => Some(false), _ => None };
+		Some((Expr::primary(value), map))
+	}
+
+	pub(super) fn is_reference_owner_argument(&self, call: NodeId, value: NodeId) -> bool {
+		let View::Call { callee, .. } = self.view(call) else {
+			return false;
+		};
+		let TypeKind::Function(sig) = self.types.kind(self.type_of(callee)) else {
+			return false;
+		};
+		let Some(path) = self.types.sig(sig).reference else {
+			return false;
+		};
+		let index = match self.types.path_data(path).0.root {
+			PathRoot::Param(index) => index as usize,
+			PathRoot::SelfParam => 0,
+			_ => return false,
+		};
+		matches!(self.analysis.call(call).and_then(|info| info.arguments.get(index)), Some(Argument::Given(node)) if *node == value)
+	}
+
+	pub(super) fn reference_pair_slot(
+		&self,
+		call: NodeId,
+		position: usize,
+		supplied: usize,
+	) -> bool {
+		let View::Call { callee, .. } = self.view(call) else {
+			return false;
+		};
+		let TypeKind::Function(sig) = self.types.kind(self.type_of(callee)) else {
+			return false;
+		};
+		let sig = self.types.sig(sig);
+		let skip = self
+			.analysis
+			.call(call)
+			.map(|info| info.arguments.len().saturating_sub(supplied))
+			.unwrap_or(0);
+		let Some(param) = self.types.params(sig.params).get(position + skip) else {
+			return false;
+		};
+		if param.reference.is_none() {
+			return false;
+		}
+		!self.reference_bound_object(call, sig, param.ty)
+	}
+
+	fn read_parts(&mut self, parts: &Parts) -> Expr {
+		let optional = if parts.optional { "?." } else { "" };
+		match &parts.key {
+			Key::Whole(text, _) => Expr::primary(text.clone()),
+			Key::Value(value) => value.clone(),
+			Key::Field(field) => Expr::primary(format!(
+				"{}{}.{}",
+				parts
+					.container
+					.as_ref()
+					.expect("field container")
+					.primary_text(),
+				if parts.optional { "?" } else { "" },
+				field
+			)),
+			Key::Index(key) => Expr::primary(format!(
+				"{}{optional}[{}]",
+				parts
+					.container
+					.as_ref()
+					.expect("index container")
+					.primary_text(),
+				key.text
+			)),
+			Key::Entry(key) => Expr::primary(format!(
+				"{}{}.get({})",
+				parts
+					.container
+					.as_ref()
+					.expect("entry container")
+					.primary_text(),
+				if parts.optional { "?" } else { "" },
+				key.text
+			)),
+			Key::Dynamic(key) => {
+				let read = self.helper("faReferenceRead");
+				js::call(
+					read,
+					&[
+						parts
+							.container
+							.as_ref()
+							.expect("reference container")
+							.text
+							.clone(),
+						key.text.clone(),
+					],
+				)
+			}
+		}
+	}
+
+	fn bind_reference_parts(&mut self, symbol: SymbolId, parts: Parts) {
+		let value = self.read_parts(&parts);
+		self.alias(symbol, value.text);
+		if let Key::Entry(key) = &parts.key {
+			self.map_aliases.insert(
+				symbol,
+				(
+					parts
+						.container
+						.as_ref()
+						.expect("entry container")
+						.text
+						.clone(),
+					key.text.clone(),
+				),
+			);
+		}
+		self.references.insert(symbol, Reference::Place(parts));
+	}
+
+	pub(super) fn reference_write(&mut self, symbol: SymbolId) -> Option<(String, String)> {
+		let Reference::Place(parts) = self.references.get(&symbol)?.clone() else {
+			return None;
+		};
+		if let Key::Dynamic(key) = parts.key {
+			let helper = self.helper("faReferenceSet");
+			Some((
+				helper.to_string(),
+				format!("{}, {}", parts.container?.text, key.text),
+			))
+		} else {
+			None
+		}
+	}
+
+	pub(super) fn reference_pair(&mut self, value: NodeId) -> Option<(Expr, Expr)> {
+		let parts = self.reference_parts(value, true)?;
+		self.parts_pair(&parts)
+	}
+
+	fn parts_pair(&mut self, parts: &Parts) -> Option<(Expr, Expr)> {
+		match &parts.key {
+			Key::Whole(_, Some((container, key))) => {
+				Some((Expr::primary(container.clone()), Expr::primary(key.clone())))
+			}
+			Key::Field(field) => Some((
+				parts.container.clone()?,
+				Expr::primary(js::string_literal(field)),
+			)),
+			Key::Index(key) | Key::Entry(key) | Key::Dynamic(key) => {
+				Some((parts.container.clone()?, key.clone()))
+			}
+			Key::Whole(_, None) | Key::Value(_) => None,
+		}
+	}
+
+	/// A physical argument pair, evaluated in the argument's written order.
+	pub(crate) fn reference_argument(&mut self, call: NodeId, value: NodeId) -> Expr {
+		if self.reference_argument_object(call, value) {
+			return self.expr(value);
+		}
+		let Some((container, key)) = self.reference_pair(value) else {
+			return self.unsupported(value, "this reference argument");
+		};
+		self.reference_argument_keys.insert(value, key);
+		container
+	}
+
+	fn reference_call_generics(&self, call: NodeId, sig: fa_analyzer::types::FnSig) -> Vec<fa_analyzer::ids::ParamId> {
+		if let Some(info) = self.analysis.call(call) && let Callee::Function(declaration) = info.callee { return self.function_generics(declaration); }
+		let mut generics: Vec<_> = self.types.list_items(sig.generics).iter().filter_map(|&ty| match self.types.kind(ty) { TypeKind::Param(param) => Some(param), _ => None }).collect();
+		if let View::Call { callee, .. } = self.view(call) {
+			let named = match self.view(self.strip_groups(callee)) { View::Access { members, .. } => members.last().unwrap_or(callee), _ => callee };
+			if let Resolution::External(key) = self.analysis.resolution(named) && let Some((module, declaration)) = self.session.external_node(Resolution::External(key)) {
+				let mut owner = self.external_owner_parameters(key);
+				if let Some(summary) = self.session.interface(module).and_then(|interface| interface.generic_functions.get(&declaration)) { generics = self.types.list_items(summary.generics).iter().filter_map(|&ty| match self.types.kind(ty) { TypeKind::Param(param) => Some(param), _ => None }).collect(); }
+				owner.extend(generics); generics = owner;
+			}
+		}
+		generics
+	}
+
+	fn reference_bound_object(&self, call: NodeId, sig: fa_analyzer::types::FnSig, ty: TypeId) -> bool {
+		if let TypeKind::Param(param) = self.types.kind(self.without_none(ty)) {
+			let generics = self.reference_call_generics(call, sig);
+			let (bindings, _) = self.generic_call_bindings(call, &generics);
+			if let Some(index) = generics.iter().position(|&candidate| self.same_reference_parameter(candidate, param)) && let Some(&bound) = bindings.get(index) { return self.is_object_reference(bound); }
+		}
+		self.is_object_reference(ty)
+	}
+
+	pub(super) fn reference_argument_object(&self, call: NodeId, value: NodeId) -> bool {
+		let View::Call { callee, .. } = self.view(call) else {
+			return self.is_object_reference(self.type_of(value));
+		};
+		let TypeKind::Function(sig) = self.types.kind(self.type_of(callee)) else {
+			return self.is_object_reference(self.type_of(value));
+		};
+		let sig = self.types.sig(sig);
+		let params = self.types.params(sig.params);
+		let Some(info) = self.analysis.call(call) else {
+			return false;
+		};
+		let Some((param, _)) = params
+			.iter()
+			.zip(
+				info.arguments
+					.iter()
+					.skip(info.arguments.len().saturating_sub(params.len())),
+			)
+			.find(|(_, argument)| matches!(argument, Argument::Given(node) if *node == value))
+		else {
+			return false;
+		};
+		self.reference_bound_object(call, sig, param.ty)
+	}
+
+	pub(crate) fn reference_return(&mut self, value: NodeId) {
+		if self.is_object_reference(
+			self.current_function()
+				.and_then(|node| self.analysis.function(node))
+				.and_then(|info| info.sig)
+				.map(|sig| self.types.sig(sig).ret)
+				.unwrap_or(self.type_of(value)),
+		) {
+			let value = self.expr(value);
+			self.out.line(format!("return {};", value.text));
+			return;
+		}
+		if matches!(self.view(self.strip_reference(value)), View::None) {
+			self.emit_reference_pair_return(Expr::primary("undefined"), Expr::primary("undefined"));
+			return;
+		}
+		let Some((container, key)) = self.reference_pair(value) else {
+			self.unsupported(value, "this reference result");
+			return;
+		};
+		self.emit_reference_pair_return(container, key);
+	}
+
+	fn emit_reference_pair_return(&mut self, container: Expr, key: Expr) {
+		match self.fcx.reference_layout {
+			ReferenceLayout::Owner => self.out.line(format!("return {};", key.text)),
+			ReferenceLayout::Field(_) => self.out.line(format!("return {};", container.text)),
+			ReferenceLayout::General => {
+				let (result_container, result_key, label) = self
+					.fcx
+					.reference_result
+					.clone()
+					.expect("general reference result destination");
+				self.out
+					.line(format!("{result_container} = {};", container.text));
+				self.out.line(format!("{result_key} = {};", key.text));
+				self.out.line(format!("break {label};"));
+			}
+		}
+	}
+
+	pub(crate) fn use_declaration(&mut self, node: NodeId, value: NodeId, mutable: bool) {
+		let Some(symbol) = self.analysis.symbols.symbol_of_decl(node) else {
 			return;
 		};
 		let ty = self.analysis.symbols.symbol(symbol).ty;
-		let module_value = self.is_module_value(symbol);
-		if matches!(self.types.kind(self.without_none(ty)), TypeKind::Param(_)) {
-			let carrier = self.reference_cell(value);
+		if self.is_object_reference(ty) {
+			let value = self.expr(value);
 			let name = self.declare(symbol);
-			let keyword = if module_value {
+			let keyword = if self.is_module_value(symbol) {
 				""
 			} else if mutable {
 				"let "
 			} else {
 				"const "
-			};
-			self.out
-				.line(format!("{keyword}{name} = {};", carrier.text));
-			self.bind_erased_reference(symbol, &name);
-			return;
-		}
-		if self.is_object_reference(ty) {
-			let value = self.expr(value);
-			let name = self.declare(symbol);
-			let keyword = match (module_value, mutable) {
-				(true, _) => "",
-				(false, true) => "let ",
-				(false, false) => "const ",
 			};
 			self.out.line(format!("{keyword}{name} = {};", value.text));
 			self.references.insert(symbol, Reference::Object);
 			return;
 		}
-		let node = self.strip_reference(value);
-		let existing = self.call_returns_reference(node)
-			|| matches!(self.analysis.resolution(node), Resolution::Local(source) if self.reference_cells.contains_key(&source));
-		if existing {
-			let carrier = self.reference_cell(value);
-			self.cell_declaration(symbol, carrier, mutable, ty);
-			return;
-		}
-		let Some(parts) = self.reference_parts(value, false) else {
+		let Some(parts) = self.reference_parts(value, true) else {
 			return;
 		};
-		if let Key::Value(value) = parts.key {
+		if let Key::Value(value) = &parts.key {
 			let name = self.declare(symbol);
-			let keyword = if module_value {
+			let keyword = if self.is_module_value(symbol) {
 				""
-			} else if mutable {
-				"let "
 			} else {
 				"const "
 			};
 			self.out.line(format!("{keyword}{name} = {};", value.text));
 			return;
 		}
-		let carrier = self.cell_from_parts(value, &parts);
-		self.cell_declaration(symbol, carrier, mutable, ty);
+		if self.is_module_value(symbol) || mutable {
+			if let Some((container, key)) = self.parts_pair(&parts) {
+				let name = self.declare(symbol);
+				let (container_name, key_name) =
+					(format!("{name}$container"), format!("{name}$key"));
+				let keyword = if self.is_module_value(symbol) {
+					""
+				} else {
+					"let "
+				};
+				self.out
+					.line(format!("{keyword}{container_name} = {};", container.text));
+				self.out
+					.line(format!("{keyword}{key_name} = {};", key.text));
+				let key = match parts.key {
+					Key::Entry(_) => Key::Entry(Expr::name(key_name, false)),
+					Key::Dynamic(_) => Key::Dynamic(Expr::name(key_name, false)),
+					_ => Key::Index(Expr::name(key_name, false)),
+				};
+				self.bind_reference_parts(
+					symbol,
+					Parts {
+						container: Some(Expr::name(container_name, false)),
+						key,
+						optional: parts.optional,
+					},
+				);
+				return;
+			}
+		}
+		self.bind_reference_parts(symbol, parts);
 	}
 
-	fn cell_declaration(&mut self, symbol: SymbolId, carrier: Expr, mutable: bool, ty: TypeId) {
-		let module_value = self.is_module_value(symbol);
-		let name = self.declare(symbol);
-		let keyword = if module_value {
-			""
-		} else if mutable {
-			"let "
-		} else {
-			"const "
-		};
-		self.out
-			.line(format!("{keyword}{name} = {};", carrier.text));
-		self.bind_primitive_reference(symbol, &name, ty);
-	}
-
-	fn bind_primitive_reference(&mut self, symbol: SymbolId, name: &str, ty: TypeId) {
-		let access = if self.may_be_none(ty) { "?." } else { "." };
-		self.alias(symbol, format!("{name}{access}$v"));
-		self.reference_cells.insert(symbol, name.to_string());
-		self.references.insert(
-			symbol,
-			Reference::Cell {
-				carrier: name.to_string(),
-				erased: false,
-			},
-		);
-	}
-
-	/// Prepare carrier names before functions that read module references.
 	pub(crate) fn prepare_module_references(&mut self) {
-		let mut symbols: Vec<_> = self
-			.module_values
-			.iter()
-			.copied()
-			.filter(|&symbol| {
-				matches!(
-					self.analysis.symbols.symbol(symbol).kind,
-					SymbolKind::Use | SymbolKind::MutableUse
-				)
-			})
-			.collect();
+		let mut symbols: Vec<_> = self.module_values.iter().copied().collect();
 		symbols.sort();
 		for symbol in symbols {
+			if !matches!(
+				self.analysis.symbols.symbol(symbol).kind,
+				SymbolKind::Use | SymbolKind::MutableUse
+			) {
+				continue;
+			}
 			let ty = self.analysis.symbols.symbol(symbol).ty;
-			let name = self.name_of(symbol);
 			if self.is_object_reference(ty) {
 				self.references.insert(symbol, Reference::Object);
-			} else if matches!(self.types.kind(self.without_none(ty)), TypeKind::Param(_)) {
-				self.bind_erased_reference(symbol, &name);
-			} else {
-				let decl = self.analysis.symbols.symbol(symbol).decl_node;
-				let value = match self.view(decl) {
-					View::Use { value, .. } => self.strip_reference(value),
-					_ => continue,
-				};
-				// Slices and characters are immutable values rather than writable slots.
-				if let View::Index { target, .. } = self.view(value)
-					&& self.kind(self.type_of(target)) == Kind::Text
-				{
-					continue;
-				}
-				self.bind_primitive_reference(symbol, &name, ty);
+				continue;
 			}
+			let declaration = self.analysis.symbols.symbol(symbol).decl_node;
+			let View::Use { value, .. } = self.view(declaration) else {
+				continue;
+			};
+			if let View::Index { target, .. } = self.view(self.strip_reference(value))
+				&& self.kind(self.type_of(target)) == Kind::Text
+			{
+				continue;
+			}
+			if let View::Name(_) = self.view(self.strip_reference(value)) && let Resolution::Local(source) = self.analysis.resolution(self.strip_reference(value)) && !matches!(self.analysis.symbols.symbol(source).kind, SymbolKind::Use | SymbolKind::MutableUse) {
+				let text = self.name_of(source);
+				self.bind_reference_parts(symbol, Parts { container: None, key: Key::Whole(text, None), optional: false }); continue;
+			}
+			let name = self.declare(symbol);
+			let (container, key) = (format!("{name}$container"), format!("{name}$key"));
+			self.module_slots.extend([container.clone(), key.clone()]);
+			self.bind_reference_parts(
+				symbol,
+				Parts {
+					container: Some(Expr::name(container, false)),
+					key: Key::Dynamic(Expr::name(key, false)),
+					optional: self.may_be_none(ty),
+				},
+			);
 		}
 	}
 
-	/// `reuse x = place` (or `none`): the `mutable use` designates another place.
-	pub(crate) fn reuse_statement(&mut self, n: NodeId, value: NodeId) {
-		let Resolution::Local(symbol) = self.analysis.resolution(n) else {
-			self.unsupported(n, "this `reuse`");
+	pub(crate) fn reuse_statement(&mut self, node: NodeId, value: NodeId) {
+		let Resolution::Local(symbol) = self.analysis.resolution(node) else {
+			self.unsupported(node, "this reuse");
 			return;
 		};
 		match self.references.get(&symbol).cloned() {
-			Some(Reference::Cell { carrier, .. }) => {
-				let value = self.reference_cell(value);
-				self.out.line(format!("{carrier} = {};", value.text));
-			}
 			Some(Reference::Object) => {
 				let value = self.expr(value);
-				let name = self.name_of(symbol);
+				let name = self.declare(symbol);
 				self.out.line(format!("{name} = {};", value.text));
 			}
+			Some(Reference::Place(parts)) => {
+				let absent = matches!(self.view(self.strip_reference(value)), View::None);
+				let pair = if absent {
+					Some((Expr::primary("undefined"), Expr::primary("undefined")))
+				} else {
+					self.reference_pair(value)
+				};
+				let (Some(container), Some((new_container, new_key))) = (parts.container, pair)
+				else {
+					self.unsupported(node, "this reuse of a local scalar");
+					return;
+				};
+				let key = match parts.key {
+					Key::Index(key) | Key::Entry(key) | Key::Dynamic(key) => key,
+					_ => {
+						self.unsupported(node, "this reuse");
+						return;
+					}
+				};
+				let new_container = self.keep_value_part(new_container);
+				let new_key = self.keep_value_part(new_key);
+				self.out
+					.line(format!("{} = {};", container.text, new_container.text));
+				self.out.line(format!("{} = {};", key.text, new_key.text));
+			}
 			None => {
-				self.unsupported(n, "this `reuse`");
+				self.unsupported(node, "this reuse");
 			}
 		}
 	}
@@ -440,8 +688,27 @@ impl Generator<'_> {
 			optional: false,
 		};
 		match self.view(node) {
+			View::None => Some(Parts {
+				container: Some(Expr::primary("undefined")),
+				key: Key::Dynamic(Expr::primary("undefined")),
+				optional: true,
+			}),
 			View::Name(_) => {
 				if let Resolution::Local(source) = self.analysis.resolution(node) {
+					if let Some(Reference::Place(mut parts)) = self.references.get(&source).cloned()
+					{
+						if let Some(container) = parts.container {
+							parts.container = Some(self.keep_value_part(container));
+						}
+						parts.key = match parts.key {
+							Key::Index(key) => Key::Index(self.keep_value_part(key)),
+							Key::Entry(key) => Key::Entry(self.keep_value_part(key)),
+							Key::Dynamic(key) => Key::Dynamic(self.keep_value_part(key)),
+							other => other,
+						};
+						return Some(parts);
+					}
+
 					let text = self.name_of(source);
 					let map = self.map_aliases.get(&source).cloned();
 					return Some(simple(None, Key::Whole(text, map)));
@@ -532,13 +799,47 @@ impl Generator<'_> {
 			let View::Call { arguments, .. } = self.view(node) else {
 				return None;
 			};
-			let cell = self.call(node, callee, arguments);
-			let cell = self.keep_value_part(cell);
-			return Some(Parts {
-				container: Some(cell),
-				key: Key::Field("$v".into()),
-				optional: self.may_be_none(self.type_of(node)),
-			});
+			let layout = self.reference_call_layout(node);
+			let result = self.call(node, callee, arguments);
+			let name = self.temp();
+			self.out.line(format!("const {name} = {};", result.text));
+			let result = Expr::name(name, true);
+			let optional = self.may_be_none(self.type_of(node));
+			return match layout {
+				ReferenceLayout::General => {
+					let key = self.helper("faReferenceKey").to_string();
+					let key_name = self.temp();
+					self.out.line(format!("const {key_name} = {key};"));
+					Some(Parts {
+						container: Some(result),
+						key: Key::Dynamic(Expr::name(key_name, true)),
+						optional,
+					})
+				}
+				ReferenceLayout::Field(name) => Some(Parts {
+					container: Some(result),
+					key: Key::Field(Self::property(self.types.syms.resolve(name))),
+					optional,
+				}),
+				ReferenceLayout::Owner => {
+					let (owner, map) = self.reference_call_owner(node)?;
+					let container = if optional {
+						let name = self.temp();
+						self.out.line(format!(
+							"const {name} = {} === undefined ? undefined : {};",
+							result.text, owner.text
+						));
+						Expr::name(name, true)
+					} else {
+						owner
+					};
+					Some(Parts {
+						container: Some(container),
+						key: match map { Some(true) => Key::Entry(result), Some(false) => Key::Index(result), None => Key::Dynamic(result) },
+						optional,
+					})
+				}
+			};
 		}
 		let path = match self.analysis.call(node).map(|info| info.callee) {
 			Some(Callee::Builtin(builtin)) => builtins::get(builtin).path,
@@ -557,12 +858,19 @@ impl Generator<'_> {
 					.collect()
 			})
 			.unwrap_or_default();
-		let value_pool = matches!(path, "Pool#find" | "Pool#add")
-			&& self.is_value_pool(self.receiver_type(callee));
+		let value_pool = matches!(
+			path,
+			"Pool#find" | "Pool#add" | "Columnar#find" | "Columnar#add"
+		) && self.is_value_pool(self.receiver_type(callee));
 		if !value_pool
 			&& !matches!(
 				path,
-				"Map#get" | "Map#getOrInsert" | "Array#get" | "Array#find"
+				"Map#get"
+					| "Map#getOrInsert"
+					| "Array#get" | "Array#find"
+					| "OrderedColumnar#get"
+					| "OrderedColumnar#find"
+					| "OrderedColumnar#add"
 			) {
 			self.unsupported(node, "a reference to a primitive value returned by a call");
 			return None;
@@ -571,7 +879,7 @@ impl Generator<'_> {
 		let receiver = self.keep_value_part(receiver);
 		let values = self.in_order(&arguments, |g, argument| g.expr(argument));
 		// an element of a pool of values: the pool and its slot
-		if path == "Pool#find" {
+		if matches!(path, "Pool#find" | "Columnar#find") {
 			let (slot, container) = (self.temp(), self.temp());
 			let pool = receiver.primary_text();
 			self.out.line(format!(
@@ -587,7 +895,7 @@ impl Generator<'_> {
 				optional: true,
 			});
 		}
-		if path == "Pool#add" {
+		if matches!(path, "Pool#add" | "Columnar#add") {
 			let slot = self.temp();
 			self.out.line(format!(
 				"const {slot} = {}.add({});",
@@ -600,7 +908,24 @@ impl Generator<'_> {
 				optional: false,
 			});
 		}
-		if path == "Array#find" {
+		if path == "OrderedColumnar#add" {
+			let slot = self.temp();
+			self.out.line(format!(
+				"const {slot} = {}.length;",
+				receiver.primary_text()
+			));
+			let item = arguments.first().copied()?;
+			let value = self.copy_stored(item, values.first()?.clone());
+			self.out
+				.line(format!("{}.push({});", receiver.primary_text(), value.text));
+			return Some(Parts {
+				container: Some(receiver),
+				key: Key::Index(Expr::name(slot, true)),
+				optional: false,
+			});
+		}
+
+		if matches!(path, "Array#find" | "OrderedColumnar#find") {
 			// the item the predicate finds first: its index, `none` without one
 			let (position, container) = (self.temp(), self.temp());
 			let array = receiver.primary_text();
@@ -665,15 +990,16 @@ impl Generator<'_> {
 		}
 	}
 
-	/// The slot of the element of a pool of values a reference designates
-	/// (`use element = pool.find(…)`), for `delete` and `take`.
-	pub(crate) fn reference_slot(&self, n: NodeId) -> Option<String> {
-		let n = self.strip_reference(n);
-		let Resolution::Local(symbol) = self.analysis.resolution(n) else {
+	pub(crate) fn reference_slot(&self, node: NodeId) -> Option<String> {
+		let Resolution::Local(symbol) = self.analysis.resolution(self.strip_reference(node)) else {
 			return None;
 		};
-		if let Some(cell) = self.reference_cells.get(&symbol) {
-			return Some(format!("{cell}.$k"));
+		if let Some(Reference::Place(Parts {
+			key: Key::Entry(key) | Key::Dynamic(key),
+			..
+		})) = self.references.get(&symbol)
+		{
+			return Some(key.text.clone());
 		}
 		self.map_aliases.get(&symbol).map(|(_, key)| key.clone())
 	}
@@ -702,7 +1028,7 @@ impl Generator<'_> {
 	}
 
 	/// A part of a place evaluated once: stable, or kept in a temporary.
-	fn keep_value_part(&mut self, value: Expr) -> Expr {
+	pub(super) fn keep_value_part(&mut self, value: Expr) -> Expr {
 		if value.stable {
 			return value;
 		}
@@ -719,10 +1045,7 @@ impl Generator<'_> {
 	/// replaces, nor a union or an optional place).
 	pub(crate) fn writes_in_place(&mut self, target: NodeId) -> bool {
 		let ty = self.type_of(target);
-		if !matches!(
-			self.types.kind(ty),
-			TypeKind::Object(_) | TypeKind::Collection(..)
-		) {
+		if !self.is_object_reference(ty) {
 			return false;
 		}
 		match self.view(target) {
@@ -745,6 +1068,10 @@ impl Generator<'_> {
 				self.place_root(target).is_some_and(|root| {
 					matches!(self.references.get(&root), Some(Reference::Object))
 						|| self.referenced_roots().contains(&root)
+						|| matches!(
+							self.analysis.symbols.symbol(root).kind,
+							SymbolKind::Parameter { .. } | SymbolKind::SelfParameter
+						) || self.is_module_value(root)
 				})
 			}
 			_ => false,
@@ -972,33 +1299,5 @@ impl Generator<'_> {
 	/// (`NodeFlags::MOVE`): the value is moved, not copied (D15).
 	pub(crate) fn is_move(&self, node: NodeId) -> bool {
 		fa_analyzer::lower::copies::is_move(self.tree, self.analysis, node)
-	}
-}
-
-impl Generator<'_> {
-	/// The container, the key (a JavaScript expression) and whether it is
-	/// a map's, of a place designated by `parts` (`None` for a value). A
-	/// whole local (or another whole place, written as is) has no
-	/// container: an accessor cell stands for it, whose `$v` reads and
-	/// writes the place (`{ get $v() { return a; }, set $v($value) { a =
-	/// $value; } }`), so that a `mutable use` pair can designate it.
-	fn pair_of(&mut self, parts: &Parts) -> Option<(String, String, bool)> {
-		if let Key::Whole(text, map) = &parts.key {
-			if let Some((container, key)) = map {
-				return Some((container.clone(), key.clone(), true));
-			}
-			let cell = format!(
-				"{{ get $v() {{ return {text}; }}, set $v($value) {{ {text} = $value; }} }}"
-			);
-			return Some((cell, js::string_literal("$v"), false));
-		}
-		let container = parts.container.as_ref()?.text.clone();
-		let (key, map) = match &parts.key {
-			Key::Field(property) => (js::string_literal(property), false),
-			Key::Index(index) => (index.text.clone(), false),
-			Key::Entry(key) => (key.text.clone(), true),
-			Key::Whole(..) | Key::Value(_) => return None,
-		};
-		Some((container, key, map))
 	}
 }

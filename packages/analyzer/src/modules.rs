@@ -703,6 +703,8 @@ pub struct Interface {
 	pub reference_aliases: FxHashSet<NodeId>,
 	/// Reference-containing generic defaults, by declaration and position.
 	pub reference_defaults: FxHashMap<NodeId, Vec<bool>>,
+	pub reference_layouts: FxHashMap<NodeId, crate::analysis::ReferenceLayout>,
+	pub reference_sensitive: FxHashMap<NodeId, Vec<ParamId>>,
 }
 
 /// The generic parameters reached by exported types, including binders
@@ -1033,6 +1035,21 @@ impl Interface {
 		for (&decl, defaults) in &self.reference_defaults {
 			for (index, &reference) in defaults.iter().enumerate() {
 				parts.push((15, key_hash(decl), index as u128, u128::from(reference)));
+			}
+		}
+		for (&decl, &layout) in &self.reference_layouts {
+			let value = match layout {
+				crate::analysis::ReferenceLayout::Owner => 1,
+				crate::analysis::ReferenceLayout::General => 2,
+				crate::analysis::ReferenceLayout::Field(name) => {
+					(rustc_hash::FxBuildHasher.hash_one(types.syms.resolve(name)) as u128) << 2 | 3
+				}
+			};
+			parts.push((16, key_hash(decl), 0, value));
+		}
+		for (&decl, params) in &self.reference_sensitive {
+			for &param in params {
+				parts.push((17, key_hash(decl), 0, param_hash(param)));
 			}
 		}
 		parts.push((4, u128::from(self.reads_target), 0, 0));

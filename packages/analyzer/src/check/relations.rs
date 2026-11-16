@@ -1541,26 +1541,29 @@ impl Walker<'_> {
 			return;
 		}
 		// the target: an element of the same owner (REL012)
-		if let Some(value) = value
-			&& let Some(from) = self.place_of(holder_node)
-			&& let Some(to) = self.place_of(value)
-			&& let (Some(from), Some(to)) = (self.collection_owner(from), self.collection_owner(to))
-			&& from != to
-			&& self.reported_once.insert((n, REL012.id))
-		{
-			let message = format!(
-				"`{}` is an element of `{}`, `{}` of `{}`: a relation links elements of the same owner",
-				self.tree.text(value.index()),
-				self.place_text(to),
-				self.tree.text(holder_node.index()),
-				self.place_text(from)
-			);
-			let diagnostic = self.diagnostic(&REL012, n, message);
-			self.report(diagnostic);
+		if let Some(value) = value {
+			for from in self.places_of(holder_node) {
+				for to in self.places_of(value) {
+					if let (Some(from), Some(to)) =
+						(self.collection_owner(from), self.collection_owner(to))
+						&& from != to && self.reported_once.insert((n, REL012.id))
+					{
+						let message = format!(
+							"`{}` is an element of `{}`, `{}` of `{}`: a relation links elements of the same owner",
+							self.tree.text(value.index()),
+							self.place_text(to),
+							self.tree.text(holder_node.index()),
+							self.place_text(from)
+						);
+						let diagnostic = self.diagnostic(&REL012, n, message);
+						self.report(diagnostic);
+					}
+				}
+			}
 		}
 		self.relations.writes.push((n, side));
 		// the other sides it writes (§8.6)
-		if let Some(place) = self.place_of(holder_node) {
+		for place in self.places_of(holder_node) {
 			let cause = format!("writing `{}.{field}`", self.tree.text(holder_node.index()));
 			for implied in self.implied_write(place, decl.field) {
 				self.record_implied_effect(implied, n, &cause);
@@ -1644,18 +1647,21 @@ impl Walker<'_> {
 		callee: NodeId,
 		arguments: &[crate::analysis::Argument],
 	) {
-		let (owner, method) = path.split_once('#').unwrap_or((path, ""));
 		// the collection: the callee without its method (`town.people`)
-		let base = match self.view(self.strip_groups(callee)) {
-			View::Access { target, members } => {
-				let members: Vec<NodeId> = members.iter().collect();
-				self.access_place(target, &members[..members.len().saturating_sub(1)])
-			}
-			_ => None,
-		};
-		let Some(base) = base else {
-			return;
-		};
+		for base in self.callee_receiver_places(callee) {
+			self.check_relation_call_at(n, path, callee, arguments, base);
+		}
+	}
+
+	fn check_relation_call_at(
+		&mut self,
+		n: NodeId,
+		path: &str,
+		callee: NodeId,
+		arguments: &[crate::analysis::Argument],
+		base: crate::ids::PlaceId,
+	) {
+		let (owner, method) = path.split_once('#').unwrap_or((path, ""));
 		match (owner, method) {
 			(
 				"Pool" | "Columnar" | "OrderedColumnar",
@@ -2272,33 +2278,31 @@ impl Walker<'_> {
 				.parent(place)
 				.and_then(|all| self.places.parent(all));
 			for &argument in used {
-				let Some(other) = self.place_of(argument) else {
-					continue;
-				};
-				let element = self.places.parent(other) == collection
-					&& matches!(
-						self.places.get(other).step,
-						Some(crate::flow::Step::Index(_) | crate::flow::Step::All)
-					);
-				let permitted_owner = self.declared_reference_owner(n, argument);
-				if element
-					|| permitted_owner
-					|| matches!(
+				for other in self.places_of(argument) {
+					let element = self.places.parent(other) == collection
+						&& matches!(
+							self.places.get(other).step,
+							Some(crate::flow::Step::Index(_) | crate::flow::Step::All)
+						);
+					let permitted_owner = self.declared_reference_owner(n, argument);
+					if element
+						|| permitted_owner || matches!(
 						self.places.get(other).step,
 						Some(crate::flow::Step::Length | crate::flow::Step::Size)
 					) || !self.may_overlap(place, other)
-				{
-					continue;
+					{
+						continue;
+					}
+					let message = format!(
+						"`{callee}` changes `{}` (the other side of a relation), which its argument `{}` reads: copy it first with `let`",
+						self.place_text(place),
+						self.tree.text(argument.index())
+					);
+					let diagnostic =
+						self.diagnostic(&crate::diagnostics::codes::advanced::REF013, n, message);
+					self.report_flow(diagnostic);
+					return;
 				}
-				let message = format!(
-					"`{callee}` changes `{}` (the other side of a relation), which its argument `{}` reads: copy it first with `let`",
-					self.place_text(place),
-					self.tree.text(argument.index())
-				);
-				let diagnostic =
-					self.diagnostic(&crate::diagnostics::codes::advanced::REF013, n, message);
-				self.report_flow(diagnostic);
-				return;
 			}
 		}
 	}

@@ -52,6 +52,7 @@ mod pools;
 mod proofs;
 mod provenance;
 pub(crate) mod reactivity;
+mod reference_sensitivity;
 mod references;
 mod relations;
 mod requirements;
@@ -178,6 +179,7 @@ pub struct FnCx {
 	pub ref_owner: Option<PlaceId>,
 	/// All returned reference values are fresh so far.
 	pub ref_fresh: bool,
+	pub ref_layout: Option<crate::analysis::ReferenceLayout>,
 }
 
 impl FnCx {
@@ -210,6 +212,7 @@ impl FnCx {
 			async_acc: tasks::Acc::new(),
 			ref_owner: None,
 			ref_fresh: true,
+			ref_layout: None,
 		}
 	}
 }
@@ -440,6 +443,7 @@ pub struct Walker<'s> {
 	pub(crate) reference_results: FxHashMap<NodeId, Vec<PlaceId>>,
 	/// Borrowed result leaves, captured before their branch flow is joined.
 	pub(crate) value_origins: FxHashMap<NodeId, crate::flow::values::ValueOrigins>,
+	pub(crate) capture_origins: FxHashMap<NodeId, Vec<(SymbolId, Vec<PlaceId>, Vec<NodeId>)>>,
 	/// Whole reference annotations in borrowing positions; nested storage is never allowed.
 	pub(crate) borrowed_type_nodes: rustc_hash::FxHashSet<NodeId>,
 	pub(crate) type_expression_root: Option<NodeId>,
@@ -635,6 +639,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		aliases: FxHashMap::default(),
 		reference_results: FxHashMap::default(),
 		value_origins: FxHashMap::default(),
+		capture_origins: FxHashMap::default(),
 		borrowed_type_nodes: rustc_hash::FxHashSet::default(),
 		type_expression_root: None,
 		reference_parameters: FxHashMap::default(),

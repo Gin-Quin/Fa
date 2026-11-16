@@ -1017,16 +1017,7 @@ impl Generator<'_> {
 					ty = self.without_none(ty);
 					text = text.replace("?.[", "[").replace("?.", ".");
 				}
-				let reference = if let Some(super::references::Reference::Cell {
-					carrier,
-					erased: true,
-				}) = self.references.get(&symbol).cloned()
-				{
-					let write = self.helper("faReferenceWrite");
-					Some((write.to_string(), carrier))
-				} else {
-					None
-				};
+				let reference = self.reference_write(symbol);
 				Some(Place {
 					text,
 					ty,

@@ -154,6 +154,7 @@ impl Walker<'_> {
 				self.body.flow.values = saved.flow.values.clone();
 				let ty = self.check_function(value, signature, body, owner, expected);
 				self.body = saved;
+				self.record_capture_origins(value);
 				self.rigid_params.truncate(rigid);
 				self.body.scope = saved_scope;
 				for key in [n, value] {
@@ -231,6 +232,7 @@ impl Walker<'_> {
 				self.body.flow.values = saved.flow.values.clone();
 				let ty = self.check_function(value, signature, body, owner, expected);
 				self.body = saved;
+				self.record_capture_origins(value);
 				ty
 			}
 			// `function f = g then h`, `function f = chain[1..]` (compose.rs)
@@ -771,8 +773,16 @@ impl Walker<'_> {
 						cx.as_ref().and_then(|cx| cx.ref_owner),
 					);
 					let fresh = self.reference_is_fresh(value_node);
+					let layout = cx
+						.as_ref()
+						.and_then(|cx| cx.ref_owner)
+						.and_then(|owner| self.reference_result_layout(value_node, owner));
 					if let Some(cx) = &mut cx {
 						cx.ref_fresh &= fresh;
+						if let Some(layout) = layout {
+							cx.ref_layout =
+								Some(cx.ref_layout.map_or(layout, |old| old.joined(layout)));
+						}
 					}
 				}
 			}
@@ -873,6 +883,14 @@ impl Walker<'_> {
 		}
 		let sig = self.signature_id(ty);
 		for key in [Some(lambda), owner.declaration].into_iter().flatten() {
+			if reference.is_some() {
+				self.a.reference_layouts.insert(
+					key,
+					cx.as_ref()
+						.and_then(|cx| cx.ref_layout)
+						.unwrap_or(crate::analysis::ReferenceLayout::General),
+				);
+			}
 			if let Some(info) = self.a.functions.get_mut(&key) {
 				info.ty = ty;
 				info.sig = sig;

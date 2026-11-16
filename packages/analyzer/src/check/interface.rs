@@ -26,6 +26,7 @@ impl Walker<'_> {
 	/// Completes the interface of the file (its export and the members of
 	/// its namespaces are published already).
 	pub(super) fn publish_interface(&mut self, root: NodeId) {
+		self.record_reference_sensitivity();
 		// the function node of each function declaration
 		let mut function_nodes: FxHashMap<NodeId, NodeId> = FxHashMap::default();
 		for (&node, info) in &self.a.functions {
@@ -505,6 +506,8 @@ impl Walker<'_> {
 		interface.parameters = parameters;
 		interface.implicit_writes = implicit_writes;
 		interface.generic_functions = generic_functions;
+		interface.reference_layouts = self.a.reference_layouts.clone();
+		interface.reference_sensitive = self.a.reference_sensitive.clone();
 		interface.key_set_params = key_set_params;
 		interface.derived_params = derived_params;
 		interface.key_set_applications = key_set_applications;

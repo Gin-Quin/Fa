@@ -15,12 +15,15 @@ pub struct ClosureOrigin {
 pub struct ValueOrigins {
 	pub places: Vec<PlaceId>,
 	pub owned: bool,
+	/// A user-call result whose physical projection is not known here.
+	pub opaque: bool,
 	pub closures: Vec<ClosureOrigin>,
 }
 
 impl ValueOrigins {
 	pub fn join(&mut self, other: &Self) {
 		self.owned |= other.owned;
+		self.opaque |= other.opaque;
 		self.places.extend_from_slice(&other.places);
 		self.places.sort_unstable();
 		self.places.dedup();
@@ -32,6 +35,7 @@ impl ValueOrigins {
 		Self {
 			places: Vec::new(),
 			owned: true,
+			opaque: false,
 			closures: self.closures.clone(),
 		}
 	}

@@ -312,7 +312,7 @@ function firstPerson = (persons: Array<Person>): (Person in persons)? => {
 }
 ```
 
-A reference result can be an `if`, `when`, `catch` or block expression. Every reachable result must designate an element of the declared collection; returning a local collection's element in just one branch is still an error. A reseatable reference must satisfy that rule for every place it may designate at the return. An `async` function cannot declare a reference result: return an index or an owned copy instead.
+A reference result can be an `if`, `when`, `catch`, block or `loop` expression. A loop returns the reference supplied by its reachable `break` values. Every reachable result must designate an element of the declared collection; returning a local collection's element in just one branch is still an error. A reseatable reference must satisfy that rule for every place it may designate at the return. An `async` function cannot declare a reference result: return an index or an owned copy instead.
 
 The caller receives a reference whose validity is tied to its own collection: the parameter name in the return type is replaced by the argument, so `firstPerson(persons)` returns a `(Person in persons)?`. The index of the element is not known to the caller.
 

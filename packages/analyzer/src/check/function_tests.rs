@@ -560,3 +560,25 @@ fn reference_function_mismatches_show_the_owner_and_a_fix() {
 		}
 	}
 }
+
+#[test]
+fn captured_reference_owner_names_the_inner_function() {
+	let source =
+		include_str!("../../tests/cases/references/review-links-closure-captured-owner.fa");
+	let (session, file) = analyze_source(source);
+	let diagnostic = session
+		.diagnostics(file)
+		.iter()
+		.find(|diagnostic| diagnostic.code.id == "REF008")
+		.unwrap();
+	assert!(
+		diagnostic.message.contains("parameter of `captured`"),
+		"{}",
+		diagnostic.message
+	);
+	assert!(
+		diagnostic.message.contains("pass `outer` as a parameter"),
+		"{}",
+		diagnostic.message
+	);
+}

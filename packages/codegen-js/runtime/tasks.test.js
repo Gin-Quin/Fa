@@ -382,25 +382,25 @@ describe("faWaitShared", () => {
 
 describe("generic function conversion", () => {
 	test("binds capabilities before visible arguments", () => {
-		const identity = (_object, value) => value;
-		const converted = faBindGenerics(identity, false);
+		const identity = (_count, value) => value;
+		const converted = faBindGenerics(identity, 3);
 		expect(["Ada", "Alan"].map(converted)).toEqual(["Ada", "Alan"]);
-		const place = { $v: 7 };
+		const place = { value: 7 };
 		expect(converted(place)).toBe(place);
 	});
 	test("preserves the asynchronous task-first entry", async () => {
 		const calls = [];
 		const original = faAsyncValue(
-			(_object, value) => value,
-			async (task, object, value) => {
-				calls.push([task, object, value]);
+			(_count, value) => value,
+			async (task, count, value) => {
+				calls.push([task, count, value]);
 				return value;
 			},
 		);
-		const converted = faBindGenerics(original, true);
+		const converted = faBindGenerics(original, 3);
 		const task = root();
 		expect(converted(9)).toBe(9);
 		expect(await converted.$async(task, 11)).toBe(11);
-		expect(calls).toEqual([[task, true, 11]]);
+		expect(calls).toEqual([[task, 3, 11]]);
 	});
 });

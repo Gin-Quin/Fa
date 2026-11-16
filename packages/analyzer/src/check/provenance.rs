@@ -57,6 +57,7 @@ impl Walker<'_> {
 			}
 			View::Loop { .. } => origins = self.evaluated_origins(node),
 			View::Lambda { .. } => {
+				self.record_capture_origins(node);
 				origins.owned = true;
 				origins.closures.push(ClosureOrigin {
 					projection: Vec::new(),
@@ -150,6 +151,12 @@ impl Walker<'_> {
 				self.ensure_builtin_reference(node);
 				origins.places = self.places_of(node);
 				origins.owned = origins.places.is_empty();
+				origins.opaque = self.a.calls.get(&node).is_some_and(|call| {
+					matches!(
+						call.callee,
+						crate::analysis::Callee::Function(_) | crate::analysis::Callee::Value
+					)
+				});
 			}
 		}
 		if self.type_of(node) == TypeId::NEVER {
@@ -283,6 +290,36 @@ impl Walker<'_> {
 				Err(index) => self.body.flow.values.insert(index, (place, id)),
 			}
 		}
+	}
+
+	pub(super) fn record_capture_origins(&mut self, lambda: NodeId) {
+		let captures = self
+			.a
+			.functions
+			.get(&lambda)
+			.map(|info| info.captures.clone())
+			.unwrap_or_default();
+		let mut origins = Vec::new();
+		for symbol in captures {
+			let places = self.symbol_places(symbol);
+			let mut closures = Vec::new();
+			for &place in &places {
+				closures.extend(
+					self.stored_origins(place)
+						.closures
+						.into_iter()
+						.map(|origin| origin.lambda),
+				);
+			}
+			let declaration = self.a.symbols.symbol(symbol).decl_node;
+			if self.a.symbols.symbol(symbol).kind == SymbolKind::Function
+				&& let Some(info) = self.a.functions.get(&declaration)
+			{
+				closures.push(info.lambda);
+			}
+			origins.push((symbol, places, closures));
+		}
+		self.capture_origins.insert(lambda, origins);
 	}
 
 	pub(super) fn bind_value_origins(&mut self, symbol: SymbolId, value: NodeId) {

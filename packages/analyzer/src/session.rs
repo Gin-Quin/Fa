@@ -1195,6 +1195,31 @@ fn merge_interface(
 				((decl, merger.sym(name)), origin)
 			})
 			.collect(),
+		reference_layouts: interface
+			.reference_layouts
+			.iter()
+			.map(|(&decl, &layout)| {
+				(
+					decl,
+					match layout {
+						crate::analysis::ReferenceLayout::Field(name) => {
+							crate::analysis::ReferenceLayout::Field(merger.sym(name))
+						}
+						other => other,
+					},
+				)
+			})
+			.collect(),
+		reference_sensitive: interface
+			.reference_sensitive
+			.iter()
+			.map(|(&decl, params)| {
+				(
+					decl,
+					params.iter().map(|&param| merger.param(param)).collect(),
+				)
+			})
+			.collect(),
 		function_owners: interface
 			.function_owners
 			.iter()

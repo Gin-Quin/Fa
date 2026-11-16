@@ -205,7 +205,11 @@ impl Walker<'_> {
 		if collections.is_empty() {
 			return;
 		}
-		let elements: Vec<_> = self.reference_origins(argument).into_iter().map(|place| self.canonical_reference_place(place)).collect();
+		let elements: Vec<_> = self
+			.reference_origins(argument)
+			.into_iter()
+			.map(|place| self.canonical_reference_place(place))
+			.collect();
 		let inside = !elements.is_empty()
 			&& collections.iter().all(|&collection| {
 				elements.iter().all(|&element| {

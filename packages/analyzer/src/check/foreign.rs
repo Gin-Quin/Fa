@@ -1061,35 +1061,34 @@ impl Walker<'_> {
 		let View::Access { members, .. } = syntax::view(&tree, n) else {
 			return;
 		};
-		let Some(mut place) = self.place_of(target) else {
-			return;
-		};
-		let count = members.len();
-		for (position, member) in members.iter().enumerate() {
-			let Some(next) = self.member_step(place, member) else {
-				return;
-			};
-			place = next;
-			if written && position + 1 == count {
-				return;
-			}
-			if let Some(&(_, at)) = self
-				.body
-				.flow
-				.moved_fields
-				.iter()
-				.find(|&&(other, _)| other == place)
-			{
-				let text = tree.text(n.index()).to_string();
-				let line = self.line_of(at);
-				let message = format!(
-					"`{}` was moved out on line {line}: assign it again before using `{text}`",
-					tree.text(at.index())
-				);
-				let diagnostic =
-					self.diagnostic(&crate::diagnostics::codes::advanced::MEM002, n, message);
-				self.report_flow(diagnostic);
-				return;
+		for mut place in self.places_of(target) {
+			let count = members.len();
+			for (position, member) in members.iter().enumerate() {
+				let Some(next) = self.member_step(place, member) else {
+					return;
+				};
+				place = next;
+				if written && position + 1 == count {
+					return;
+				}
+				if let Some(&(_, at)) = self
+					.body
+					.flow
+					.moved_fields
+					.iter()
+					.find(|&&(other, _)| other == place)
+				{
+					let text = tree.text(n.index()).to_string();
+					let line = self.line_of(at);
+					let message = format!(
+						"`{}` was moved out on line {line}: assign it again before using `{text}`",
+						tree.text(at.index())
+					);
+					let diagnostic =
+						self.diagnostic(&crate::diagnostics::codes::advanced::MEM002, n, message);
+					self.report_flow(diagnostic);
+					return;
+				}
 			}
 		}
 	}

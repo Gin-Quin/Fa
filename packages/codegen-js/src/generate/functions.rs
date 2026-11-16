@@ -58,41 +58,67 @@ impl Generator<'_> {
 				let indent = self.out.indentation();
 				// an escaping local function copies its captures (references.rs)
 				let saved = self.copy_captures(&info);
-				// the instances of a function that may suspend (tasks.rs)
-				for (mode, instance) in self.instance_modes(n) {
-					self.tasks.next_mode = Some(mode);
-					let parts = self.function_parts(&info, indent, false);
-					let keyword = if matches!(mode, Mode::Async { .. }) {
-						"async function"
-					} else {
-						"function"
-					};
-					let name = instance.unwrap_or_else(|| name.clone());
-					self.out
-						.line(format!("{keyword} {name}{} {{", parts.parameters));
-					self.out.append(parts.body);
-					self.out.line("}");
-				}
-				// the integer variants (`integer_variants.rs`)
-				for variant in self.integer_variants.get(&n).cloned().unwrap_or_default() {
-					let suffix = self.variant_suffix(n, &variant);
-					self.numeric_bindings = variant.into_iter().collect();
-					for (mode, instance) in self.instance_modes(n) {
-						self.tasks.next_mode = Some(mode);
-						let parts = self.function_parts(&info, indent, false);
-						let keyword = if matches!(mode, Mode::Async { .. }) {
-							"async function"
-						} else {
-							"function"
-						};
-						let name = format!("{}{suffix}", instance.unwrap_or_else(|| name.clone()));
-						self.out
-							.line(format!("{keyword} {name}{} {{", parts.parameters));
-						self.out.append(parts.body);
-						self.out.line("}");
+				let saved_references = self.reference_bindings.clone();
+				let generics = self.function_generics(n);
+				let mut numbers = vec![None];
+				numbers.extend(
+					self.integer_variants
+						.get(&n)
+						.cloned()
+						.unwrap_or_default()
+						.into_iter()
+						.map(Some),
+				);
+				for references in self.reference_variants(n) {
+					self.reference_bindings = saved_references.clone();
+					self.reference_bindings.extend(references.iter().copied());
+					let reference_suffix = self.reference_suffix(&generics, &references);
+					let mut layouts = vec![fa_analyzer::analysis::ReferenceLayout::General];
+					if let Some(layout) = self.analysis.reference_layouts.get(&n).copied() {
+						let ret = info
+							.sig
+							.map(|sig| self.types.sig(sig).ret)
+							.unwrap_or(TypeId::UNKNOWN);
+						if !self.is_object_reference(ret)
+							&& layout != fa_analyzer::analysis::ReferenceLayout::General
+						{
+							layouts.push(layout);
+						}
 					}
-					self.numeric_bindings.clear();
+					for numeric in &numbers {
+						let numeric_suffix = numeric
+							.as_ref()
+							.map(|variant| self.variant_suffix(n, variant))
+							.unwrap_or_default();
+						self.numeric_bindings =
+							numeric.clone().unwrap_or_default().into_iter().collect();
+						for &layout in &layouts {
+							self.reference_layout = layout;
+							for (mode, instance) in self.instance_modes(n) {
+								self.tasks.next_mode = Some(mode);
+								let parts = self.function_parts(&info, indent, false);
+								let keyword = if matches!(mode, Mode::Async { .. }) {
+									"async function"
+								} else {
+									"function"
+								};
+								let name = format!(
+									"{}{numeric_suffix}{reference_suffix}{}",
+									instance.unwrap_or_else(|| name.clone()),
+									Self::reference_layout_suffix(layout)
+								);
+								self.out
+									.line(format!("{keyword} {name}{} {{", parts.parameters));
+								self.out.append(parts.body);
+								self.out.line("}");
+							}
+						}
+					}
 				}
+				self.numeric_bindings.clear();
+				self.reference_bindings = saved_references;
+				self.reference_layout = fa_analyzer::analysis::ReferenceLayout::General;
+				self.emit_reference_family(n, &name);
 				if let Some((name, code)) = self.promise_api(n) {
 					self.out.line(format!("const {name} = {code};"));
 				}
@@ -185,6 +211,42 @@ impl Generator<'_> {
 		};
 		let indent = self.out.indentation();
 		let saved = self.copy_captures(&info);
+		if self
+			.analysis
+			.reference_sensitive
+			.get(&n)
+			.is_some_and(|params| !params.is_empty())
+			&& !info.generics.is_empty()
+		{
+			let base = self.temp();
+			let generics = self.function_generics(n);
+			let bindings = self.reference_bindings.clone();
+			for variant in self.reference_variants(n) {
+				self.reference_bindings = bindings.clone();
+				self.reference_bindings.extend(variant.iter().copied());
+				let suffix = self.reference_suffix(&generics, &variant);
+				let parts = self.function_parts(&info, indent, true);
+				let arrow = Self::arrow(parts, indent);
+				let value = if self.lambda_suspends(n) {
+					self.tasks.next_mode = Some(Mode::Async { coop: true });
+					let parts = self.function_parts(&info, indent, true);
+					let asynchronous = Self::arrow(parts, indent);
+					let helper = self.helper("faAsyncValue");
+					js::call(
+						helper,
+						&[arrow.text, format!("async {}", asynchronous.text)],
+					)
+				} else {
+					arrow
+				};
+				self.out
+					.line(format!("const {base}{suffix} = {};", value.text));
+			}
+			self.reference_bindings = bindings;
+			self.emit_reference_family(n, &base);
+			self.restore_captures(saved);
+			return Expr::name(base, true);
+		}
 		let parts = self.function_parts(&info, indent, true);
 		// an async lambda that may suspend: its async instance too (tasks.rs)
 		let asynchronous = self.lambda_suspends(n).then(|| {
@@ -257,6 +319,15 @@ impl Generator<'_> {
 				.is_some_and(|summary| summary.starts);
 		let (parts, temps) = self.in_function(info.lambda, |g| {
 			g.fcx.mode = mode;
+			g.fcx.reference_layout = g.reference_layout;
+			let general_reference = g.returns_reference()
+				&& !g.is_object_reference(ret)
+				&& g.reference_layout == fa_analyzer::analysis::ReferenceLayout::General;
+			if general_reference {
+				let container = g.temp();
+				let key = g.temp();
+				g.fcx.reference_result = Some((container, key, "$referenceReturn".into()));
+			}
 			// a generic function's hidden parameters first (generics.rs)
 			let mut parameters = g.declare_hidden(info.lambda);
 			let mut prologue = Writer::at(indent + 1);
@@ -281,7 +352,23 @@ impl Generator<'_> {
 					continue;
 				}
 				let name = g.declare(param.symbol);
-				g.bind_reference_parameter(info, position, &name);
+				if let Some(key) = g.bind_reference_parameter(info, position, &name) {
+					let physical = parameters.len() + 1;
+					parameters.extend([name.clone(), key.clone()]);
+					if let Some(default) = param.default {
+						let omitted = g.helper("faOmitted");
+						let (lines, pair) = g.capture_at(indent + 2, |g| g.reference_pair(default));
+						let condition = if arrow { format!("if ({name} === {omitted})") } else { format!("if (arguments.length < {physical} || {name} === {omitted})") };
+						prologue.open(condition);
+						prologue.append(lines);
+						if let Some((container, slot)) = pair {
+							prologue.line(format!("{name} = {};", container.text));
+							prologue.line(format!("{key} = {};", slot.text));
+						}
+						prologue.close("");
+					}
+					continue;
+				}
 				if param.variadic {
 					parameters.push(format!("...{name}"));
 					// the hidden arguments come after the variadic ones: taken
@@ -308,7 +395,7 @@ impl Generator<'_> {
 				});
 				let (lines, value) = g.capture_at(indent + 2, |g| {
 					if reference {
-						g.reference_cell(default)
+						g.expr(default)
 					} else {
 						g.expr(default)
 					}
@@ -401,6 +488,16 @@ impl Generator<'_> {
 				wrapped.append(indent_by_one(body));
 				drops.reverse();
 				wrapped.close(&format!("finally {{ {} }}", drops.join(" ")));
+				body = wrapped;
+			}
+			if let Some((container, key, label)) = g.fcx.reference_result.clone() {
+				let publish = g.helper("faReferenceResult");
+				let mut wrapped = Writer::at(indent + 1);
+				wrapped.line(format!("let {container}, {key};"));
+				wrapped.open(format!("{label}:"));
+				wrapped.append(indent_by_one(body));
+				wrapped.close("");
+				wrapped.line(format!("return {publish}({container}, {key});"));
 				body = wrapped;
 			}
 			FunctionParts {
@@ -526,10 +623,17 @@ impl Generator<'_> {
 				} else {
 					self.temporary_receiver(callee, receiver)
 				};
+				let function = self
+					.select_reference_call(n, callee, Expr::name(function, true))
+					.text;
 				let omitted = self.sentinel_slots(declaration, 1);
 				let (receiver, mut values) =
 					self.arguments(n, receiver, &rest, arguments, &omitted);
 				values.insert(0, receiver.text.clone());
+				self.call_arguments
+					.entry(n)
+					.or_default()
+					.insert(0, Some(receiver.text.clone()));
 				let hidden = self.hidden_arguments(declaration, n);
 				values.splice(0..0, hidden);
 				let result = self.finish_call(n, Some(declaration), function, values);
@@ -557,7 +661,13 @@ impl Generator<'_> {
 				let Some(function) = method.and_then(|member| self.external_value(member)) else {
 					return self.unsupported(n, "this method of another file");
 				};
+				let function = self.select_reference_call(n, callee, function);
 				let receiver = self.receiver(callee);
+				let receiver = if self.call_returns_reference(n) {
+					self.keep_value_part(receiver)
+				} else {
+					receiver
+				};
 				let (receiver, drop) = self.temporary_receiver(callee, receiver);
 				let rest: Vec<Argument> = info
 					.arguments
@@ -567,6 +677,10 @@ impl Generator<'_> {
 					.collect();
 				let (receiver, mut values) = self.arguments(n, receiver, &rest, arguments, &[]);
 				values.insert(0, receiver.text.clone());
+				self.call_arguments
+					.entry(n)
+					.or_default()
+					.insert(0, Some(receiver.text.clone()));
 				let hidden = self.signature_hidden_arguments(callee, n);
 				values.splice(0..0, hidden);
 				let result = self.finish_call(n, None, function.text, values);
@@ -655,6 +769,7 @@ impl Generator<'_> {
 					}
 					_ => function,
 				};
+				let function = self.select_reference_call(n, callee, function);
 				let (function, mut values) =
 					self.arguments(n, function, &info.arguments, arguments, &omitted);
 				if let Some(sources) = sources {
@@ -828,9 +943,14 @@ impl Generator<'_> {
 		let (lines, values) = self.capture(|g| {
 			g.in_order(&nodes, |g, node| {
 				if g.reference_parameter(call, node) {
-					g.reference_cell(node)
+					g.reference_argument(call, node)
 				} else {
-					g.argument(node, detached)
+					let value = g.argument(node, detached);
+					if g.is_reference_owner_argument(call, node) {
+						g.keep_value_part(value)
+					} else {
+						value
+					}
 				}
 			})
 		});
@@ -859,6 +979,13 @@ impl Generator<'_> {
 				}
 			}
 		}
+		self.call_arguments.insert(
+			call,
+			by_slot
+				.iter()
+				.map(|value| value.as_ref().map(|value| value.text.clone()))
+				.collect(),
+		);
 		// hidden arguments follow: every slot is passed (references.rs)
 		let requirements = self.requirement_arguments(call);
 		// the sources of a reactive instance follow too (reactivity.rs)
@@ -876,18 +1003,26 @@ impl Generator<'_> {
 					&& last.is_some_and(|last| index < last || every)
 			})
 			.then(|| self.helper("faOmitted"));
-		let values = by_slot
-			.into_iter()
-			.zip(&slots)
-			.enumerate()
-			.filter(|(index, _)| last.is_some_and(|last| *index <= last))
-			.map(|(_, (value, slot))| match (value, slot) {
+		let mut values = Vec::new();
+		for (index, (value, slot)) in by_slot.into_iter().zip(&slots).enumerate() {
+			if !last.is_some_and(|last| index <= last) {
+				continue;
+			}
+			let value = match (value, slot) {
 				(Some(value), _) => value.text,
 				(None, Slot::Omitted(true)) => sentinel.unwrap_or("undefined").to_string(),
-				(None, _) => "undefined".to_string(),
-			})
-			.chain(requirements)
-			.collect();
+				_ => "undefined".into(),
+			};
+			values.push(value);
+			if let Slot::Value(node) = slot {
+				if let Some(key) = self.reference_argument_keys.remove(node) {
+					values.push(key.text);
+				}
+			} else if self.reference_pair_slot(call, index, arguments.len()) {
+				values.push("undefined".into());
+			}
+		}
+		values.extend(requirements);
 		(first, values)
 	}
 

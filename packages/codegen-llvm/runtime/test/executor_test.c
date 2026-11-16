@@ -1496,6 +1496,12 @@ static void test_utf8_input(void) {
 		uint8_t copied[8] = {0};
 		fa_string_copy_block(copied, spans[index], lengths[index], STRING_COUNTED_VIEW | (index == 3 ? 2 : 1));
 		CHECK(unit_count(copied, count) == (index == 3 ? 2 : 1));
+		size_t capacity = STRING_COUNTED_VIEW | (index == 3 ? 2 : 1);
+		CHECK(fa_string_index_of(spans[index], lengths[index], capacity, copied, count, 0) == 0);
+		CHECK(fa_string_index_of(copied, count, capacity, spans[index], lengths[index], 1) == 0);
+		CHECK(fa_string_includes(spans[index], lengths[index], capacity, copied, count));
+		CHECK(fa_string_starts_with(spans[index], lengths[index], capacity, copied, count));
+		CHECK(fa_string_ends_with(spans[index], lengths[index], capacity, copied, count));
 	}
 	FaFileJob *file = fa_file_job(FILE_WRITE, pair + 2, 2, pair, 3);
 	CHECK(file->path_length == 3 && file->path[3] == 0 && file->length == 3);

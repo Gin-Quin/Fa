@@ -2895,24 +2895,6 @@ FA_EXPORT void fa_b_append_into(FaString *string) {
 	builder_simple = 0;
 }
 
-/// Whether a byte offset is a grapheme cluster boundary.
-static int is_boundary(const uint8_t *bytes, size_t length, size_t offset) {
-	size_t index = 0;
-	while (index < offset) {
-		index = next_boundary(bytes, length, index);
-	}
-	return index == offset;
-}
-
-/// The number of grapheme clusters before a boundary.
-static size_t grapheme_index(const uint8_t *bytes, size_t length, size_t offset) {
-	size_t count = 0;
-	for (size_t index = 0; index < offset; index = next_boundary(bytes, length, index)) {
-		count += 1;
-	}
-	return count;
-}
-
 static int bytes_at(const uint8_t *text, size_t text_length, size_t offset, const uint8_t *search,
                     size_t search_length) {
 	if (offset + search_length > text_length) {
@@ -2999,81 +2981,129 @@ FA_EXPORT int64_t fa_bytes_next(const uint8_t *items, int64_t offset, int64_t le
 	return (int64_t)next_byte(items, (size_t)length, (size_t)offset, (uint8_t)byte);
 }
 
-/// The byte offset of the first (or last) match of `search` whose two ends
-/// are grapheme boundaries, or -1 (`faFindMatches`).
-static int64_t find(const uint8_t *text, size_t text_length, size_t simple, const uint8_t *search,
-                    size_t search_length, int last) {
-	if (search_length > text_length) {
-		return -1;
+/// The low bit selects the low half of a four-byte code point; otherwise
+/// position/2 is the next physical byte. Copies are independent cursors.
+typedef struct {
+	const uint8_t *text;
+	size_t length;
+	size_t position;
+} UnitReader;
+
+static int32_t read_unit(UnitReader *reader) {
+	size_t offset = reader->position / 2;
+	if (offset == reader->length) { return -1; }
+	size_t next = offset;
+	uint32_t code = decode(reader->text, reader->length, &next);
+	if (code < 0x10000) { reader->position = next * 2; return (int32_t)code; }
+	code -= 0x10000;
+	if (reader->position & 1) {
+		reader->position = next * 2;
+		return (int32_t)(0xDC00 + (code & 1023));
 	}
-	if (simple && search_length > 0 && !last) {
-		// every offset is a boundary: the bytes alone decide
+	reader->position = offset * 2 + 1;
+	return (int32_t)(0xD800 + (code >> 10));
+}
+
+static int matches_units(UnitReader text, const uint8_t *search, size_t length) {
+	UnitReader needle = {search, length, 0};
+	int32_t unit;
+	while ((unit = read_unit(&needle)) >= 0) {
+		if (read_unit(&text) != unit) { return 0; }
+	}
+	return 1;
+}
+
+/// Only a low half at the start or a high half at the end can match inside
+/// a canonical pair. Every other canonical needle is self-synchronizing UTF-8.
+static int search_needs_units(const uint8_t *search, size_t length) {
+	if (span_has_edges(search, length)) { return 1; }
+	return length >= 3 &&
+	       ((search[0] == 0xED && search[1] >= 0xB0) ||
+	        (search[length - 3] == 0xED && search[length - 2] >= 0xA0 && search[length - 2] < 0xB0));
+}
+
+static __attribute__((noinline)) int64_t find_units(const uint8_t *text, size_t length,
+    const uint8_t *search, size_t search_length, int last) {
+	UnitReader candidate = {text, length, 0};
+	int64_t found = -1;
+	for (size_t index = 0;; index += 1) {
+		if (matches_units(candidate, search, search_length)) {
+			found = (int64_t)index;
+			if (!last) { return found; }
+		}
+		if (read_unit(&candidate) < 0) { return found; }
+	}
+}
+
+/// The byte offset of the first (or last) complete canonical match, or -1.
+/// Callers route needles that can cut a pair through the unit reader.
+static int64_t find_bytes(const uint8_t *text, size_t text_length, const uint8_t *search,
+                          size_t search_length, int last) {
+	if (search_length > text_length) { return -1; }
+	if (search_length == 0) { return last ? (int64_t)text_length : 0; }
+	if (!last) {
 		size_t offset = next_byte(text, text_length, 0, search[0]);
 		while (offset + search_length <= text_length) {
-			if (bytes_at(text, text_length, offset, search, search_length)) {
-				return (int64_t)offset;
-			}
+			if (bytes_at(text, text_length, offset, search, search_length)) { return (int64_t)offset; }
 			offset = next_byte(text, text_length, offset + 1, search[0]);
 		}
 		return -1;
 	}
-	if (simple && search_length > 0) {
-		// every offset is a boundary: the bytes alone decide
-		uint8_t first = search[0];
-		size_t count = text_length - search_length + 1;
-		for (size_t step = 0; step < count; step += 1) {
-			size_t offset = last ? count - 1 - step : step;
-			if (text[offset] == first &&
-			    bytes_at(text, text_length, offset, search, search_length)) {
-				return (int64_t)offset;
-			}
-		}
-		return -1;
-	}
-	int64_t found = -1;
-	Boundaries starts = {text, text_length, 0, simple};
-	Boundaries ends = {text, text_length, 0, simple};
-	for (size_t offset = 0; offset + search_length <= text_length; offset += 1) {
-		if (bytes_at(text, text_length, offset, search, search_length) &&
-		    at_boundary(&starts, offset) && at_boundary(&ends, offset + search_length)) {
-			found = (int64_t)offset;
-			if (!last) {
-				break;
-			}
+	uint8_t first = search[0];
+	size_t count = text_length - search_length + 1;
+	for (size_t step = 0; step < count; step += 1) {
+		size_t offset = count - 1 - step;
+		if (text[offset] == first && bytes_at(text, text_length, offset, search, search_length)) {
+			return (int64_t)offset;
 		}
 	}
-	return found;
+	return -1;
 }
 
 FA_EXPORT int32_t fa_string_includes(const uint8_t *text, size_t text_length, size_t capacity,
                                      const uint8_t *search, size_t search_length) {
-	return find(text, text_length, capacity & SIMPLE, search, search_length, 0) >= 0;
+	if (!(capacity & SIMPLE) && search_needs_units(search, search_length)) {
+		return find_units(text, text_length, search, search_length, 0) >= 0;
+	}
+	return find_bytes(text, text_length, search, search_length, 0) >= 0;
 }
 
 FA_EXPORT int32_t fa_string_starts_with(const uint8_t *text, size_t text_length, size_t capacity,
                                         const uint8_t *search, size_t search_length) {
-	return bytes_at(text, text_length, 0, search, search_length) &&
-	       ((capacity & SIMPLE) || is_boundary(text, text_length, search_length));
+	if (!(capacity & SIMPLE) && search_needs_units(search, search_length)) {
+		return matches_units((UnitReader){text, text_length, 0}, search, search_length);
+	}
+	return bytes_at(text, text_length, 0, search, search_length);
 }
 
 FA_EXPORT int32_t fa_string_ends_with(const uint8_t *text, size_t text_length, size_t capacity,
                                       const uint8_t *search, size_t search_length) {
+	if (!(capacity & SIMPLE) && search_needs_units(search, search_length)) {
+		size_t count = fa_string_length(text, text_length, capacity);
+		size_t needed = unit_count(search, search_length);
+		if (needed > count) { return 0; }
+		UnitReader tail = {text, text_length, 0};
+		for (size_t index = needed; index < count; index += 1) { (void)read_unit(&tail); }
+		return matches_units(tail, search, search_length);
+	}
 	return search_length <= text_length &&
-	       bytes_at(text, text_length, text_length - search_length, search, search_length) &&
-	       ((capacity & SIMPLE) || is_boundary(text, text_length, text_length - search_length));
+	       bytes_at(text, text_length, text_length - search_length, search, search_length);
 }
 
-/// `indexOf` (`last` 0) and `lastIndexOf` (1): the grapheme position of the
+/// `indexOf` (`last` 0) and `lastIndexOf` (1): the UTF-16 position of the
 /// match, or -1 for `none`.
 static __attribute__((noinline)) int64_t string_index_of(const uint8_t *text, size_t text_length,
                                                           size_t capacity, const uint8_t *search,
                                                           size_t search_length, int32_t last) {
 	size_t simple = capacity & SIMPLE;
-	int64_t offset = find(text, text_length, simple, search, search_length, last);
+	if (!simple && search_needs_units(search, search_length)) {
+		return find_units(text, text_length, search, search_length, last);
+	}
+	int64_t offset = find_bytes(text, text_length, search, search_length, last);
 	if (offset < 0 || simple) {
 		return offset;
 	}
-	return (int64_t)grapheme_index(text, text_length, (size_t)offset);
+	return unit_count(text, (size_t)offset);
 }
 
 FA_EXPORT int64_t fa_string_index_of(const uint8_t *text, size_t text_length, size_t capacity,

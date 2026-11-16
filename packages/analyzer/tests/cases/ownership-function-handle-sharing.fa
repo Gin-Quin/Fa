@@ -1,0 +1,40 @@
+-- prints: 7 3
+-- prints: 3 99
+-- prints: 13 27
+-- prints: 3
+
+type Reader = () => Integer
+type Failure = Errors { Stopped }
+type CheckedReader = () => Integer throws Failure
+
+function make = (seed: Integer): Reader => {
+	let items = [seed]
+	() => items.length + seed - 1
+}
+
+function duplicate = (read: Reader): Reader => copy read
+function checked = (read: Reader): CheckedReader => read
+function pipeline = (read: Reader, offset: Integer): Reader =>
+	read then ((value: Integer) => value + offset)
+
+mutable first = make(3)
+let second = duplicate(first)
+first = make(7) -- releases the first handle; `second` keeps its environment
+console.log(first(), second())
+
+mutable guarded = checked(second)
+let retained = copy guarded
+guarded = () => 99 -- the adapter's other handle stays alive
+console.log(try retained(), try guarded())
+
+mutable chain = pipeline(second, 10)
+let saved = copy chain
+chain = pipeline(first, 20)
+console.log(saved(), chain())
+
+do {
+	let local = copy second
+	let handles = (copy local, copy local)
+	if handles[0]() == 3 { throw Failure.Stopped }
+} catch _error => {}
+console.log(second())

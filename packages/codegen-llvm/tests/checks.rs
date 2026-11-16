@@ -80,6 +80,38 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn copying_an_owned_function_handle_only_retains_its_environment() {
+		let source =
+			include_str!("../../analyzer/tests/cases/ownership-function-handle-sharing.fa");
+		for (name, target) in [
+			("environment-sharing-native", Target::Native),
+			("environment-sharing-wasm", Target::Wasm),
+		] {
+			let ir = ir_at_target(name, source, true, OptLevel::O0, target);
+			let retain = function(&ir, "fa.retain_environment");
+			assert!(!retain.contains("@fa_alloc("), "{retain}");
+			assert!(!retain.contains("@fa.copy"), "{retain}");
+			assert_eq!(
+				retain.contains("atomicrmw add"),
+				target != Target::Wasm,
+				"{retain}"
+			);
+			let drop = function(&ir, "fa.environment.drop");
+			assert_eq!(
+				drop.contains("atomicrmw sub"),
+				target != Target::Wasm,
+				"{drop}"
+			);
+			assert!(drop.contains("last_owner"), "{drop}");
+			assert!(ir.contains("fa.adapt_errors.drop."), "{ir}");
+			assert!(ir.contains("fa.compose.drop."), "{ir}");
+			assert!(!ir.contains("fa.copy_environment"), "{ir}");
+			assert!(!ir.contains("fa.adapt_errors.copy."), "{ir}");
+			assert!(!ir.contains("fa.compose.copy."), "{ir}");
+		}
+	}
+
+	#[test]
 	fn sorting_stages_only_a_comparator_whose_type_can_throw() {
 		for (body, staged) in [
 			("items.sortInPlace((a, b) => a - b)", false),

@@ -1088,13 +1088,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		size
 	}
 
-	/// `{ ptr drop, ptr copy }`: the start of every closure environment.
-	pub(crate) fn environment_header(&self) -> inkwell::types::StructType<'ctx> {
-		let pointer = self.pointer_type();
-		self.context
-			.struct_type(&[pointer.into(), pointer.into()], false)
-	}
-
 	/// `fa.drop_box(ptr)`, defined last ([`Lowering::define_box_functions`]).
 	pub(crate) fn box_drop_function(&self) -> FunctionValue<'ctx> {
 		self.module.get_function("fa.drop_box").unwrap_or_else(|| {

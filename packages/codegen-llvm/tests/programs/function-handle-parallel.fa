@@ -1,0 +1,20 @@
+-- skip-target: wasm
+-- Parallel loops require native threads; WebAssembly has no threaded target.
+-- prints: 6000
+
+use { AtomicInteger } = std.concurrency
+type Reader = () => Integer
+
+function make = (seed: Integer): Reader => {
+	let items = [seed]
+	() => items.length + seed - 1
+}
+
+let read = make(3)
+mutable total = AtomicInteger { value = 0 }
+for parallel(threads = 4) _index in 0..1000 {
+	let first = copy read
+	let second = copy first
+	total.add(first() + second())
+}
+console.log(total.load())

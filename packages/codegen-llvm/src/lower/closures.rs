@@ -3,8 +3,8 @@
 //! A function value is a pair `{ ptr function, ptr environment }`. A lambda
 //! is an `internal fastcc` function whose first parameter is its
 //! environment: a block holding a copy of the locals of the enclosing
-//! functions it reads, made when the lambda is evaluated, after the drop
-//! and the copy of the environment (the function value owns it). A function
+//! functions it reads, made when the lambda is evaluated, after the common
+//! lifetime header. Owning handles share this immutable environment. A function
 //! declaration used as a value goes through a thunk that ignores the
 //! environment. Calling a function value is an indirect call, with the
 //! signature of the value's own type.
@@ -17,6 +17,7 @@ use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FunctionTy
 use inkwell::values::{BasicMetadataValueEnum, FunctionValue, PointerValue};
 
 use crate::error::Error;
+use crate::lower::environments::ENVIRONMENT_FIELDS;
 use crate::lower::values::{Repr, Val};
 use crate::lower::{FAST_CALLING_CONVENTION, Lowering, Slot};
 
@@ -51,29 +52,27 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		captures
 	}
 
-	/// The struct of an environment: its drop and its copy, then the
-	/// captured values (or pointers to them).
+	/// The common lifetime header, then captured values (or pointers to them).
 	fn environment_type(
 		&self,
 		captures: &[SymbolId],
 		by_reference: bool,
 	) -> Result<StructType<'ctx>, Error> {
-		let mut fields: Vec<BasicTypeEnum<'ctx>> =
-			vec![self.pointer_type().into(), self.pointer_type().into()];
+		let mut fields: Vec<BasicTypeEnum<'ctx>> = Vec::new();
 		if by_reference {
 			fields.extend(
 				captures
 					.iter()
 					.map(|_| BasicTypeEnum::from(self.pointer_type())),
 			);
-			return Ok(self.context.struct_type(&fields, false));
+			return Ok(self.environment_layout(&fields));
 		}
 		for &symbol in captures {
 			let data = self.analysis.symbols.symbol(symbol);
 			let repr = self.repr_of(data.ty, data.decl_node.index())?;
 			fields.push(self.llvm_type(repr));
 		}
-		Ok(self.context.struct_type(&fields, false))
+		Ok(self.environment_layout(&fields))
 	}
 
 	/// Loads the captured values of a lambda from its environment into slots
@@ -89,9 +88,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		for (index, &symbol) in captures.iter().enumerate() {
 			let data = self.analysis.symbols.symbol(symbol);
 			let repr = self.repr_of(data.ty, data.decl_node.index())?;
-			let pointer =
-				self.builder
-					.build_struct_gep(structure, environment, index as u32 + 2, "")?;
+			let pointer = self.builder.build_struct_gep(
+				structure,
+				environment,
+				index as u32 + ENVIRONMENT_FIELDS,
+				"",
+			)?;
 			if by_reference {
 				// the variable itself
 				let pointer = self
@@ -221,18 +223,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let structure = self.environment_type(captures, true)?;
 			let pointer = self.alloca_type(structure.into(), "environment")?;
 			let (drop, copy) = self.shared_environment_functions();
-			for (index, function) in [drop, copy].into_iter().enumerate() {
-				let field = self
-					.builder
-					.build_struct_gep(structure, pointer, index as u32, "")?;
-				self.builder
-					.build_store(field, function.as_global_value().as_pointer_value())?;
-			}
+			self.initialize_environment(pointer, drop, copy, false)?;
 			for (index, &symbol) in captures.iter().enumerate() {
 				let slot = self.slot_of(symbol, node)?;
-				let field =
-					self.builder
-						.build_struct_gep(structure, pointer, index as u32 + 2, "")?;
+				let field = self.builder.build_struct_gep(
+					structure,
+					pointer,
+					index as u32 + ENVIRONMENT_FIELDS,
+					"",
+				)?;
 				self.builder.build_store(field, slot.pointer)?;
 			}
 			pointer
@@ -240,21 +239,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let structure = self.environment_type(captures, false)?;
 			let pointer = self.allocate(structure.size_of().expect("a sized environment"))?;
 			let (drop, copy) = self.environment_functions(structure, captures)?;
-			for (index, function) in [drop, copy].into_iter().enumerate() {
-				let field = self
-					.builder
-					.build_struct_gep(structure, pointer, index as u32, "")?;
-				self.builder
-					.build_store(field, function.as_global_value().as_pointer_value())?;
-			}
+			self.initialize_environment(pointer, drop, copy, true)?;
 			for (index, &symbol) in captures.iter().enumerate() {
 				let slot = self.slot_of(symbol, node)?;
 				let loaded = self.load(slot)?;
 				// the environment holds copies
 				let loaded = self.emit_copy(loaded)?;
-				let field =
-					self.builder
-						.build_struct_gep(structure, pointer, index as u32 + 2, "")?;
+				let field = self.builder.build_struct_gep(
+					structure,
+					pointer,
+					index as u32 + ENVIRONMENT_FIELDS,
+					"",
+				)?;
 				self.builder
 					.build_store(field, loaded.value.expect("a value"))?;
 			}
@@ -298,7 +294,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		(drop, copy)
 	}
 
-	/// The drop and the copy of an environment of this layout.
+	/// The final release drops the captured values; handle copies share them.
 	fn environment_functions(
 		&self,
 		structure: StructType<'ctx>,
@@ -309,81 +305,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let data = self.analysis.symbols.symbol(symbol);
 			reprs.push(self.repr_of(data.ty, data.decl_node.index())?);
 		}
-		let pointer = self.pointer_type();
-		let size = structure.size_of().expect("a sized environment");
-		let align = self.usize.const_int(16, false);
-
-		let drop = self.module.add_function(
-			"fa.drop_environment",
-			self.context.void_type().fn_type(&[pointer.into()], false),
-			Some(Linkage::Internal),
-		);
-		self.runtime.add_attributes(drop, &["nounwind"]);
-		let builder = self.context.create_builder();
-		builder.position_at_end(self.context.append_basic_block(drop, "entry"));
-		let environment = drop
-			.get_nth_param(0)
-			.expect("an environment")
-			.into_pointer_value();
-		for (index, repr) in reprs.iter().enumerate().rev() {
-			if self.needs_drop(*repr) {
-				let field =
-					builder.build_struct_gep(structure, environment, index as u32 + 2, "")?;
-				let loaded = builder.build_load(self.llvm_type(*repr), field, "")?;
-				builder.build_call(self.drop_function(*repr)?, &[loaded.into()], "")?;
-			}
-		}
-		let size_value = builder.build_int_cast(size, self.usize, "")?;
-		builder.build_call(
-			self.runtime.free()?,
-			&[environment.into(), size_value.into(), align.into()],
-			"",
-		)?;
-		builder.build_return(None)?;
-
-		let copy = self.module.add_function(
-			"fa.copy_environment",
-			pointer.fn_type(&[pointer.into()], false),
-			Some(Linkage::Internal),
-		);
-		self.runtime.add_attributes(copy, &["nounwind"]);
-		builder.position_at_end(self.context.append_basic_block(copy, "entry"));
-		let environment = copy
-			.get_nth_param(0)
-			.expect("an environment")
-			.into_pointer_value();
-		let size_value = builder.build_int_cast(size, self.usize, "")?;
-		let copied = builder
-			.build_call(
-				self.runtime.alloc()?,
-				&[size_value.into(), align.into()],
-				"",
-			)?
-			.try_as_basic_value()
-			.basic()
-			.expect("an environment")
-			.into_pointer_value();
-		for index in 0..2 {
-			let from = builder.build_struct_gep(structure, environment, index, "")?;
-			let to = builder.build_struct_gep(structure, copied, index, "")?;
-			let loaded = builder.build_load(pointer, from, "")?;
-			builder.build_store(to, loaded)?;
-		}
-		for (index, repr) in reprs.iter().enumerate() {
-			let from = builder.build_struct_gep(structure, environment, index as u32 + 2, "")?;
-			let to = builder.build_struct_gep(structure, copied, index as u32 + 2, "")?;
-			let mut loaded = builder.build_load(self.llvm_type(*repr), from, "")?;
-			if self.needs_drop(*repr) {
-				loaded = builder
-					.build_call(self.copy_function(*repr)?, &[loaded.into()], "")?
-					.try_as_basic_value()
-					.basic()
-					.expect("a copy");
-			}
-			builder.build_store(to, loaded)?;
-		}
-		builder.build_return(Some(&copied))?;
-		Ok((drop, copy))
+		self.owned_environment_functions("fa.environment.drop", structure, &reprs)
 	}
 
 	fn make_closure(
@@ -619,14 +541,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Some(raw) = value.value else {
 			return Ok(retagged);
 		};
-		let pointer = self.pointer_type();
 		let closure_type = self.closure_type();
-		let environment_type = self.context.struct_type(
-			&[pointer.into(), pointer.into(), closure_type.into()],
-			false,
-		);
+		let environment_type = self.environment_layout(&[closure_type.into()]);
 		let size = environment_type.size_of().expect("a sized environment");
-		let align = self.usize.const_int(16, false);
 		let key = format!("{from:?}.{to:?}");
 		// only the value of an `async` function type may be a tagged table
 		let is_async = matches!(
@@ -638,20 +555,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let (drop, copy) = self.adapter_environment_functions(&key, from, environment_type)?;
 		// the environment: its drop, its copy, a copy of the value
 		let environment = self.allocate(size)?;
-		for (index, function) in [drop, copy].into_iter().enumerate() {
-			let field =
-				self.builder
-					.build_struct_gep(environment_type, environment, index as u32, "")?;
-			self.builder
-				.build_store(field, function.as_global_value().as_pointer_value())?;
-		}
+		self.initialize_environment(environment, drop, copy, true)?;
 		let copied = self.emit_copy(Val::new(Repr::Function(from), raw))?;
-		let field = self
-			.builder
-			.build_struct_gep(environment_type, environment, 2, "")?;
+		let field =
+			self.builder
+				.build_struct_gep(environment_type, environment, ENVIRONMENT_FIELDS, "")?;
 		self.builder
 			.build_store(field, copied.value.expect("a closure"))?;
-		let _ = align;
 		let pair = self.builder.build_insert_value(
 			closure_type.get_undef(),
 			adapter.as_global_value().as_pointer_value(),
@@ -694,7 +604,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.get_nth_param(0)
 			.expect("an environment")
 			.into_pointer_value();
-		let field = builder.build_struct_gep(environment_type, environment, 2, "")?;
+		let field =
+			builder.build_struct_gep(environment_type, environment, ENVIRONMENT_FIELDS, "")?;
 		let closure = builder
 			.build_load(self.closure_type(), field, "")?
 			.into_struct_value();
@@ -768,88 +679,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(function)
 	}
 
-	/// The drop and the copy of the environment of an adapter: the closure
-	/// it holds, dropped or copied.
+	/// The adapter owns one handle; copying the adapter retains its environment.
 	fn adapter_environment_functions(
 		&self,
 		key: &str,
 		from: TypeId,
 		environment_type: StructType<'ctx>,
 	) -> Result<(FunctionValue<'ctx>, FunctionValue<'ctx>), Error> {
-		let drop_name = format!("fa.adapt_errors.drop.{key}");
-		let copy_name = format!("fa.adapt_errors.copy.{key}");
-		if let (Some(drop), Some(copy)) = (
-			self.module.get_function(&drop_name),
-			self.module.get_function(&copy_name),
-		) {
-			return Ok((drop, copy));
-		}
-		let pointer = self.pointer_type();
-		let closure_repr = Repr::Function(from);
-		let size = environment_type.size_of().expect("a sized environment");
-		let align = self.usize.const_int(16, false);
-		let drop = self.module.add_function(
-			&drop_name,
-			self.context.void_type().fn_type(&[pointer.into()], false),
-			Some(Linkage::Internal),
-		);
-		self.runtime.add_attributes(drop, &["nounwind"]);
-		let builder = self.context.create_builder();
-		builder.position_at_end(self.context.append_basic_block(drop, "entry"));
-		let environment = drop
-			.get_nth_param(0)
-			.expect("an environment")
-			.into_pointer_value();
-		let field = builder.build_struct_gep(environment_type, environment, 2, "")?;
-		let closure = builder.build_load(self.closure_type(), field, "")?;
-		builder.build_call(self.drop_function(closure_repr)?, &[closure.into()], "")?;
-		let size_value = builder.build_int_cast(size, self.usize, "")?;
-		builder.build_call(
-			self.runtime.free()?,
-			&[environment.into(), size_value.into(), align.into()],
-			"",
-		)?;
-		builder.build_return(None)?;
-
-		let copy = self.module.add_function(
-			&copy_name,
-			pointer.fn_type(&[pointer.into()], false),
-			Some(Linkage::Internal),
-		);
-		self.runtime.add_attributes(copy, &["nounwind"]);
-		builder.position_at_end(self.context.append_basic_block(copy, "entry"));
-		let environment = copy
-			.get_nth_param(0)
-			.expect("an environment")
-			.into_pointer_value();
-		let size_value = builder.build_int_cast(size, self.usize, "")?;
-		let copied = builder
-			.build_call(
-				self.runtime.alloc()?,
-				&[size_value.into(), align.into()],
-				"",
-			)?
-			.try_as_basic_value()
-			.basic()
-			.expect("an environment")
-			.into_pointer_value();
-		for index in 0..2 {
-			let from_field = builder.build_struct_gep(environment_type, environment, index, "")?;
-			let to_field = builder.build_struct_gep(environment_type, copied, index, "")?;
-			let loaded = builder.build_load(pointer, from_field, "")?;
-			builder.build_store(to_field, loaded)?;
-		}
-		let from_field = builder.build_struct_gep(environment_type, environment, 2, "")?;
-		let to_field = builder.build_struct_gep(environment_type, copied, 2, "")?;
-		let closure = builder.build_load(self.closure_type(), from_field, "")?;
-		let closure = builder
-			.build_call(self.copy_function(closure_repr)?, &[closure.into()], "")?
-			.try_as_basic_value()
-			.basic()
-			.expect("a copy");
-		builder.build_store(to_field, closure)?;
-		builder.build_return(Some(&copied))?;
-		Ok((drop, copy))
+		self.owned_environment_functions(
+			&format!("fa.adapt_errors.drop.{key}"),
+			environment_type,
+			&[Repr::Function(from)],
+		)
 	}
 
 	/// The IR signature of a call through a function value of type `ty`

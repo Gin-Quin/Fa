@@ -10,10 +10,9 @@
 //! results of calls) is a closure of `fa.compose.runtime.<node>`, whose
 //! environment holds each step's closure, owned (a copy, or the temporary
 //! itself): the function calls them in turn the same way, and the
-//! environment's drop and copy drop and copy the closures.
+//! environment is shared by copied handles and releases its closures once.
 
 use inkwell::builder::Builder;
-use inkwell::module::Linkage;
 use inkwell::types::{BasicTypeEnum, StructType};
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, PointerValue};
 
@@ -23,6 +22,7 @@ use fa_analyzer::syntax::View;
 use fa_analyzer::types::TypeKind;
 
 use crate::error::Error;
+use crate::lower::environments::ENVIRONMENT_FIELDS;
 use crate::lower::values::{Repr, Val};
 use crate::lower::{FAST_CALLING_CONVENTION, Lowering};
 
@@ -200,14 +200,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			values.push(value);
 		}
 		self.check_step_conventions(node, &params, &parts)?;
-		let pointer = self.pointer_type();
-		let mut fields: Vec<BasicTypeEnum<'ctx>> = vec![pointer.into(), pointer.into()];
+		let mut fields: Vec<BasicTypeEnum<'ctx>> = Vec::new();
 		fields.extend(
 			values
 				.iter()
 				.map(|_| BasicTypeEnum::from(self.closure_type())),
 		);
-		let layout = self.context.struct_type(&fields, false);
+		let layout = self.environment_layout(&fields);
 		let name = format!("fa.compose.runtime.{}", node.index());
 		let function = match self.module.get_function(&name) {
 			Some(function) => function,
@@ -222,13 +221,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let (drop, copy) = self.composition_environment_functions(node, layout, &reprs)?;
 		let size = layout.size_of().expect("a sized environment");
 		let environment = self.allocate(size)?;
-		for (index, function) in [drop, copy].into_iter().enumerate() {
-			let field = self
-				.builder
-				.build_struct_gep(layout, environment, index as u32, "")?;
-			self.builder
-				.build_store(field, function.as_global_value().as_pointer_value())?;
-		}
+		self.initialize_environment(environment, drop, copy, true)?;
 		for (index, value) in values.into_iter().enumerate() {
 			// a temporary moves into the environment, another value is copied
 			let owned = if self.unregister(value) {
@@ -236,9 +229,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			} else {
 				self.emit_copy(value)?
 			};
-			let field = self
-				.builder
-				.build_struct_gep(layout, environment, index as u32 + 2, "")?;
+			let field = self.builder.build_struct_gep(
+				layout,
+				environment,
+				index as u32 + ENVIRONMENT_FIELDS,
+				"",
+			)?;
 			self.builder
 				.build_store(field, owned.value.expect("a closure"))?;
 		}
@@ -303,91 +299,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		)
 	}
 
-	/// The drop and the copy of the environment of a runtime composition:
-	/// the closures it holds, dropped or copied.
+	/// A composition shares its immutable environment across function handles.
 	fn composition_environment_functions(
 		&self,
 		node: NodeId,
 		layout: StructType<'ctx>,
 		reprs: &[Repr],
 	) -> Result<(FunctionValue<'ctx>, FunctionValue<'ctx>), Error> {
-		let drop_name = format!("fa.compose.drop.{}", node.index());
-		let copy_name = format!("fa.compose.copy.{}", node.index());
-		if let (Some(drop), Some(copy)) = (
-			self.module.get_function(&drop_name),
-			self.module.get_function(&copy_name),
-		) {
-			return Ok((drop, copy));
-		}
-		let pointer = self.pointer_type();
-		let size = layout.size_of().expect("a sized environment");
-		let align = self.usize.const_int(16, false);
-		let drop = self.module.add_function(
-			&drop_name,
-			self.context.void_type().fn_type(&[pointer.into()], false),
-			Some(Linkage::Internal),
-		);
-		self.runtime.add_attributes(drop, &["nounwind"]);
-		let builder = self.context.create_builder();
-		builder.position_at_end(self.context.append_basic_block(drop, "entry"));
-		let environment = drop
-			.get_nth_param(0)
-			.expect("an environment")
-			.into_pointer_value();
-		for (index, repr) in reprs.iter().enumerate().rev() {
-			let field = builder.build_struct_gep(layout, environment, index as u32 + 2, "")?;
-			let closure = builder.build_load(self.closure_type(), field, "")?;
-			builder.build_call(self.drop_function(*repr)?, &[closure.into()], "")?;
-		}
-		let size_value = builder.build_int_cast(size, self.usize, "")?;
-		builder.build_call(
-			self.runtime.free()?,
-			&[environment.into(), size_value.into(), align.into()],
-			"",
-		)?;
-		builder.build_return(None)?;
-
-		let copy = self.module.add_function(
-			&copy_name,
-			pointer.fn_type(&[pointer.into()], false),
-			Some(Linkage::Internal),
-		);
-		self.runtime.add_attributes(copy, &["nounwind"]);
-		builder.position_at_end(self.context.append_basic_block(copy, "entry"));
-		let environment = copy
-			.get_nth_param(0)
-			.expect("an environment")
-			.into_pointer_value();
-		let size_value = builder.build_int_cast(size, self.usize, "")?;
-		let copied = builder
-			.build_call(
-				self.runtime.alloc()?,
-				&[size_value.into(), align.into()],
-				"",
-			)?
-			.try_as_basic_value()
-			.basic()
-			.expect("an environment")
-			.into_pointer_value();
-		for index in 0..2 {
-			let from = builder.build_struct_gep(layout, environment, index, "")?;
-			let to = builder.build_struct_gep(layout, copied, index, "")?;
-			let loaded = builder.build_load(pointer, from, "")?;
-			builder.build_store(to, loaded)?;
-		}
-		for (index, repr) in reprs.iter().enumerate() {
-			let from = builder.build_struct_gep(layout, environment, index as u32 + 2, "")?;
-			let to = builder.build_struct_gep(layout, copied, index as u32 + 2, "")?;
-			let closure = builder.build_load(self.closure_type(), from, "")?;
-			let closure = builder
-				.build_call(self.copy_function(*repr)?, &[closure.into()], "")?
-				.try_as_basic_value()
-				.basic()
-				.expect("a copy");
-			builder.build_store(to, closure)?;
-		}
-		builder.build_return(Some(&copied))?;
-		Ok((drop, copy))
+		self.owned_environment_functions(
+			&format!("fa.compose.drop.{}", node.index()),
+			layout,
+			reprs,
+		)
 	}
 
 	/// The body of a composition's function: each step called in turn, an
@@ -472,7 +395,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				),
 				Callee::Field(position, is_async) => {
 					let layout = layout.expect("the layout of the environment");
-					let field = builder.build_struct_gep(layout, environment, position + 2, "")?;
+					let field = builder.build_struct_gep(
+						layout,
+						environment,
+						position + ENVIRONMENT_FIELDS,
+						"",
+					)?;
 					let closure = builder
 						.build_load(self.closure_type(), field, "")?
 						.into_struct_value();

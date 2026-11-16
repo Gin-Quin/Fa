@@ -1,0 +1,6 @@
+-- The unchanged source outlives these split parts: they should borrow it.
+let text = "é".repeat(80) + "😀x"
+let parts = text.split("😀"[1])
+for part in parts { console.log(part.length) }
+-- prints: 81
+-- prints: 1

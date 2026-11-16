@@ -233,6 +233,15 @@ impl Walker<'_> {
 		self.access_place(target, &members[..members.len().saturating_sub(1)])
 	}
 
+	pub(crate) fn callee_receiver_places(&mut self, callee: NodeId) -> Vec<crate::ids::PlaceId> {
+		let callee = self.strip_groups(callee);
+		let View::Access { target, members } = self.view(callee) else {
+			return Vec::new();
+		};
+		let members: Vec<_> = members.iter().collect();
+		self.access_places(target, &members[..members.len().saturating_sub(1)])
+	}
+
 	/// The type of the receiver of a method call `a.b.method(…)`: `a.b`'s.
 	pub(crate) fn callee_receiver_type(&self, callee: NodeId) -> Option<TypeId> {
 		let callee = self.strip_groups(callee);

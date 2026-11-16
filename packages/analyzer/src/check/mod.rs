@@ -434,7 +434,7 @@ pub struct Walker<'s> {
 	/// The place each `use` alias and `for` variable over a collection designates.
 	pub(crate) aliases: FxHashMap<SymbolId, PlaceId>,
 	/// Borrowed call results, recorded once after that evaluation's effects.
-	pub(crate) reference_results: FxHashMap<NodeId, PlaceId>,
+	pub(crate) reference_results: FxHashMap<NodeId, Vec<PlaceId>>,
 	/// Borrowed result leaves, captured before their branch flow is joined.
 	pub(crate) reference_values: FxHashMap<NodeId, Option<Vec<PlaceId>>>,
 	/// Whole reference annotations in borrowing positions; nested storage is never allowed.
@@ -1195,11 +1195,23 @@ impl Walker<'_> {
 			// `let f: Float32 = 16_777_217`, `let p: Percentage = 50` (math.rs)
 			Err(_) if self.number_literal_sink(n, actual, target) => {}
 			Err(_) => {
-				let message = format!(
+				let mut message = format!(
 					"a `{}` is not accepted where a `{}` is expected",
 					self.display(actual),
 					self.display(target)
 				);
+				if let (TypeKind::Function(actual), TypeKind::Function(target)) =
+					(self.s.types.kind(actual), self.s.types.kind(target))
+				{
+					let (actual, target) = (self.s.types.sig(actual), self.s.types.sig(target));
+					if actual.reference != target.reference {
+						message.push_str(if target.reference.is_none() {
+							": this function returns a reference; return an owned `copy` in a wrapper, or declare the same `in owner` result in the expected type"
+						} else {
+							": the result must borrow from the same owner as the expected type; give both signatures the same `in owner` result"
+						});
+					}
+				}
 				let diagnostic = self.diagnostic(&codes::values::E_TYPE_1, n, message);
 				self.report_flow(diagnostic);
 			}
@@ -1420,7 +1432,46 @@ impl Walker<'_> {
 
 	/// Prints a type for a message.
 	pub fn display(&self, ty: TypeId) -> String {
+		if let TypeKind::Function(sig) = self.s.types.kind(ty)
+			&& (self.s.types.sig(sig).reference.is_some()
+				|| self
+					.s
+					.types
+					.params(self.s.types.sig(sig).params)
+					.iter()
+					.any(|param| param.reference.is_some()))
+		{
+			let names = self.function_type_parameter_names(ty);
+			return self.s.types.display_with_parameters(ty, &names);
+		}
 		self.s.types.display(ty)
+	}
+
+	fn function_type_parameter_names(&self, ty: TypeId) -> Vec<String> {
+		for (index, node_ty) in self.a.types.iter().enumerate() {
+			if *node_ty != ty {
+				continue;
+			}
+			let View::Lambda { signature, .. } = self.view(NodeId::new(index)) else {
+				continue;
+			};
+			return signature
+				.parameters
+				.iter()
+				.enumerate()
+				.map(|(index, node)| {
+					let node = match self.view(node) {
+						View::Assignment { target, .. } => target,
+						_ => node,
+					};
+					match self.view(node) {
+						View::Name(name) => self.tree.name(name).to_string(),
+						_ => format!("arg{}", index + 1),
+					}
+				})
+				.collect();
+		}
+		Vec::new()
 	}
 
 	/// The view of a node. It borrows the walker: to call handlers while

@@ -1607,3 +1607,17 @@ The existing awaited-task starter regression waits for explicit completion
 through cooperative yields. Elapsed sleeps cannot establish that a detached task
 has resumed under load; all starter-order and live module-value assertions stay
 unchanged.
+
+## Links second reference review fixes (2026-11-16)
+
+Lead decision: JavaScript primitive references use the pair (innermost container,
+key). A reference parameter passes the two parts as two arguments; this extra
+argument is exclusive to primitive reference parameters. A reference result
+returns one part and leaves the other in a module-level temporary, read by the
+caller immediately after the synchronous call. Async reference results remain
+forbidden. Calls through a function value use the general pair convention for
+its function type. A known function can return only the key when all paths
+locate an element of its named owner, or only the container when its key is
+static. Local references rewrite reads/writes to direct member accesses;
+object references remain the objects. No reference cells, caches or generic
+representation flags are part of this convention.

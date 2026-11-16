@@ -654,6 +654,11 @@ impl Walker<'_> {
 		let mut params = Vec::with_capacity(signature.parameters.len());
 		for (index, parameter) in signature.parameters.iter().enumerate() {
 			self.set_flag(parameter, NodeFlags::TYPE_EXPR);
+			if let View::Assignment { value: Some(_), .. } = self.view(parameter) {
+				let diagnostic = self.diagnostic(&crate::diagnostics::codes::types::FN030, parameter,
+					"a function type cannot declare a default: put the default on a named function, or pass this argument explicitly through the function value");
+				self.report(diagnostic);
+			}
 			// `(self) => String`: a method required by a structural type; the
 			// type is the method without its receiver (FieldFlags::METHOD)
 			if index == 0 && is_self_parameter(&tree, parameter) {

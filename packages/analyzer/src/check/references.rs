@@ -170,8 +170,24 @@ impl Walker<'_> {
 		};
 		if path.is_none() && self.reported_once.insert((owner, "REF008")) {
 			let text = self.tree.text(owner.index()).to_string();
+			let function = self
+				.body
+				.functions
+				.last()
+				.and_then(|cx| self.a.functions.get(&cx.node))
+				.and_then(|info| info.declaration)
+				.and_then(|declaration| self.a.symbols.symbol_of_decl(declaration))
+				.map(|symbol| {
+					self.s
+						.types
+						.syms
+						.resolve(self.a.symbols.symbol(symbol).name)
+				});
+			let context = function
+				.map(|name| format!(" of `{name}`"))
+				.unwrap_or_else(|| " of this function".into());
 			let diagnostic = self.diagnostic(&crate::diagnostics::codes::advanced::REF008, owner,
-				format!("`{text}` must name a collection or string reached from a parameter or module-level value: bind the owner in the caller, then return a reference into it"));
+				format!("`{text}` must name a collection or string reached from a parameter{context} or a module-level value: pass `{text}` as a parameter of this function, then return a reference into it"));
 			self.report(diagnostic);
 		}
 		path.map(|(path, _)| {
@@ -267,53 +283,16 @@ impl Walker<'_> {
 		}
 	}
 
-	/// All places reachable through an alias at this point. The syntactic
-	/// alias map is only a fallback for captures analyzed in a separate body.
+	/// Reference origins use the same flow places as effects and calls.
 	pub(super) fn reference_origins(&mut self, value: NodeId) -> Vec<PlaceId> {
-		let value = self.strip_groups(value);
-		if let View::Try(inner) = self.view(value) {
-			return self.reference_origins(inner);
-		}
-		if let View::Access { target, members } = self.view(value) {
-			let members: Vec<_> = members.iter().collect();
-			let mut places = self.reference_origins(target);
-			if !places.is_empty() {
-				for member in members {
-					places = places
-						.into_iter()
-						.filter_map(|place| {
-							let place = self.reference_field_target(place);
-							self.member_step(place, member)
-						})
-						.collect();
-				}
-				return places
-					.into_iter()
-					.map(|place| self.reference_field_target(place))
-					.collect();
-			}
-		}
-		if let View::Index { target, index } = self.view(value) {
-			let places = self.reference_origins(target);
-			let step = if self.type_of(self.strip_groups(index)) == TypeId::RANGE {
-				Step::All
-			} else {
-				Step::Index(self.identity_of(index))
-			};
-			return places
-				.into_iter()
-				.map(|place| self.places.child(place, step))
-				.collect();
-		}
-		if let Resolution::Local(symbol) = self.a.resolution(value)
-			&& matches!(
-				self.a.symbols.symbol(symbol).kind,
-				SymbolKind::Use | SymbolKind::MutableUse
-			) && let Some(state) = self.body.flow.ref_state(symbol)
-		{
-			return self.facts.refs.get(state).places.to_vec();
-		}
-		self.reference_place(value).into_iter().collect()
+		self.ensure_builtin_reference(value);
+		self.places_of(value)
+			.into_iter()
+			.map(|place| {
+				let place = self.reference_field_target(place);
+				self.canonical_reference_place(place)
+			})
+			.collect()
 	}
 
 	/// Validate reference results with the same owner/identity paths used by
@@ -400,8 +379,10 @@ impl Walker<'_> {
 				continue;
 			};
 			let owner = self
-				.substitute(path, &call.arguments, None, (n, "reference argument"))
-				.map(|(owner, _, _)| owner);
+				.substitute_places(path, &call.arguments, None, (n, "reference argument"))
+				.into_iter()
+				.map(|(owner, _, _)| owner)
+				.collect::<Vec<_>>();
 			if matches!(self.view(self.strip_groups(*value)), View::None) {
 				continue;
 			}
@@ -410,17 +391,24 @@ impl Walker<'_> {
 				.into_iter()
 				.map(|place| self.canonical_reference_place(place))
 				.collect();
-			if owner.is_some_and(|owner| {
-				!actual.is_empty()
-					&& actual
-						.iter()
-						.all(|&place| self.may_be_at_or_below(place, owner))
-			}) {
+			if !owner.is_empty()
+				&& owner.iter().all(|&owner| {
+					!actual.is_empty()
+						&& actual
+							.iter()
+							.all(|&place| self.may_be_at_or_below(place, owner))
+				}) {
 				continue;
 			}
-			let expected = owner
-				.map(|owner| self.place_text(owner))
-				.unwrap_or_else(|| "the owner argument (a temporary)".into());
+			let expected = if owner.is_empty() {
+				"the owner argument (a temporary)".into()
+			} else {
+				owner
+					.into_iter()
+					.map(|owner| self.place_text(owner))
+					.collect::<Vec<_>>()
+					.join(" or ")
+			};
 			let actual = actual
 				.first()
 				.map(|&place| self.place_text(place))
@@ -499,12 +487,11 @@ impl Walker<'_> {
 			let crate::analysis::Argument::Given(dependent) = arg else {
 				continue;
 			};
-			let Some((_, _, owner)) =
-				self.substitute(path, &call.arguments, None, (n, "dependent reference"))
-			else {
-				continue;
-			};
-			pairs.push((*dependent, owner));
+			for (_, _, owner) in
+				self.substitute_places(path, &call.arguments, None, (n, "dependent reference"))
+			{
+				pairs.push((*dependent, owner));
+			}
 		}
 		pairs
 	}
@@ -523,11 +510,8 @@ impl Walker<'_> {
 		let Some(call) = self.a.calls.get(&n).cloned() else {
 			return;
 		};
-		let Some((owner, _, _)) =
-			self.substitute(path, &call.arguments, Some(callee), (n, "reference result"))
-		else {
-			return;
-		};
+		let owners =
+			self.substitute_places(path, &call.arguments, Some(callee), (n, "reference result"));
 		let mut callee = self.strip_groups(callee);
 		if let View::Call { callee: inner, .. } = self.view(callee)
 			&& self.a.has_flags(callee, NodeFlags::GENERIC_APPLICATION)
@@ -558,8 +542,11 @@ impl Walker<'_> {
 		} else {
 			crate::flow::Identity::Unknown
 		};
-		let place = self.places.child(owner, Step::Index(identity));
-		self.reference_results.insert(n, place);
+		let places = owners
+			.into_iter()
+			.map(|(owner, _, _)| self.places.child(owner, Step::Index(identity)))
+			.collect();
+		self.reference_results.insert(n, places);
 	}
 
 	/// Reference parameters keep independent roots for their declared effects,
@@ -597,24 +584,26 @@ impl Walker<'_> {
 		place
 	}
 
-	/// The place a `use` designates: a place expression (through `try`).
+	/// A representative for the alias declaration's runtime type metadata.
+	/// Validity and ownership always use `reference_origins` instead.
 	pub(super) fn reference_place(&mut self, value: NodeId) -> Option<PlaceId> {
+		self.reference_origins(value).first().copied()
+	}
+
+	fn ensure_builtin_reference(&mut self, value: NodeId) {
 		let value = self.strip_groups(value);
+		if let View::Try(inner) = self.view(value) {
+			self.ensure_builtin_reference(inner);
+			return;
+		}
 		let tree = Arc::clone(&self.tree);
-		match syntax::view(&tree, value) {
-			View::Try(inner) => self.reference_place(inner),
-			View::Name(_) | View::Access { .. } | View::Index { .. } => self
-				.place_of(value)
-				.map(|place| self.reference_field_target(place)),
-			View::Call { callee, arguments } => {
-				if let Some(&place) = self.reference_results.get(&value) {
-					return Some(place);
-				}
-				let place = self.returned_reference(callee, arguments)?;
-				self.reference_results.insert(value, place);
-				Some(place)
+		if let View::Call { callee, arguments } = syntax::view(&tree, value)
+			&& !self.reference_results.contains_key(&value)
+		{
+			let places = self.returned_reference(callee, arguments);
+			if !places.is_empty() {
+				self.reference_results.insert(value, places);
 			}
-			_ => None,
 		}
 	}
 
@@ -626,15 +615,17 @@ impl Walker<'_> {
 		&mut self,
 		callee: NodeId,
 		arguments: crate::syntax::NodeList<'_>,
-	) -> Option<PlaceId> {
+	) -> Vec<PlaceId> {
 		let callee = self.strip_groups(callee);
 		let View::Access { target, members } = self.view(callee) else {
-			return None;
+			return Vec::new();
 		};
 		let members: Vec<NodeId> = members.iter().collect();
-		let member = *members.last()?;
+		let Some(&member) = members.last() else {
+			return Vec::new();
+		};
 		let Resolution::Builtin(builtin) = self.a.resolution(member) else {
-			return None;
+			return Vec::new();
 		};
 		let path = crate::builtins::get(builtin).path;
 		let method = path.rsplit('#').next().unwrap_or(path);
@@ -650,11 +641,13 @@ impl Walker<'_> {
 				self.body.flow.time += 1;
 				crate::flow::Identity::Fresh(self.body.flow.time)
 			}
-			_ => return None,
+			_ => return Vec::new(),
 		};
 		// the collection: the target and the members before the method
-		let collection = self.access_place(target, &members[..members.len() - 1])?;
-		Some(self.places.child(collection, Step::Index(identity)))
+		self.access_places(target, &members[..members.len() - 1])
+			.into_iter()
+			.map(|collection| self.places.child(collection, Step::Index(identity)))
+			.collect()
 	}
 
 	/// `REF004`: `use`/`reuse` of something that is not a place.
@@ -802,7 +795,6 @@ impl Walker<'_> {
 				let diagnostic = self.diagnostic(&REF006, value, message);
 				self.report_flow(diagnostic);
 			}
-			self.aliases.insert(symbol, place);
 		}
 		if self.body.flow.reachable {
 			let place = place.or_else(|| self.aliases.get(&symbol).copied());

@@ -510,3 +510,21 @@ fn ranged_values_keep_their_type() {
 	assert_eq!(symbol_type(&session, file, "c"), "Integer<min = 0>");
 	assert_eq!(symbol_type(&session, file, "e"), "Integer<min = 0>");
 }
+
+#[test]
+fn function_types_reject_defaults_at_the_parameter() {
+	for source in [
+		"type F = (x: Integer = 1) => Integer",
+		"function apply = (f: <T>(x: T, y: T = x) => T) => 0",
+	] {
+		let (session, file) = analyze_source(source);
+		let errors: Vec<_> = session
+			.diagnostics(file)
+			.iter()
+			.filter(|diagnostic| diagnostic.severity == crate::Severity::Error)
+			.collect();
+		assert_eq!(errors.len(), 1, "{errors:?}");
+		assert_eq!(errors[0].code.id, "FN030");
+		assert!(errors[0].message.contains("pass this argument explicitly"));
+	}
+}

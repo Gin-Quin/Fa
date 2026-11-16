@@ -1973,9 +1973,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if let Some(value) = self.pending_receiver.take() {
 			return Ok(value);
 		}
-		let View::Call { callee, .. } = self.view(call) else {
+		let View::Call { mut callee, .. } = self.view(call) else {
 			return Err(self.unsupported(call.index(), "this method call"));
 		};
+		while let View::Group(inner) = self.view(callee) {
+			callee = inner;
+		}
 		let View::Access { target, members } = self.view(callee) else {
 			return Err(self.unsupported(call.index(), "this method call"));
 		};

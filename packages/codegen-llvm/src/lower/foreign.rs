@@ -556,24 +556,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						return Ok(text);
 					}
 					let (bytes, length) = self.string_parts(text)?;
-					let size =
-						self.builder
-							.build_int_add(length, self.usize.const_int(1, false), "")?;
+					let capacity = self.string_capacity(text)?;
+					let encoded = self
+						.call_value(
+							self.runtime.function("fa_string_encoded_length")?,
+							&[bytes.into(), length.into(), capacity.into()],
+						)?
+						.into_int_value();
+					let size = self
+						.call_value(
+							self.runtime.function("fa_string_size")?,
+							&[encoded.into(), self.usize.const_int(1, false).into()],
+						)?
+						.into_int_value();
 					let block = self.allocate(size)?;
 					self.call_runtime(
 						"fa_string_write_utf8",
-						&[
-							block.into(),
-							bytes.into(),
-							length.into(),
-							self.string_capacity(text)?.into(),
-						],
+						&[block.into(), bytes.into(), length.into(), capacity.into()],
 					)?;
 					let end = unsafe {
 						self.builder.build_in_bounds_gep(
 							self.context.i8_type(),
 							block,
-							&[length],
+							&[encoded],
 							"",
 						)?
 					};

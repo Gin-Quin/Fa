@@ -1165,8 +1165,8 @@ function measure = (items: Array<String>): Integer => {
 console.log(measure(["é😀".repeat(100)]))
 "#,
 		);
-		// A cached query may update the heap prefix, but cannot change the
-		// three words of the item. The subsequent byte length reuses them.
+		// An owned length query reads its fixed byte/unit base without changing
+		// the item's three words. The subsequent byte length reuses them.
 		let body = function(&ir, "main");
 		let call = body.find("@string_length_slow(").expect("a cached query");
 		let after = body[call..]
@@ -1177,6 +1177,34 @@ console.log(measure(["é😀".repeat(100)]))
 			after.into_iter().all(|line| !line.contains(" = load ")),
 			"{body}"
 		);
+	}
+
+	#[test]
+	fn utf8_iteration_encodes_with_bounded_scratch_without_bytes_allocation() {
+		let source = r#"
+function sum = (text: String): Integer => {
+	mutable total = 0
+	for byte in text.toUtf8() { total += byte }
+	total
+}
+console.log(sum("é😀"))
+"#;
+		for target in [Target::Native, Target::Wasm] {
+			let ir = ir_at_target(
+				&format!("utf8-cursor-{}", target.name()),
+				source,
+				true,
+				OptLevel::O0,
+				target,
+			);
+			assert!(ir.contains("@fa_next_utf8_byte("), "{ir}");
+			assert!(!ir.contains("@fa_array_new"), "{ir}");
+			let word = if target == Target::Wasm { "i32" } else { "i64" };
+			assert!(
+				ir.contains(&format!("alloca {{ {word}, i32, i32 }}")),
+				"{ir}"
+			);
+		}
 	}
 
 	#[test]

@@ -315,6 +315,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.basic()
 			.expect("a count")
 			.into_int_value();
+		let physical = length;
+		let length = b
+			.build_call(
+				self.runtime.function("fa_string_encoded_length")?,
+				&[bytes.into(), physical.into(), capacity.into()],
+				"",
+			)?
+			.try_as_basic_value()
+			.basic()
+			.expect("an encoded length")
+			.into_int_value();
 		let simple = b.build_and(capacity, self.simple_flag(), "")?;
 		let is_simple =
 			b.build_int_compare(IntPredicate::NE, simple, self.usize.const_zero(), "")?;
@@ -388,7 +399,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.basic()
 			.expect("text bytes")
 			.into_pointer_value();
-		b.build_memcpy(target, 1, bytes, 1, length)?;
+		b.build_call(
+			self.runtime.function("fa_string_copy_block")?,
+			&[
+				target.into(),
+				bytes.into(),
+				physical.into(),
+				capacity.into(),
+			],
+			"",
+		)?;
 		if !copy {
 			self.call_drop(b, Repr::Str, value)?;
 		}

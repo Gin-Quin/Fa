@@ -328,6 +328,14 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_copy_bytes(
 	if (high) { encode_point(out + written + end - start, high_unit); }
 }
 
+/// Compiler block copies retain their memcpy form on canonical/ASCII paths.
+FA_EXPORT __attribute__((always_inline)) void fa_string_copy_block(
+    uint8_t *out, const uint8_t *bytes, size_t length, size_t capacity) {
+	if (!(capacity & SIMPLE) && span_has_edges(bytes, length)) {
+		fa_string_copy_bytes(out, bytes, length, capacity);
+	} else { __builtin_memcpy(out, bytes, length); }
+}
+
 /// A borrowed reader can visit at most three canonical pieces. The tiny
 /// synthetic halves live only for the callback; the middle is never copied.
 static __attribute__((noinline)) void string_span_parts(const uint8_t *bytes, size_t length,
@@ -1908,17 +1916,19 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_assign_local(const FaStr
 		if (drop_destination) { fa_string_free(destination.bytes, destination.capacity); }
 		return;
 	}
-	size_t units = previous.capacity & SIMPLE ? physical : fa_string_length(bytes, physical, previous.capacity);
+	size_t units = 0;
+	if (!(previous.capacity & SIMPLE)) { units = fa_string_length(bytes, physical, previous.capacity); }
 	FaString result;
 	uint8_t *target = fa_string_allocate_local(length, previous.capacity & STRING_FLAGS,
 	                                         buffer, &result, mutable);
+	size_t result_capacity = result.capacity;
 	if ((previous.capacity & SIMPLE) || !span_has_edges(bytes, physical)) {
 		__builtin_memmove(target, bytes, physical);
 	} else { fa_string_copy_bytes(target, bytes, physical, previous.capacity); }
-	fa_string_set_unit_count(string_bytes(&result), string_length(&result), result.capacity, units);
+	if (!(previous.capacity & SIMPLE)) { fa_string_set_unit_count(target, length, result_capacity, units); }
 	if (owned) { fa_string_free(previous.bytes, previous.capacity); }
 	if (drop_destination) { fa_string_free(destination.bytes, destination.capacity); }
-	if ((result.capacity & STRING_INLINE) && (previous.capacity & STRING_SURROGATES)) { fa_string_finish(&result); }
+	if ((previous.capacity & STRING_SURROGATES) && (result.capacity & STRING_INLINE)) { fa_string_finish(&result); }
 	*out = result;
 }
 
@@ -2699,6 +2709,28 @@ static size_t encode_point(uint8_t *out, uint32_t code) {
 	out[2] = (uint8_t)(0x80 | ((code >> 6) & 63));
 	out[3] = (uint8_t)(0x80 | (code & 63));
 	return 4;
+}
+
+typedef struct {
+	size_t position;
+	uint32_t pending;
+	uint32_t remaining;
+} FaUtf8Cursor;
+
+/// Four bytes of bounded cursor state encode one code point at a time.
+/// The lowering retains a direct byte loop when the ASCII flag is set.
+FA_EXPORT uint8_t fa_next_utf8_byte(const uint8_t *bytes, size_t length, FaUtf8Cursor *cursor) {
+	if (!cursor->remaining) {
+		uint32_t code = decode(bytes, length, &cursor->position);
+		if (code >= 0xD800 && code <= 0xDFFF) { code = 0xFFFD; }
+		uint8_t encoded[4] = {0};
+		cursor->remaining = (uint32_t)encode_point(encoded, code);
+		__builtin_memcpy(&cursor->pending, encoded, sizeof encoded);
+	}
+	uint8_t byte = (uint8_t)cursor->pending;
+	cursor->pending >>= 8;
+	cursor->remaining -= 1;
+	return byte;
 }
 
 /// Normalize a writable byte sequence, including joins across builder parts.
@@ -11201,15 +11233,17 @@ FA_EXPORT FaFileJob *fa_file_job(int32_t kind, const uint8_t *path, size_t lengt
 	file->job.run = file_job_run;
 	file->job.release = file_job_release;
 	file->kind = kind;
-	file->path = fa_alloc(length + 1, 1);
+	size_t path_length = fa_string_encoded_length(path, length, 0);
+	file->path = fa_alloc(fa_string_size(path_length, 1), 1);
 	fa_string_write_utf8((uint8_t *)file->path, path, length, 0);
-	file->path[length] = 0;
-	file->path_length = length;
+	file->path[path_length] = 0;
+	file->path_length = path_length;
 	if (kind == FILE_WRITE && byte_count > 0) {
-		file->bytes = fa_alloc(byte_count, 16);
+		size_t encoded = fa_string_encoded_length(bytes, byte_count, 0);
+		file->bytes = fa_alloc(encoded, 16);
 		fa_string_write_utf8(file->bytes, bytes, byte_count, 0);
-		file->length = byte_count;
-		file->room = byte_count;
+		file->length = encoded;
+		file->room = encoded;
 	}
 	return file;
 }

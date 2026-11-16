@@ -1006,6 +1006,30 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.usize.const_zero(),
 			"",
 		)?;
+		let utf8_cursor = if bytes_only {
+			let ty = self.context.struct_type(
+				&[
+					self.usize.into(),
+					self.context.i32_type().into(),
+					self.context.i32_type().into(),
+				],
+				false,
+			);
+			let cursor = self.alloca_type(ty.into(), "utf8_cursor")?;
+			self.builder.build_store(cursor, ty.const_zero())?;
+			Some(cursor)
+		} else {
+			None
+		};
+		let iteration_length = if bytes_only {
+			self.call_value(
+				self.runtime.function("fa_string_encoded_length")?,
+				&[bytes.into(), length.into(), capacity.into()],
+			)?
+			.into_int_value()
+		} else {
+			length
+		};
 		let i64 = self.context.i64_type();
 		let index_slot = match has_index
 			.then(|| self.analysis.symbols.symbol_of_decl(node))
@@ -1035,14 +1059,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.position_at_end(test);
 		let start = self.load(offset)?.int();
 		let start = self.int_to(start, IntRepr::I64, usize_repr)?;
-		let more = self
-			.builder
-			.build_int_compare(IntPredicate::ULT, start, length, "")?;
+		let more =
+			self.builder
+				.build_int_compare(IntPredicate::ULT, start, iteration_length, "")?;
 		self.builder
 			.build_conditional_branch(more, body_block, exit)?;
 		self.builder.position_at_end(body_block);
 		let (code, code_repr) = if bytes_only {
-			// the byte at the offset
+			let ascii = self.append_block("utf8_ascii");
+			let encode = self.append_block("utf8_encode");
+			let ready = self.append_block("utf8_byte");
+			self.builder
+				.build_conditional_branch(simple, ascii, encode)?;
+			self.builder.position_at_end(ascii);
+			// ASCII preserves the original direct byte loop.
 			let address = unsafe {
 				self.builder
 					.build_in_bounds_gep(self.context.i8_type(), bytes, &[start], "")?
@@ -1051,6 +1081,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.builder
 				.build_load(self.context.i8_type(), address, "byte")?
 				.into_int_value();
+			self.builder.build_unconditional_branch(ready)?;
+			self.builder.position_at_end(encode);
+			let encoded = self
+				.call_value(
+					self.runtime.function("fa_next_utf8_byte")?,
+					&[
+						bytes.into(),
+						length.into(),
+						utf8_cursor.expect("a byte cursor").into(),
+					],
+				)?
+				.into_int_value();
+			let encode_end = self.builder.get_insert_block().expect("the encoder");
+			self.builder.build_unconditional_branch(ready)?;
+			self.builder.position_at_end(ready);
+			let read = self
+				.builder
+				.build_phi(self.context.i8_type(), "encoded_byte")?;
+			read.add_incoming(&[(&byte, ascii), (&encoded, encode_end)]);
+			let byte = read.as_basic_value().into_int_value();
 			let wide = self.int_to(start, usize_repr, IntRepr::I64)?;
 			let after = self
 				.builder

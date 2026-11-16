@@ -643,9 +643,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// The receiver of a method call (`pair` in `pair.swap()`, `a.b` in
 	/// `a.b.c()`).
 	fn method_receiver(&self, call: NodeId) -> Option<NodeId> {
-		let View::Call { callee, .. } = self.view(call) else {
+		let View::Call { mut callee, .. } = self.view(call) else {
 			return None;
 		};
+		while let View::Group(inner) = self.view(callee) {
+			callee = inner;
+		}
 		let View::Access { target, members } = self.view(callee) else {
 			return None;
 		};
@@ -1766,10 +1769,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					bits: 8,
 					signed: false,
 				});
-				let count = self.byte_length(receiver)?;
+				let capacity = self.string_capacity(receiver)?;
+				let encoded = self
+					.call_value(
+						self.runtime.function("fa_string_encoded_length")?,
+						&[bytes.into(), length.into(), capacity.into()],
+					)?
+					.into_int_value();
+				let count = self.builder.build_int_z_extend_or_bit_cast(
+					encoded,
+					self.context.i64_type(),
+					"",
+				)?;
 				let array = self.new_array(byte, count, count)?;
 				let (items, _) = self.array_parts(array)?;
-				self.builder.build_memcpy(items, 1, bytes, 1, length)?;
+				self.call_runtime(
+					"fa_string_write_utf8",
+					&[items.into(), bytes.into(), length.into(), capacity.into()],
+				)?;
 				Ok(self.fresh(Val::new(self.node_repr(node)?, array)))
 			}
 			"String#get" => {

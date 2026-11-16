@@ -1450,6 +1450,11 @@ static void test_utf8_input(void) {
 				CHECK(fa_string_length(text, string_length(&result), result.capacity)
 				      == prefix + unit_count((const uint8_t *)cases[item].output, output_length) + suffix);
 				CHECK(fa_string_is_well_formed(text, string_length(&result), result.capacity));
+				FaUtf8Cursor cursor = {0};
+				for (size_t index = 0; index < string_length(&result); index += 1) {
+					CHECK(fa_next_utf8_byte(text, string_length(&result), &cursor) == text[index]);
+				}
+				CHECK(cursor.remaining == 0 && cursor.position == string_length(&result));
 				if (string_owned(result.capacity)) { fa_string_free(result.bytes, result.capacity); }
 				free(input);
 			}
@@ -1478,6 +1483,25 @@ static void test_utf8_input(void) {
 		}
 		data[index] = old;
 	}
+	const uint8_t *pair = (const uint8_t *)"\xF0\x9F\x98\x80\xF0\x9F\x98\x80";
+	const uint8_t *spans[] = {(const uint8_t *)"\xED\xA0\xBD", pair, pair + 2, pair + 2};
+	size_t lengths[] = {3, 3, 2, 5};
+	for (size_t index = 0; index < 4; index += 1) {
+		size_t count = index == 3 ? 6 : 3;
+		FaUtf8Cursor cursor = {0};
+		for (size_t byte = 0; byte < count; byte += 1) {
+			CHECK(fa_next_utf8_byte(spans[index], lengths[index], &cursor) == (byte % 3 == 0 ? 0xEF : byte % 3 == 1 ? 0xBF : 0xBD));
+		}
+		CHECK(cursor.remaining == 0 && cursor.position == lengths[index]);
+		uint8_t copied[8] = {0};
+		fa_string_copy_block(copied, spans[index], lengths[index], STRING_COUNTED_VIEW | (index == 3 ? 2 : 1));
+		CHECK(unit_count(copied, count) == (index == 3 ? 2 : 1));
+	}
+	FaFileJob *file = fa_file_job(FILE_WRITE, pair + 2, 2, pair, 3);
+	CHECK(file->path_length == 3 && file->path[3] == 0 && file->length == 3);
+	CHECK(string_equal_bytes((const uint8_t *)file->path, (const uint8_t *)"\xEF\xBF\xBD", 3));
+	CHECK(string_equal_bytes(file->bytes, (const uint8_t *)"\xEF\xBF\xBD", 3));
+	file_job_release(&file->job);
 	CHECK(allocated == before && allocated_bytes == bytes_before);
 }
 

@@ -198,6 +198,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				value
 			};
 			let (bytes, length) = self.string_parts(value)?;
+			let capacity = self.string_capacity(value)?;
+			let encoded = self
+				.call_value(
+					self.runtime.function("fa_string_encoded_length")?,
+					&[bytes.into(), length.into(), capacity.into()],
+				)?
+				.into_int_value();
 			let empty = self.builder.build_int_compare(
 				IntPredicate::EQ,
 				length,
@@ -206,13 +213,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			)?;
 			let flag = self
 				.builder
-				.build_select(empty, self.simple_flag(), self.string_capacity(value)?, "")?
+				.build_select(empty, self.simple_flag(), capacity, "")?
 				.into_int_value();
 			simple = self.builder.build_and(simple, flag, "")?;
-			values.push((bytes, length));
+			values.push((bytes, length, capacity, encoded));
 		}
 		let mut total = self.usize.const_zero();
-		for &(_, length) in &values {
+		for &(_, _, _, length) in &values {
 			total = self
 				.call_value(
 					self.runtime.function("fa_string_size")?,
@@ -253,16 +260,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		.into_pointer_value();
 		let mut offset = self.usize.const_zero();
-		for (part, length) in values {
+		for (part, length, capacity, encoded) in values {
 			let target = unsafe {
 				self.builder
 					.build_in_bounds_gep(self.context.i8_type(), bytes, &[offset], "")?
 			};
 			self.call_runtime(
-				"fa_copy_bytes",
-				&[target.into(), part.into(), length.into()],
+				"fa_string_copy_bytes",
+				&[target.into(), part.into(), length.into(), capacity.into()],
 			)?;
-			offset = self.builder.build_int_add(offset, length, "")?;
+			offset = self.builder.build_int_add(offset, encoded, "")?;
 		}
 		self.call_runtime(
 			"fa_string_finish_known",

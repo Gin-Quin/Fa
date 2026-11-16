@@ -492,9 +492,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						.builder
 						.build_extract_value(loaded.into_struct_value(), 2, "")?
 						.into_int_value();
+					let encoded = self
+						.call_value(
+							self.runtime.function("fa_string_encoded_length")?,
+							&[bytes.into(), length.into(), capacity.into()],
+						)?
+						.into_int_value();
 					let length64 = self
 						.builder
-						.build_int_z_extend_or_bit_cast(length, i64, "")?;
+						.build_int_z_extend_or_bit_cast(encoded, i64, "")?;
 					let units = self
 						.call_value(
 							self.runtime.function("fa_string_length")?,
@@ -533,7 +539,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					values.push((
 						leaf.repr,
 						loaded,
-						Some((bytes, length, capacity, units, short)),
+						Some((bytes, length, encoded, capacity, units, short)),
 					));
 				} else {
 					fixed += self.leaf_size(leaf.repr);
@@ -573,9 +579,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						cursor =
 							self.packed_offset(cursor, i64.const_int(self.leaf_size(repr), false))?;
 					}
-					Some((bytes, length, capacity, units, short)) => {
-						cursor = self
-							.packed_store_string(cursor, bytes, length, capacity, units, short)?;
+					Some((bytes, length, encoded, capacity, units, short)) => {
+						cursor = self.packed_store_string(
+							cursor,
+							bytes,
+							(length, encoded),
+							capacity,
+							units,
+							short,
+						)?;
 					}
 				}
 			}
@@ -596,17 +608,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		})
 	}
 
-	/// Writes a string's length (with the ASCII flag in the low bit; surrogates use the extended header) and
-	/// bytes at `cursor`; the address after them.
+	/// Writes encoded byte length/ASCII, the Unicode-only unit count, then
+	/// canonical bytes at `cursor`; returns the address after them.
 	fn packed_store_string(
 		&self,
 		cursor: PointerValue<'ctx>,
 		bytes: PointerValue<'ctx>,
-		length: IntValue<'ctx>,
+		lengths: (IntValue<'ctx>, IntValue<'ctx>),
 		capacity: IntValue<'ctx>,
 		units: IntValue<'ctx>,
 		short: IntValue<'ctx>,
 	) -> Result<PointerValue<'ctx>, Error> {
+		let (length, encoded) = lengths;
 		let i8 = self.context.i8_type();
 		let usize = self.usize;
 		let simple = self.builder.build_and(capacity, self.simple_flag(), "")?;
@@ -616,7 +629,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let simple = self.builder.build_int_z_extend(simple, usize, "")?;
 		let word = self
 			.builder
-			.build_left_shift(length, usize.const_int(1, false), "")?;
+			.build_left_shift(encoded, usize.const_int(1, false), "")?;
 		let word = self.builder.build_or(word, simple, "")?;
 
 		let short_block = self.append_block("packed_short");
@@ -657,10 +670,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				&[destination.into(), units.into(), capacity.into()],
 			)?
 			.into_pointer_value();
-		self.builder
-			.build_memcpy(destination, 1, bytes, 1, length)
-			.map_err(|e| Error::Llvm(e.to_string()))?;
-		self.packed_offset(destination, length)
+		self.builder.build_call(
+			self.runtime.function("fa_string_copy_block")?,
+			&[
+				destination.into(),
+				bytes.into(),
+				length.into(),
+				capacity.into(),
+			],
+			"",
+		)?;
+		self.packed_offset(destination, encoded)
 	}
 
 	/// Reads a string written by [`Self::packed_store_string`] at `cursor`:

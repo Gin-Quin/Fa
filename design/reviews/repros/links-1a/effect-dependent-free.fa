@@ -1,0 +1,12 @@
+-- prints: 4
+type Scene = {
+	nodes: GrowingPool<Node> = []
+	type Node = { value: Integer, world: Integer = 0 }
+}
+function update = (scene: Scene, node: Scene.Node in scene.nodes, parent: Integer) mutates scene.nodes[..].world => {
+	node.world = parent + node.value
+}
+mutable scene: Scene = {}
+use root = scene.nodes.add({ value = 3 })
+update(scene, root, 1)
+console.log(root.world)

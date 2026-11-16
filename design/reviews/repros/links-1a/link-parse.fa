@@ -1,0 +1,7 @@
+type Expr = Union {
+	Num = { value: Int32 }
+	Neg = { link inner: Integer }
+}
+type Holder = { link #next: Integer? = none }
+let link = { link = 1 }
+console.log(link.link)

@@ -112,8 +112,18 @@ pub const WRITTEN_FIELDS: &str = "fields.written";
 /// (`fa_analyzer::regions`).
 pub const ROOT_REGIONS: &str = "regions.roots";
 
+/// Closed permission to change Array capacities when no checked module reads
+/// one, including through aliases or wider types (`fa_analyzer::capacities`).
+pub const ARRAY_CAPACITIES: &str = "arrays.capacities";
+
 /// Every fact kind, in a fixed order.
 pub const KINDS: &[FactKind] = &[
+	FactKind {
+		name: ARRAY_CAPACITIES,
+		collect: fa_analyzer::capacities::unit_claims,
+		merge: union,
+		finish: fa_analyzer::capacities::resolve_claims,
+	},
 	FactKind {
 		name: ROOT_REGIONS,
 		collect: fa_analyzer::regions::unit_claims,

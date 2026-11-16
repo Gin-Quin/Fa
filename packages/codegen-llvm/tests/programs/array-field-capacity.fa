@@ -1,0 +1,10 @@
+-- Observing capacity must preserve the geometric construction path.
+type Bucket = { items: Array<Integer> }
+function build = (count: Integer): Bucket => {
+	mutable bucket = Bucket { items = [] }
+	for index in 0..count { bucket.items.push(index) }
+	bucket
+}
+let bucket = build(3)
+assert bucket.items.capacity == 4
+console.log(bucket.items.length) -- prints: 3

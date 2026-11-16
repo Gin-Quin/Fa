@@ -1,0 +1,1570 @@
+{
+  "schema": 2,
+  "mode": "cpu",
+  "start": {
+    "utc": "2026-11-16T06:48:01Z",
+    "local": "2026-11-16T07:48:01+0100",
+    "load_average": [
+      1.76513671875,
+      5.7392578125,
+      11.0185546875
+    ]
+  },
+  "machine": "Linux-6.8.0-147-generic-x86_64-with-glibc2.39",
+  "cpu": "AMD EPYC Processor (with IBPB)",
+  "cpu_affinity": [
+    1
+  ],
+  "revision": "0d6de8f71826c59dc4d053922e7e65a134f8e8ca",
+  "working_tree_dirty": false,
+  "runs": 21,
+  "size_set": "default",
+  "benchmarks": {
+    "scene": {
+      "size": 12,
+      "suite": "goose",
+      "output_sha256": "eb8e7f97943c14ece4d1529b499c7dd79272587c2da3d9e81006897aa06a3044",
+      "artifacts": {
+        "rust": {
+          "format": 1,
+          "request": {
+            "benchmark": "scene",
+            "language": "rust",
+            "size": 12,
+            "source_sha256": "6a05d4ead97e30bcd448924d5baee359a467dd96ab3885952d327260efbc27bb",
+            "source_files": {
+              "main.rs": "b7ee2b92a30c5a99e9579385f7272894065b0949a8d86dba2bdb6e8e6fd5003b"
+            },
+            "compiler": {
+              "path": "/home/claude-dev/.cargo/bin/rustc",
+              "real_path": "/home/claude-dev/.cargo/bin/rustup",
+              "sha256": "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71",
+              "version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+              "toolchain_binary": {
+                "path": "/home/claude-dev/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc",
+                "real_path": "/home/claude-dev/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc",
+                "sha256": "b53b780f77f952062f8ca8a3b70aef2390b1e45ad91939be94afdc9543026853",
+                "version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)"
+              }
+            },
+            "flags": [
+              "--edition",
+              "2024",
+              "-C",
+              "opt-level=3",
+              "-C",
+              "overflow-checks=off"
+            ],
+            "modes": {
+              "target": "native",
+              "asynchronous": false,
+              "overflow_checks": false,
+              "size_binding": "runtime"
+            },
+            "environment": {}
+          },
+          "binary": "rust",
+          "binary_sha256": "fd8bb49903bd1810a82e0126b5de4590762ba0f56dc2593982ffb51b38c0c5ba",
+          "arguments": [
+            "12"
+          ],
+          "stdout": "expected.txt",
+          "output_sha256": "eb8e7f97943c14ece4d1529b499c7dd79272587c2da3d9e81006897aa06a3044",
+          "output_base64": "NDA3MjQKMjczMTg1MAo=",
+          "reference_output_sha256": null
+        },
+        "goose": {
+          "format": 1,
+          "request": {
+            "benchmark": "scene",
+            "language": "goose",
+            "size": 12,
+            "source_sha256": "b802f6e215a696fee3c06394be3e3632fa2c424359f117427d021c406632c38b",
+            "source_files": {
+              "main.goose": "f385b481b1908870f4cd1172a40d3f8f1f9ed1e53d157847fa035cbdf17f5c78",
+              "rng.goose": "3a2666062bbdce79cdfd8320a661c6e487aa3c421b91d41b39d8feba84e92545"
+            },
+            "compiler": {
+              "path": "/home/claude-dev/.local/goose/goose",
+              "real_path": "/home/claude-dev/.local/goose/goose",
+              "sha256": "b8e1681cf44fa871929c135e2bc529cd6a81549f097fe3a7f61f605a865ccd20",
+              "version": "goose eadca40 (runtime 3025e5810379)",
+              "c_compiler": {
+                "path": "/home/claude-dev/.local/llvm18/usr/bin/clang-18",
+                "real_path": "/home/claude-dev/.local/llvm18/usr/lib/llvm-18/bin/clang",
+                "sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+                "version": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /home/claude-dev/.local/llvm18/usr/bin"
+              },
+              "stdlib": {
+                "path": "/home/claude-dev/.local/goose/stdlib",
+                "files": {
+                  "base64.goose": "fa1111ce46e9534311f825880dbd2988953430aeb3f1f52d8f0eaecbbc298a61",
+                  "binary.goose": "24f3f09192738f42dfc0cb08b7447bbdc38009f7fec2567cae932b3022455631",
+                  "csv.goose": "a49b0647f4a2f8ca36170e5a184ab6c6e505492434d0a10a5e05127e96da61ba",
+                  "dictionary.goose": "fb39f896731faf3799e81727f7261849a62bdfbdc92d5fdbc36405a85830f322",
+                  "exception.goose": "093863eda5433176750182b597aa6760a93808d86b0c9b713681443d2fb29160",
+                  "ffi.goose": "e092b245fbe13ee2fdc71599b7b8eb44198e5261cad9600b7681e13ad75a6c2e",
+                  "json.goose": "81595baa298b9b0deb271297c971166fd084c13b128bba2a7f7486191ea0de4e",
+                  "math.goose": "b20bd3f78cd1ca291fdbc65df85d9aeaa77054cdf601b5adecfdd4f9db9f0d6e",
+                  "os.goose": "2193f394d44469daffd993ed204a91b068084fd8db13e261e11156b40c66e934",
+                  "regex.goose": "1ea3fc0a38402f29193777478b793b4a74a3074da0e3baf96f0b54eea1a84a95",
+                  "slice_pool.goose": "e15aa757be8edea4b367ac0b2cb8cce48df9f4f249f5002a9393475cc89404f0",
+                  "slice_pool_internal.goose": "488048c4e67754c878aa24ae25a941833a4a1a36ba679a2444b13806e7d42e15",
+                  "slot_pool.goose": "e83b975bfff2806df0401afc3e37e147618c5673a9c98690007e6beb3bd51745",
+                  "std.goose": "2bff7f6748300396e4c048bbf072f798566fadfe6b05d4256052d32c93e6d5d2",
+                  "vec.goose": "2cac168c72047834433bfb419734c38455c9429ea045b1273898031c53faa82e"
+                }
+              }
+            },
+            "flags": [
+              "build",
+              "-O2",
+              "--standalone",
+              "-v",
+              "--cc",
+              "/home/claude-dev/.local/llvm18/usr/bin/clang-18",
+              "--stdlib",
+              "/home/claude-dev/.local/goose/stdlib"
+            ],
+            "modes": {
+              "target": "native",
+              "asynchronous": false,
+              "overflow_checks": false,
+              "size_binding": "constant",
+              "runtime_size_rewrite": false
+            },
+            "environment": {}
+          },
+          "binary": "goose/main",
+          "binary_sha256": "1ff9ca478c61aa64de7c937bd10ddaa4385e423d43e02d6cc853126d29a084d6",
+          "arguments": [],
+          "stdout": "goose/stdout.txt",
+          "output_sha256": "eb8e7f97943c14ece4d1529b499c7dd79272587c2da3d9e81006897aa06a3044",
+          "output_base64": "NDA3MjQKMjczMTg1MAo=",
+          "reference_output_sha256": "eb8e7f97943c14ece4d1529b499c7dd79272587c2da3d9e81006897aa06a3044"
+        },
+        "fa": {
+          "format": 1,
+          "request": {
+            "benchmark": "scene",
+            "language": "fa",
+            "size": 12,
+            "source_sha256": "3b3bf77ffdf875854bef151b3407b59a2327cba84fd67442cc403ffa20064956",
+            "source_files": {
+              "main.fa": "22765d2ec8b2439575e1f47a88d9d4da87444d1bbe295a2d5c331b78a20e39b1"
+            },
+            "compiler": {
+              "path": "/home/claude-dev/projects/Fa/.claude/worktrees/trunk/target/release/fa",
+              "real_path": "/home/claude-dev/projects/Fa/.claude/worktrees/trunk/target/release/fa",
+              "sha256": "8ba3c8b7e44febc900486c5206c008797b8c1c254603897ae8d30654a9c73d21",
+              "version": "fa 0.1.0",
+              "native_backend": {
+                "path": "/home/claude-dev/projects/Fa/.claude/worktrees/trunk/target/release/fa-native",
+                "real_path": "/home/claude-dev/projects/Fa/.claude/worktrees/trunk/target/release/fa-native",
+                "sha256": "0760cfc0de3323ea72d50a75f6010db67a47edb7255f3a625c11c3936645c031",
+                "version": "fa 0.1.0"
+              },
+              "link_driver": {
+                "path": "/home/claude-dev/.local/llvm18/usr/bin/clang-18",
+                "real_path": "/home/claude-dev/.local/llvm18/usr/lib/llvm-18/bin/clang",
+                "sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+                "version": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /home/claude-dev/.local/llvm18/usr/bin"
+              }
+            },
+            "flags": [
+              "build",
+              "--target=native",
+              "--emit-ir",
+              "-O3",
+              "--asynchronous=false",
+              "--overflow-checks=false"
+            ],
+            "modes": {
+              "target": "native",
+              "asynchronous": false,
+              "overflow_checks": false,
+              "size_binding": "constant"
+            },
+            "environment": {}
+          },
+          "binary": "fa/native/main",
+          "binary_sha256": "2dbaa1f37f7682d54a1e4ed9d6c0817a90d7ed41ce605816ed8a2c198c49e8a5",
+          "arguments": [
+            "12"
+          ],
+          "stdout": "fa/stdout.txt",
+          "output_sha256": "eb8e7f97943c14ece4d1529b499c7dd79272587c2da3d9e81006897aa06a3044",
+          "output_base64": "NDA3MjQKMjczMTg1MAo=",
+          "reference_output_sha256": "eb8e7f97943c14ece4d1529b499c7dd79272587c2da3d9e81006897aa06a3044"
+        }
+      },
+      "start": {
+        "utc": "2026-11-16T06:48:01Z",
+        "local": "2026-11-16T07:48:01+0100",
+        "load_average": [
+          1.76513671875,
+          5.7392578125,
+          11.0185546875
+        ]
+      },
+      "additional_artifacts": {
+        "scene": {
+          "rust": {
+            "format": 1,
+            "request": {
+              "benchmark": "scene",
+              "language": "rust",
+              "size": 12,
+              "source_sha256": "6a05d4ead97e30bcd448924d5baee359a467dd96ab3885952d327260efbc27bb",
+              "source_files": {
+                "main.rs": "b7ee2b92a30c5a99e9579385f7272894065b0949a8d86dba2bdb6e8e6fd5003b"
+              },
+              "compiler": {
+                "path": "/home/claude-dev/.cargo/bin/rustc",
+                "real_path": "/home/claude-dev/.cargo/bin/rustup",
+                "sha256": "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71",
+                "version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+                "toolchain_binary": {
+                  "path": "/home/claude-dev/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc",
+                  "real_path": "/home/claude-dev/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc",
+                  "sha256": "b53b780f77f952062f8ca8a3b70aef2390b1e45ad91939be94afdc9543026853",
+                  "version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)"
+                }
+              },
+              "flags": [
+                "--edition",
+                "2024",
+                "-C",
+                "opt-level=3",
+                "-C",
+                "overflow-checks=off"
+              ],
+              "modes": {
+                "target": "native",
+                "asynchronous": false,
+                "overflow_checks": false,
+                "size_binding": "runtime"
+              },
+              "environment": {}
+            },
+            "binary": "rust",
+            "binary_sha256": "f1b78e31c73b49765bc8f282d76ee97f0c0852e170fbe19ca8161cd9944c7214",
+            "arguments": [
+              "12"
+            ],
+            "stdout": "expected.txt",
+            "output_sha256": "eb8e7f97943c14ece4d1529b499c7dd79272587c2da3d9e81006897aa06a3044",
+            "output_base64": "NDA3MjQKMjczMTg1MAo=",
+            "reference_output_sha256": null
+          },
+          "goose": {
+            "format": 1,
+            "request": {
+              "benchmark": "scene",
+              "language": "goose",
+              "size": 12,
+              "source_sha256": "b802f6e215a696fee3c06394be3e3632fa2c424359f117427d021c406632c38b",
+              "source_files": {
+                "main.goose": "f385b481b1908870f4cd1172a40d3f8f1f9ed1e53d157847fa035cbdf17f5c78",
+                "rng.goose": "3a2666062bbdce79cdfd8320a661c6e487aa3c421b91d41b39d8feba84e92545"
+              },
+              "compiler": {
+                "path": "/home/claude-dev/.local/goose/goose",
+                "real_path": "/home/claude-dev/.local/goose/goose",
+                "sha256": "b8e1681cf44fa871929c135e2bc529cd6a81549f097fe3a7f61f605a865ccd20",
+                "version": "goose eadca40 (runtime 3025e5810379)",
+                "c_compiler": {
+                  "path": "/home/claude-dev/.local/llvm18/usr/bin/clang-18",
+                  "real_path": "/home/claude-dev/.local/llvm18/usr/lib/llvm-18/bin/clang",
+                  "sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+                  "version": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /home/claude-dev/.local/llvm18/usr/bin"
+                },
+                "stdlib": {
+                  "path": "/home/claude-dev/.local/goose/stdlib",
+                  "files": {
+                    "base64.goose": "fa1111ce46e9534311f825880dbd2988953430aeb3f1f52d8f0eaecbbc298a61",
+                    "binary.goose": "24f3f09192738f42dfc0cb08b7447bbdc38009f7fec2567cae932b3022455631",
+                    "csv.goose": "a49b0647f4a2f8ca36170e5a184ab6c6e505492434d0a10a5e05127e96da61ba",
+                    "dictionary.goose": "fb39f896731faf3799e81727f7261849a62bdfbdc92d5fdbc36405a85830f322",
+                    "exception.goose": "093863eda5433176750182b597aa6760a93808d86b0c9b713681443d2fb29160",
+                    "ffi.goose": "e092b245fbe13ee2fdc71599b7b8eb44198e5261cad9600b7681e13ad75a6c2e",
+                    "json.goose": "81595baa298b9b0deb271297c971166fd084c13b128bba2a7f7486191ea0de4e",
+                    "math.goose": "b20bd3f78cd1ca291fdbc65df85d9aeaa77054cdf601b5adecfdd4f9db9f0d6e",
+                    "os.goose": "2193f394d44469daffd993ed204a91b068084fd8db13e261e11156b40c66e934",
+                    "regex.goose": "1ea3fc0a38402f29193777478b793b4a74a3074da0e3baf96f0b54eea1a84a95",
+                    "slice_pool.goose": "e15aa757be8edea4b367ac0b2cb8cce48df9f4f249f5002a9393475cc89404f0",
+                    "slice_pool_internal.goose": "488048c4e67754c878aa24ae25a941833a4a1a36ba679a2444b13806e7d42e15",
+                    "slot_pool.goose": "e83b975bfff2806df0401afc3e37e147618c5673a9c98690007e6beb3bd51745",
+                    "std.goose": "2bff7f6748300396e4c048bbf072f798566fadfe6b05d4256052d32c93e6d5d2",
+                    "vec.goose": "2cac168c72047834433bfb419734c38455c9429ea045b1273898031c53faa82e"
+                  }
+                }
+              },
+              "flags": [
+                "build",
+                "-O2",
+                "--standalone",
+                "-v",
+                "--cc",
+                "/home/claude-dev/.local/llvm18/usr/bin/clang-18",
+                "--stdlib",
+                "/home/claude-dev/.local/goose/stdlib"
+              ],
+              "modes": {
+                "target": "native",
+                "asynchronous": false,
+                "overflow_checks": false,
+                "size_binding": "constant",
+                "runtime_size_rewrite": false
+              },
+              "environment": {}
+            },
+            "binary": "goose/main",
+            "binary_sha256": "3fd49c6365f14f429926c4c37b1c3651706db98f4cdb4830e9177f50db5f6948",
+            "arguments": [],
+            "stdout": "goose/stdout.txt",
+            "output_sha256": "eb8e7f97943c14ece4d1529b499c7dd79272587c2da3d9e81006897aa06a3044",
+            "output_base64": "NDA3MjQKMjczMTg1MAo=",
+            "reference_output_sha256": "eb8e7f97943c14ece4d1529b499c7dd79272587c2da3d9e81006897aa06a3044"
+          },
+          "fa": {
+            "format": 1,
+            "request": {
+              "benchmark": "scene",
+              "language": "fa",
+              "size": 12,
+              "source_sha256": "3b3bf77ffdf875854bef151b3407b59a2327cba84fd67442cc403ffa20064956",
+              "source_files": {
+                "main.fa": "22765d2ec8b2439575e1f47a88d9d4da87444d1bbe295a2d5c331b78a20e39b1"
+              },
+              "compiler": {
+                "path": "/tmp/fa-aggregates-before/bin/fa",
+                "real_path": "/tmp/fa-aggregates-before/bin/fa",
+                "sha256": "1f0770344cff8280b3e51f0012741de507cc48a6677b33734242566884955420",
+                "version": "fa 0.1.0",
+                "native_backend": {
+                  "path": "/tmp/fa-aggregates-before/bin/fa-native",
+                  "real_path": "/tmp/fa-aggregates-before/bin/fa-native",
+                  "sha256": "507533bf8bf2b94f5fe38b6e461dd6b94446ea8e41952bdf7f72051c342327d7",
+                  "version": "fa 0.1.0"
+                },
+                "link_driver": {
+                  "path": "/home/claude-dev/.local/llvm18/usr/bin/clang-18",
+                  "real_path": "/home/claude-dev/.local/llvm18/usr/lib/llvm-18/bin/clang",
+                  "sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+                  "version": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /home/claude-dev/.local/llvm18/usr/bin"
+                }
+              },
+              "flags": [
+                "build",
+                "--target=native",
+                "--emit-ir",
+                "-O3",
+                "--asynchronous=false",
+                "--overflow-checks=false"
+              ],
+              "modes": {
+                "target": "native",
+                "asynchronous": false,
+                "overflow_checks": false,
+                "size_binding": "constant"
+              },
+              "environment": {}
+            },
+            "binary": "fa/native/main",
+            "binary_sha256": "c004ab1005b3e31fcd1acd16887581a07ea69b3efcb68d871545f68a8bccc793",
+            "arguments": [
+              "12"
+            ],
+            "stdout": "fa/stdout.txt",
+            "output_sha256": "eb8e7f97943c14ece4d1529b499c7dd79272587c2da3d9e81006897aa06a3044",
+            "output_base64": "NDA3MjQKMjczMTg1MAo=",
+            "reference_output_sha256": "eb8e7f97943c14ece4d1529b499c7dd79272587c2da3d9e81006897aa06a3044"
+          }
+        }
+      },
+      "commands": {
+        "fa": [
+          "/home/claude-dev/projects/Fa/.claude/worktrees/trunk/benchmarks/audit/build/leaves-default/scene/fa/native/main",
+          "12"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/.claude/worktrees/trunk/benchmarks/audit/build/leaves-default/scene/goose/main"
+        ],
+        "rust": [
+          "/home/claude-dev/projects/Fa/.claude/worktrees/trunk/benchmarks/audit/build/leaves-default/scene/rust",
+          "12"
+        ],
+        "fa_control": [
+          "/home/claude-dev/projects/Fa/.claude/worktrees/trunk/benchmarks/audit/build/leaves-default/scene/fa/native/main",
+          "12"
+        ],
+        "scene": [
+          "/home/claude-dev/projects/Fa/.claude/worktrees/trunk/benchmarks/audit/build/aggregates-before-default/scene/fa/native/main",
+          "12"
+        ]
+      },
+      "fa": {
+        "samples": [
+          {
+            "cpu": 0.034913,
+            "user": 0.027930999999999997,
+            "system": 0.0069819999999999995,
+            "wall": 0.037585393991321325,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.056797999999999994,
+            "user": 0.040569999999999995,
+            "system": 0.016228,
+            "wall": 0.059774466790258884,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.035566,
+            "user": 0.027143,
+            "system": 0.008423,
+            "wall": 0.03955670120194554,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.037245,
+            "user": 0.028423999999999998,
+            "system": 0.008820999999999999,
+            "wall": 0.03978352528065443,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.03984,
+            "user": 0.03338,
+            "system": 0.00646,
+            "wall": 0.04319580690935254,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.05359,
+            "user": 0.045183999999999995,
+            "system": 0.008406,
+            "wall": 0.05831859726458788,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.029341,
+            "user": 0.025429,
+            "system": 0.003912,
+            "wall": 0.0314117600210011,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.070322,
+            "user": 0.059774,
+            "system": 0.010548,
+            "wall": 0.0752441487275064,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.027908999999999996,
+            "user": 0.021172999999999997,
+            "system": 0.006736,
+            "wall": 0.0308049526065588,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.028434999999999995,
+            "user": 0.022747999999999997,
+            "system": 0.005686999999999999,
+            "wall": 0.030558413360267878,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.032562,
+            "user": 0.024422,
+            "system": 0.00814,
+            "wall": 0.035357589833438396,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.027195,
+            "user": 0.020631,
+            "system": 0.0065639999999999995,
+            "wall": 0.03111098613590002,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.037931,
+            "user": 0.026951,
+            "system": 0.01098,
+            "wall": 0.04550908086821437,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.042849,
+            "user": 0.025269999999999997,
+            "system": 0.017579,
+            "wall": 0.04623823240399361,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.038274,
+            "user": 0.027479,
+            "system": 0.010794999999999999,
+            "wall": 0.04246200015768409,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.031258,
+            "user": 0.023444,
+            "system": 0.007814,
+            "wall": 0.033219130244106054,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.038588,
+            "user": 0.026352999999999998,
+            "system": 0.012235,
+            "wall": 0.0438045971095562,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.027681,
+            "user": 0.02153,
+            "system": 0.006150999999999999,
+            "wall": 0.03124039201065898,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.034885,
+            "user": 0.027343,
+            "system": 0.007541999999999999,
+            "wall": 0.037415157072246075,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.028033000000000002,
+            "user": 0.020024,
+            "system": 0.008009,
+            "wall": 0.03110790066421032,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.032407,
+            "user": 0.025318,
+            "system": 0.007089,
+            "wall": 0.03577706357464194,
+            "peak_rss_kib": 20880
+          }
+        ],
+        "cpu": 0.034913,
+        "wall": 0.037585393991321325,
+        "peak_rss_kib": 20880,
+        "gnu_peak_rss_kib": 7552,
+        "executable_bytes": 35448,
+        "stripped_bytes": 30968
+      },
+      "goose": {
+        "samples": [
+          {
+            "cpu": 0.018805,
+            "user": 0.012867,
+            "system": 0.005938,
+            "wall": 0.02105154376477003,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.026475,
+            "user": 0.01702,
+            "system": 0.009455,
+            "wall": 0.030317607801407576,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.020502,
+            "user": 0.013326,
+            "system": 0.007176,
+            "wall": 0.02386797685176134,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.039552,
+            "user": 0.028565999999999998,
+            "system": 0.010986,
+            "wall": 0.042499967850744724,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.019674999999999998,
+            "user": 0.013117,
+            "system": 0.006558,
+            "wall": 0.02249599387869239,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.019822,
+            "user": 0.013215,
+            "system": 0.006607,
+            "wall": 0.02256172616034746,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.018623,
+            "user": 0.014485,
+            "system": 0.004138,
+            "wall": 0.020665782038122416,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.022808,
+            "user": 0.014513999999999999,
+            "system": 0.008294,
+            "wall": 0.025429334957152605,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.018313999999999997,
+            "user": 0.012530999999999999,
+            "system": 0.005783,
+            "wall": 0.021237362641841173,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.016921,
+            "user": 0.013160999999999999,
+            "system": 0.00376,
+            "wall": 0.01844360399991274,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.018890999999999998,
+            "user": 0.011930999999999999,
+            "system": 0.00696,
+            "wall": 0.02205922594293952,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.017637999999999997,
+            "user": 0.013718999999999999,
+            "system": 0.003919,
+            "wall": 0.02047598408535123,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.024353999999999997,
+            "user": 0.017535,
+            "system": 0.0068189999999999995,
+            "wall": 0.029238099232316017,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.051366999999999996,
+            "user": 0.026569,
+            "system": 0.024798,
+            "wall": 0.05517279822379351,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.0377,
+            "user": 0.0247,
+            "system": 0.013,
+            "wall": 0.04082371527329087,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.030629,
+            "user": 0.018151,
+            "system": 0.012478,
+            "wall": 0.03292088909074664,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.027682,
+            "user": 0.018455,
+            "system": 0.009226999999999999,
+            "wall": 0.03174070781096816,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.020266999999999997,
+            "user": 0.015660999999999998,
+            "system": 0.004606,
+            "wall": 0.022686573676764965,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.026957,
+            "user": 0.021566,
+            "system": 0.005391,
+            "wall": 0.031820757780224085,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.018262,
+            "user": 0.010043999999999999,
+            "system": 0.008218,
+            "wall": 0.020646202843636274,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.018313,
+            "user": 0.014457999999999999,
+            "system": 0.003855,
+            "wall": 0.020831041038036346,
+            "peak_rss_kib": 20880
+          }
+        ],
+        "cpu": 0.020266999999999997,
+        "wall": 0.022686573676764965,
+        "peak_rss_kib": 20880,
+        "gnu_peak_rss_kib": 6656,
+        "executable_bytes": 22864,
+        "stripped_bytes": 18896
+      },
+      "rust": {
+        "samples": [
+          {
+            "cpu": 0.268678,
+            "user": 0.24267699999999998,
+            "system": 0.026001,
+            "wall": 0.38442642288282514,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.121291,
+            "user": 0.11053199999999999,
+            "system": 0.010759,
+            "wall": 0.13179627992212772,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.10839,
+            "user": 0.096673,
+            "system": 0.011717,
+            "wall": 0.11340053705498576,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.112251,
+            "user": 0.102229,
+            "system": 0.010022,
+            "wall": 0.11963054491207004,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.169635,
+            "user": 0.145402,
+            "system": 0.024232999999999998,
+            "wall": 0.18194822315126657,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.12631299999999998,
+            "user": 0.11368199999999999,
+            "system": 0.012631,
+            "wall": 0.13404413498938084,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.119873,
+            "user": 0.11004799999999999,
+            "system": 0.009825,
+            "wall": 0.12768594129011035,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.174672,
+            "user": 0.15604099999999999,
+            "system": 0.018630999999999998,
+            "wall": 0.1843929961323738,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.10426099999999999,
+            "user": 0.091475,
+            "system": 0.012785999999999999,
+            "wall": 0.10925716906785965,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.109397,
+            "user": 0.09954199999999999,
+            "system": 0.009855,
+            "wall": 0.11704790685325861,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.10650599999999999,
+            "user": 0.09368599999999999,
+            "system": 0.01282,
+            "wall": 0.11237052083015442,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.10069299999999999,
+            "user": 0.089834,
+            "system": 0.010858999999999999,
+            "wall": 0.10641365591436625,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.123538,
+            "user": 0.108594,
+            "system": 0.014943999999999999,
+            "wall": 0.13110017916187644,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.122346,
+            "user": 0.10958,
+            "system": 0.012766,
+            "wall": 0.1286721802316606,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.11295199999999998,
+            "user": 0.10403499999999999,
+            "system": 0.008917,
+            "wall": 0.11996534327045083,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.121486,
+            "user": 0.105152,
+            "system": 0.016333999999999998,
+            "wall": 0.12893724301829934,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.13763499999999998,
+            "user": 0.11857799999999999,
+            "system": 0.019056999999999998,
+            "wall": 0.14517984306439757,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.14118799999999998,
+            "user": 0.13156199999999998,
+            "system": 0.009626,
+            "wall": 0.14880244294181466,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.126195,
+            "user": 0.11117199999999999,
+            "system": 0.015023,
+            "wall": 0.13287109415978193,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.10936399999999999,
+            "user": 0.09666999999999999,
+            "system": 0.012693999999999999,
+            "wall": 0.11529753264039755,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.149689,
+            "user": 0.13855599999999998,
+            "system": 0.011132999999999999,
+            "wall": 0.1577958557754755,
+            "peak_rss_kib": 20880
+          }
+        ],
+        "cpu": 0.121486,
+        "wall": 0.12893724301829934,
+        "peak_rss_kib": 20880,
+        "gnu_peak_rss_kib": 10240,
+        "executable_bytes": 4546456,
+        "stripped_bytes": 344112
+      },
+      "fa_control": {
+        "samples": [
+          {
+            "cpu": 0.125431,
+            "user": 0.101225,
+            "system": 0.024206,
+            "wall": 0.13950222684070468,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.029221,
+            "user": 0.021429,
+            "system": 0.0077919999999999994,
+            "wall": 0.032952919602394104,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.027135999999999997,
+            "user": 0.022291,
+            "system": 0.0048449999999999995,
+            "wall": 0.029246830847114325,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.030858999999999998,
+            "user": 0.024887,
+            "system": 0.005972,
+            "wall": 0.03379240585491061,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.028261999999999995,
+            "user": 0.022414999999999997,
+            "system": 0.005847,
+            "wall": 0.030800677835941315,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.034721999999999996,
+            "user": 0.026785999999999997,
+            "system": 0.007936,
+            "wall": 0.03740160772576928,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.03535,
+            "user": 0.02727,
+            "system": 0.00808,
+            "wall": 0.03847790230065584,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.030756999999999996,
+            "user": 0.024232999999999998,
+            "system": 0.006523999999999999,
+            "wall": 0.032968430779874325,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.03336,
+            "user": 0.025511,
+            "system": 0.007849,
+            "wall": 0.0369611419737339,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.027403,
+            "user": 0.018595,
+            "system": 0.008808,
+            "wall": 0.0289002382196486,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.030379999999999997,
+            "user": 0.0196,
+            "system": 0.01078,
+            "wall": 0.03321516374126077,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.026549,
+            "user": 0.023486,
+            "system": 0.0030629999999999998,
+            "wall": 0.02941931178793311,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.028879999999999996,
+            "user": 0.020912999999999998,
+            "system": 0.007967,
+            "wall": 0.031234252266585827,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.032966999999999996,
+            "user": 0.025755999999999998,
+            "system": 0.0072109999999999995,
+            "wall": 0.03526076301932335,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.03679399999999999,
+            "user": 0.031821999999999996,
+            "system": 0.004972,
+            "wall": 0.0396470190025866,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.054509,
+            "user": 0.039368,
+            "system": 0.015141,
+            "wall": 0.060841378290206194,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.031802,
+            "user": 0.024621,
+            "system": 0.007181,
+            "wall": 0.03573903627693653,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.036077,
+            "user": 0.031066999999999997,
+            "system": 0.00501,
+            "wall": 0.040388578083366156,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.043662,
+            "user": 0.035539,
+            "system": 0.008123,
+            "wall": 0.046747662127017975,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.042668,
+            "user": 0.035557,
+            "system": 0.007110999999999999,
+            "wall": 0.04702976020053029,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.038161,
+            "user": 0.026236,
+            "system": 0.011925,
+            "wall": 0.040618657134473324,
+            "peak_rss_kib": 20880
+          }
+        ],
+        "cpu": 0.032966999999999996,
+        "wall": 0.03573903627693653,
+        "peak_rss_kib": 20880
+      },
+      "scene": {
+        "samples": [
+          {
+            "cpu": 0.068185,
+            "user": 0.056042999999999996,
+            "system": 0.012142,
+            "wall": 0.1017316640354693,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.06426899999999999,
+            "user": 0.054676999999999996,
+            "system": 0.009592,
+            "wall": 0.06904158322140574,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.050684999999999994,
+            "user": 0.040937999999999995,
+            "system": 0.009746999999999999,
+            "wall": 0.05519424891099334,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.060966,
+            "user": 0.0465,
+            "system": 0.014466,
+            "wall": 0.06537426402792335,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.057522,
+            "user": 0.050331999999999995,
+            "system": 0.007189999999999999,
+            "wall": 0.0605154437944293,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.06963799999999999,
+            "user": 0.058695,
+            "system": 0.010943,
+            "wall": 0.07832045666873455,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.052294,
+            "user": 0.043414,
+            "system": 0.008879999999999999,
+            "wall": 0.054875407833606005,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.055173999999999994,
+            "user": 0.040655,
+            "system": 0.014518999999999999,
+            "wall": 0.05859286058694124,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.055364,
+            "user": 0.041271999999999996,
+            "system": 0.014091999999999999,
+            "wall": 0.05921134492382407,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.056970999999999994,
+            "user": 0.046349999999999995,
+            "system": 0.010621,
+            "wall": 0.06164451129734516,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.057027999999999995,
+            "user": 0.045623,
+            "system": 0.011405,
+            "wall": 0.061988059896975756,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.052304,
+            "user": 0.042436,
+            "system": 0.009868,
+            "wall": 0.05486786598339677,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.057352,
+            "user": 0.046284,
+            "system": 0.011068,
+            "wall": 0.06307799508795142,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.06369,
+            "user": 0.05257,
+            "system": 0.01112,
+            "wall": 0.06940946774557233,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.061756,
+            "user": 0.049013,
+            "system": 0.012742999999999999,
+            "wall": 0.06786243198439479,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.053782,
+            "user": 0.046099,
+            "system": 0.007683,
+            "wall": 0.0586053510196507,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.07166499999999999,
+            "user": 0.062318,
+            "system": 0.009347,
+            "wall": 0.075897176284343,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.04872599999999999,
+            "user": 0.037787999999999995,
+            "system": 0.010938,
+            "wall": 0.05218168022111058,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.05272,
+            "user": 0.040554,
+            "system": 0.012166,
+            "wall": 0.05732840206474066,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.05410999999999999,
+            "user": 0.047223999999999995,
+            "system": 0.006886,
+            "wall": 0.06036092201247811,
+            "peak_rss_kib": 20880
+          },
+          {
+            "cpu": 0.06514199999999999,
+            "user": 0.056736999999999996,
+            "system": 0.008405,
+            "wall": 0.06930899573490024,
+            "peak_rss_kib": 20880
+          }
+        ],
+        "cpu": 0.057027999999999995,
+        "wall": 0.06164451129734516,
+        "peak_rss_kib": 20880
+      },
+      "control": {
+        "ratio_of_medians": 1.0590287256953925,
+        "q1": 0.83001414427157,
+        "median": 1.0402239495569932,
+        "q3": 1.3106574292452833,
+        "ratios": [
+          0.2783442689606238,
+          1.9437390917490844,
+          1.3106574292452833,
+          1.2069412489063158,
+          1.4096666902554669,
+          1.543401877772018,
+          0.83001414427157,
+          2.2863738335988555,
+          0.8366007194244603,
+          1.0376601102069114,
+          1.0718235681369324,
+          1.024332366567479,
+          1.3134002770083104,
+          1.2997542997543,
+          1.0402239495569932,
+          0.5734465868021794,
+          1.2133828061128231,
+          0.7672755495190843,
+          0.7989785167880536,
+          0.6570029061591827,
+          0.8492177877938208
+        ],
+        "passes": false,
+        "binary_sha256": "2dbaa1f37f7682d54a1e4ed9d6c0817a90d7ed41ce605816ed8a2c198c49e8a5"
+      },
+      "comparisons": {
+        "goose": {
+          "ratio_of_medians": 1.7226525879508563,
+          "q1": 1.365816351704742,
+          "median": 1.557485423339082,
+          "q3": 1.7696172118167421,
+          "ratios": [
+            1.8565806966232385,
+            2.1453446647780923,
+            1.7347575846258902,
+            0.9416717233009709,
+            2.024904701397713,
+            2.7035616991221874,
+            1.5755248885786393,
+            3.08321641529288,
+            1.5239161297368133,
+            1.680456237811004,
+            1.7236779418770845,
+            1.5418414786256949,
+            1.557485423339082,
+            0.8341736912803941,
+            1.0152254641909815,
+            1.0205360932449639,
+            1.3939744238133083,
+            1.365816351704742,
+            1.2940980079385689,
+            1.5350454495674077,
+            1.7696172118167421
+          ],
+          "threshold": 1.1,
+          "verdict": "behind"
+        },
+        "rust": {
+          "ratio_of_medians": 0.287382908318654,
+          "q1": 0.25632749350791856,
+          "median": 0.2764372597963469,
+          "q3": 0.33180105299730067,
+          "ratios": [
+            0.12994365001972621,
+            0.4682787675919895,
+            0.32812990128240616,
+            0.33180105299730067,
+            0.2348571933857989,
+            0.4242635358197494,
+            0.2447673788092398,
+            0.40259457726481634,
+            0.2676839853828373,
+            0.25992486082799343,
+            0.30572925468987666,
+            0.27007835698608645,
+            0.30703912966050934,
+            0.3502280417831396,
+            0.33885190169275453,
+            0.25729713711868035,
+            0.28036473280778873,
+            0.1960577386180129,
+            0.2764372597963469,
+            0.25632749350791856,
+            0.21649553407398006
+          ],
+          "threshold": 1.0,
+          "verdict": "goal met"
+        }
+      },
+      "acceptance_eligible": true,
+      "additional_pairs": {
+        "scene": {
+          "ratio_of_medians": 0.612208038156695,
+          "q1": 0.519941113490364,
+          "median": 0.5811981703915808,
+          "q3": 0.6727743758831842,
+          "ratios": [
+            0.5120334384395395,
+            0.8837542205417853,
+            0.7017066193153794,
+            0.6109142800905423,
+            0.6926045686867633,
+            0.7695511071541401,
+            0.5610777527058554,
+            1.2745496066988076,
+            0.5041001372733184,
+            0.4991135841041933,
+            0.570982675177106,
+            0.519941113490364,
+            0.6613718789231413,
+            0.6727743758831842,
+            0.6197616425934322,
+            0.5811981703915808,
+            0.5384497313891021,
+            0.5680950621844602,
+            0.6617033383915022,
+            0.5180742931066348,
+            0.4974824230143379
+          ]
+        }
+      },
+      "orders": [
+        [
+          "fa",
+          "goose",
+          "rust",
+          "fa_control",
+          "scene"
+        ],
+        [
+          "scene",
+          "fa_control",
+          "rust",
+          "goose",
+          "fa"
+        ],
+        [
+          "goose",
+          "rust",
+          "fa_control",
+          "scene",
+          "fa"
+        ],
+        [
+          "fa",
+          "scene",
+          "fa_control",
+          "rust",
+          "goose"
+        ],
+        [
+          "rust",
+          "fa_control",
+          "scene",
+          "fa",
+          "goose"
+        ],
+        [
+          "goose",
+          "fa",
+          "scene",
+          "fa_control",
+          "rust"
+        ],
+        [
+          "fa_control",
+          "scene",
+          "fa",
+          "goose",
+          "rust"
+        ],
+        [
+          "rust",
+          "goose",
+          "fa",
+          "scene",
+          "fa_control"
+        ],
+        [
+          "scene",
+          "fa",
+          "goose",
+          "rust",
+          "fa_control"
+        ],
+        [
+          "fa_control",
+          "rust",
+          "goose",
+          "fa",
+          "scene"
+        ],
+        [
+          "fa",
+          "goose",
+          "rust",
+          "fa_control",
+          "scene"
+        ],
+        [
+          "scene",
+          "fa_control",
+          "rust",
+          "goose",
+          "fa"
+        ],
+        [
+          "goose",
+          "rust",
+          "fa_control",
+          "scene",
+          "fa"
+        ],
+        [
+          "fa",
+          "scene",
+          "fa_control",
+          "rust",
+          "goose"
+        ],
+        [
+          "rust",
+          "fa_control",
+          "scene",
+          "fa",
+          "goose"
+        ],
+        [
+          "goose",
+          "fa",
+          "scene",
+          "fa_control",
+          "rust"
+        ],
+        [
+          "fa_control",
+          "scene",
+          "fa",
+          "goose",
+          "rust"
+        ],
+        [
+          "rust",
+          "goose",
+          "fa",
+          "scene",
+          "fa_control"
+        ],
+        [
+          "scene",
+          "fa",
+          "goose",
+          "rust",
+          "fa_control"
+        ],
+        [
+          "fa_control",
+          "rust",
+          "goose",
+          "fa",
+          "scene"
+        ],
+        [
+          "fa",
+          "goose",
+          "rust",
+          "fa_control",
+          "scene"
+        ]
+      ],
+      "end": {
+        "utc": "2026-11-16T06:48:10Z",
+        "local": "2026-11-16T07:48:10+0100",
+        "load_average": [
+          2.31689453125,
+          5.73046875,
+          10.95849609375
+        ]
+      }
+    }
+  },
+  "command_line": [
+    "benchmarks/audit/compare.py",
+    "scene",
+    "--default-sizes",
+    "--directory",
+    "benchmarks/audit/build/leaves-default",
+    "--reuse",
+    "--mode",
+    "cpu",
+    "--runs",
+    "21",
+    "--cpu",
+    "1",
+    "--additional",
+    "scene=benchmarks/audit/build/aggregates-before-default/scene",
+    "--report",
+    "/tmp/leaves-scene-cpu.json"
+  ],
+  "compilers": {
+    "fa": {
+      "path": "/home/claude-dev/projects/Fa/.claude/worktrees/trunk/target/release/fa",
+      "real_path": "/home/claude-dev/projects/Fa/.claude/worktrees/trunk/target/release/fa",
+      "sha256": "8ba3c8b7e44febc900486c5206c008797b8c1c254603897ae8d30654a9c73d21",
+      "version": "fa 0.1.0",
+      "native_backend": {
+        "path": "/home/claude-dev/projects/Fa/.claude/worktrees/trunk/target/release/fa-native",
+        "real_path": "/home/claude-dev/projects/Fa/.claude/worktrees/trunk/target/release/fa-native",
+        "sha256": "0760cfc0de3323ea72d50a75f6010db67a47edb7255f3a625c11c3936645c031",
+        "version": "fa 0.1.0"
+      },
+      "link_driver": {
+        "path": "/home/claude-dev/.local/llvm18/usr/bin/clang-18",
+        "real_path": "/home/claude-dev/.local/llvm18/usr/lib/llvm-18/bin/clang",
+        "sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+        "version": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /home/claude-dev/.local/llvm18/usr/bin"
+      }
+    },
+    "goose": {
+      "path": "/home/claude-dev/.local/goose/goose",
+      "real_path": "/home/claude-dev/.local/goose/goose",
+      "sha256": "b8e1681cf44fa871929c135e2bc529cd6a81549f097fe3a7f61f605a865ccd20",
+      "version": "goose eadca40 (runtime 3025e5810379)",
+      "c_compiler": {
+        "path": "/home/claude-dev/.local/llvm18/usr/bin/clang-18",
+        "real_path": "/home/claude-dev/.local/llvm18/usr/lib/llvm-18/bin/clang",
+        "sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+        "version": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /home/claude-dev/.local/llvm18/usr/bin"
+      },
+      "stdlib": {
+        "path": "/home/claude-dev/.local/goose/stdlib",
+        "files": {
+          "base64.goose": "fa1111ce46e9534311f825880dbd2988953430aeb3f1f52d8f0eaecbbc298a61",
+          "binary.goose": "24f3f09192738f42dfc0cb08b7447bbdc38009f7fec2567cae932b3022455631",
+          "csv.goose": "a49b0647f4a2f8ca36170e5a184ab6c6e505492434d0a10a5e05127e96da61ba",
+          "dictionary.goose": "fb39f896731faf3799e81727f7261849a62bdfbdc92d5fdbc36405a85830f322",
+          "exception.goose": "093863eda5433176750182b597aa6760a93808d86b0c9b713681443d2fb29160",
+          "ffi.goose": "e092b245fbe13ee2fdc71599b7b8eb44198e5261cad9600b7681e13ad75a6c2e",
+          "json.goose": "81595baa298b9b0deb271297c971166fd084c13b128bba2a7f7486191ea0de4e",
+          "math.goose": "b20bd3f78cd1ca291fdbc65df85d9aeaa77054cdf601b5adecfdd4f9db9f0d6e",
+          "os.goose": "2193f394d44469daffd993ed204a91b068084fd8db13e261e11156b40c66e934",
+          "regex.goose": "1ea3fc0a38402f29193777478b793b4a74a3074da0e3baf96f0b54eea1a84a95",
+          "slice_pool.goose": "e15aa757be8edea4b367ac0b2cb8cce48df9f4f249f5002a9393475cc89404f0",
+          "slice_pool_internal.goose": "488048c4e67754c878aa24ae25a941833a4a1a36ba679a2444b13806e7d42e15",
+          "slot_pool.goose": "e83b975bfff2806df0401afc3e37e147618c5673a9c98690007e6beb3bd51745",
+          "std.goose": "2bff7f6748300396e4c048bbf072f798566fadfe6b05d4256052d32c93e6d5d2",
+          "vec.goose": "2cac168c72047834433bfb419734c38455c9429ea045b1273898031c53faa82e"
+        }
+      }
+    },
+    "rust": {
+      "path": "/home/claude-dev/.cargo/bin/rustc",
+      "real_path": "/home/claude-dev/.cargo/bin/rustup",
+      "sha256": "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71",
+      "version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+      "toolchain_binary": {
+        "path": "/home/claude-dev/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc",
+        "real_path": "/home/claude-dev/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc",
+        "sha256": "b53b780f77f952062f8ca8a3b70aef2390b1e45ad91939be94afdc9543026853",
+        "version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)"
+      }
+    }
+  },
+  "runner_source_sha256": "aa4f1fdd3b945fe9de1db4cc2c0b03d4c04ef9c3f9e50cc0b25dde706be04874",
+  "compiler_source_revision": null,
+  "supplemental": false,
+  "selection": [
+    "scene"
+  ],
+  "end": {
+    "utc": "2026-11-16T06:48:10Z",
+    "local": "2026-11-16T07:48:10+0100",
+    "load_average": [
+      2.31689453125,
+      5.73046875,
+      10.95849609375
+    ]
+  }
+}

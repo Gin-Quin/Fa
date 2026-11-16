@@ -701,6 +701,55 @@ part of its coroutine's frame. This is an implementation choice under the existi
 ## Unobserved capacities of region arrays (2026-11-07)
 
 The closed ROOT_REGIONS proof also publishes `capacity-unobserved` for an admitted `Array<Root>` when no module observes that family's array capacity. A capacity read on either an ordinary root array or a child array removes this permission for both; reads through aliases, a function value and chained or pattern-bound fields count too. This is an additional positive fact, never an assumption from a missing negative claim: incomplete manifests, foreign code, deferred bodies and unsupported member-only arrays keep their conservative rejection. It reuses the existing semantic walk and fact dependency log. Native lowering may freeze a child array at its exact length only after consulting this fact; an absent fact preserves its original capacity.
+
+## Recursive aggregates: exact empty-field reservations (2026-11-16)
+
+The first isolated `scene` change removes the geometric slack of the existing
+counted append-loop reservation, without changing recursive ownership. The
+analyzer publishes a separate closed `arrays.capacities` permission when **no
+module reads any Array capacity**. This deliberately global rule covers aliases,
+widened element types, patterns and function values. An exact scanned-module
+manifest is required in whole-module and per-unit builds; missing/deferred/error
+contributions, generic bodies, key-loop snapshots and foreign declarations/calls
+reject it. C-library lowering also rejects it. The manifest implementation is
+shared with the unchanged root-region proof. Consultations invalidate cached
+objects when an observer appears in another unit.
+
+Only the already-proven counted append to an empty array field uses the permission:
+reserve its nonnegative trip count with `fa_array_reserve` rather than geometrically
+rounding it with `fa_array_room`. Keep the header's address, ordinary ownership and
+every push's capacity check. Calls through aliases and later structural mutations
+remain valid, and errors still destroy the constructed prefix. Nonempty fields and
+local arrays keep the previous path (locals need geometric amortization over
+repeated loops). This does not claim that the array is frozen after construction.
+
+`scene`'s 112-byte inline child objects previously reserved four slots even for one,
+two or three children. Its current object/array shape with mutable passive fields
+is outside the existing root-region proof. Region coallocation and smaller headers
+require a further structural-mutation/lifetime proof; they are not inferred from
+this capacity permission. No traversal is reordered: floating-point folds,
+exceptions and observable effects prevent a blanket allocation-order rewrite.
+
+At audit size 9, `scene` falls from 9,538,351 to 9,479,696 instructions
+(−0.615%; Fa/Goose 1.208 → 1.201). All 28 other audit rows remain within
++0.0122%, below the +1% limit. At default depth 12, Fa falls from 147,351,353
+to 146,392,565 instructions; modeled LL data read misses 658,815 → 1,022,
+total LL data misses 776,875 → 96,420 (Goose 76,194). Exact child slots remove
+2,731,568 raw bytes before allocator rounding. GNU-time peak RSS is 7,552 KiB
+versus the baseline 9,984 KiB and Goose 6,656 KiB.
+
+The first 21-round CPU series interleaves the preserved compiler's original
+executable, the candidate, an identical candidate control, Goose and Rust.
+Point ratios are old/Goose 2.805 and candidate/Goose 1.483; candidate/old
+0.529 (paired median 0.532 [0.490, 0.603]). The control is 0.9635/0.9638,
+which fails strict 3%: **CPU improvement not resolved**. Retain that primary
+series; a longer 63-round supplemental series gives 1.540 / 1.467 [1.334, 1.674]
+against Goose and 0.555 / 0.539 [0.518, 0.599] against the original Fa. Its
+control also fails (0.9328/0.9111), so CPU remains not resolved. Both are retained
+in the generated aggregate JSON. The remaining layout/traversal work and measurements
+are in `benchmarks/results/2026-11-16-aggregates.json` and
+`/home/claude-dev/fa-lead/reports/perf-aggregates.md`.
+
 ## Compact payloads in proven root regions (2026-11-07)
 
 The analyzer's portable, closed root-region proof is shared by all compilation units.
@@ -1406,3 +1455,33 @@ Full LLVM workspace validations share `/tmp/fa-compiler-full-suite.lock` (`flock
   boundary. Combine phases into a dated JSON and generate Markdown from it.
   Fa has no source DWARF: line-level profile attribution is to assembly/IR, with
   source locations established by inspection, not invented source-line counts.
+
+## Aggregate performance: object child arrays stay in the heap (2026-11-16)
+
+Owning the child arrays of a recursive object in its root region (exact buffers
+next to their parent, root copies into an independent region; commits `4fd04130`,
+`d720d7be`, `1e7aa90f`, reverted) was built, validated and measured on `scene`.
+It saves 0.5% of the instructions but runs the traversals about 40% slower on the
+hardware (21-round series: 1.27× the CPU time of the exact heap reservations;
+frame-count variants isolate the walks, whose instructions are identical). The
+region interleaves headers, buffers and chunk ends; the heap keeps headers dense
+in their own size class and buffers by size. Larger chunks narrow the loss
+(4 KiB: 1.17×) without removing it. Exact heap reservations remain the layout.
+The analysis also showed that `analysis.coercions` misses conversions into an
+object root (optional narrowing, adapted function returns): a future region proof
+for object roots must exclude convertible layouts from the whole program's
+inventory instead of trusting coercion entries.
+
+## Aggregate performance: scalar union leaves at recursive calls (2026-11-16)
+
+The existing expansion of a scalar union leaf at recursive call sites now also
+applies to functions that don't throw, to any arm whose preceding arms only test
+other members (they exclude it, so testing its member first selects the same arm),
+and to leaves made of scalar arithmetic (`Arithmetic`, `Negate`, groups; at most 16
+nodes) over the arm's fields, scalar parameters and constants. Calls, `try`, local
+declarations and blocks keep the call. The result keeps the callee's ABI and its
+range-checked return still disables the expansion. `interp`: default-size
+instructions 164.03 M → 159.43 M (Goose 148.79 M), audit −2.23%; every other audit
+row within +0.03%. The tag dispatch is already an IR `switch` that LLVM lowers to
+three compares; the narrow/far link format costs one predictable test per binary
+node and was left alone. CPU: see the aggregate report.

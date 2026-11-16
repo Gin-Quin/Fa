@@ -3710,10 +3710,16 @@ static void unit_slice_positions(const uint8_t *text, size_t length, size_t capa
 /// Copy a code-unit range, encoding a cut pair boundary as a lone surrogate.
 static void unit_slice(const uint8_t *text, size_t length, size_t capacity,
                        size_t from, size_t to, FaString *out, int view) {
+	if (capacity & SIMPLE) {
+		size_t bytes = to - from;
+		if (view || (string_static(capacity) && bytes > 1)) {
+			*out = (FaString){text + from, bytes, view ? SIMPLE | KIND_MASK : SIMPLE};
+		} else { *out = owned_copy_with(text + from, bytes, SIMPLE); }
+		return;
+	}
 	if (from == to && !view) { *out = (FaString){(const uint8_t *)"", 0, SIMPLE}; return; }
-	size_t first = (capacity & SIMPLE) ? from * 2 : unit_position(text, length, capacity, from);
-	size_t last = from == to ? first
-	            : (capacity & SIMPLE) ? to * 2 : unit_position(text, length, capacity, to);
+	size_t first = unit_position(text, length, capacity, from);
+	size_t last = from == to ? first : unit_position(text, length, capacity, to);
 	unit_slice_positions(text, length, capacity, first, last, to - from, out, view);
 }
 

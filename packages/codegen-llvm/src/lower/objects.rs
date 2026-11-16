@@ -769,9 +769,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		name: &str,
 		arguments: &[BasicMetadataValueEnum<'ctx>],
 	) -> Result<(), Error> {
+		self.raise_runtime_with(name, |_| Ok(arguments.to_vec()))
+	}
+
+	/// Build diagnostic-only arguments only when the handler observes them.
+	pub(crate) fn raise_runtime_with(
+		&mut self,
+		name: &str,
+		arguments: impl FnOnce(&mut Self) -> Result<Vec<BasicMetadataValueEnum<'ctx>>, Error>,
+	) -> Result<(), Error> {
 		// IndexError construction has no observable effect when the local
-		// handler never reads its payload. Its arguments were evaluated by
-		// the caller; retain all cleanups before entering that handler.
+		// handler never reads its payload. User expressions are evaluated
+		// before this call; retain all cleanups before entering the handler.
 		if name == "fa_error_index"
 			&& let Some(&(block, None, mark)) = self.frame().catches.last()
 		{
@@ -780,8 +789,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.continue_unreachable();
 			return Ok(());
 		}
+		let arguments = arguments(self)?;
 		let function = self.runtime.function(name)?;
-		let error = self.call_value(function, arguments)?.into_pointer_value();
+		let error = self.call_value(function, &arguments)?.into_pointer_value();
 		self.raise(error)
 	}
 

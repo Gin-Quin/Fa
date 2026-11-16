@@ -15670,136 +15670,168 @@ define hidden noundef ptr @fa_string_slice(ptr noundef %0, i32 noundef %1, i32 n
 
 ; Function Attrs: nounwind optsize
 define internal fastcc noundef ptr @string_slice(ptr noundef %0, i32 noundef %1, i32 noundef %2, i64 noundef %3, i64 noundef %4, i8 noundef signext %5, ptr noundef %6, i32 noundef %7) unnamed_addr #17 {
-  %9 = icmp sgt i32 %2, -1
-  br i1 %9, label %10, label %26
+  %9 = alloca %struct.FaString, align 4
+  %10 = icmp sgt i32 %2, -1
+  br i1 %10, label %11, label %27
 
-10:                                               ; preds = %8
-  %11 = and i32 %2, 805306368
-  %12 = icmp eq i32 %11, 268435456
-  br i1 %12, label %13, label %15
+11:                                               ; preds = %8
+  %12 = and i32 %2, 805306368
+  %13 = icmp eq i32 %12, 268435456
+  br i1 %13, label %14, label %16
 
-13:                                               ; preds = %10
-  %14 = and i32 %2, 268435455
-  br label %26
+14:                                               ; preds = %11
+  %15 = and i32 %2, 268435455
+  br label %27
 
-15:                                               ; preds = %10
-  %16 = and i32 %2, 1073741823
-  %17 = add nsw i32 %16, -268435455
-  %18 = icmp ult i32 %17, -268435454
-  %19 = and i32 %2, 1
-  %20 = icmp ne i32 %19, 0
-  %21 = or i1 %20, %18
-  br i1 %21, label %24, label %22
+16:                                               ; preds = %11
+  %17 = and i32 %2, 1073741823
+  %18 = add nsw i32 %17, -268435455
+  %19 = icmp ult i32 %18, -268435454
+  %20 = and i32 %2, 1
+  %21 = icmp ne i32 %20, 0
+  %22 = or i1 %21, %19
+  br i1 %22, label %25, label %23
 
-22:                                               ; preds = %15
-  %23 = tail call fastcc i32 @string_length_slow(ptr noundef %0, i32 noundef %1) #73
-  br label %26
+23:                                               ; preds = %16
+  %24 = tail call fastcc i32 @string_length_slow(ptr noundef %0, i32 noundef %1) #73
+  br label %27
 
-24:                                               ; preds = %15
-  %25 = tail call fastcc i32 @unit_count(ptr noundef %0, i32 noundef %1) #73
-  br label %26
+25:                                               ; preds = %16
+  %26 = tail call fastcc i32 @unit_count(ptr noundef %0, i32 noundef %1) #73
+  br label %27
 
-26:                                               ; preds = %8, %13, %22, %24
-  %27 = phi i32 [ %14, %13 ], [ %1, %8 ], [ %23, %22 ], [ %25, %24 ]
-  %28 = zext i32 %27 to i64
-  %29 = zext i8 %5 to i32
-  %30 = and i32 %29, 1
-  %31 = icmp eq i32 %30, 0
-  br i1 %31, label %43, label %32
+27:                                               ; preds = %8, %14, %23, %25
+  %28 = phi i32 [ %15, %14 ], [ %1, %8 ], [ %24, %23 ], [ %26, %25 ]
+  %29 = zext i32 %28 to i64
+  %30 = zext i8 %5 to i32
+  %31 = and i32 %30, 1
+  %32 = icmp eq i32 %31, 0
+  br i1 %32, label %44, label %33
 
-32:                                               ; preds = %26
-  %33 = sub nsw i64 0, %28
-  %34 = icmp sgt i64 %33, %3
-  %35 = icmp slt i64 %28, %3
-  %36 = or i1 %34, %35
-  br i1 %36, label %37, label %39
+33:                                               ; preds = %27
+  %34 = sub nsw i64 0, %29
+  %35 = icmp sgt i64 %34, %3
+  %36 = icmp slt i64 %29, %3
+  %37 = or i1 %35, %36
+  br i1 %37, label %38, label %40
 
-37:                                               ; preds = %32
-  %38 = tail call ptr @fa_error_index(i64 noundef %3, i64 noundef %28) #73
-  br label %88
+38:                                               ; preds = %33
+  %39 = tail call ptr @fa_error_index(i64 noundef %3, i64 noundef %29) #73
+  br label %105
 
-39:                                               ; preds = %32
-  %40 = icmp slt i64 %3, 0
-  %41 = select i1 %40, i64 %28, i64 0
-  %42 = add nsw i64 %41, %3
-  br label %43
+40:                                               ; preds = %33
+  %41 = icmp slt i64 %3, 0
+  %42 = select i1 %41, i64 %29, i64 0
+  %43 = add nsw i64 %42, %3
+  br label %44
 
-43:                                               ; preds = %39, %26
-  %44 = phi i64 [ %42, %39 ], [ 0, %26 ]
-  %45 = and i32 %29, 2
-  %46 = icmp eq i32 %45, 0
-  br i1 %46, label %63, label %47
+44:                                               ; preds = %40, %27
+  %45 = phi i64 [ %43, %40 ], [ 0, %27 ]
+  %46 = and i32 %30, 2
+  %47 = icmp eq i32 %46, 0
+  br i1 %47, label %64, label %48
 
-47:                                               ; preds = %43
-  %48 = sub nsw i64 0, %28
-  %49 = icmp sgt i64 %48, %4
-  br i1 %49, label %61, label %50
+48:                                               ; preds = %44
+  %49 = sub nsw i64 0, %29
+  %50 = icmp sgt i64 %49, %4
+  br i1 %50, label %62, label %51
 
-50:                                               ; preds = %47
-  %51 = lshr i32 %29, 2
-  %52 = and i32 %51, 1
-  %53 = zext nneg i32 %52 to i64
-  %54 = sub nsw i64 %28, %53
-  %55 = icmp slt i64 %54, %4
-  br i1 %55, label %61, label %56
+51:                                               ; preds = %48
+  %52 = lshr i32 %30, 2
+  %53 = and i32 %52, 1
+  %54 = zext nneg i32 %53 to i64
+  %55 = sub nsw i64 %29, %54
+  %56 = icmp slt i64 %55, %4
+  br i1 %56, label %62, label %57
 
-56:                                               ; preds = %50
-  %57 = icmp slt i64 %4, 0
-  %58 = select i1 %57, i64 %28, i64 0
-  %59 = add nsw i64 %53, %4
-  %60 = add nsw i64 %59, %58
-  br label %63
+57:                                               ; preds = %51
+  %58 = icmp slt i64 %4, 0
+  %59 = select i1 %58, i64 %29, i64 0
+  %60 = add nsw i64 %54, %4
+  %61 = add nsw i64 %60, %59
+  br label %64
 
-61:                                               ; preds = %47, %50
-  %62 = tail call ptr @fa_error_index(i64 noundef %4, i64 noundef %28) #73
-  br label %88
+62:                                               ; preds = %48, %51
+  %63 = tail call ptr @fa_error_index(i64 noundef %4, i64 noundef %29) #73
+  br label %105
 
-63:                                               ; preds = %56, %43
-  %64 = phi i64 [ %28, %43 ], [ %60, %56 ]
-  %65 = tail call i64 @llvm.smax.i64(i64 %64, i64 %44)
-  %66 = trunc i64 %44 to i32
-  %67 = trunc i64 %65 to i32
-  %68 = icmp ne i32 %66, %67
-  %69 = icmp ne i32 %7, 0
-  %70 = or i1 %69, %68
-  br i1 %70, label %74, label %71
+64:                                               ; preds = %57, %44
+  %65 = phi i64 [ %29, %44 ], [ %61, %57 ]
+  %66 = tail call i64 @llvm.smax.i64(i64 %65, i64 %45)
+  %67 = trunc i64 %45 to i32
+  %68 = trunc i64 %66 to i32
+  br i1 %10, label %90, label %69
 
-71:                                               ; preds = %63
+69:                                               ; preds = %64
+  %70 = sub i32 %68, %67
+  %71 = icmp eq i32 %7, 0
+  br i1 %71, label %72, label %83
+
+72:                                               ; preds = %69
+  %73 = and i32 %2, 536870912
+  %74 = icmp eq i32 %73, 0
+  br i1 %74, label %75, label %88
+
+75:                                               ; preds = %72
+  %76 = and i32 %2, 1610612735
+  %77 = icmp eq i32 %76, 0
+  %78 = and i32 %2, 1342177280
+  %79 = icmp eq i32 %78, 268435456
+  %80 = or i1 %77, %79
+  %81 = icmp ugt i32 %70, 1
+  %82 = and i1 %80, %81
+  br i1 %82, label %83, label %88
+
+83:                                               ; preds = %75, %69
+  %84 = phi i32 [ -2147483648, %75 ], [ -1879048193, %69 ]
+  %85 = getelementptr inbounds i8, ptr %0, i32 %67
+  store ptr %85, ptr %6, align 4, !tbaa.struct !7
+  %86 = getelementptr inbounds i8, ptr %6, i32 4
+  store i32 %70, ptr %86, align 4, !tbaa.struct !15
+  %87 = getelementptr inbounds i8, ptr %6, i32 8
+  store i32 %84, ptr %87, align 4, !tbaa.struct !16
+  br label %105
+
+88:                                               ; preds = %75, %72
+  call void @llvm.lifetime.start.p0(i64 12, ptr nonnull %9) #77
+  %89 = getelementptr inbounds i8, ptr %0, i32 %67
+  call fastcc void @owned_copy_with(ptr dead_on_unwind nonnull writable sret(%struct.FaString) align 4 %9, ptr noundef %89, i32 noundef %70, i32 noundef -2147483648) #73
+  call void @llvm.memcpy.p0.p0.i32(ptr noundef nonnull align 4 dereferenceable(12) %6, ptr noundef nonnull align 4 dereferenceable(12) %9, i32 12, i1 false), !tbaa.struct !7
+  call void @llvm.lifetime.end.p0(i64 12, ptr nonnull %9) #77
+  br label %105
+
+90:                                               ; preds = %64
+  %91 = icmp ne i32 %67, %68
+  %92 = icmp ne i32 %7, 0
+  %93 = or i1 %92, %91
+  br i1 %93, label %97, label %94
+
+94:                                               ; preds = %90
   store ptr @.str.4, ptr %6, align 4, !tbaa.struct !7
-  %72 = getelementptr inbounds i8, ptr %6, i32 4
-  store i32 0, ptr %72, align 4, !tbaa.struct !15
-  %73 = getelementptr inbounds i8, ptr %6, i32 8
-  store i32 -2147483648, ptr %73, align 4, !tbaa.struct !16
-  br label %88
+  %95 = getelementptr inbounds i8, ptr %6, i32 4
+  store i32 0, ptr %95, align 4, !tbaa.struct !15
+  %96 = getelementptr inbounds i8, ptr %6, i32 8
+  store i32 -2147483648, ptr %96, align 4, !tbaa.struct !16
+  br label %105
 
-74:                                               ; preds = %63
-  %75 = icmp eq i32 %66, %67
-  br i1 %9, label %76, label %78
+97:                                               ; preds = %90
+  %98 = tail call fastcc i32 @unit_position(ptr noundef %0, i32 noundef %1, i32 noundef %2, i32 noundef %67) #73
+  %99 = icmp eq i32 %67, %68
+  br i1 %99, label %102, label %100
 
-76:                                               ; preds = %74
-  %77 = tail call fastcc i32 @unit_position(ptr noundef %0, i32 noundef %1, i32 noundef %2, i32 noundef %66) #73
-  br i1 %75, label %84, label %82
+100:                                              ; preds = %97
+  %101 = tail call fastcc i32 @unit_position(ptr noundef %0, i32 noundef %1, i32 noundef %2, i32 noundef %68) #73
+  br label %102
 
-78:                                               ; preds = %74
-  %79 = shl i32 %66, 1
-  %80 = shl i32 %67, 1
-  %81 = select i1 %75, i32 %79, i32 %80
-  br label %84
+102:                                              ; preds = %100, %97
+  %103 = phi i32 [ %101, %100 ], [ %98, %97 ]
+  %104 = sub i32 %68, %67
+  tail call fastcc void @unit_slice_positions(ptr noundef %0, i32 noundef %1, i32 noundef %2, i32 noundef %98, i32 noundef %103, i32 noundef %104, ptr noundef %6, i32 noundef %7) #73
+  br label %105
 
-82:                                               ; preds = %76
-  %83 = tail call fastcc i32 @unit_position(ptr noundef %0, i32 noundef %1, i32 noundef %2, i32 noundef %67) #73
-  br label %84
-
-84:                                               ; preds = %82, %78, %76
-  %85 = phi i32 [ %77, %82 ], [ %77, %76 ], [ %79, %78 ]
-  %86 = phi i32 [ %83, %82 ], [ %77, %76 ], [ %81, %78 ]
-  %87 = sub i32 %67, %66
-  tail call fastcc void @unit_slice_positions(ptr noundef %0, i32 noundef %1, i32 noundef %2, i32 noundef %85, i32 noundef %86, i32 noundef %87, ptr noundef %6, i32 noundef %7) #73
-  br label %88
-
-88:                                               ; preds = %84, %71, %61, %37
-  %89 = phi ptr [ %38, %37 ], [ %62, %61 ], [ null, %71 ], [ null, %84 ]
-  ret ptr %89
+105:                                              ; preds = %102, %94, %88, %83, %62, %38
+  %106 = phi ptr [ %39, %38 ], [ %63, %62 ], [ null, %83 ], [ null, %88 ], [ null, %94 ], [ null, %102 ]
+  ret ptr %106
 }
 
 ; Function Attrs: nounwind optsize

@@ -1051,6 +1051,23 @@ static void test_utf16_strings(void) {
 	fa_virtual_string_slices = 0;
 	CHECK(fa_string_encoded_length(both_edges, sizeof both_edges, STRING_COUNTED_VIEW | 3) == sizeof both_edges);
 	fa_virtual_string_slices = 1;
+	// Explicit cuts retain the owner's bytes even when both ends cut pairs
+	// and the logical result is too large for inline storage.
+	uint8_t paired[320];
+	for (size_t i = 0; i < sizeof paired; i += 4) {
+		copy_bytes(paired + i, (const uint8_t *)"\xF0\x9F\x98\x80", 4);
+	}
+	long view_blocks = allocated;
+	long view_bytes = allocated_bytes;
+	FaString cut, nested_cut;
+	CHECK(!fa_string_slice_view(paired, sizeof paired, STRING_LITERAL | 160, 1, 159, 3, &cut));
+	CHECK(cut.bytes == paired + 2 && cut.length == 317);
+	CHECK(fa_string_length(cut.bytes, cut.length, cut.capacity) == 158);
+	CHECK(fa_string_encoded_length(cut.bytes, cut.length, cut.capacity) == 318);
+	CHECK(!fa_string_slice_view(cut.bytes, cut.length, cut.capacity, 0, 1, 3, &nested_cut));
+	CHECK(nested_cut.bytes == paired + 2 && nested_cut.length == 2);
+	CHECK(fa_string_code_unit_at(nested_cut.bytes, nested_cut.length, nested_cut.capacity, 0) == 0xDE00);
+	CHECK(allocated == view_blocks && allocated_bytes == view_bytes);
 	// ASCII compact storage has no extra field. Unicode counts are bounded
 	// unsigned LEB128 values and preserve the full representation range.
 	uint8_t metadata[16] = "ascii";

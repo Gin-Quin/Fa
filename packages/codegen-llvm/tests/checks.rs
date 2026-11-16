@@ -1113,6 +1113,9 @@ console.log(ignored("a", 2), observed("a", 2))
 			!function(&ir, "fa.ignored").contains("@fa_error_index("),
 			"{ir}"
 		);
+		for helper in ["@string_length_slow(", "@unit_count("] {
+			assert!(!function(&ir, "fa.ignored").contains(helper), "{ir}");
+		}
 		assert!(
 			function(&ir, "fa.observed").contains("@fa_error_index("),
 			"{ir}"

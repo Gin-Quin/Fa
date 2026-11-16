@@ -359,18 +359,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				"",
 			)?;
 			self.guard(missing, |this| {
-				let count = this
-					.call_value(
-						this.runtime.function("fa_string_length")?,
-						&[bytes.into(), length.into(), capacity.into()],
-					)?
-					.into_int_value();
-				let count = this.builder.build_int_z_extend_or_bit_cast(
-					count,
-					this.context.i64_type(),
-					"",
-				)?;
-				this.raise_runtime("fa_error_index", &[position.into(), count.into()])
+				this.raise_runtime_with("fa_error_index", |this| {
+					let count = this
+						.call_value(
+							this.runtime.function("fa_string_length")?,
+							&[bytes.into(), length.into(), capacity.into()],
+						)?
+						.into_int_value();
+					let count = this.builder.build_int_z_extend_or_bit_cast(
+						count,
+						this.context.i64_type(),
+						"",
+					)?;
+					Ok(vec![position.into(), count.into()])
+				})
 			})?;
 		}
 		let unit = self

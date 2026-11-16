@@ -1655,3 +1655,13 @@ resolver as direct calls and explicit generic applications. Their values use
 the existing synchronous/asynchronous thunks, including defaults and aggregate
 borrows. Non-LTO asynchronous units also run the coroutine pipeline at O0:
 dead-code removal alone cannot emit their unsplit coroutine intrinsics.
+
+The indirect argument path uses the Task-consuming predicate too; a fresh
+Resource argument remains a caller-owned temporary. JavaScript retains fresh
+borrowed arguments through the statement and releases them before an enclosing
+error handler on failure, including errors evaluating later arguments. Cleanup
+frames belong to the function being generated, never its enclosing declaration.
+The throwing-literal fixture constructs its resource prefix through a factory;
+moving a borrowed generic resource parameter into the prefix was invalid under
+the documented parameter contract. Typed errors retain their declared payload
+field formatter, independently of ordinary union payload representation order.

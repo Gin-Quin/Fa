@@ -2625,24 +2625,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if let Repr::Object(object) = repr {
 					let space = self.string_constant(" ");
 					self.append_value(space, node)?;
-					// Union payloads have the canonical field order of their
-					// value, as in the interpreter and JavaScript representation.
-					let fields = self
-						.types()
-						.fields_of(object)
-						.iter()
-						.enumerate()
-						.filter(|(_, field)| {
-							!self.types().syms.resolve(field.name).starts_with('#')
-						})
-						.map(|(index, field)| {
-							(
-								self.types().syms.resolve(field.name).to_string(),
-								index as u32,
-								field.ty,
-							)
-						})
-						.collect();
+					// Errors carry their declared field formatter; ordinary
+					// union payloads use their canonical value representation.
+					let fields = if self.types().nominal(nominal).kind
+						== fa_analyzer::types::NominalKind::Errors
+					{
+						self.printed_fields(object)
+					} else {
+						self.types()
+							.fields_of(object)
+							.iter()
+							.enumerate()
+							.filter(|(_, field)| {
+								!self.types().syms.resolve(field.name).starts_with('#')
+							})
+							.map(|(index, field)| {
+								(
+									self.types().syms.resolve(field.name).to_string(),
+									index as u32,
+									field.ty,
+								)
+							})
+							.collect()
+					};
 					self.append_ordered_fields(loaded, fields, node)?;
 				} else {
 					let open = self.string_constant("(");

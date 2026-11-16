@@ -1,5 +1,8 @@
 //! The string redesign's public facts, tested on the exact expression rather
 //! than the union of all flags on its source line.
+use std::sync::Arc;
+
+use fa_analyzer::Session;
 use fa_analyzer::analysis::NodeFlags;
 use fa_analyzer::analyze_source;
 use fa_analyzer::diagnostics::Severity;
@@ -204,7 +207,14 @@ fn utf8_literal_length_proofs_survive_groups() {
 }
 
 fn assert_diagnostic(source: &str, code: &str, span: &str, hints: &[&str]) {
-	let (session, file) = analyze_source(source);
+	assert_diagnostic_on_target(source, code, span, hints, "bun");
+}
+
+fn assert_diagnostic_on_target(source: &str, code: &str, span: &str, hints: &[&str], target: &str) {
+	let mut session = Session::new();
+	session.set_target(target);
+	let file = session.set_source("main", Arc::from(source));
+	session.analyze_file(file);
 	let diagnostics = session.diagnostics(file);
 	let diagnostic = diagnostics
 		.iter()
@@ -302,6 +312,43 @@ fn locale_data_is_refused_at_compile_time_with_a_runtime_fix() {
 		NodeFlags::empty(),
 		NodeFlags::CAN_FAIL,
 	);
+}
+
+#[test]
+fn slice_replacement_diagnostics_name_item_writes_and_reuse() {
+	for (source, target, hints) in [
+		(
+			"mutable data = Bytes.filled(2)\nmutable use part = data[0..2]\npart = Bytes.filled(2, 7)",
+			"part",
+			&["slice view", "loop", "reuse"][..],
+		),
+		(
+			"mutable data = [1, 2]\nmutable use part = data[0..2]\npart = [7, 7]",
+			"part",
+			&["slice view", "loop", "reuse"][..],
+		),
+		(
+			"mutable data = \"ab\"\nmutable use part = data[0..2]\npart = \"cd\"",
+			"part",
+			&["slice view", "owning string", "reuse"][..],
+		),
+		(
+			"mutable data = [1, 2]\ndata[0..2] = [7, 7]",
+			"data[0..2]",
+			&["slice view", "loop", "reuse"][..],
+		),
+	] {
+		for backend in [
+			"bun",
+			"node",
+			"web",
+			"native",
+			"native-freestanding",
+			"wasm",
+		] {
+			assert_diagnostic_on_target(source, "REF016", target, hints, backend);
+		}
+	}
 }
 
 #[test]

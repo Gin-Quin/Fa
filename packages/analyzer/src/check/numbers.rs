@@ -1463,7 +1463,11 @@ impl Walker<'_> {
 		target: NodeId,
 		value: NodeId,
 	) -> TypeId {
-		let mut place = self.check_place(target);
+		let (mut place, slice) = self.assignment_place(target);
+		if slice {
+			self.check(value, None);
+			return self.memo(n, |_| TypeId::VOID);
+		}
 		// the target is read first: an optional narrowed here has its narrowed type
 		let name = self.strip_groups(target);
 		let mut narrowed_field = None;

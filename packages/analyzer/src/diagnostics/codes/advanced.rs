@@ -120,6 +120,7 @@ codes! {
 	REF013 = "REF013", Error, ["EF030"], "the alias rule";
 	REF014 = "REF014", Error, [], "writing through a read-only reference (immutable collection, set element, map key)";
 	REF015 = "REF015", Error, [], "writing through a use alias of an immutable place";
+	REF016 = "REF016", Error, [], "assigning a slice view as a whole";
 	REF020 = "REF020", Error, ["CL050"], "argument of a T in p parameter that is not a reference into the argument of p";
 	REF021 = "REF021", Error, ["FN070"], "an escaping closure writes a captured value";
 	REL001 = "REL001", Error, [], "direct side without reverse side";

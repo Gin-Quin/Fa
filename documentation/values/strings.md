@@ -169,6 +169,8 @@ console.log(word) -- error: `word` was invalidated: declare it again with `use w
 
 A string owns its storage, so any mutation of the string invalidates its slices: appending to it, or replacing it, as in `person.name = "Bao"`. See [mutations](/advanced/owned-references#mutations).
 
+A slice is a view of a range of code units, not an independently replaceable string. Assigning the whole view, with `word = "other"` or `word += "!"`, is an error, even for a `mutable use`. Replace the owning string instead, or reseat a `mutable use` reference with `reuse`.
+
 ### Surrogate pairs
 
 An index or a range may fall between the two code units of a surrogate pair. As in JavaScript, this is not an error: the result holds a **lone surrogate**, half of a character.
@@ -269,7 +271,7 @@ Interpolation constructors and appended interpolations check each addition of by
 - **The surrogates flag** says that the string may hold a lone surrogate. Only an index or a slice that cuts a surrogate pair sets it (and operations on such strings keep it). Without it, the bytes are valid UTF-8. A concatenation whose left operand ends with a lone high surrogate and whose right operand starts with a lone low one writes the four bytes of the code point.
 - **`length`** of a string without the ASCII flag is the number of bytes that are not continuation bytes, plus the number of four-byte sequences. An inline string counts its bytes; a heap string caches the count in its block header; a write clears the cache.
 - **Indexing and slicing** a string without the ASCII flag convert code unit positions to byte offsets by scanning. A heap string builds breadcrumbs (the byte offset of every 64th code unit) at the second conversion after a write, so that a conversion scans at most 64 code units; a write clears them. A position inside a four-byte sequence yields the lone surrogate, as three bytes, and sets the surrogates flag of the result. `text[i]` returns an inline string; `codeUnitAt` returns the unit without building a string.
-- **A slice** (`String in text`) is a pointer and a byte length, with the ASCII flag of its string.
+- **A slice** (`String in text`) is a pointer and a byte length, with the ASCII flag of its string. Whole-slice assignment is rejected by the analyzer; a reference can be reseated with `reuse`.
 - **Comparing a one-unit string with a literal** (`text[i] == "a"`, `when text[i] is { … }`) compares code units: no string is built.
 - **Iteration** decodes one code point per step from the bytes, `O(1)`, and advances the index by 1 or 2.
 - **Equality** compares two inline values word by word. Otherwise it checks byte lengths before reading bytes; empty and one-byte strings compare inline, and longer strings use the shared byte comparison.

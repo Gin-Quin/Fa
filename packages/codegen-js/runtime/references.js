@@ -56,7 +56,13 @@ export function faReferenceSet(container, key, value) {
  * @param {any} value
  */
 export function faMapAssign(map, key, value) {
- const previous = map.get(key);
- if (previous !== null && typeof previous === "object" && value !== null && typeof value === "object") faAssign(previous, value);
- else map.set(key, value);
+	const previous = map.get(key);
+	if (
+		previous !== null &&
+		typeof previous === "object" &&
+		value !== null &&
+		typeof value === "object"
+	)
+		faAssign(previous, value);
+	else map.set(key, value);
 }

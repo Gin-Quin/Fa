@@ -1621,3 +1621,17 @@ locate an element of its named owner, or only the container when its key is
 static. Local references rewrite reads/writes to direct member accesses;
 object references remain the objects. No reference cells, caches or generic
 representation flags are part of this convention.
+
+Implementation choices: evaluated value provenance is interned with flow state,
+including projected closure origins and weak unknown-index updates. Call effects
+use existential overlap; result/dependent-owner proofs require every reachable
+origin. Formal effect roots remain distinct from normalized owner paths. The
+JavaScript result's key is a live shared-runtime module binding, published after
+callee cleanup and consumed immediately. Portable result-layout and generic
+representation-sensitivity summaries are included in interfaces and hashes.
+Only sensitive generic representations get emitted bodies; generic callbacks
+select existing functions through static properties, without reference binding
+wrappers. Numeric, async and reference entry names compose in one selection.
+Map object replacement preserves existing identities wherever a caller may hold
+a bare reference. The deterministic pairwise test keeps explicit diagnostic and
+value oracles, plus fixed join/escape and locator regressions.

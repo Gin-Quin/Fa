@@ -1469,8 +1469,9 @@ impl Pass {
 					_ => None,
 				};
 				// a `use` alias or a `for` variable: the place it designates
-				if let Some(&alias) = w.aliases.get(&symbol)
-					&& let Some(path) = w.flow_path(alias)
+				if w.is_alias(symbol)
+					&& let [alias] = w.evaluated_origins(n).places.as_slice()
+					&& let Some(path) = w.flow_path(*alias)
 				{
 					return Some(Chain {
 						path,

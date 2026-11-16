@@ -438,6 +438,86 @@ fn generated_reference_matrix() {
 			"first 36 pairwise rows, fixed seed"
 		}
 	);
+	// Fixed seeds keep the reported joins and non-syntactic escapes present
+	// even when their higher-order combination is absent from a pairwise sample.
+	for (name, source, allowed) in [
+		(
+			"joined-effect-model",
+			include_str!("../../../analyzer/tests/cases/references/review2-joined-effect-model.fa"),
+			&["REF001"][..],
+		),
+		(
+			"joined-effect-model-builtin",
+			include_str!(
+				"../../../analyzer/tests/cases/references/review2-joined-effect-model-builtin.fa"
+			),
+			&["REF001"][..],
+		),
+		(
+			"joined-owner-call",
+			include_str!("../../../analyzer/tests/cases/references/review2-joined-owner-call.fa"),
+			&["REF009", "EFF004"][..],
+		),
+		(
+			"joined-owner-dependent",
+			include_str!(
+				"../../../analyzer/tests/cases/references/review2-joined-owner-dependent.fa"
+			),
+			&["REF020", "REF009"][..],
+		),
+		(
+			"joined-owner-argument",
+			include_str!(
+				"../../../analyzer/tests/cases/references/review2-joined-owner-argument.fa"
+			),
+			&["REF020", "REF009", "EFF011"][..],
+		),
+		(
+			"alias-closure-escape",
+			include_str!(
+				"../../../analyzer/tests/cases/references/review2-alias-closure-escape.fa"
+			),
+			&["MEM004"][..],
+		),
+		(
+			"loop-closure-escape",
+			include_str!("../../../analyzer/tests/cases/references/review2-loop-closure-escape.fa"),
+			&["MEM004"][..],
+		),
+		(
+			"loop-closure-observe",
+			include_str!(
+				"../../../analyzer/tests/cases/references/review2-loop-closure-observe.fa"
+			),
+			&["MEM004"][..],
+		),
+		(
+			"closure-field-observe",
+			include_str!(
+				"../../../analyzer/tests/cases/references/review2-closure-field-observe.fa"
+			),
+			&["MEM004"][..],
+		),
+		(
+			"transitive-closure-alias",
+			include_str!(
+				"../../../analyzer/tests/cases/references/review2-transitive-closure-alias.fa"
+			),
+			&["MEM004"][..],
+		),
+	] {
+		let (session, file) = fa_analyzer::analyze_source(source);
+		let errors: Vec<_> = session
+			.diagnostics(file)
+			.iter()
+			.filter(|d| d.severity == Severity::Error)
+			.map(|d| d.code.id)
+			.collect();
+		assert!(
+			!errors.is_empty() && errors.iter().all(|code| allowed.contains(code)),
+			"fixed seed {name}: {errors:?}, expected {allowed:?}"
+		);
+	}
 	// Fixed regression seed covers key-only, static-key, general projection,
 	// nested-container and function-value conventions in one program.
 	let locator = include_str!("../../../analyzer/tests/cases/references/review2-locator-abi.fa");
@@ -451,6 +531,15 @@ fn generated_reference_matrix() {
 		"[7, 18, 9, 6]".to_string(),
 		100000,
 	));
+	let map =
+		include_str!("../../../analyzer/tests/cases/references/review2-map-object-replacement.fa");
+	let map = map
+		.split("static result")
+		.next()
+		.unwrap()
+		.replace("Node", "MapNode")
+		.replace("exercise", "mapExercise");
+	accepted.push((format!("{map}\nfunction exercise100001 = (_flag: Boolean): Integer throws KeyNotFound => try mapExercise(\"kept\")\n"), "9".to_string(), 100001));
 	for (batch, cases) in accepted.chunks(8).enumerate() {
 		let mut text = String::new();
 		let mut lines = Vec::new();

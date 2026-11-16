@@ -661,7 +661,7 @@ impl Generator<'_> {
 				values.splice(0..0, hidden);
 				let result = self.finish_call(n, Some(declaration), function, values);
 				if !optional {
-					return self.after_call_drop(result, drop);
+					return self.after_call_drop(n, result, drop);
 				}
 				// `receiver?.method()`: `none` when the receiver is `none`
 				let none = Expr::constant("undefined", Prec::Primary);
@@ -707,7 +707,7 @@ impl Generator<'_> {
 				let hidden = self.signature_hidden_arguments(callee, n);
 				values.splice(0..0, hidden);
 				let result = self.finish_call(n, None, function.text, values);
-				self.after_call_drop(result, drop)
+				self.after_call_drop(n, result, drop)
 			}
 			Callee::Value if self.constraint_method_call(callee).is_some() => {
 				// `item.describe()` on a type parameter: the hidden function

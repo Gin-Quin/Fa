@@ -64,13 +64,7 @@ impl Walker<'_> {
 			SymbolKind::Let | SymbolKind::Mutable => self.note_use(n, symbol),
 			SymbolKind::Use | SymbolKind::MutableUse | SymbolKind::LoopVariable { copy: false } => {
 				// every place it may designate here (a `reuse` on one branch only)
-				let mut places: Vec<crate::ids::PlaceId> = self
-					.body
-					.flow
-					.ref_state(symbol)
-					.map(|state| self.facts.refs.get(state).places.to_vec())
-					.unwrap_or_default();
-				places.extend(self.aliases.get(&symbol).copied());
+				let places = self.symbol_places(symbol);
 				for place in places {
 					if let Some(root) = self.place_symbol(place)
 						&& root != symbol

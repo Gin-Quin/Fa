@@ -158,8 +158,9 @@ pub(crate) struct Generator<'s> {
 	pub(crate) out: Writer,
 	/// The key whose fields an unrolled `@for` over a key set reads (fields.rs).
 	pub(crate) direct_key: Option<String>,
-	/// Explicit dependent reference parameters use existing accessor cells.
+	/// Evaluated keys of dependent reference arguments.
 	pub(crate) reference_argument_keys: HashMap<NodeId, Expr>,
+	pub(crate) reference_call_keys: HashMap<NodeId, Expr>,
 	pub(crate) call_arguments: HashMap<NodeId, Vec<Option<String>>>,
 	reference_layout: fa_analyzer::analysis::ReferenceLayout,
 	/// The current function.
@@ -317,6 +318,7 @@ pub(crate) fn generate_module(
 		out: Writer::new(),
 		direct_key: None,
 		reference_argument_keys: HashMap::new(),
+		reference_call_keys: HashMap::new(),
 		call_arguments: HashMap::new(),
 		reference_layout: fa_analyzer::analysis::ReferenceLayout::General,
 		fcx: FnCx::default(),

@@ -1,0 +1,21 @@
+type Node = { left: Integer, right: Integer }
+let scratchOwners: Array<Node> = [{ left = 3, right = 4 }]
+function choose = (values: Array<Node>, right: Boolean): Integer in values throws IndexError => {
+ if right { try values[0].right } else { try values[0].left }
+}
+type Dropper = {
+ function pick = (self, values: Array<Node>, right: Boolean): Integer in values throws IndexError => try choose(values, right)
+ function destroy = (self) => { let _ignored = choose(scratchOwners, true) catch _error => 0 }
+}
+function defaulted = (values: Array<Node>, item: Integer in values = try (Dropper {}).pick(values, false)): Integer in values throws IndexError => item
+function exercise = (): Array<Integer> throws IndexError => {
+ mutable values: Array<Node> = [{ left = 1, right = 2 }]
+ use chosen = try (Dropper {}).pick(values, false)
+ chosen += 10
+ use again = try defaulted(values)
+ again += 10
+ [values[0].left, values[0].right]
+}
+static result = @exercise()
+console.log(result) -- prints: [21, 2]
+console.log(try exercise()) -- prints: [21, 2]

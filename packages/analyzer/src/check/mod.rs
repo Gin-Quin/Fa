@@ -1105,6 +1105,7 @@ impl Walker<'_> {
 			}
 		};
 		self.set_flag(n, NodeFlags::PLACE);
+		self.record_value_origins(n);
 		info
 	}
 

@@ -703,7 +703,7 @@ impl Generator<'_> {
 		if self.is_object_reference(ty) {
 			let value = self.expr(value);
 			let name = self.declare(symbol);
-			let keyword = if self.is_module_value(symbol) {
+			let keyword = if self.is_module_value(symbol) || self.guard_binding(&name) {
 				""
 			} else if mutable {
 				"let "
@@ -714,12 +714,12 @@ impl Generator<'_> {
 			self.references.insert(symbol, Reference::Object);
 			return;
 		}
-		let Some(parts) = self.reference_parts(value, true) else {
+		let Some(mut parts) = self.reference_parts(value, true) else {
 			return;
 		};
 		if let Key::Value(value) = &parts.key {
 			let name = self.declare(symbol);
-			let keyword = if self.is_module_value(symbol) {
+			let keyword = if self.is_module_value(symbol) || self.guard_binding(&name) {
 				""
 			} else {
 				"const "
@@ -727,12 +727,40 @@ impl Generator<'_> {
 			self.out.line(format!("{keyword}{name} = {};", value.text));
 			return;
 		}
+		// The location survives the statement's temporary-resource cleanup.
+		if self
+			.guard_frames
+			.last()
+			.is_some_and(|frame| !frame.is_empty())
+			&& let Some((container, key)) = self.parts_pair(&parts)
+		{
+			let container_name = self.temp();
+			let key_name = self.temp();
+			self.guard_binding(&container_name);
+			self.guard_binding(&key_name);
+			self.out
+				.line(format!("{container_name} = {};", container.text));
+			self.out.line(format!("{key_name} = {};", key.text));
+			parts.container = Some(Expr::name(container_name, true));
+			parts.key = match parts.key {
+				Key::Entry(_) => Key::Entry(Expr::name(key_name, true)),
+				Key::Set(_) => Key::Set(Expr::name(key_name, true)),
+				Key::Dynamic(_) => Key::Dynamic(Expr::name(key_name, true)),
+				_ => Key::Index(Expr::name(key_name, true)),
+			};
+		}
 		if self.is_module_value(symbol) || mutable {
 			if let Some((container, key)) = self.parts_pair(&parts) {
 				let name = self.declare(symbol);
 				let (container_name, key_name) =
 					(format!("{name}$container"), format!("{name}$key"));
-				let keyword = if self.is_module_value(symbol) {
+				let keyword = if self.is_module_value(symbol) || {
+					let guarded = self.guard_binding(&container_name);
+					if guarded {
+						self.guard_binding(&key_name);
+					}
+					guarded
+				} {
 					""
 				} else {
 					"let "
@@ -1000,12 +1028,17 @@ impl Generator<'_> {
 			let optional = self.may_be_none(self.type_of(node));
 			return match layout {
 				ReferenceLayout::General => {
-					let key = self.helper("faReferenceKey").to_string();
-					let key_name = self.temp();
-					self.out.line(format!("const {key_name} = {key};"));
+					let key_value = if let Some(key) = self.reference_call_keys.remove(&node) {
+						key
+					} else {
+						let key = self.helper("faReferenceKey").to_string();
+						let key_name = self.temp();
+						self.out.line(format!("const {key_name} = {key};"));
+						Expr::name(key_name, true)
+					};
 					Some(Parts {
 						container: Some(result),
-						key: Key::Dynamic(Expr::name(key_name, true)),
+						key: Key::Dynamic(key_value),
 						optional,
 					})
 				}

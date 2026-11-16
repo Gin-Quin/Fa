@@ -361,13 +361,23 @@ fn resident_kib(pid: u32) -> Option<usize> {
 	#[cfg(target_os = "linux")]
 	{
 		let status = fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
-		status.lines().find_map(|line| {
+		let own: Option<usize> = status.lines().find_map(|line| {
 			line.strip_prefix("VmRSS:")?
 				.split_whitespace()
 				.next()?
 				.parse()
 				.ok()
-		})
+		});
+		// The facade starts a compiler or runtime child. Bound each descendant's
+		// RSS as well; its sparse virtual address space is intentionally unbounded.
+		let children =
+			fs::read_to_string(format!("/proc/{pid}/task/{pid}/children")).unwrap_or_default();
+		children
+			.split_whitespace()
+			.filter_map(|pid| pid.parse().ok())
+			.filter_map(resident_kib)
+			.chain(own)
+			.max()
 	}
 	#[cfg(not(target_os = "linux"))]
 	{

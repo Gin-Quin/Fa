@@ -784,22 +784,31 @@ impl Walker<'_> {
 		else {
 			return TypeId::VOID;
 		};
-		if let Some(place) = place {
-			// the owner must be the same collection (`REF006`)
-			if let Some(&current) = self.aliases.get(&symbol)
-				&& let (Some(old), Some(new)) = (self.owner_place(current), self.owner_place(place))
-				&& self.places.get(old).root != self.places.get(new).root
-			{
-				let message = format!(
-					"`{}` designates an element of `{}`: it can't designate an element of `{}`",
-					self.tree.name(name),
-					self.place_text(old),
-					self.place_text(new)
-				);
-				let diagnostic = self.diagnostic(&REF006, value, message);
-				self.report_flow(diagnostic);
-			}
+		// Every reachable old/new origin must have the same declared owner root.
+		let current = self.symbol_places(symbol);
+		let old_owners: Vec<_> = current
+			.into_iter()
+			.filter_map(|place| self.owner_place(place))
+			.collect();
+		let new_owners: Vec<_> = origins
+			.iter()
+			.filter_map(|&place| self.owner_place(place))
+			.collect();
+		if let Some((old, new)) = old_owners
+			.iter()
+			.flat_map(|&old| new_owners.iter().map(move |&new| (old, new)))
+			.find(|&(old, new)| self.places.get(old).root != self.places.get(new).root)
+		{
+			let message = format!(
+				"`{}` designates an element of `{}`: it can't designate an element of `{}`",
+				self.tree.name(name),
+				self.place_text(old),
+				self.place_text(new)
+			);
+			let diagnostic = self.diagnostic(&REF006, value, message);
+			self.report_flow(diagnostic);
 		}
+
 		if self.body.flow.reachable {
 			let place = place.or_else(|| self.aliases.get(&symbol).copied());
 			if let Some(place) = place {

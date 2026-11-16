@@ -1,0 +1,18 @@
+-- prints: 9
+-- prints: 9
+-- file: main.fa
+type Node = { value: Integer }
+function exercise = (): Integer throws IndexError => {
+ mutable nodes: Array<Node> = [Node { value = 7 }]
+ use node = try first(nodes)
+ node.value = 9
+ mutable values: Array<Integer> = [7]
+ use value = try first(values)
+ value = 9
+ node.value + value - 9
+}
+static result = @exercise()
+console.log(result)
+console.log(try exercise())
+-- file: first.fa
+export function = <Item>(values: Array<Item>): Item in values throws IndexError => try values[0]

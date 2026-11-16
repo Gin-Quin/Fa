@@ -53,7 +53,7 @@ unsafe extern "C" {
 /// compiler is never reused.
 const VERSION: &str = concat!(
 	env!("CARGO_PKG_VERSION"),
-	"-split-7-platform-1-effects-1-errors-1-regions-1-packed-capacity-1-frame-1-sync-payload-1-region-string-view-1-region-edges-1-inline-length-1-template-size-1-coroutine-decimal-1-array-capacities-1-reference-results-2"
+	"-split-7-platform-1-effects-1-errors-1-regions-1-packed-capacity-1-frame-1-sync-payload-1-region-string-view-1-region-edges-1-inline-length-1-template-size-1-coroutine-decimal-1-array-capacities-1-reference-results-3"
 );
 
 /// A file name made of a module path.

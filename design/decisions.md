@@ -1434,3 +1434,17 @@ The analysis also showed that `analysis.coercions` misses conversions into an
 object root (optional narrowing, adapted function returns): a future region proof
 for object roots must exclude convertible layouts from the whole program's
 inventory instead of trusting coercion entries.
+
+## Aggregate performance: scalar union leaves at recursive calls (2026-11-16)
+
+The existing expansion of a scalar union leaf at recursive call sites now also
+applies to functions that don't throw, to any arm whose preceding arms only test
+other members (they exclude it, so testing its member first selects the same arm),
+and to leaves made of scalar arithmetic (`Arithmetic`, `Negate`, groups; at most 16
+nodes) over the arm's fields, scalar parameters and constants. Calls, `try`, local
+declarations and blocks keep the call. The result keeps the callee's ABI and its
+range-checked return still disables the expansion. `interp`: default-size
+instructions 164.03 M → 159.43 M (Goose 148.79 M), audit −2.23%; every other audit
+row within +0.03%. The tag dispatch is already an IR `switch` that LLVM lowers to
+three compares; the narrow/far link format costs one predictable test per binary
+node and was left alone. CPU: see the aggregate report.

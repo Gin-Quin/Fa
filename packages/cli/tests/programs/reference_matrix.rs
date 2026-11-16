@@ -442,6 +442,13 @@ fn generated_reference_matrix() {
 	// even when their higher-order combination is absent from a pairwise sample.
 	for (name, source, allowed) in [
 		(
+			"nested-result-invalidation",
+			include_str!(
+				"../../../analyzer/tests/cases/references/review2-nested-result-invalidation.fa"
+			),
+			&["REF001"][..],
+		),
+		(
 			"joined-effect-model",
 			include_str!("../../../analyzer/tests/cases/references/review2-joined-effect-model.fa"),
 			&["REF001"][..],
@@ -517,6 +524,36 @@ fn generated_reference_matrix() {
 			!errors.is_empty() && errors.iter().all(|code| allowed.contains(code)),
 			"fixed seed {name}: {errors:?}, expected {allowed:?}"
 		);
+	}
+	for (source, expected, id) in [
+		(
+			include_str!("../../../analyzer/tests/cases/references/review2-nested-result-paths.fa"),
+			"[8, 8]",
+			100002,
+		),
+		(
+			include_str!(
+				"../../../analyzer/tests/cases/references/review2-local-scalar-selection.fa"
+			),
+			"[5, 15, 20]",
+			100003,
+		),
+	] {
+		let source = source
+			.split("static ")
+			.next()
+			.unwrap()
+			.replace("Node", &format!("NestedNode{id}"))
+			.replace("exercise", &format!("exercise{id}"));
+		let source = if id == 100002 {
+			source.replace(
+				&format!("exercise{id} = ()"),
+				&format!("exercise{id} = (_flag: Boolean)"),
+			)
+		} else {
+			source
+		};
+		accepted.push((source, expected.to_string(), id));
 	}
 	// Fixed regression seed covers key-only, static-key, general projection,
 	// nested-container and function-value conventions in one program.

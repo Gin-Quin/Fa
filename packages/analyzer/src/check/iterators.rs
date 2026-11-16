@@ -177,6 +177,8 @@ impl Walker<'_> {
 			let state = self.facts.refs.state(crate::flow::refs::RefState {
 				places,
 				opaque: false,
+				bounds: Default::default(),
+				readonly: false,
 				invalidated: None,
 				reported: false,
 			});

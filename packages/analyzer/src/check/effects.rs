@@ -84,7 +84,11 @@ impl Walker<'_> {
 		let tree = Arc::clone(&self.tree);
 		match syntax::view(&tree, n) {
 			View::Try(inner) => self.places_of(inner),
-			View::Call { .. } => self.reference_results.get(&n).cloned().unwrap_or_default(),
+			View::Call { .. } => self
+				.reference_results
+				.get(&n)
+				.map(|value| value.places.clone())
+				.unwrap_or_default(),
 			View::Name(_) => match self.a.resolution(n) {
 				Resolution::Local(symbol) => self.symbol_places(symbol),
 				_ => Vec::new(),
@@ -438,6 +442,15 @@ impl Walker<'_> {
 		if !self.body.flow.reachable {
 			return;
 		}
+		let evaluated = self.evaluated_origins(target);
+		for bound in evaluated.bounds {
+			if bound.formal.is_none() {
+				let saved = self.effect_type;
+				self.effect_type = Some(self.type_of(target));
+				self.record_effect(bound.place, false, n, false);
+				self.effect_type = saved;
+			}
+		}
 		for place in self.places_of(target) {
 			self.record_effect(place, false, n, false);
 			// `map[key] = value` may add the key: `mutates self[key], self.size`
@@ -585,7 +598,7 @@ impl Walker<'_> {
 
 	/// The effect path of a place for the innermost function: its root is a
 	/// parameter, `self` or a module-level value.
-	fn effect_path(&mut self, place: PlaceId) -> Option<PathId> {
+	pub(super) fn effect_path(&mut self, place: PlaceId) -> Option<PathId> {
 		let symbol = self.place_symbol(place)?;
 		let entry = self.a.symbols.symbol(symbol);
 		let root = match entry.kind {
@@ -1573,7 +1586,16 @@ impl Walker<'_> {
 								.collect()
 						})
 						.unwrap_or_default(),
-					_ => Vec::new(),
+					_ => match self.s.types.kind(self.type_of(callee)) {
+						TypeKind::Function(sig) => self
+							.s
+							.types
+							.params(self.s.types.sig(sig).params)
+							.iter()
+							.map(|param| param.ty)
+							.collect(),
+						_ => Vec::new(),
+					},
 				};
 				let mut path_types: Vec<Option<TypeId>> = Vec::new();
 				for &(path, _) in &paths {
@@ -1583,7 +1605,7 @@ impl Walker<'_> {
 				let mut checked: Vec<PlaceId> = Vec::new();
 				for (position, (path, invalidates)) in paths.into_iter().enumerate() {
 					let places =
-						self.substitute_places(path, &info.arguments, receiver, (n, &name));
+						self.substitute_effect_places(path, &info.arguments, receiver, (n, &name));
 					if places.is_empty() {
 						self.temporary_mutated(path, &info.arguments, &name);
 					}
@@ -1682,6 +1704,15 @@ impl Walker<'_> {
 		// the effects
 		self.kept_narrowings = kept;
 		if !receiver_places.is_empty() {
+			let bounds = self.evaluated_origins(callee).bounds;
+			for bound in bounds {
+				if bound.formal.is_none() {
+					let saved = self.effect_type;
+					self.effect_type = self.callee_receiver_type(callee);
+					self.record_effect(bound.place, false, n, true);
+					self.effect_type = saved;
+				}
+			}
 			for base in receiver_places {
 				self.kept_narrowings.push(base);
 				let length = self.place_length(base);
@@ -2160,6 +2191,28 @@ impl Walker<'_> {
 			.collect()
 	}
 
+	/// Effects through an opaque result can reach any descendant of its
+	/// owner. Formal dependent parameters retain their distinct narrow roots.
+	fn substitute_effect_places(
+		&mut self,
+		path: PathId,
+		arguments: &[Argument],
+		receiver: Option<NodeId>,
+		call: (NodeId, &str),
+	) -> Vec<(PlaceId, PlaceId, NodeId)> {
+		let mut places = self.substitute_places(path, arguments, receiver, call);
+		for (_, base, argument) in places.clone() {
+			for bound in self.evaluated_origins(argument).bounds {
+				if bound.formal.is_none() {
+					places.push((bound.place, base, argument));
+				}
+			}
+		}
+		places.sort_unstable();
+		places.dedup();
+		places
+	}
+
 	/// The places a call of a function of the program changes by its own
 	/// effects (`mutates`, `invalidates`), with whether it invalidates them:
 	/// a lambda argument may run after them, so its entry facts drop them
@@ -2190,7 +2243,7 @@ impl Walker<'_> {
 		paths
 			.into_iter()
 			.flat_map(|(path, invalidates)| {
-				self.substitute_places(path, arguments, receiver, (n, &name))
+				self.substitute_effect_places(path, arguments, receiver, (n, &name))
 					.into_iter()
 					.map(move |(place, _, _)| (place, invalidates, n))
 			})
@@ -2233,7 +2286,9 @@ impl Walker<'_> {
 	) -> bool {
 		// a set element or a map key is read-only (`CL031`, collections.rs)
 		if let Some(symbol) = self.root_symbol(node)
-			&& (self.readonly_elements.contains(&symbol) || self.readonly_place(base))
+			&& (self.readonly_elements.contains(&symbol)
+				|| self.readonly_place(base)
+				|| self.evaluated_origins(node).readonly)
 		{
 			let name = self
 				.s
@@ -2374,8 +2429,10 @@ impl Walker<'_> {
 			return true;
 		}
 		if let Some(state) = self.body.flow.ref_state(symbol) {
-			let places = &self.facts.refs.get(state).places;
-			return !places.is_empty()
+			let state = self.facts.refs.get(state);
+			let places = &state.places;
+			return !state.readonly
+				&& !places.is_empty()
 				&& places
 					.iter()
 					.all(|&place| self.place_writable(place) == Writable::Yes);

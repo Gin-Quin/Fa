@@ -1962,7 +1962,7 @@ impl TypeStore {
 	}
 
 	/// The stable hash of an effect path (from names, never from ids).
-	fn path_hash(&self, path: PathId) -> u128 {
+	pub(crate) fn path_hash(&self, path: PathId) -> u128 {
 		let (data, steps) = self.path_data(path);
 		let mut hasher = StableHasher::new();
 		match data.root {

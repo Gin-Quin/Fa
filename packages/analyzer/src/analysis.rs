@@ -613,6 +613,7 @@ pub struct Analysis {
 	/// Reachable break values of each loop expression, targeting that loop.
 	pub loop_results: FxHashMap<NodeId, Vec<NodeId>>,
 	pub reference_layouts: FxHashMap<NodeId, ReferenceLayout>,
+	pub reference_origins: FxHashMap<NodeId, Vec<ReferenceOrigin>>,
 	pub reference_sensitive: FxHashMap<NodeId, Vec<ParamId>>,
 	/// The compositions (`f then g`, a slice of a known chain): their steps,
 	/// in order, flat (a step is a node of this file evaluating to a
@@ -1261,6 +1262,14 @@ pub struct TypeDecl {
 	pub generics: Vec<ParamId>,
 }
 
+/// Portable evaluated result provenance, expressed in the callee's formal roots.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct ReferenceOrigin {
+	pub path: crate::ids::PathId,
+	pub descendant: bool,
+	pub readonly: bool,
+}
+
 /// A proven compression of the JavaScript primitive-reference result pair.
 /// Function values always use the general convention, independently of this fact.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
@@ -1581,6 +1590,7 @@ impl Analysis {
 			forwards: FxHashMap::default(),
 			loop_results: FxHashMap::default(),
 			reference_layouts: FxHashMap::default(),
+			reference_origins: FxHashMap::default(),
 			reference_sensitive: FxHashMap::default(),
 			compositions: FxHashMap::default(),
 			intervals: FxHashMap::default(),

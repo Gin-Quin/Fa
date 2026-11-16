@@ -1,0 +1,4 @@
+function wrong = (values: Array<Integer>): Integer in values => values.length -- error: REF009
+function useItem = (values: Array<Integer>, item: Integer in values): Integer => item
+mutable values = [7]
+console.log(useItem(values, values.length)) -- error: REF020

@@ -314,7 +314,7 @@ function firstPerson = (persons: Array<Person>): (Person in persons)? => {
 
 A reference result can be an `if`, `when`, `catch`, block or `loop` expression. A loop returns the reference supplied by its reachable `break` values. Every reachable result must designate an element of the declared collection; returning a local collection's element in just one branch is still an error. A reseatable reference must satisfy that rule for every place it may designate at the return. An `async` function cannot declare a reference result: return an index or an owned copy instead.
 
-The caller receives a reference whose validity is tied to its own collection: the parameter name in the return type is replaced by the argument, so `firstPerson(persons)` returns a `(Person in persons)?`. The index of the element is not known to the caller.
+The caller receives a reference whose validity is tied to its own collection: the parameter name in the return type is replaced by the argument, so `firstPerson(persons)` returns a `(Person in persons)?`. The caller uses the evaluated result provenance for validity: known functions retain their field and nested collection paths, including across imports; an unknown function value conservatively borrows anywhere below its declared owner. Collection metadata such as `length` is not an element and cannot satisfy an `in` result.
 
 ```fa
 mutable persons = [Person { name = "Ana" }]
@@ -365,8 +365,11 @@ JavaScript passes and returns object references as the objects themselves, with
 `undefined` for an absent reference. A local primitive reference is a direct
 place: evaluate its innermost container and key once, then rewrite each read or
 write to that member access. `use score = player.score; score += 1` emits
-`player.score += 1`. A mutable reference retains two locals reassigned by
-`reuse`. A map slot uses its existing `get`/`set` operations; a primitive pool
+`player.score += 1`. A mutable member reference retains two locals reassigned by
+`reuse`. When a mutable reference can also designate scalar locals, a selector
+chooses direct reads and writes of those locals; its other alternative uses the
+container and key. Copying that reference with `use` snapshots the selector and
+location, without copying the referent or allocating a cell. A map slot uses its existing `get`/`set` operations; a primitive pool
 uses its slot array and stable slot index, with direct member accesses. There are no accessor cells or reference caches.
 
 At a function boundary a primitive or mixed-union reference has two parts:

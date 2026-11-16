@@ -704,6 +704,7 @@ pub struct Interface {
 	/// Reference-containing generic defaults, by declaration and position.
 	pub reference_defaults: FxHashMap<NodeId, Vec<bool>>,
 	pub reference_layouts: FxHashMap<NodeId, crate::analysis::ReferenceLayout>,
+	pub reference_origins: FxHashMap<NodeId, Vec<crate::analysis::ReferenceOrigin>>,
 	pub reference_sensitive: FxHashMap<NodeId, Vec<ParamId>>,
 }
 
@@ -1050,6 +1051,16 @@ impl Interface {
 		for (&decl, params) in &self.reference_sensitive {
 			for &param in params {
 				parts.push((17, key_hash(decl), 0, param_hash(param)));
+			}
+		}
+		for (&decl, origins) in &self.reference_origins {
+			for origin in origins {
+				parts.push((
+					18,
+					key_hash(decl),
+					types.path_hash(origin.path),
+					u128::from(origin.descendant) | u128::from(origin.readonly) << 1,
+				));
 			}
 		}
 		parts.push((4, u128::from(self.reads_target), 0, 0));

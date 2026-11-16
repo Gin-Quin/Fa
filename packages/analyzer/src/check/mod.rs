@@ -180,6 +180,8 @@ pub struct FnCx {
 	/// All returned reference values are fresh so far.
 	pub ref_fresh: bool,
 	pub ref_layout: Option<crate::analysis::ReferenceLayout>,
+	pub ref_origins: Vec<crate::analysis::ReferenceOrigin>,
+	pub ref_valid: bool,
 }
 
 impl FnCx {
@@ -213,6 +215,8 @@ impl FnCx {
 			ref_owner: None,
 			ref_fresh: true,
 			ref_layout: None,
+			ref_origins: Vec::new(),
+			ref_valid: true,
 		}
 	}
 }
@@ -440,7 +444,8 @@ pub struct Walker<'s> {
 	/// The place each `use` alias and `for` variable over a collection designates.
 	pub(crate) aliases: FxHashMap<SymbolId, PlaceId>,
 	/// Borrowed call results, recorded once after that evaluation's effects.
-	pub(crate) reference_results: FxHashMap<NodeId, Vec<PlaceId>>,
+	pub(crate) invalid_reference_arguments: rustc_hash::FxHashSet<NodeId>,
+	pub(crate) reference_results: FxHashMap<NodeId, crate::flow::values::ValueOrigins>,
 	/// Borrowed result leaves, captured before their branch flow is joined.
 	pub(crate) value_origins: FxHashMap<NodeId, crate::flow::values::ValueOrigins>,
 	pub(crate) capture_origins: FxHashMap<NodeId, Vec<provenance::CapturedOrigins>>,
@@ -637,6 +642,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		implicit_write_calls: Vec::new(),
 		key_sets: key_sets::KeySetState::default(),
 		aliases: FxHashMap::default(),
+		invalid_reference_arguments: rustc_hash::FxHashSet::default(),
 		reference_results: FxHashMap::default(),
 		value_origins: FxHashMap::default(),
 		capture_origins: FxHashMap::default(),

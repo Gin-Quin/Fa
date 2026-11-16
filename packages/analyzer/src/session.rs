@@ -1195,6 +1195,22 @@ fn merge_interface(
 				((decl, merger.sym(name)), origin)
 			})
 			.collect(),
+		reference_origins: interface
+			.reference_origins
+			.iter()
+			.map(|(&decl, origins)| {
+				(
+					decl,
+					origins
+						.iter()
+						.map(|origin| crate::analysis::ReferenceOrigin {
+							path: merger.path(origin.path),
+							..*origin
+						})
+						.collect(),
+				)
+			})
+			.collect(),
 		reference_layouts: interface
 			.reference_layouts
 			.iter()

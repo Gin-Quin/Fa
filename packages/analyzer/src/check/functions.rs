@@ -772,12 +772,21 @@ impl Walker<'_> {
 						value_node,
 						cx.as_ref().and_then(|cx| cx.ref_owner),
 					);
+					let valid = self.reference_result_valid(
+						value_node,
+						cx.as_ref().and_then(|cx| cx.ref_owner),
+					);
+					let summary = self.reference_value_summary(value_node);
 					let fresh = self.reference_is_fresh(value_node);
 					let layout = cx
 						.as_ref()
 						.and_then(|cx| cx.ref_owner)
 						.and_then(|owner| self.reference_result_layout(value_node, owner));
 					if let Some(cx) = &mut cx {
+						cx.ref_valid &= valid;
+						cx.ref_origins.extend(summary);
+						cx.ref_origins.sort_unstable();
+						cx.ref_origins.dedup();
 						cx.ref_fresh &= fresh;
 						if let Some(layout) = layout {
 							cx.ref_layout =
@@ -884,6 +893,13 @@ impl Walker<'_> {
 		let sig = self.signature_id(ty);
 		for key in [Some(lambda), owner.declaration].into_iter().flatten() {
 			if reference.is_some() {
+				if let Some(cx) = &cx
+					&& cx.ref_valid
+				{
+					self.a.reference_origins.insert(key, cx.ref_origins.clone());
+				} else {
+					self.a.reference_origins.remove(&key);
+				}
 				self.a.reference_layouts.insert(
 					key,
 					cx.as_ref()
@@ -1034,10 +1050,12 @@ impl Walker<'_> {
 					);
 					self.reference_parameters.insert(symbol, place);
 					let formal = self.places.symbol(symbol);
-					let state = self
-						.facts
-						.refs
-						.state(crate::flow::refs::RefState::valid(formal));
+					let mut state = crate::flow::refs::RefState::valid(formal);
+					state.bounds.push(crate::flow::values::ReferenceBound {
+						place: owner,
+						formal: Some(symbol),
+					});
+					let state = self.facts.refs.state(state);
 					self.body.flow.set_ref_state(symbol, state);
 				} else if self.contains_reference_type(annotation) {
 					self.check_reference_annotation(annotation);

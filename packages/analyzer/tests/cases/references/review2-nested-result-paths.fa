@@ -1,0 +1,18 @@
+type Node = { left: Integer, children: Array<Integer> }
+function field = (values: Array<Node>): Integer in values throws IndexError => try values[0].left
+function preserve = (values: Array<Node>, item: Node in values): Integer mutates item.children => {
+ item.children.clear()
+ item.left
+}
+function exercise = (): Array<Integer> throws IndexError => {
+ mutable values: Array<Node> = [{ left = 7, children = [9] }]
+ use left = try field(values)
+ values[0].children.clear()
+ left += 1
+ use item = values[0]
+ let answer = preserve(values, item)
+ [left, answer]
+}
+static result = @exercise()
+console.log(result) -- prints: [8, 8]
+console.log(try exercise()) -- prints: [8, 8]

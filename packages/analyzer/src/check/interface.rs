@@ -507,6 +507,7 @@ impl Walker<'_> {
 		interface.implicit_writes = implicit_writes;
 		interface.generic_functions = generic_functions;
 		interface.reference_layouts = self.a.reference_layouts.clone();
+		interface.reference_origins = self.a.reference_origins.clone();
 		interface.reference_sensitive = self.a.reference_sensitive.clone();
 		interface.key_set_params = key_set_params;
 		interface.derived_params = derived_params;

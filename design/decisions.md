@@ -1641,3 +1641,12 @@ indices drive iteration, and a free list reuses dead slots; former references
 are already statically invalid, so no runtime identity generation is required.
 Native object-cache producer `reference-results-7` invalidates artifacts from
 the earlier provenance/borrow-result lowering.
+
+Second-round sibling audit: evaluated reference-result paths are published in
+the module interface and included in its hash. Unknown callable results carry
+a descendant bound, kept separately from a formal dependent parameter's root.
+This preserves narrow formal effects while invalidating a returned nested slot
+when its inner collection changes. Primitive local reseating uses scalar locals
+and a selector, with a container/key alternative for member places; no box or
+closure is allocated. Whole writes to optional storage replace its value, since
+its previous payload may be absent.

@@ -76,7 +76,10 @@ impl Walker<'_> {
 				origins.places = self.places_of(node);
 				if let Resolution::Local(symbol) = self.a.resolution(node) {
 					if let Some(state) = self.body.flow.ref_state(symbol) {
-						origins.opaque = self.facts.refs.get(state).opaque;
+						let state = self.facts.refs.get(state);
+						origins.opaque = state.opaque;
+						origins.bounds = state.bounds.to_vec();
+						origins.readonly = state.readonly;
 					}
 					if self.a.symbols.symbol(symbol).kind == SymbolKind::Function {
 						if let Some(info) = self
@@ -178,25 +181,25 @@ impl Walker<'_> {
 			} => origins = self.evaluated_origins(value),
 			_ => {
 				self.ensure_builtin_reference(node);
-				origins.places = self.places_of(node);
-				origins.owned = origins.places.is_empty();
-				origins.opaque = self
-					.a
-					.calls
+				origins = self
+					.reference_results
 					.get(&node)
-					.is_some_and(|call| match call.callee {
-						crate::analysis::Callee::Function(decl) => {
-							self.a.reference_layouts.get(&decl)
-								!= Some(&crate::analysis::ReferenceLayout::Owner)
-						}
-						crate::analysis::Callee::Value => true,
-						_ => false,
+					.cloned()
+					.unwrap_or_else(|| ValueOrigins {
+						places: self.places_of(node),
+						..ValueOrigins::default()
 					});
+				origins.owned = origins.places.is_empty();
+				origins.opaque = !origins.bounds.is_empty();
 			}
 		}
 		if self.type_of(node) == TypeId::NEVER {
 			origins = ValueOrigins::default();
 		}
+		origins.readonly |= origins
+			.places
+			.iter()
+			.any(|&place| self.readonly_place(place));
 		origins.places.sort_unstable();
 		origins.places.dedup();
 		origins.closures.sort_unstable();

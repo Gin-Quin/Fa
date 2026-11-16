@@ -503,7 +503,7 @@ impl Merger<'_> {
 		PathListId(self.view.global.path_lists.insert(&paths))
 	}
 
-	fn path(&mut self, path: PathId) -> PathId {
+	pub(crate) fn path(&mut self, path: PathId) -> PathId {
 		if !is_local(path.0) {
 			return path;
 		}

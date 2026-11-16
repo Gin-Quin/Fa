@@ -1,8 +1,8 @@
 import { faAssign } from "./copy.js";
 
 // @fa-helper faReferenceKey
-/** The second half of the most recently returned general reference. */
-export let faReferenceKey;
+/** @type {any} The second half of the most recently returned general reference. */
+export let faReferenceKey = null;
 
 // @fa-helper faReferenceResult deps: faReferenceKey
 /**

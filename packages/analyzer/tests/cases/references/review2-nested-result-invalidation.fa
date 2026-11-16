@@ -1,0 +1,25 @@
+type Node = { left: Integer, children: Array<Integer> }
+type Pick = (values: Array<Node>) => Integer in values throws IndexError
+function nested = (values: Array<Node>): Integer in values throws IndexError => try values[0].children[0]
+function forward = (values: Array<Node>): Integer in values throws IndexError => try nested(values)
+function direct = (values: Array<Node>) throws IndexError mutates values => {
+ use child = try nested(values)
+ try values[0].children.clear()
+ console.log(child) -- error: REF001
+}
+function forwarded = (values: Array<Node>) throws IndexError mutates values => {
+ use child = try forward(values)
+ try values[0].children.clear()
+ console.log(child) -- error: REF001
+}
+function selected = (values: Array<Node>) throws IndexError mutates values => {
+ let pick: Pick = nested
+ use child = try pick(values)
+ try values[0].children.clear()
+ console.log(child) -- error: REF001
+}
+function unknown = (values: Array<Node>, pick: Pick) throws IndexError mutates values => {
+ use child = try pick(values)
+ try values[0].children.clear()
+ console.log(child) -- error: REF001
+}

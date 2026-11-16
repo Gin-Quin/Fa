@@ -291,8 +291,17 @@ impl<'i, 'h> Machine<'i, 'h> {
 	fn value(&self, value: Out) -> Result<Value, Flow> {
 		match value {
 			Out::Value(value) => Ok(value),
-			Out::Loan(loan) => Ok(self.read_loan(&loan)?.materialize()),
+			Out::Loan(loan) => self.view_value(self.read_loan(&loan)?),
 		}
+	}
+
+	fn view_value(&self, view: PlaceView<'_>) -> Result<Value, Flow> {
+		if matches!(view, PlaceView::Entry(_)) {
+			self.interpreter.reserve(
+				memory::values_size(2) + size_of::<Vec<Value>>() + 2 * size_of::<usize>(),
+			)?;
+		}
+		Ok(view.materialize())
 	}
 
 	fn read_loan(&self, loan: &Loan) -> Result<PlaceView<'_>, Flow> {
@@ -636,7 +645,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 			}
 		}
 		match state.action {
-			PlaceAction::Read => Self::done(self.read_loan(&state.loan)?.materialize()),
+			PlaceAction::Read => Self::done(self.view_value(self.read_loan(&state.loan)?)?),
 			PlaceAction::Lend => {
 				self.read_loan(&state.loan)?;
 				Self::done(Out::Loan(state.loan))
@@ -760,7 +769,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 			}
 			Finish::Mutate(path, loan) => {
 				if Callback::mutating(path) {
-					let receiver = self.read_loan(&loan)?.materialize();
+					let receiver = self.view_value(self.read_loan(&loan)?)?;
 					let mut arguments = values;
 					arguments.insert(0, receiver);
 					self.start_callback(path, arguments, CallbackFinish::Mutate(loan))
@@ -1504,6 +1513,30 @@ mod ownership_tests {
 		fn global(&mut self, _key: GlobalKey) -> Result<Value, Error> {
 			Err(Error::Unsupported("no global in this test".into()))
 		}
+	}
+
+	#[test]
+	fn map_entry_inspection_reserves_its_bounded_tuple_wrapper() {
+		let code = Arc::new(Code::expression(&Expr::none(), 0, || Ok(())).unwrap());
+		let mut host = EmptyHost;
+		let mut interpreter = Interpreter::new(
+			&mut host,
+			crate::Limits {
+				memory: 1,
+				..crate::Limits::default()
+			},
+		);
+		let machine = Machine::new(&mut interpreter, code).unwrap();
+		let pair = (Value::int(1), Value::int(2));
+		let view = PlaceView::Entry(&pair);
+		assert!(matches!(
+			machine.view_value(view),
+			Err(Flow::Error(Error::Memory(1)))
+		));
+		let value = view.project(&PlaceStep::Index(Value::int(1))).unwrap();
+		assert!(
+			matches!(machine.view_value(value), Ok(Value::Integer(value)) if value == I256::from(2))
+		);
 	}
 
 	#[test]

@@ -18,7 +18,8 @@ function records = (): Integer => {
 	people[0].score + people[1].score
 }
 
-function score = (scores: Map<String, Integer>, name: String): Integer throws KeyNotFound => try scores[name]
+function score = (scores: Map<String, Integer>, name: String): Integer throws KeyNotFound =>
+	try scores[name]
 function entries = (): Integer => do {
 	mutable scores: Map<String, Integer> = [("a", 1), ("b", 2)]
 	for (_name, value) in scores { value += 1 }

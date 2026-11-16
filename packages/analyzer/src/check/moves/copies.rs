@@ -369,6 +369,19 @@ impl Walker<'_> {
 	}
 
 	fn report_structure_copy(&mut self, value: NodeId, later: Option<NodeId>) {
+		let edit = self.explicit_copy_edit(value);
+		// A conversion on a containing result can already offer the very
+		// same Copy boundary. Keep its more precise diagnostic, rather than
+		// making a fix-all insert `copy` twice at that boundary.
+		if self.output.iter().any(|diagnostic| {
+			diagnostic.code.id == MEM004.id
+				&& diagnostic
+					.fixes
+					.iter()
+					.any(|fix| fix.edits.as_slice() == std::slice::from_ref(&edit))
+		}) {
+			return;
+		}
 		let actual = self.a.type_of(value);
 		let target = self.a.coercion(value).unwrap_or(actual);
 		let ty = self.display(target);
@@ -417,7 +430,7 @@ impl Walker<'_> {
 		}
 		diagnostic = diagnostic.with_fix(Fix {
 			title: format!("Make an independent copy of `{text}`"),
-			edits: vec![self.explicit_copy_edit(value)],
+			edits: vec![edit],
 		});
 		self.report(diagnostic);
 	}
@@ -451,6 +464,30 @@ mod tests {
 			);
 		}
 		assert!(fixed.contains("duplicate = copy items"));
+		analyzed(&fixed);
+	}
+
+	#[test]
+	fn a_fallback_conversion_offers_each_copy_boundary_once() {
+		let source = "function choose = (items: Array<Int8>?): Array<Integer> => items ?? []\n";
+		let (session, file) = crate::analyze_source(source);
+		let diagnostics = session.diagnostics(file);
+		assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+		let diagnostic = &diagnostics[0];
+		assert_eq!(diagnostic.code.id, "MEM004");
+		assert!(diagnostic.message.contains("walks the whole value"));
+		let [fix] = diagnostic.fixes.as_slice() else {
+			panic!("one complete copy fix");
+		};
+		let [edit] = fix.edits.as_slice() else {
+			panic!("one insertion");
+		};
+		let mut fixed = source.to_string();
+		fixed.replace_range(
+			edit.location.span.start as usize..edit.location.span.end as usize,
+			&edit.replacement,
+		);
+		assert!(fixed.contains("=> copy items ?? []"));
 		analyzed(&fixed);
 	}
 

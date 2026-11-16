@@ -11,6 +11,63 @@ use crate::lower::values::{IntRepr, Repr, Val};
 use crate::lower::{Lowering, Slot};
 
 impl<'ctx> Lowering<'_, 'ctx> {
+	/// Borrow a live input; consume only a temporary or a proven last read.
+	pub(super) fn conversion_source(
+		&self,
+		value: Val<'ctx>,
+		node: Option<NodeId>,
+	) -> Result<(Val<'ctx>, bool), Error> {
+		let moved = self.is_temporary(value)
+			|| node.is_some_and(|node| self.movable_local(node, value.repr).is_some());
+		Ok((
+			if moved {
+				self.take(value, node)?
+			} else {
+				value
+			},
+			moved,
+		))
+	}
+
+	pub(super) fn string_decode_bytes(
+		&mut self,
+		node: NodeId,
+		info: &CallInfo,
+		lossy: bool,
+	) -> Result<Val<'ctx>, Error> {
+		let Some(Argument::Given(argument)) = info.arguments.first() else {
+			return Err(self.unsupported(node.index(), "UTF-8 input"));
+		};
+		let input = self.expr(*argument)?;
+		if input.repr == Repr::Never {
+			return Ok(input);
+		}
+		let (input, moved) = self.conversion_source(input, Some(*argument))?;
+		let out = self.alloca(Repr::Str, "decoded_utf8")?;
+		let error = self
+			.call_value(
+				self.runtime.function("fa_string_decode_bytes")?,
+				&[
+					input.value.expect("Bytes").into(),
+					self.context
+						.i32_type()
+						.const_int(moved as u64, false)
+						.into(),
+					self.context
+						.i32_type()
+						.const_int(lossy as u64, false)
+						.into(),
+					out.pointer.into(),
+				],
+			)?
+			.into_pointer_value();
+		if !lossy {
+			self.raise_if_error(error)?;
+		}
+		let text = self.load(out)?;
+		Ok(self.fresh(text))
+	}
+
 	pub(super) fn bytes_view_type(&self) -> StructType<'ctx> {
 		self.context
 			.struct_type(&[self.pointer_type().into(), self.usize.into()], false)
@@ -170,15 +227,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		let result = match path {
 			"Bytes.from" => {
-				let source = values[0];
-				let (items, length) =
-					self.array_parts(source.value.expect("array").into_pointer_value())?;
-				let length = self
-					.builder
-					.build_int_truncate_or_bit_cast(length, self.usize, "")?;
+				let (source, moved) = self.conversion_source(values[0], Some(arguments[0]))?;
 				self.call_value(
-					self.runtime.function("fa_bytes_from")?,
-					&[items.into(), length.into()],
+					self.runtime.function("fa_bytes_from_array")?,
+					&[
+						source.value.expect("array").into(),
+						self.context
+							.i32_type()
+							.const_int(moved as u64, false)
+							.into(),
+					],
 				)?
 			}
 			"Bytes.filled" => {
@@ -196,9 +254,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				)?
 			}
 			"Bytes#toArray" => {
+				let (receiver, moved) = self
+					.conversion_source(receiver.expect("receiver"), self.method_receiver(node))?;
 				let pointer = self.call_value(
-					self.runtime.function("fa_bytes_copy")?,
-					&[receiver.expect("receiver").value.expect("Bytes").into()],
+					self.runtime.function("fa_bytes_to_array")?,
+					&[
+						receiver.value.expect("Bytes").into(),
+						self.context
+							.i32_type()
+							.const_int(moved as u64, false)
+							.into(),
+					],
 				)?;
 				return Ok(self.fresh(Val::new(Repr::Array(TypeId::BYTE), pointer)));
 			}

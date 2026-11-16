@@ -4295,9 +4295,7 @@ static void utf8_copy_valid(const uint8_t *bytes, size_t length, size_t units, F
 	fa_string_set_unit_count(target, length, out->capacity, units);
 }
 
-/// External nonthrowing text inputs and String.fromUtf8Lossy share this path.
-FA_EXPORT void fa_string_from_utf8_lossy(const uint8_t *bytes, size_t length, FaString *out) {
-	Utf8Info info = utf8_validate(bytes, length);
+static void utf8_copy_lossy(const uint8_t *bytes, size_t length, Utf8Info info, FaString *out) {
 	if (info.error == SIZE_MAX) { utf8_copy_valid(bytes, length, info.units, out); return; }
 	size_t encoded = info.error, units = info.units, position = info.error;
 	while (position < length) {
@@ -4316,6 +4314,11 @@ FA_EXPORT void fa_string_from_utf8_lossy(const uint8_t *bytes, size_t length, Fa
 		written += encode_point(target + written, code);
 	}
 	fa_string_set_unit_count(target, encoded, out->capacity, units);
+}
+
+/// External nonthrowing text inputs and String.fromUtf8Lossy share this path.
+FA_EXPORT void fa_string_from_utf8_lossy(const uint8_t *bytes, size_t length, FaString *out) {
+	utf8_copy_lossy(bytes, length, utf8_validate(bytes, length), out);
 }
 
 // ── arguments ───────────────────────────────────────────────────────────
@@ -4968,6 +4971,38 @@ FA_EXPORT void fa_array_free(FaArrayHeader *array, int64_t item_size) {
 
 typedef struct { uint8_t *items; size_t length; } FaBytesView;
 typedef struct { void *value; FaBytesView view; } FaBytesReference;
+_Static_assert(sizeof(FaBytesView) == 2 * sizeof(size_t), "two-word Bytes view");
+
+// A separate byte payload can retain/adopt a String allocation prefix. Its
+// metadata is uninitialized while it is Bytes, and is never inspected.
+#define BYTES_STRING_BLOCK ((uint64_t)128)
+
+static FaArrayHeader *bytes_allocate(size_t length) {
+	if (length > SIZE_MAX - INLINE_ITEMS) { out_of_memory(); }
+#if SIZE_MAX > INT64_MAX
+	if (length > INT64_MAX) { out_of_memory(); }
+#endif
+	if (length <= INLINE_LIMIT) {
+		// Padding makes a combined block adoptable as a String whose low
+		// capacity bit is reserved. It never extends the logical byte range.
+		return fa_array_new((int64_t)length, (int64_t)((length + 1) & ~(size_t)1), 1);
+	}
+	if (length >= KIND_MASK - sizeof(StringHeader) - 8192) {
+		return fa_array_new((int64_t)length, (int64_t)length, 1);
+	}
+	FaArrayHeader *owner = fa_alloc(INLINE_ITEMS, sizeof(int64_t));
+	size_t capacity = string_block(length);
+	*owner = (FaArrayHeader){string_alloc_block(capacity, SIMPLE), (int64_t)length, (int64_t)capacity};
+	mark_items(owner, BYTES_STRING_BLOCK);
+	return owner;
+}
+
+static FaArrayHeader *bytes_adopt_string(uint8_t *bytes, size_t length, size_t capacity) {
+	FaArrayHeader *owner = fa_alloc(INLINE_ITEMS, sizeof(int64_t));
+	*owner = (FaArrayHeader){bytes, (int64_t)length, (int64_t)capacity};
+	mark_items(owner, BYTES_STRING_BLOCK);
+	return owner;
+}
 
 /// Owners keep the array block layout. A tagged pointer addresses only the
 /// two-word borrowed descriptor: it has no capacity, marker or allocation.
@@ -4985,18 +5020,17 @@ FA_EXPORT __attribute__((always_inline)) void fa_bytes_array_view(const void *by
 }
 
 FA_EXPORT void *fa_bytes_filled(int64_t length, uint8_t value) {
-	if (length < 0 || (uint64_t)length > SIZE_MAX - INLINE_ITEMS) { out_of_memory(); }
-	FaArrayHeader *out = fa_array_new(length, length, 1);
+	if (length < 0) { out_of_memory(); }
+#if SIZE_MAX < INT64_MAX
+	if ((uint64_t)length > SIZE_MAX) { out_of_memory(); }
+#endif
+	FaArrayHeader *out = bytes_allocate((size_t)length);
 	fill_bytes(out->items, value, (size_t)length);
 	return out;
 }
 
 FA_EXPORT void *fa_bytes_from(const uint8_t *items, size_t length) {
-	if (length > SIZE_MAX - INLINE_ITEMS) { out_of_memory(); }
-#if SIZE_MAX > INT64_MAX
-	if (length > INT64_MAX) { out_of_memory(); }
-#endif
-	FaArrayHeader *out = fa_array_new((int64_t)length, (int64_t)length, 1);
+	FaArrayHeader *out = bytes_allocate(length);
 	copy_bytes(out->items, items, length);
 	return out;
 }
@@ -5011,7 +5045,10 @@ FA_EXPORT void fa_bytes_free(void *bytes) {
 	if (!bytes || ((uintptr_t)bytes & 1)) { return; }
 	FaArrayHeader *owner = bytes;
 	if (fa_array_storage(owner) != 0) { return; }
-	if (inline_items(owner)) {
+	if (array_marker(owner) == BYTES_STRING_BLOCK) {
+		fa_free(string_header(owner->items), sizeof(StringHeader) + (size_t)owner->capacity, sizeof(size_t));
+		fa_free(owner, INLINE_ITEMS, sizeof(int64_t));
+	} else if (inline_items(owner)) {
 		fa_free(owner, INLINE_ITEMS + (size_t)owner->capacity, 16);
 	} else { fa_array_free(owner, 1); }
 }
@@ -5021,6 +5058,83 @@ FA_EXPORT void *fa_bytes_own(void *bytes) {
 		return fa_bytes_copy(bytes);
 	}
 	return bytes;
+}
+
+/// Array results use its ordinary allocation/deallocation convention.
+FA_EXPORT void *fa_bytes_to_array(void *bytes, int32_t move) {
+	if (move && !((uintptr_t)bytes & 1) && fa_array_storage(bytes) == 0 &&
+	    !fa_array_is_region(bytes) && array_marker(bytes) != BYTES_STRING_BLOCK) { return bytes; }
+	FaBytesView view = bytes_parts(bytes);
+	FaArrayHeader *array = fa_array_new((int64_t)view.length, (int64_t)view.length, 1);
+	copy_bytes(array->items, view.items, view.length);
+	if (move) { fa_bytes_free(bytes); }
+	return array;
+}
+
+FA_EXPORT void *fa_bytes_from_array(void *array, int32_t move) {
+	if (move && fa_array_storage(array) == 0 && !fa_array_is_region(array)) { return array; }
+	FaArrayHeader *source = array;
+	void *bytes = fa_bytes_from(source->items, (size_t)source->length);
+	if (move) { fa_array_free(source, 1); }
+	return bytes;
+}
+
+FA_EXPORT __attribute__((noinline)) void *fa_string_to_utf8(FaString *source, int32_t move) {
+	const uint8_t *bytes = string_bytes(source);
+	size_t length = string_length(source), capacity = source->capacity;
+	if (move && string_owned(capacity)) {
+		if (!(capacity & SIMPLE)) { string_clear(string_header(bytes)); }
+		// Canonical owners never have virtual edges; replacements are the
+		// same three bytes wide, so the block can be rewritten in place.
+		fa_string_write_utf8((uint8_t *)bytes, bytes, length, capacity);
+		*source = (FaString){0};
+		return bytes_adopt_string((uint8_t *)bytes, length, capacity & KIND_MASK);
+	}
+	size_t encoded = fa_string_encoded_length(bytes, length, capacity);
+	FaArrayHeader *out = bytes_allocate(encoded);
+	fa_string_write_utf8(out->items, bytes, length, capacity);
+	if (move) { *source = (FaString){0}; }
+	return out;
+}
+
+const void *fa_error_utf8(int64_t position);
+
+/// A consuming call frees the input on both the error and success paths.
+FA_EXPORT __attribute__((noinline)) const void *fa_string_decode_bytes(void *bytes,
+    int32_t move, int32_t lossy, FaString *out) {
+	FaBytesView view = bytes_parts(bytes);
+	Utf8Info info = utf8_validate(view.items, view.length);
+	if (info.error != SIZE_MAX) {
+		if (lossy) { utf8_copy_lossy(view.items, view.length, info, out); }
+		if (move) { fa_bytes_free(bytes); }
+		return lossy ? 0 : fa_error_utf8((int64_t)info.error);
+	}
+	if (move && !((uintptr_t)bytes & 1) && view.length > INLINE_STRING_BYTES &&
+	    fa_array_storage(bytes) == 0 && !fa_array_is_region(bytes)) {
+		FaArrayHeader *owner = bytes;
+		size_t capacity = (size_t)owner->capacity;
+		uint8_t *items = view.items;
+		int adopt = array_marker(owner) == BYTES_STRING_BLOCK;
+		if (!adopt && inline_items(owner) && !(capacity & 1)) {
+			// The combined array header becomes the prefix. On wasm the
+			// smaller prefix shifts at most 96 bytes within this same block.
+			items = (uint8_t *)owner + sizeof(StringHeader);
+			__builtin_memmove(items, view.items, view.length);
+			capacity += INLINE_ITEMS - sizeof(StringHeader);
+			adopt = 2;
+		}
+		if (adopt) {
+			if (adopt == 1) { fa_free(owner, INLINE_ITEMS, sizeof(int64_t)); }
+			size_t flags = info.units == view.length ? SIMPLE : 0;
+			if (!flags) { string_init_header(string_header(items)); }
+			*out = (FaString){items, view.length, capacity | flags};
+			fa_string_set_unit_count(items, view.length, out->capacity, info.units);
+			return 0;
+		}
+	}
+	utf8_copy_valid(view.items, view.length, info.units, out);
+	if (move) { fa_bytes_free(bytes); }
+	return 0;
 }
 
 FA_EXPORT __attribute__((always_inline)) int32_t fa_bytes_equal(const void *left, const void *right) {
@@ -7997,6 +8111,13 @@ FA_EXPORT FA_COLD const void *fa_error_index(int64_t index, int64_t length) {
 	error->id = INDEX_ERROR;
 	error->index = index;
 	error->length = length;
+	return error;
+}
+
+FA_EXPORT FA_COLD const void *fa_error_utf8(int64_t position) {
+	struct { uint64_t id; int64_t position; } *error = fa_alloc(16, sizeof(int64_t));
+	error->id = 12; // Utf8Error, builtins/errors.rs
+	error->position = position;
 	return error;
 }
 

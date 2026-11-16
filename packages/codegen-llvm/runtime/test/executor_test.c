@@ -1221,6 +1221,49 @@ static void test_byte_blocks(void) {
 	CHECK(allocated == before && allocated_bytes == bytes_before);
 }
 
+static void test_utf8_byte_conversions(void) {
+	fa_release_builder();
+	long before = allocated, bytes_before = allocated_bytes;
+	uint8_t raw[180];
+	for (size_t i = 0; i < sizeof raw; i += 6) { copy_bytes(raw + i, (const uint8_t *)"\xC3\xA9\xF0\x9F\x98\x80", 6); }
+	for (size_t count = 0; count <= sizeof raw; count += 6) {
+		void *bytes = fa_bytes_from(raw, count);
+		uint8_t *original = bytes_parts(bytes).items;
+		FaString text;
+		CHECK(!fa_string_decode_bytes(bytes, 1, 0, &text));
+		CHECK(fa_string_length(string_bytes(&text), string_length(&text), text.capacity) == count / 2);
+		if (count > INLINE_LIMIT) { CHECK(text.bytes == original); }
+		if (count > 128) {
+			CHECK(fa_string_code_unit_fallback(text.bytes, count, text.capacity, 0) == 233);
+			CHECK(fa_string_code_unit_fallback(text.bytes, count, text.capacity, 1) == 0xD83D);
+		}
+		const uint8_t *owned = string_bytes(&text);
+		int was_owned = string_owned(text.capacity);
+		void *encoded = fa_string_to_utf8(&text, 1);
+		if (was_owned) { CHECK(bytes_parts(encoded).items == owned); }
+		CHECK(bytes_parts(encoded).length == count);
+		CHECK(__builtin_memcmp(bytes_parts(encoded).items, raw, count) == 0);
+		fa_bytes_free(encoded);
+	}
+	void *bad = fa_bytes_from((const uint8_t *)"a\xF0\x9F", 3);
+	FaString output;
+	const int64_t *error = fa_string_decode_bytes(bad, 1, 0, &output);
+	CHECK(error && error[0] == 12 && error[1] == 1);
+	fa_free((void *)error, 16, sizeof(int64_t));
+	bad = fa_bytes_from((const uint8_t *)"\xED\xA0\x80", 3);
+	CHECK(!fa_string_decode_bytes(bad, 1, 1, &output));
+	CHECK(string_length(&output) == 9 && fa_string_length(string_bytes(&output), 9, output.capacity) == 3);
+	FaString surrogate;
+	unit_string(0xD83D, &surrogate);
+	FaString long_surrogate;
+	fa_string_from(string_bytes(&surrogate), 3, surrogate.capacity, 160, &long_surrogate);
+	void *replacement = fa_string_to_utf8(&long_surrogate, 1);
+	CHECK(bytes_parts(replacement).length == 3);
+	CHECK(__builtin_memcmp(bytes_parts(replacement).items, "\xEF\xBF\xBD", 3) == 0);
+	fa_bytes_free(replacement);
+	CHECK(allocated == before && allocated_bytes == bytes_before);
+}
+
 static void test_allocator_fast_paths(void) {
 	const size_t sizes[] = {0, 1, 8, 16, 24, 32, 128};
 	for (size_t at = 0; at < sizeof sizes / sizeof sizes[0]; at += 1) {
@@ -2652,6 +2695,7 @@ int main(void) {
 	test_string_padding();
 	test_utf16_strings();
 	test_byte_blocks();
+	test_utf8_byte_conversions();
 	test_inline_strings();
 	test_nonempty_splits();
 	test_region_slice_views();

@@ -1124,6 +1124,39 @@ console.log(ignored("a", 2), observed("a", 2))
 	}
 
 	#[test]
+	fn utf8_conversions_consume_only_temporaries_and_dead_locals() {
+		let ir = ir_of(
+			"utf8-moves",
+			r#"
+function encode_live = (text: String): Bytes => text.toUtf8()
+function encode_dead = (): Bytes => {
+	mutable text = String.from("a long string whose allocation is transferred", capacity = 256)
+	text.toUtf8()
+}
+function decode_live = (bytes: Bytes): String throws Utf8Error => try String.fromUtf8(bytes)
+function decode_dead = (): String throws Utf8Error => try String.fromUtf8(Bytes.filled(160, 97))
+console.log(encode_live("abc"), encode_dead(), try decode_live(Bytes.filled(1, 97)), try decode_dead())
+"#,
+		);
+		for (name, helper, moved) in [
+			("fa.encode_live", "@fa_string_to_utf8(", false),
+			("fa.encode_dead", "@fa_string_to_utf8(", true),
+			("fa.decode_live", "@fa_string_decode_bytes(", false),
+			("fa.decode_dead", "@fa_string_decode_bytes(", true),
+		] {
+			let body = function(&ir, name);
+			let call = body
+				.lines()
+				.find(|line| line.contains(helper))
+				.expect("conversion call");
+			assert!(
+				call.contains(if moved { "i32 1" } else { "i32 0" }),
+				"{body}"
+			);
+		}
+	}
+
+	#[test]
 	fn ascii_packed_text_keeps_its_short_and_extended_headers() {
 		let source = format!(
 			r#"

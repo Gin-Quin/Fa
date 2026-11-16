@@ -642,7 +642,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The receiver of a method call (`pair` in `pair.swap()`, `a.b` in
 	/// `a.b.c()`).
-	fn method_receiver(&self, call: NodeId) -> Option<NodeId> {
+	pub(super) fn method_receiver(&self, call: NodeId) -> Option<NodeId> {
 		let View::Call { mut callee, .. } = self.view(call) else {
 			return None;
 		};
@@ -722,6 +722,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			// capacity (capacity.rs)
 			_ if path.ends_with("#reserve") => self.reserve_call(node, info),
 			"String.from" => self.string_from(node, info),
+			"String.fromUtf8" | "String.fromUtf8Lossy" => {
+				self.string_decode_bytes(node, info, path.ends_with("Lossy"))
+			}
 			"console.log" | "console.error" => {
 				let mut values = Vec::new();
 				for argument in &info.arguments {
@@ -1765,30 +1768,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Ok(self.fresh(Val::new(self.node_repr(node)?, array)))
 			}
 			"String#toUtf8" => {
-				// a copy of the UTF-8 bytes
-				let byte = Repr::Int(IntRepr {
-					bits: 8,
-					signed: false,
-				});
-				let capacity = self.string_capacity(receiver)?;
-				let encoded = self
-					.call_value(
-						self.runtime.function("fa_string_encoded_length")?,
-						&[bytes.into(), length.into(), capacity.into()],
-					)?
-					.into_int_value();
-				let count = self.builder.build_int_z_extend_or_bit_cast(
-					encoded,
-					self.context.i64_type(),
-					"",
+				let (source, moved) =
+					self.conversion_source(receiver, self.method_receiver(node))?;
+				let source = self.string_snapshot(source)?;
+				let bytes = self.call_value(
+					self.runtime.function("fa_string_to_utf8")?,
+					&[
+						source.pointer.into(),
+						self.context
+							.i32_type()
+							.const_int(moved as u64, false)
+							.into(),
+					],
 				)?;
-				let array = self.new_array(byte, count, count)?;
-				let (items, _) = self.array_parts(array)?;
-				self.call_runtime(
-					"fa_string_write_utf8",
-					&[items.into(), bytes.into(), length.into(), capacity.into()],
-				)?;
-				Ok(self.fresh(Val::new(self.node_repr(node)?, array)))
+				Ok(self.fresh(Val::new(Repr::Bytes, bytes)))
 			}
 			"String#get" => {
 				let index = self.convert(arguments[0], Repr::Int(IntRepr::I64), node.index())?;

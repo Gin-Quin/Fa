@@ -2754,3 +2754,16 @@ The native unit-cache version advances with `inline-place-byte-1`; the runtime
 source/ABI is unchanged, so its hash alone would otherwise retain previously
 compiled, slower package objects. Final validation includes the existing cache
 and per-unit tests on this version.
+
+### Ownership acceptance stays general (lead, 2026-11-17)
+
+No String-specific last-use move is introduced here. `feature/ownership` owns
+field extraction at an owner's last use and temporary-to-place transfers for all
+owning types, including nested objects, collections, tuples and recursive values.
+The String performance acceptance fixture exercises these paths, keeps a live
+snapshot control, and relies on the ordinary leak-checked target harness. The
+copy attribution and exact call/IR sites are retained with the performance data.
+Records currently has inline 4–15-byte words and no slow String copy; its
+transient descriptor stores are a destination opportunity, not an allocation
+saving. Calc retains its generator across iterations, so moving that live buffer
+would violate its reuse contract; a bounded immutable view is a separate proof.

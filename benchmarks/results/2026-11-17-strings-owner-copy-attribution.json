@@ -1,0 +1,498 @@
+{
+  "respond": {
+    "audit_size": 40000,
+    "copy_call_edges": [
+      "main -> fa.copy_string_slow: 40,000 calls, 7,486,825 (3.2%)",
+      "fa.copy_string_slow -> owned_copy_with: 40,000 calls, 6,966,825 (3.0%)",
+      "owned_copy_with -> string_alloc_ascii: 40,000 calls, 2,525,638 (1.1%)",
+      "owned_copy_with -> __memcpy_avx_unaligned_erms: 40,000 calls, 1,652,150 (0.7%)"
+    ],
+    "ir": "benchmarks/audit/build/strings-final/respond/fa/native/main.ll",
+    "ir_call_sites": [
+      {
+        "line": 6916,
+        "function": "define internal fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %0) unnamed_addr #23 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %1, ptr noundef %4, i64 noundef %2, i64 noundef %5) #28"
+      },
+      {
+        "line": 9238,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readnone %1) local_unnamed_addr #24 {",
+        "instruction": "%1090 = call fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %1082), !noalias !97"
+      }
+    ],
+    "all_executed_copy_edges": [
+      {
+        "pc": "0x620d",
+        "caller": "fa.copy_string_slow",
+        "callee": "owned_copy_with",
+        "calls": 40000,
+        "inclusive_ir": 6966825
+      },
+      {
+        "pc": "0x7fa6",
+        "caller": "main",
+        "callee": "fa.copy_string_slow",
+        "calls": 40000,
+        "inclusive_ir": 7486825
+      }
+    ]
+  },
+  "records": {
+    "audit_size": 400000,
+    "copy_call_edges": [],
+    "ir": "benchmarks/audit/build/strings-final/records/fa/native/main.ll",
+    "ir_call_sites": [],
+    "all_executed_copy_edges": []
+  },
+  "respond-interpolation": {
+    "audit_size": 40000,
+    "copy_call_edges": [
+      "fa.render -> owned_copy_with: 40,000 calls, 1,868,664 (0.9%)"
+    ],
+    "ir": "benchmarks/audit/build/strings-final/respond-interpolation/fa/native/main.ll",
+    "ir_call_sites": [
+      {
+        "line": 4786,
+        "function": "define internal fastcc void @string_plus_slow(ptr nocapture noundef %0) unnamed_addr #14 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %3, ptr noundef nonnull @fa.constant.1, i64 noundef %18, i64 noundef 0) #28"
+      },
+      {
+        "line": 7538,
+        "function": "define internal fastcc { ptr, i64, i64 } @fa.render(ptr nocapture noundef readonly %0) unnamed_addr #23 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %10, ptr noundef %.fca.0.load357.i, i64 noundef %.fca.1.load360.i, i64 noundef %197) #28"
+      },
+      {
+        "line": 7572,
+        "function": "define internal fastcc { ptr, i64, i64 } @fa.render(ptr nocapture noundef readonly %0) unnamed_addr #23 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %11, ptr noundef %escaped_string.i.sroa.0.0, i64 noundef %escaped_string.i.sroa.5.0, i64 noundef %209) #28"
+      },
+      {
+        "line": 8111,
+        "function": "define internal fastcc { ptr, i64, i64 } @fa.render(ptr nocapture noundef readonly %0) unnamed_addr #23 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %12, ptr noundef %escaped_string103.i.sroa.0.0, i64 noundef %escaped_string103.i.sroa.5.0, i64 noundef %448) #28"
+      }
+    ],
+    "all_executed_copy_edges": [
+      {
+        "pc": "0x7260",
+        "caller": "fa.render",
+        "callee": "owned_copy_with",
+        "calls": 40000,
+        "inclusive_ir": 1868664
+      }
+    ]
+  },
+  "calc": {
+    "audit_size": 40000,
+    "copy_call_edges": [
+      "main -> fa.copy_string_slow: 40,000 calls, 3,524,652 (2.9%)",
+      "fa.copy_string_slow -> owned_copy_with: 40,000 calls, 3,004,652 (2.4%)",
+      "owned_copy_with -> string_alloc_ascii: 24,576 calls, 629,369 (0.5%)",
+      "owned_copy_with -> __memcpy_avx_unaligned_erms: 19,213 calls, 328,874 (0.3%)"
+    ],
+    "ir": "benchmarks/audit/build/strings-final/calc/fa/native/main.ll",
+    "ir_call_sites": [
+      {
+        "line": 5821,
+        "function": "define internal fastcc noundef ptr @fa_string_slice(ptr noundef %0, i64 noundef %1, i64 noundef %2, i64 noundef %3, i64 noundef %4, i8 noundef signext %5, ptr nocapture noundef %6) unnamed_addr #16 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %10, ptr noundef %77, i64 noundef %61, i64 noundef -9223372036854775808) #32"
+      },
+      {
+        "line": 5882,
+        "function": "define internal fastcc noundef ptr @fa_string_slice(ptr noundef %0, i64 noundef %1, i64 noundef %2, i64 noundef %3, i64 noundef %4, i8 noundef signext %5, ptr nocapture noundef %6) unnamed_addr #16 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %9, ptr noundef %111, i64 noundef %95, i64 noundef %112) #32"
+      },
+      {
+        "line": 10367,
+        "function": "define internal fastcc ptr @fa.copy(ptr readonly %0) unnamed_addr #26 {",
+        "instruction": "%69 = tail call fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %68), !noalias !92"
+      },
+      {
+        "line": 10455,
+        "function": "define internal fastcc ptr @fa.copy(ptr readonly %0) unnamed_addr #26 {",
+        "instruction": "%106 = tail call fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %105), !noalias !95"
+      },
+      {
+        "line": 10543,
+        "function": "define internal fastcc ptr @fa.copy(ptr readonly %0) unnamed_addr #26 {",
+        "instruction": "%143 = tail call fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %142), !noalias !98"
+      },
+      {
+        "line": 10582,
+        "function": "define internal fastcc ptr @fa.copy(ptr readonly %0) unnamed_addr #26 {",
+        "instruction": "%156 = tail call fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %155), !noalias !101"
+      },
+      {
+        "line": 10670,
+        "function": "define internal fastcc ptr @fa.copy(ptr readonly %0) unnamed_addr #26 {",
+        "instruction": "%193 = tail call fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %192), !noalias !104"
+      },
+      {
+        "line": 10709,
+        "function": "define internal fastcc ptr @fa.copy(ptr readonly %0) unnamed_addr #26 {",
+        "instruction": "%206 = tail call fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %205), !noalias !107"
+      },
+      {
+        "line": 10797,
+        "function": "define internal fastcc ptr @fa.copy(ptr readonly %0) unnamed_addr #26 {",
+        "instruction": "%243 = tail call fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %242), !noalias !110"
+      },
+      {
+        "line": 10885,
+        "function": "define internal fastcc ptr @fa.copy(ptr readonly %0) unnamed_addr #26 {",
+        "instruction": "%280 = tail call fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %279), !noalias !113"
+      },
+      {
+        "line": 11922,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readnone %1) local_unnamed_addr #26 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %result.i, ptr noundef nonnull @fa.constant.9, i64 noundef %182, i64 noundef 0) #32"
+      },
+      {
+        "line": 12353,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readnone %1) local_unnamed_addr #26 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %result42.i, ptr noundef %494, i64 noundef %320, i64 noundef 0) #32"
+      },
+      {
+        "line": 12634,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readnone %1) local_unnamed_addr #26 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %2, ptr noundef %.fca.0.load241.i, i64 noundef %.fca.1.load244.i, i64 noundef %627) #32"
+      },
+      {
+        "line": 12884,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readnone %1) local_unnamed_addr #26 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %result79.i, ptr noundef nonnull @fa.constant.10, i64 noundef %643, i64 noundef 0) #32"
+      },
+      {
+        "line": 13315,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readnone %1) local_unnamed_addr #26 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %result88.i, ptr noundef %955, i64 noundef %781, i64 noundef 0) #32"
+      },
+      {
+        "line": 13596,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readnone %1) local_unnamed_addr #26 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %5, ptr noundef %.fca.0.load325.i, i64 noundef %.fca.1.load328.i, i64 noundef %1088) #32"
+      },
+      {
+        "line": 13939,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readnone %1) local_unnamed_addr #26 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %result138.i, ptr noundef nonnull @fa.constant.9, i64 noundef %1146, i64 noundef 0) #32"
+      },
+      {
+        "line": 14370,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readnone %1) local_unnamed_addr #26 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %result147.i, ptr noundef %1458, i64 noundef %1284, i64 noundef 0) #32"
+      },
+      {
+        "line": 14651,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readnone %1) local_unnamed_addr #26 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %8, ptr noundef %.fca.0.load418.i, i64 noundef %.fca.1.load421.i, i64 noundef %1591) #32"
+      },
+      {
+        "line": 14983,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readnone %1) local_unnamed_addr #26 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %11, ptr noundef %.fca.0.load469.i, i64 noundef %.fca.1.load472.i, i64 noundef %1739) #32"
+      },
+      {
+        "line": 15217,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readnone %1) local_unnamed_addr #26 {",
+        "instruction": "%1793 = call fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %1792), !noalias !148"
+      },
+      {
+        "line": 15577,
+        "function": "define internal fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %0) unnamed_addr #28 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %1, ptr noundef %4, i64 noundef %2, i64 noundef %5) #32"
+      }
+    ],
+    "all_executed_copy_edges": [
+      {
+        "pc": "0x9766",
+        "caller": "main",
+        "callee": "fa.copy_string_slow",
+        "calls": 40000,
+        "inclusive_ir": 3524652
+      },
+      {
+        "pc": "0xc5dd",
+        "caller": "fa.copy_string_slow",
+        "callee": "owned_copy_with",
+        "calls": 40000,
+        "inclusive_ir": 3004652
+      }
+    ]
+  },
+  "sexp": {
+    "audit_size": 2000,
+    "copy_call_edges": [
+      "main -> fa.copy_string_slow: 1 calls, 965,634 (1.2%)",
+      "fa.copy_string_slow -> owned_copy_with: 1 calls, 965,621 (1.2%)",
+      "owned_copy_with -> __memcpy_avx_unaligned_erms: 1 calls, 965,486 (1.2%)"
+    ],
+    "ir": "benchmarks/audit/build/strings-final/sexp/fa/native/main.ll",
+    "ir_call_sites": [
+      {
+        "line": 4029,
+        "function": "define internal fastcc void @string_append_slow(ptr nocapture noundef %0, ptr noundef %1, i64 noundef %2, i64 noundef %3) unnamed_addr #16 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %9, ptr noundef nonnull %23, i64 noundef %58, i64 noundef 0) #34"
+      },
+      {
+        "line": 11491,
+        "function": "define internal fastcc ptr @fa.node.arena(ptr %0) unnamed_addr #29 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %1, ptr noundef %357, i64 noundef %354, i64 noundef -9223372036854775808) #34"
+      },
+      {
+        "line": 11588,
+        "function": "define internal fastcc ptr @fa.node.arena(ptr %0) unnamed_addr #29 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %2, ptr noundef %.sink9.i.i.i, i64 noundef %408, i64 noundef 4611686018427387904) #34"
+      },
+      {
+        "line": 13104,
+        "function": "define internal fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %0) unnamed_addr #30 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %1, ptr noundef %4, i64 noundef %2, i64 noundef %5) #34"
+      },
+      {
+        "line": 13255,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readnone %1) local_unnamed_addr #29 {",
+        "instruction": "%28 = call fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %20), !noalias !115"
+      }
+    ],
+    "all_executed_copy_edges": [
+      {
+        "pc": "0xa578",
+        "caller": "main",
+        "callee": "fa.copy_string_slow",
+        "calls": 1,
+        "inclusive_ir": 965634
+      },
+      {
+        "pc": "0xa38d",
+        "caller": "fa.copy_string_slow",
+        "callee": "owned_copy_with",
+        "calls": 1,
+        "inclusive_ir": 965621
+      }
+    ]
+  },
+  "words": {
+    "audit_size": 100000,
+    "copy_call_edges": [
+      "main -> fa.copy_string_slow: 7,502 calls, 450,811 (1.7%)",
+      "fa.copy_string_slow -> owned_copy_with: 7,502 calls, 353,285 (1.3%)"
+    ],
+    "ir": "benchmarks/audit/build/strings-final/words/fa/native/main.ll",
+    "ir_call_sites": [
+      {
+        "line": 10497,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readnone %1) local_unnamed_addr #25 {",
+        "instruction": "%627 = call fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %618), !noalias !140"
+      },
+      {
+        "line": 12233,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readnone %1) local_unnamed_addr #25 {",
+        "instruction": "%1704 = call fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %1703), !noalias !150"
+      },
+      {
+        "line": 12570,
+        "function": "define internal fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %0) unnamed_addr #26 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %1, ptr noundef %4, i64 noundef %2, i64 noundef %5) #31"
+      }
+    ],
+    "all_executed_copy_edges": [
+      {
+        "pc": "0xa34d",
+        "caller": "fa.copy_string_slow",
+        "callee": "owned_copy_with",
+        "calls": 7502,
+        "inclusive_ir": 353285
+      },
+      {
+        "pc": "0x9991",
+        "caller": "main",
+        "callee": "fa.copy_string_slow",
+        "calls": 7502,
+        "inclusive_ir": 450811
+      }
+    ]
+  },
+  "word-count": {
+    "audit_size": 500000,
+    "copy_call_edges": [],
+    "ir": "benchmarks/audit/build/strings-final/word-count/fa/native/main.ll",
+    "ir_call_sites": [
+      {
+        "line": 7972,
+        "function": "define internal fastcc noundef ptr @parse_error(ptr nocapture noundef readonly %0, i64 noundef %1) unnamed_addr #5 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %4, ptr noundef %0, i64 noundef %1, i64 noundef 0) #32"
+      },
+      {
+        "line": 8072,
+        "function": "define internal fastcc noundef ptr @parse_error(ptr nocapture noundef readonly %0, i64 noundef %1) unnamed_addr #5 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %3, ptr noundef %.pre, i64 noundef %34, i64 noundef %72) #32"
+      },
+      {
+        "line": 9552,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readonly %1) local_unnamed_addr #25 {",
+        "instruction": "%195 = call fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %198), !noalias !117"
+      },
+      {
+        "line": 10958,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readonly %1) local_unnamed_addr #25 {",
+        "instruction": "%994 = call fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %988), !noalias !129"
+      },
+      {
+        "line": 11841,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readonly %1) local_unnamed_addr #25 {",
+        "instruction": "%1500 = call fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %1492), !noalias !136"
+      },
+      {
+        "line": 12207,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readonly %1) local_unnamed_addr #25 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %9, ptr noundef %aggregate_argument58.sroa.0.0, i64 noundef %aggregate_argument58.sroa.4.0, i64 noundef %1685) #32"
+      },
+      {
+        "line": 13784,
+        "function": "define internal fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %0) unnamed_addr #26 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %1, ptr noundef %4, i64 noundef %2, i64 noundef %5) #32"
+      }
+    ],
+    "all_executed_copy_edges": []
+  },
+  "sort-objects": {
+    "audit_size": 100000,
+    "copy_call_edges": [],
+    "ir": "benchmarks/audit/build/strings-final/sort-objects/fa/native/main.ll",
+    "ir_call_sites": [
+      {
+        "line": 7402,
+        "function": "define internal fastcc noundef ptr @parse_error(ptr nocapture noundef readonly %0, i64 noundef %1) unnamed_addr #5 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %4, ptr noundef %0, i64 noundef %1, i64 noundef 0) #32"
+      },
+      {
+        "line": 7502,
+        "function": "define internal fastcc noundef ptr @parse_error(ptr nocapture noundef readonly %0, i64 noundef %1) unnamed_addr #5 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %3, ptr noundef %.pre, i64 noundef %34, i64 noundef %72) #32"
+      },
+      {
+        "line": 7530,
+        "function": "define internal fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %0) unnamed_addr #26 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %1, ptr noundef %4, i64 noundef %2, i64 noundef %5) #32"
+      },
+      {
+        "line": 7894,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readonly %1) local_unnamed_addr #27 {",
+        "instruction": "%194 = call fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %199), !noalias !108"
+      },
+      {
+        "line": 8840,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readonly %1) local_unnamed_addr #27 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %19, ptr noundef %.fca.0.load293.pre, i64 noundef %.fca.1.load296.pre, i64 noundef %657) #32"
+      },
+      {
+        "line": 8872,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readonly %1) local_unnamed_addr #27 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %20, ptr noundef %escaped_string.sroa.0.0, i64 noundef %escaped_string.sroa.3.0, i64 noundef %669) #32"
+      },
+      {
+        "line": 8909,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readonly %1) local_unnamed_addr #27 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %21, ptr noundef %escaped_string27.sroa.0.0, i64 noundef %escaped_string27.sroa.3.0, i64 noundef %684) #32"
+      },
+      {
+        "line": 8941,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readonly %1) local_unnamed_addr #27 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %22, ptr noundef %escaped_string30.sroa.0.0, i64 noundef %escaped_string30.sroa.3.0, i64 noundef %696) #32"
+      },
+      {
+        "line": 8973,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readonly %1) local_unnamed_addr #27 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %23, ptr noundef %escaped_string32.sroa.0.0, i64 noundef %escaped_string32.sroa.3.0, i64 noundef %708) #32"
+      },
+      {
+        "line": 9502,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readonly %1) local_unnamed_addr #27 {",
+        "instruction": "%956 = call fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %948), !noalias !124"
+      },
+      {
+        "line": 9551,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readonly %1) local_unnamed_addr #27 {",
+        "instruction": "%974 = call fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %966), !noalias !131"
+      }
+    ],
+    "all_executed_copy_edges": []
+  },
+  "string-building": {
+    "audit_size": 300000,
+    "copy_call_edges": [
+      "split_text -> owned_copy_with: 300,300 calls, 22,513,515 (10.2%)",
+      "owned_copy_with -> string_alloc_ascii: 299,833 calls, 6,007,252 (2.7%)"
+    ],
+    "ir": "benchmarks/audit/build/strings-final/string-building/fa/native/main.ll",
+    "ir_call_sites": [
+      {
+        "line": 7018,
+        "function": "define internal fastcc ptr @split_text(ptr noundef %0, i64 noundef %1, i64 noundef %2) unnamed_addr #5 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %4, ptr noundef %146, i64 noundef %147, i64 noundef %6) #31"
+      },
+      {
+        "line": 7129,
+        "function": "define internal fastcc ptr @split_text(ptr noundef %0, i64 noundef %1, i64 noundef %2) unnamed_addr #5 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %5, ptr noundef %212, i64 noundef %213, i64 noundef %6) #31"
+      },
+      {
+        "line": 7540,
+        "function": "define internal fastcc void @split_unit_part(ptr noundef %0, ptr noundef %1, i64 noundef %2, i64 noundef %3, i64 noundef %4, i64 noundef %5, i64 noundef %6) unnamed_addr #13 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %9, ptr noundef %55, i64 noundef %36, i64 noundef %56) #31"
+      },
+      {
+        "line": 9555,
+        "function": "define internal fastcc ptr @fa_string_split_into(ptr noundef %0, i64 noundef %1, i64 noundef %2, ptr noundef %3) unnamed_addr #13 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %5, ptr noundef %236, i64 noundef %237, i64 noundef %11) #31"
+      },
+      {
+        "line": 9669,
+        "function": "define internal fastcc ptr @fa_string_split_into(ptr noundef %0, i64 noundef %1, i64 noundef %2, ptr noundef %3) unnamed_addr #13 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %6, ptr noundef %300, i64 noundef %301, i64 noundef %11) #31"
+      },
+      {
+        "line": 11413,
+        "function": "define internal fastcc noundef ptr @parse_error(ptr nocapture noundef readonly %0, i64 noundef %1) unnamed_addr #5 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %4, ptr noundef %0, i64 noundef %1, i64 noundef 0) #31"
+      },
+      {
+        "line": 11513,
+        "function": "define internal fastcc noundef ptr @parse_error(ptr nocapture noundef readonly %0, i64 noundef %1) unnamed_addr #5 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %3, ptr noundef %.pre, i64 noundef %34, i64 noundef %72) #31"
+      },
+      {
+        "line": 11807,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readonly %1) local_unnamed_addr #26 {",
+        "instruction": "%80 = call fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %86), !noalias !127"
+      },
+      {
+        "line": 12561,
+        "function": "define noundef i32 @main(i32 %0, ptr nocapture readonly %1) local_unnamed_addr #26 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %12, ptr noundef nonnull %449, i64 noundef %448, i64 noundef -9223372036854775808) #31"
+      },
+      {
+        "line": 15552,
+        "function": "define internal fastcc { ptr, i64, i64 } @fa.copy_string_slow({ ptr, i64, i64 } %0) unnamed_addr #27 {",
+        "instruction": "call fastcc void @owned_copy_with(ptr dead_on_unwind noalias nonnull writable align 8 %1, ptr noundef %4, i64 noundef %2, i64 noundef %5) #31"
+      }
+    ],
+    "all_executed_copy_edges": [
+      {
+        "pc": "0x6927",
+        "caller": "split_text",
+        "callee": "owned_copy_with",
+        "calls": 300,
+        "inclusive_ir": 8100
+      },
+      {
+        "pc": "0x69b8",
+        "caller": "split_text",
+        "callee": "owned_copy_with",
+        "calls": 300000,
+        "inclusive_ir": 22505415
+      }
+    ]
+  }
+}

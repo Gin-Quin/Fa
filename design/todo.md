@@ -79,9 +79,33 @@ One item per ordered slice of [the WIP assessment §3.4](reviews/ownership-wip-2
 - **O35 — Measured pass reduction.** Reimplement only F→P optimization differences: shared scan parents, read/reference reuse, lazy region facts; preserve latest semantic code/closed facts. ([§3.4, slice 35](reviews/ownership-wip-2026-11-15.md#34-ordered-focused-slices)) Must satisfy: all preceding ownership sections; deterministic diagnostics and unchanged semantic behavior.
 
 - **String copy visibility (tooling, lead 2026-11-16).** Add a `fa check` option reporting implicit native String copies with source sites and reasons (mutable destination, escaping lifetime, source modification). Satisfy memory-management §Strings and strings §Implementation details; no change to ordinary String semantics.
+
+- **General last-owner moves: String performance acceptance (lead, 2026-11-17).**
+  `feature/ownership` owns one extraction/destination mechanism for every owning
+  type; do not add a String-specific field move. Use
+  `packages/cli/tests/programs/last-owner-store-acceptance.fa` for an owned String
+  field returned with a still-owned sibling, a temporary stored in a union/array,
+  and extracted object/array/tuple/recursive payloads. Retain its live-owner
+  snapshot control and native leak checks. Reprofile the unchanged audit ports:
+  respond's `render` returns `out.text` (40,000 slow copies, 7,486,825 inclusive
+  Ir); sexp transfers `generator.text` to `Parser` at the generator's last use
+  (one slow copy, 965,634 Ir). Records has no slow String copy: its 100,069 short
+  words incur a 400,276-Ir temporary descriptor spill/address sequence before
+  packed storage; destination forwarding may remove that sequence, while final
+  packed payload writes remain. Calc's generator is reused, so its 40,000
+  snapshots (3,524,652 Ir) require a lifetime/view proof rather than moving its
+  live buffer. Keep moved fields out of their old owner's destructor.
 - **Recursive operation safety.** Under memory-management §Recursive types / §Native and WebAssembly, explicit copy/drop must support arbitrary finite depth without native stack overflow; construction and consuming walks move, nonconsuming walks borrow. Include the lead's 200,000-node list regression. This is part of O8/O9/O12/O13/O34 acceptance; do not transplant the old implicit-recursive-copy predicate.
 
 ### Generic follow-ups
+
+- **Function-type field effects (2026-11-17).** The analyzer rejects
+  `(out: Output) => Void mutates out.text` with AN001, although the documented
+  function-type syntax carries signature effects. A function declaring
+  `mutates out.text` also fails assignment to a callback type declaring
+  `mutates out`. Support field paths and the documented effect coverage in
+  function types; the inline String append fixture uses matching whole-parameter
+  callback effects to exercise the supported path without changing this rule.
 
 - **GN030 and review m1.** Complete lambda/function-type parameter restrictions, legal named/literal-lambda/forwarded arguments, static cases and generic return annotations. Also reject an inferred generic return (`function wrap = () => identity`) at its declaration; callers currently get misleading GN015 errors. Test local/imported forwarding and allowed specialization. Also reject stored generic lambdas hidden under parentheses or `copy`: the pre-existing group wrapper bypasses E-DECL-6, and inferred stored forall values must still follow GN030.
 - **E-DECL-6 wording only.** The single diagnostic is implemented. Its fix must show `function f = <T>(…) => …`.

@@ -1,0 +1,59 @@
+-- Acceptance probes for the general ownership move mechanism, not a String
+-- specialization. Profile with a larger argument (e.g. 40000); assertions and
+-- the checksum keep each returned/stored payload observable. Native tests also
+-- check that siblings are destroyed and extracted fields are not destroyed twice.
+-- asynchronous: false
+
+type TextOwner = { text: String, sibling: Array<Integer> }
+function lastTextField = (number: Integer): String => {
+	mutable owner = TextOwner { text = "", sibling = [number, number + 1] }
+	owner.text += "a-long-owned-string-over-twenty-three-bytes:{number}"
+	owner.text
+}
+
+type Event = Union { Say = { text: String }, Empty }
+function temporaryIntoField = (number: Integer): Array<Event> => {
+	mutable events: Array<Event> = []
+	events.push(Event.Say { text = lastTextField(number) })
+	events
+}
+
+type Payload = { text: String, values: Array<Integer> }
+type Tree = Union { Leaf = { text: String }, Branch = { children: Array<Tree> } }
+function lastAggregateFields = (number: Integer): Tuple<Payload, Array<String>, Tree> => {
+	let owner = {
+		payload = Payload { text = lastTextField(number), values = [number, number + 1] }
+		words = [lastTextField(number)]
+		tree = Tree.Branch { children = [Tree.Leaf { text = lastTextField(number) }] }
+		sibling = [number + 2]
+	}
+	(owner.payload, owner.words, owner.tree)
+}
+
+-- A live owner still needs an independent ordinary String snapshot.
+function liveSnapshot = (number: Integer): String => {
+	mutable owner = TextOwner { text = lastTextField(number), sibling = [number] }
+	let previous = owner.text
+	owner.text += "!"
+	assert previous == "a-long-owned-string-over-twenty-three-bytes:{number}"
+	owner.text
+}
+
+let rounds = try Integer.parse(arguments.get(0) ?? "3")
+mutable checksum = 0
+for number in 0..rounds {
+	let expected = "a-long-owned-string-over-twenty-three-bytes:{number}"
+	let text = lastTextField(number)
+	assert text == expected
+	let events = temporaryIntoField(number)
+	assert events == [Event.Say { text = expected }]
+	let (payload, words, tree) = lastAggregateFields(number)
+	assert payload.text == expected
+	assert payload.values == [number, number + 1]
+	assert words == [expected]
+	assert tree == Tree.Branch { children = [Tree.Leaf { text = expected }] }
+	checksum += text.length + payload.values.length + words.length
+}
+assert liveSnapshot(rounds) == "a-long-owned-string-over-twenty-three-bytes:{rounds}!"
+console.log(checksum)
+-- prints: 144

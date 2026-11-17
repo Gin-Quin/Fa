@@ -2747,3 +2747,11 @@ Language decisions on the questions the work revealed (§9 of the review). No pa
 Also decided: a store that already has a type error gets no ownership diagnostic (no cascade), and one mistake is reported under one code.
 
 **Known defect of the trunk found by the review** (to-do, ownership section): the textual last-use rule moves a module-level array that a function kept in an array still reads; the program `reviews/repros/ownership-enforcement/g2.fa` prints `4 4` on Bun instead of `3 4`. Slice A2 fixes it.
+
+## Tooling audit: decisions (lead, 2026-11-17)
+
+From the audit [`reviews/tooling-2026-11-17.md`](reviews/tooling-2026-11-17.md):
+
+- **A Git tag whose `package.fa` version doesn't match its name (`DEP003`) is skipped with a warning** when versions are resolved; it is an error only when that exact version is requested. One bad tag of a library must not block every consumer's `fa update`.
+- **A distribution of Fa always ships `fa-native` next to `fa`.** A target that a package declares is never skipped silently: without `fa-native`, `fa build` builds the other targets, reports the native ones as failed (`CLI009`) and exits with 1, as today.
+- **Dependency cycles between packages are refused**, with a diagnostic that names the cycle. Files of one package may refer to each other freely; packages form an acyclic graph (they are compiled, cached and published as units).

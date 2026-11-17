@@ -200,7 +200,11 @@ types and must not be replaced by fact-name equality.
   field/item append path is implemented (2026-11-17): it removes all 124,389
   short cold calls in the fresh respond audit. Remaining String work is room/mode
   propagation across appends, longer literal appends, direct decimal formatting
-  and last-use field moves; the latter meets `feature/ownership`. Next retain masked Array-index and
+  and last-use field moves; the latter meets `feature/ownership`. Records' short
+  word loop also spends 2,847,837 Ir forming/storing its inline tag (three
+  instructions per 949,279 characters). Keep length/tag state in SSA until the
+  end of a proven append-only bounded loop; retain read/capture/throw/async
+  fallbacks and measure before adopting it. Next retain masked Array-index and
   stored-node validity facts in lru-open, including backward-shift deletion:
   39,041 mapRemove calls cost 1.78 M inclusive instructions. Preserve checked
   failure paths; do not add unchecked benchmark accesses. Standard Map remains

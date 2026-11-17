@@ -78,7 +78,9 @@ impl Generator<'_> {
 			}
 			View::ImplicitMember(_) => match self.analysis.resolution(n) {
 				Resolution::Member(nominal, index) => self.nominal_member_value(n, nominal, index),
-				_ => self.unsupported(n, "this member"),
+				_ => {
+					self.internal_error(n, "the checked implicit member has no nominal resolution")
+				}
 			},
 			View::Call { callee, arguments } => self.call(n, callee, arguments),
 			View::Arithmetic { op, operands } => self.arithmetic(n, op, operands),
@@ -310,7 +312,7 @@ impl Generator<'_> {
 				Some(value) => value,
 				None => self.unsupported(n, "this name of another file"),
 			},
-			_ => self.unsupported(n, "this name"),
+			_ => self.internal_error(n, "the checked runtime name has no value resolution"),
 		}
 	}
 

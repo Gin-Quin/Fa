@@ -111,7 +111,7 @@ impl Generator<'_> {
 	/// with braces): the fields in declaration order.
 	pub(crate) fn object_literal(&mut self, n: NodeId) -> Expr {
 		let Some(info) = self.analysis.object(n).cloned() else {
-			return self.unsupported(n, "this object literal");
+			return self.internal_error(n, "the checked object literal has no object metadata");
 		};
 		// `AtomicInteger { value = 0 }`, `Mutex(T) { … }`, `Channel(T) { … }`
 		if let TypeKind::Sync(kind, _) = self.types.kind(info.ty) {
@@ -510,7 +510,10 @@ impl Generator<'_> {
 						let name = self.enum_members(nominal);
 						Expr::name(name, true)
 					}
-					_ => self.unsupported(member, "`members`"),
+					_ => self.internal_error(
+						member,
+						"the checked Enum.members receiver is not an enumeration",
+					),
 				}
 			}
 			_ => self.unsupported(member, "this member of a type"),
@@ -630,14 +633,17 @@ impl Generator<'_> {
 				}
 			}
 			NominalKind::Errors => self.new_error(nominal, index, Vec::new()),
-			_ => self.unsupported(n, "this member"),
+			_ => self.internal_error(
+				n,
+				"the checked nominal member is neither an enumeration, union nor error",
+			),
 		}
 	}
 
 	/// `Shape.Labelled("north")`: `{ $t: "Shape.Labelled", v: "north" }`.
 	pub(crate) fn member_with_data(&mut self, member: TypeId, data: NodeId) -> Expr {
 		let TypeKind::Member(nominal, index) = self.types.kind(member) else {
-			return self.unsupported(data, "this member");
+			return self.internal_error(data, "the checked member construction has no member type");
 		};
 		let value = self.expr(data);
 		let value = self.copy_stored(data, value);
@@ -1343,7 +1349,7 @@ impl Generator<'_> {
 	/// `target .= { field = value, … }`: every value first, then the writes.
 	pub(crate) fn update_fields(&mut self, target: NodeId, value: NodeId) {
 		let View::Object { items } = self.view(value) else {
-			self.unsupported(value, "this `.=`");
+			self.internal_error(value, "the checked field update has no object literal");
 			return;
 		};
 		let container = self.stable_value(target);
@@ -1357,7 +1363,10 @@ impl Generator<'_> {
 				} => fields.push((self.text(name).to_string(), value)),
 				View::Name(_) => fields.push((self.text(item).to_string(), item)),
 				_ => {
-					self.unsupported(item, "this field of `.=`");
+					self.internal_error(
+						item,
+						"the checked field update has an invalid object item",
+					);
 					return;
 				}
 			}

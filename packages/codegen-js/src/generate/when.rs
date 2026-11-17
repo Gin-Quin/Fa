@@ -547,7 +547,10 @@ impl Generator<'_> {
 			self.view(binding),
 			View::Name(_) | View::ObjectPattern { .. }
 		) {
-			self.unsupported(binding, "this binding");
+			self.internal_error(
+				binding,
+				"the checked when binding is neither a name nor an object pattern",
+			);
 			return;
 		}
 		// paired by name (`fa_analyzer::lower::when::arm_bindings`)

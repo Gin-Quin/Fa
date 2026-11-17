@@ -168,7 +168,10 @@ impl Generator<'_> {
 				self.out.line(format!("const {name} = {};", composed.text));
 			}
 			_ => {
-				self.unsupported(n, "this function declaration");
+				self.internal_error(
+					n,
+					"the checked function declaration has no body metadata, alias or composition",
+				);
 			}
 		}
 	}
@@ -226,7 +229,7 @@ impl Generator<'_> {
 	/// A lambda: an arrow function.
 	pub(crate) fn lambda(&mut self, n: NodeId) -> Expr {
 		let Some(info) = self.analysis.function(n).cloned() else {
-			return self.unsupported(n, "this function");
+			return self.internal_error(n, "the checked lambda has no function metadata");
 		};
 		let indent = self.out.indentation();
 		let saved = self.copy_captures(&info);
@@ -662,7 +665,7 @@ impl Generator<'_> {
 			{
 				return self.abs(n, target);
 			}
-			return self.unsupported(n, "this call");
+			return self.internal_error(n, "the checked call has no call or application metadata");
 		};
 		// a C function (foreign.rs)
 		if self.analysis.extern_calls.contains_key(&n) {
@@ -675,12 +678,15 @@ impl Generator<'_> {
 		match info.callee {
 			Callee::Conversion(target) => match info.arguments.first() {
 				Some(Argument::Given(value)) => self.conversion(n, target, *value),
-				_ => self.unsupported(n, "this conversion"),
+				_ => self.internal_error(n, "the checked conversion has no value argument"),
 			},
 			Callee::Builtin(builtin) => self.builtin_call(n, callee, builtin, &info.arguments),
 			Callee::Member(member) => match info.arguments.first() {
 				Some(Argument::Given(value)) => self.member_with_data(member, *value),
-				_ => self.unsupported(n, "this member"),
+				_ => self.internal_error(
+					n,
+					"the checked union member construction has no data argument",
+				),
 			},
 			Callee::Function(declaration)
 				if info
@@ -690,7 +696,7 @@ impl Generator<'_> {
 			{
 				// a method: `Type$method(receiver, …)`
 				let Some(symbol) = self.analysis.symbols.symbol_of_decl(declaration) else {
-					return self.unsupported(n, "this method");
+					return self.internal_error(n, "the checked method declaration has no symbol");
 				};
 				let function = self.name_of(symbol);
 				let receiver = self.receiver(callee);

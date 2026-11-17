@@ -2546,3 +2546,7 @@ JavaScript constants share the runtime literal class selection: primitive Set/Ma
 ### Direct pool-reference removal (2026-11-17)
 
 JavaScript value-pool delete/take obtains its slot through the common reference-pair lowering, including direct builtin and user-function results. Evaluate the receiver before any emitted argument statements, and never recover a slot by value equality: equal live elements remain distinct. The same path keeps named references and columnar slots.
+
+### Defensive JavaScript lowering contracts (2026-11-17)
+
+Forty additional audited fallbacks report an internal compiler diagnostic under AN001: missing mandatory analysis data, checked call arity or numeric-dispatch inconsistencies, invalid range/destructuring/when shapes, static reference layouts containing dynamic bindings, and blocking socket calls that bypassed CONC010. Reachable optional/numeric-generic/JSON/builtin-value and unresolved metadata families retain ordinary refusal diagnostics until fixed. Internal diagnostics remain recoverable and do not panic on user input.

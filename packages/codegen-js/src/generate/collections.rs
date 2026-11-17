@@ -183,7 +183,10 @@ impl Generator<'_> {
 		arguments: &[Argument],
 	) -> Expr {
 		let Some(Argument::Given(source)) = arguments.first() else {
-			return self.unsupported(n, &format!("`{path}` without a source"));
+			return self.internal_error(
+				n,
+				"the checked collection constructor has no source argument",
+			);
 		};
 		let source = *source;
 		let key = match (path, arguments.get(1)) {

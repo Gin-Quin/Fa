@@ -412,7 +412,7 @@ impl Generator<'_> {
 	/// `watch { … }` as a value: `faWatch(() => { … })`.
 	pub(crate) fn watch_expr(&mut self, n: NodeId) -> Expr {
 		let Some(info) = self.analysis.watches.get(&n).copied() else {
-			return self.unsupported(n, "this `watch` block");
+			return self.internal_error(n, "the checked watch block has no watch metadata");
 		};
 		let compute = self.reactive_closure(n, info.body, true, info.cleanup);
 		let helper = self.helper("faWatch");

@@ -52,10 +52,13 @@ impl Generator<'_> {
 	/// values rooted behind an opaque C address.
 	pub(crate) fn pointer_allocate(&mut self, n: NodeId, arguments: &[Argument]) -> Expr {
 		let Some(Argument::Given(value)) = arguments.first() else {
-			return self.unsupported(n, "this pointer allocation");
+			return self.internal_error(n, "the checked pointer allocation has no value argument");
 		};
 		let Some(target) = self.types.pointer_target(self.type_of(n)) else {
-			return self.unsupported(n, "this pointer allocation");
+			return self.internal_error(
+				n,
+				"the checked pointer allocation has no pointer result type",
+			);
 		};
 		if self
 			.types
@@ -121,7 +124,10 @@ impl Generator<'_> {
 				self.analysis.symbols.symbol(symbol).ty
 			});
 		let TypeKind::Function(sig) = self.types.kind(ty) else {
-			self.unsupported(n, "this C function");
+			self.internal_error(
+				n,
+				"the checked extern declaration has no function signature",
+			);
 			return;
 		};
 		let sig = self.types.sig(sig);
@@ -386,7 +392,7 @@ impl Generator<'_> {
 	) -> Expr {
 		let function = self.expr(callee);
 		let TypeKind::Function(sig) = self.types.kind(self.type_of(callee)) else {
-			return self.unsupported(n, "this C call");
+			return self.internal_error(n, "the checked C call has no function signature");
 		};
 		let sig = self.types.sig(sig);
 		let params: Vec<TypeId> = self
@@ -401,7 +407,7 @@ impl Generator<'_> {
 		let mut values: Vec<String> = Vec::new();
 		for (index, argument) in arguments.iter().enumerate() {
 			let Argument::Given(value) = argument else {
-				return self.unsupported(n, "these C arguments");
+				return self.internal_error(n, "the checked C call has an unbound argument");
 			};
 			let value = *value;
 			let param = params.get(index).copied().unwrap_or(TypeId::UNKNOWN);
@@ -468,7 +474,10 @@ impl Generator<'_> {
 				}
 				Some(ForeignArg::Callback) => {
 					let TypeKind::Function(callback) = self.types.kind(param) else {
-						return self.unsupported(value, "this callback");
+						return self.internal_error(
+							value,
+							"the checked C callback argument has no function signature",
+						);
 					};
 					let callback = self.types.sig(callback);
 					let mut args = Vec::new();

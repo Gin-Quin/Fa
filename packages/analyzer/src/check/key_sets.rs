@@ -587,6 +587,7 @@ impl Walker<'_> {
 				self.forget_callable_capture_sources(node);
 			}
 			self.ownership_read_origins.remove(&node);
+			self.a.named_function_readiness.remove(&node);
 			let index = node.index();
 			if let Some(slot) = self.a.types.get_mut(index) {
 				*slot = TypeId::UNSET;

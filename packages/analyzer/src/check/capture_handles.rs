@@ -101,6 +101,7 @@ impl Walker<'_> {
 			})
 			.collect();
 		self.a.named_function_dependencies = handles;
+		self.publish_local_function_readiness();
 	}
 
 	fn function_binding_owner(&self, lambda: NodeId) -> NodeId {
@@ -299,6 +300,50 @@ mod tests {
 				.collect();
 			assert_eq!(names, [callee]);
 			assert_eq!(snapshot.function_capture_states.get(&lambda), Some(&state));
+			let uses: Vec<_> = snapshot
+				.named_function_readiness
+				.values()
+				.filter(|read| {
+					snapshot
+						.symbols
+						.symbol_of_decl(read.declaration)
+						.is_some_and(|symbol| {
+							session
+								.types()
+								.syms
+								.resolve(snapshot.symbols.symbol(symbol).name)
+								== callee
+						})
+				})
+				.collect();
+			assert!(
+				!uses.is_empty(),
+				"the key snapshot lost {callee}: {:?}; reads {:?}",
+				snapshot.named_function_readiness,
+				(0..session.tree(file).nodes.len())
+					.filter_map(|index| {
+						let node = NodeId::new(index);
+						(session.tree(file).text(index) == callee).then_some((
+							node,
+							snapshot.type_of(node),
+							snapshot.flags_of(node),
+							snapshot.resolution(node),
+						))
+					})
+					.collect::<Vec<_>>()
+			);
+			let expected_owned = if state == FunctionCaptureState::Pending {
+				crate::analysis::DeclarationReadiness::Pending
+			} else {
+				crate::analysis::DeclarationReadiness::Ready
+			};
+			assert!(uses.iter().any(|read| read.borrowed
+				== crate::analysis::DeclarationReadiness::Pending
+				&& read.owned == expected_owned));
+			assert_eq!(
+				snapshot.named_function_readiness,
+				snapshot.clone().named_function_readiness
+			);
 		}
 	}
 }

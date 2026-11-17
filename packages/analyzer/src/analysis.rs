@@ -674,6 +674,9 @@ pub struct Analysis {
 	/// settle Pending against the enclosing declaration before lowering.
 	/// Neither this state nor the dependency edges authorize a transfer.
 	pub function_capture_states: FxHashMap<NodeId, FunctionCaptureState>,
+	/// Named reads in borrowed and owned invocation contexts. Pending
+	/// wrapper/default states must settle before target selection.
+	pub named_function_readiness: FxHashMap<NodeId, NamedFunctionReadiness>,
 	/// Parameters whose callable data can be retained by their function.
 	pub kept_parameters: rustc_hash::FxHashSet<SymbolId>,
 	/// Retention inferred conservatively from an unknown function value.
@@ -1356,6 +1359,23 @@ pub enum FunctionCaptureState {
 	Pending,
 }
 
+/// Whether execution has reached a local function's declaration.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeclarationReadiness {
+	Pending,
+	Early,
+	Ready,
+	/// The running invocation supplies its own environment and mode.
+	SelfInvocation,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NamedFunctionReadiness {
+	pub declaration: NodeId,
+	pub borrowed: DeclarationReadiness,
+	pub owned: DeclarationReadiness,
+}
+
 /// What the backends need of a function or a lambda node.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FnInfo {
@@ -1621,6 +1641,7 @@ impl Analysis {
 			capture_types: FxHashMap::default(),
 			named_function_dependencies: FxHashMap::default(),
 			function_capture_states: FxHashMap::default(),
+			named_function_readiness: FxHashMap::default(),
 			kept_parameters: rustc_hash::FxHashSet::default(),
 			unknown_kept_parameters: rustc_hash::FxHashSet::default(),
 			non_escaping: rustc_hash::FxHashSet::default(),

@@ -18,6 +18,8 @@ pub(super) struct Graph {
 	pub at: FxHashMap<NodeId, Vec<usize>>,
 	pub stores: FxHashMap<NodeId, Vec<usize>>,
 	pub reachable: Vec<bool>,
+	/// Entries of each lexical block activation, including loop bodies.
+	blocks: FxHashMap<NodeId, SmallVec<[usize; 1]>>,
 }
 
 pub(super) struct Event {
@@ -81,6 +83,39 @@ impl Graph {
 			pending.extend(graph.events[index].next.iter().copied());
 		}
 		graph
+	}
+
+	/// Events reachable from this lexical block's entry without executing
+	/// the declaration. Starting at the block, rather than a function's
+	/// entry, also describes a fresh loop-body activation.
+	pub fn before_definition(&self, block: NodeId, symbol: SymbolId) -> Option<Vec<bool>> {
+		let mut before = vec![false; self.events.len()];
+		let mut pending: Vec<_> = self.blocks.get(&block)?.iter().copied().collect();
+		while let Some(index) = pending.pop() {
+			if !self.reachable[index]
+				|| before[index]
+				|| self.events[index].defines.contains(&symbol)
+			{
+				continue;
+			}
+			before[index] = true;
+			pending.extend(self.events[index].next.iter().copied());
+		}
+		Some(before)
+	}
+
+	pub fn definition_reached(&self, node: NodeId, before: &[bool]) -> Option<bool> {
+		let positions = self.at.get(&node)?;
+		let mut reached = false;
+		for &index in positions {
+			if self.reachable[index] {
+				if before[index] {
+					return Some(false);
+				}
+				reached = true;
+			}
+		}
+		reached.then_some(true)
 	}
 
 	/// One backward traversal per stored owner. A definition stops the old
@@ -227,7 +262,9 @@ impl Builder<'_, '_> {
 			View::Lambda { .. } | View::Watch(_) => self.end(node, next, exits, SmallVec::new()),
 			View::Module { statements } | View::Block { statements } => {
 				let tail = self.end(node, next, exits, SmallVec::new());
-				self.sequence(statements.iter(), tail, exits)
+				let entry = self.sequence(statements.iter(), tail, exits);
+				self.graph.blocks.entry(node).or_default().push(entry);
+				entry
 			}
 			View::If {
 				condition,

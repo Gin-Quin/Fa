@@ -1,4 +1,4 @@
-// helpers: FaTask, faSched, faEnd, faCancel, faDrop, faDropTasks, faIsError, faCancelSignal, faExit, FaStop, faStopMessage, faIsStackOverflow, faWriteError, faReport, faFatal, faSettle, faRunTask, faStartCall, faFinished, faDetach, faLater, faMacrotask, faReady, faAlive, faWhenDone, faQuote, faFormatError, FaError, Cancelled, faResult, faJoin, faRunAsync
+// helpers: faIsBytes, faQuote, faFormatRange, faSides, faFormatNested, faFormat, FaTask, faSched, faEnd, faCancel, faDrop, faDropTasks, faIsError, faCancelSignal, faExit, FaStop, faStopMessage, faIsStackOverflow, faWriteError, faReport, faFatal, faSettle, faRunTask, faStartCall, faFinished, faDetach, faLater, faMacrotask, faReady, faAlive, faWhenDone, faFormatError, FaError, Cancelled, faResult, faJoin, faRunAsync
 
 const copy$Box = (value) => ({ name: value.name });
 
@@ -9,6 +9,10 @@ function defaultSuffix() {
 
 function Box$describe(self, suffix = defaultSuffix()) {
 	return self.name + suffix;
+}
+
+function Box$maybe(self) {
+	return undefined;
 }
 
 function Box$length(self) {
@@ -32,35 +36,41 @@ async function check($task, box) {
 			if (!(size === undefined)) {
 				console.log(String(await faJoin($task, size)));
 			}
-			const text = !(box === undefined) ? box.name : undefined;
-			const trimmed = text === undefined ? undefined : faFinished(() => text.trim());
+			const nullable = box === undefined ? undefined : faStartCall($task, Box$maybe, box);
 			try {
-				if (!(trimmed === undefined)) {
-					console.log(await faJoin($task, trimmed));
+				if (!(nullable === undefined)) {
+					console.log(faFormat(await faJoin($task, nullable)));
 				}
-				let $t1;
-				if (box !== undefined) {
-					const $t0 = copy$Box(box);
-					$t1 = faDetach(faStartCall($task, Box$describe, $t0, "detached"));
-				}
-				let $t3;
-				if (box !== undefined) {
-					let $t2;
-					if (!(box === undefined)) {
-						$t2 = 7;
-					} else {
-						console.log("bad argument");
-						$t2 = 0;
-					}
-					$t3 = faStartCall($task, Box$tagged, box, $t2);
-				}
-				const skipped = $t3;
+				const text = !(box === undefined) ? box.name : undefined;
+				const trimmed = text === undefined ? undefined : faFinished(() => text.trim());
 				try {
-					if (!(skipped === undefined)) {
-						console.log(String(await faJoin($task, skipped)));
+					if (!(trimmed === undefined)) {
+						console.log(await faJoin($task, trimmed));
 					}
-				} finally { faDropTasks(skipped); }
-			} finally { faDropTasks(trimmed); }
+					let $t1;
+					if (box !== undefined) {
+						const $t0 = copy$Box(box);
+						$t1 = faDetach(faStartCall($task, Box$describe, $t0, "detached"));
+					}
+					let $t3;
+					if (box !== undefined) {
+						let $t2;
+						if (!(box === undefined)) {
+							$t2 = 7;
+						} else {
+							console.log("bad argument");
+							$t2 = 0;
+						}
+						$t3 = faStartCall($task, Box$tagged, box, $t2);
+					}
+					const skipped = $t3;
+					try {
+						if (!(skipped === undefined)) {
+							console.log(String(await faJoin($task, skipped)));
+						}
+					} finally { faDropTasks(skipped); }
+				} finally { faDropTasks(trimmed); }
+			} finally { faDropTasks(nullable); }
 		} finally { faDropTasks(size); }
 	} finally { faDropTasks(task); }
 }

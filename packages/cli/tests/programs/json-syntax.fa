@@ -379,3 +379,29 @@ console.log(deep1001Bytes) -- prints: JSON Parse error: Exceeded the maximum dep
 console.log(
 	depthMessage(("{{\"data\":" + "[".repeat(1001) + "0" + "]".repeat(1001) + "}}").toUtf8())
 ) -- prints: JSON Parse error: Exceeded the maximum depth
+
+-- Remaining UTF-8 prefix/continuation widths and line-independent diagnostics.
+attempt(Bytes.from([194])) -- prints: invalid UTF-8 in JSON input
+static utf8Extra0 = message(Bytes.from([194]))
+console.log(utf8Extra0)              -- prints: invalid UTF-8 in JSON input
+attempt(Bytes.from([240, 159, 146])) -- prints: invalid UTF-8 in JSON input
+static utf8Extra1 = message(Bytes.from([240, 159, 146]))
+console.log(utf8Extra1)             -- prints: invalid UTF-8 in JSON input
+attempt(Bytes.from([226, 40, 161])) -- prints: invalid UTF-8 in JSON input
+static utf8Extra2 = message(Bytes.from([226, 40, 161]))
+console.log(utf8Extra2)                   -- prints: invalid UTF-8 in JSON input
+attempt(Bytes.from([240, 128, 128, 128])) -- prints: invalid UTF-8 in JSON input
+static utf8Extra3 = message(Bytes.from([240, 128, 128, 128]))
+console.log(utf8Extra3)                   -- prints: invalid UTF-8 in JSON input
+attempt(Bytes.from([245, 128, 128, 128])) -- prints: invalid UTF-8 in JSON input
+static utf8Extra4 = message(Bytes.from([245, 128, 128, 128]))
+console.log(utf8Extra4)        -- prints: invalid UTF-8 in JSON input
+attempt(Bytes.from([194, 32])) -- prints: invalid UTF-8 in JSON input
+static utf8Extra5 = message(Bytes.from([194, 32]))
+console.log(utf8Extra5)         -- prints: invalid UTF-8 in JSON input
+attempt(Bytes.from([224, 160])) -- prints: invalid UTF-8 in JSON input
+static utf8Extra6 = message(Bytes.from([224, 160]))
+console.log(utf8Extra6) -- prints: invalid UTF-8 in JSON input
+attempt("\n[1,]")       -- prints: JSON Parse error: Unexpected comma at the end of array expression
+static multiline = message("\n[1,]")
+console.log(multiline) -- prints: JSON Parse error: Unexpected comma at the end of array expression

@@ -2772,3 +2772,13 @@ Direct `await receiver?.method()` gives `Result?`. Started arguments, defaults
 and detachment stay inside the guard. The analyzer's present-result table keeps
 chain-added absence separate from an optional declared result, including a
 returned optional function pointer; ordinary continuation never strips the latter.
+
+The JSON diagnostic contract is native's grammar and error precedence, shared by
+an annotated String/Bytes fixture used by ordinary and generated tests. The
+interpreter reads containers iteratively, matching native's 1000-container bound
+without depending on the Rust call stack. No host-specific line/column/byte text
+is added to syntax errors; invalid UTF-8 has the native message. JavaScript keeps
+engine parsing for short successful String input. A potentially over-deep valid
+document needs at least 2002 code units, so only inputs at least that long need
+the iterative Fa check before engine parsing. Bytes check their existing explicit
+container stack. Syntax failures continue to use the native-compatible scan.

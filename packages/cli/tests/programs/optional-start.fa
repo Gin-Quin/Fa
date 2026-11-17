@@ -6,6 +6,7 @@ function defaultSuffix = (): String => {
 type Box = {
 	name: String
 	async function describe = (self, suffix: String = defaultSuffix()): String => self.name + suffix
+	async function maybe = (self): String? => none
 	function length = (self): Integer => self.name.length
 	function tagged = (self, value: Integer): Integer => value
 }
@@ -14,6 +15,8 @@ async function check = (box: Box?) => {
 	if task is none { console.log("none") } else { console.log(await task) }
 	let size: Task<Integer>? = start box?.length()
 	if size is not none { console.log(await size) }
+	let nullable: Task<String?>? = start box?.maybe()
+	if nullable is not none { console.log(await nullable) }
 	let text: String? = if box is not none { box.name } else { none }
 	let trimmed: Task<String>? = start text?.trim()
 	if trimmed is not none { console.log(await trimmed) }
@@ -31,5 +34,6 @@ await check(Box { name = "Ada" })
 -- prints: default
 -- prints: Ada!
 -- prints: 3
+-- prints: none
 -- prints: Ada
 -- prints: 7

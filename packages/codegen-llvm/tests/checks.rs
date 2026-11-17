@@ -463,6 +463,25 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn a_closed_module_slot_transfers_after_its_last_reader() {
+		let source = include_str!("../../analyzer/tests/cases/ownership-private-global-moves.fa");
+		for target in [Target::Native, Target::Wasm] {
+			let ir = ir_at_target("private-global-move", source, true, OptLevel::O0, target);
+			let main = function(
+				&ir,
+				if target == Target::Native {
+					"main"
+				} else {
+					"_start"
+				},
+			);
+			assert!(!main.contains("@fa.copy"), "{target:?}: {main}");
+			let read = function(&ir, "fa.read");
+			assert!(!read.contains("!invariant.load"), "{target:?}: {read}");
+		}
+	}
+
+	#[test]
 	fn captures_transfer_the_old_owner_before_a_borrowed_replacement() {
 		let source = include_str!("../../analyzer/tests/cases/ownership-capture-replacements.fa");
 		for target in [Target::Native, Target::Wasm] {

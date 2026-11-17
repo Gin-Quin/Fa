@@ -2548,7 +2548,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				global.set_constant(true);
 			} else {
 				global.set_initializer(&zero_of(ty));
-				if data.kind == SymbolKind::Let && !self.reactive_sources.contains_key(&symbol) {
+				if data.kind == SymbolKind::Let
+					&& !self.reactive_sources.contains_key(&symbol)
+					&& !self.binding_may_move(symbol)
+				{
 					self.invariant_globals.insert(global.as_pointer_value());
 				}
 			}

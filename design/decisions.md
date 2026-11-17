@@ -3067,3 +3067,7 @@ An exported callable observes module state after its initializer. Its original-s
 ### Ownership enforcement: method receiver observations (implementation, 2026-11-17)
 
 Selecting a method reads its receiver even though the selected method is not a place. Freeze the receiver's logical storage origin and exact checked path at that expression, outside memoized type checking. Canonical move paths alone do not establish an original-source observation. This keeps a source live across later borrowed method calls, while an owned closure's method reads stop at its stored environment.
+
+### Ownership enforcement: private module transfers (implementation, 2026-11-17)
+
+A proven last-use module slot can transfer in a closed synchronous standalone initializer with settled source observations and no deferred observers, foreign exposure, namespace/reference aliases or capturing environment. The source slot is cleared through the ordinary transfer operation. Other module lifetimes retain the existing physical-storage guard until their complete source proof is available. An immutable module binding whose slot or supported unique field may be cleared cannot use LLVM invariant-load metadata, including in a reader that runs before the move.

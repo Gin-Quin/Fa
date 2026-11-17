@@ -1,0 +1,11 @@
+function make = (count: Integer<min = 0>): Array<Integer> => {
+	mutable items: Array<Integer> = []
+	for index in 0..count { items.push(index) }
+	items
+}
+let original = make(arguments.length + 2)
+function read = (): Integer => original.sum()
+let before = read()
+mutable target = original
+target.push(9)
+console.log(before, target.sum(), target.length) -- prints: 1 10 3

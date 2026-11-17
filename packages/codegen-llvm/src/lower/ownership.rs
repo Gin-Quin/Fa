@@ -2245,7 +2245,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		{
 			return None;
 		}
-		if self.shared.contains_key(&symbol) {
+		if self.shared.contains_key(&symbol)
+			&& !(self.analysis.has_flags(inner, NodeFlags::MOVE) && self.closed_module_transfers())
+		{
 			return None;
 		}
 		// the whole value, or the value of an optional
@@ -2279,6 +2281,76 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else {
 			None
 		}
+	}
+
+	/// A closed synchronous initializer has no observer left behind its
+	/// checked last uses. More general module lifetimes keep the existing
+	/// guard until their deferred-observer proof is available.
+	fn closed_module_transfers(&self) -> bool {
+		use fa_analyzer::analysis::Callee;
+		if self.module_file
+			|| !self.analysis.escapes.is_empty()
+			|| !self.analysis.starts.is_empty()
+			|| !self.analysis.watches.is_empty()
+			|| !self.analysis.type_decls.is_empty()
+			|| !self.analysis.function_owners.is_empty()
+			|| !self.analysis.foreign_args.is_empty()
+			|| self.analysis.ownership_source_graph.entries.is_empty()
+			|| self
+				.analysis
+				.ownership_source_graph
+				.entries
+				.values()
+				.any(|entry| entry.pending)
+		{
+			return false;
+		}
+		if self.analysis.symbols.symbols().iter().any(|symbol| {
+			matches!(
+				symbol.kind,
+				SymbolKind::Use
+					| SymbolKind::MutableUse
+					| SymbolKind::Reactive
+					| SymbolKind::Derived
+					| SymbolKind::Namespace
+			)
+		}) {
+			return false;
+		}
+		self.analysis.functions.values().all(|info| {
+			info.sig.is_some_and(|sig| !self.types().sig(sig).is_async)
+				&& info
+					.declaration
+					.is_some_and(|node| matches!(self.view(node), View::Function { .. }))
+		}) && self.analysis.calls.values().all(|call| match call.callee {
+			Callee::Builtin(_) | Callee::Conversion(_) => true,
+			Callee::Function(node) => self.analysis.function(node).is_some(),
+			_ => false,
+		}) && (0..self.tree.nodes.len()).all(|index| {
+			!matches!(
+				self.view(NodeId::new(index)),
+				View::ExportValue { .. }
+					| View::ExportFunction { .. }
+					| View::ExportType { .. }
+					| View::ExportNamespace(_)
+					| View::Await(_)
+			)
+		})
+	}
+
+	/// Immutable global loads cannot promise invariance when their owner
+	/// slot (or a supported unique field) is cleared by a later transfer.
+	pub(super) fn binding_may_move(&self, symbol: SymbolId) -> bool {
+		self.analysis
+			.flags
+			.iter()
+			.enumerate()
+			.any(|(index, flags)| {
+				let node = NodeId::new(index);
+				(flags.contains(NodeFlags::MOVE) || self.analysis.moved_reads.contains(&node))
+					&& fa_analyzer::lower::copies::place_root(self.tree, self.analysis, node)
+						== Some(symbol)
+			})
 	}
 
 	/// A direct return ends this local's lifetime even when another branch

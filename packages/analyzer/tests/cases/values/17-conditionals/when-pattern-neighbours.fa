@@ -1,0 +1,27 @@
+-- Neighbours of T-WHEN-24, T-WHEN-27 and T-WHEN-30: the valid patterns next
+-- to the invalid ones, also in generic code.
+let passing = 60..=100
+function grade = (score: Integer): String => when score is {
+	60..=100 => "pass"
+	else => "fail"
+}
+function named = (score: Integer): Integer => when score is {
+	passing => 1 -- error: E-CMP-5
+	else => 2
+}
+function twice = (score: Integer): Integer => when score is {
+	1 => 1
+	2 => 2
+	1 => 3 -- warning: W-WHEN-1
+	else => 4
+}
+function alternatives = (score: Integer): Integer => when score is {
+	1 | 2 => 1
+	2 => 2 -- warning: W-WHEN-1
+	else => 3
+}
+function pair = <Item>(t: Tuple<Item, Item>, fallback: Item): Item => when t is {
+	(1, 2) => fallback -- error: E-WHEN-5
+	else => fallback
+}
+console.log(grade(70), named(1), twice(2), alternatives(2), pair((1, 2), 3))

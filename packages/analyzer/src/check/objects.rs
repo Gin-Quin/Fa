@@ -12,8 +12,8 @@ use crate::diagnostics::Code;
 use crate::diagnostics::codes::analyzer::AN001;
 use crate::diagnostics::codes::types::{FN042, TY021, TY053, TY054, TY055, TY056, TY084};
 use crate::diagnostics::codes::values::{
-	E_DECL_4, E_OBJ_1, E_OBJ_2, E_OBJ_3, E_OBJ_4, E_OBJ_5, E_OBJ_10, E_OBJ_11, E_OBJ_13, E_OPT_1,
-	E_TYPE_1,
+	E_DECL_4, E_OBJ_1, E_OBJ_2, E_OBJ_3, E_OBJ_4, E_OBJ_5, E_OBJ_10, E_OBJ_11, E_OBJ_13, E_OBJ_14,
+	E_OPT_1, E_TYPE_1,
 };
 use crate::ids::{NodeId, Sym, SymbolId, TypeId};
 use crate::symbols::{Resolution, SymbolKind};
@@ -1876,5 +1876,73 @@ impl Walker<'_> {
 		);
 		let diagnostic = self.diagnostic(&E_DECL_4, target, message);
 		self.report(diagnostic);
+	}
+}
+
+impl Walker<'_> {
+	/// `E-OBJ-14`: after `=>`, braces are a block, so `(v) => { x = v, y = 0 }`
+	/// assigns undeclared names. When every statement of a function's block
+	/// body is such a field, it is reported once (not `E-DECL-1` per name),
+	/// and the body is not checked. Whether it reported.
+	pub(super) fn report_object_like_block(&mut self, body: NodeId) -> bool {
+		let statements: Vec<NodeId> = match self.view(body) {
+			View::Block { statements } => statements.iter().collect(),
+			_ => return false,
+		};
+		let mut fields = Vec::new();
+		let looks_like_object = !statements.is_empty()
+			&& statements
+				.into_iter()
+				.all(|statement| self.collect_object_like_fields(statement, &mut fields));
+		if !looks_like_object {
+			return false;
+		}
+		let diagnostic = self.diagnostic(
+			&E_OBJ_14,
+			body,
+			format!(
+				"after `=>`, braces are a block, and `{}` {} not declared: to return an object, write its type before the braces, like `=> TypeName {{ {} }}`",
+				fields.join("`, `"),
+				if fields.len() == 1 { "is" } else { "are" },
+				self.tree.text(body.index()).trim_matches(['{', '}', ' ', '\n', '\t']),
+			),
+		);
+		self.report(diagnostic);
+		true
+	}
+
+	/// The fields of a statement that looks like the fields of an object
+	/// literal: `x = v`, or `x = v, y = 0` (a tuple of assignments, or
+	/// `x = (v, y = 0)`), each name undeclared.
+	fn collect_object_like_fields(&mut self, statement: NodeId, fields: &mut Vec<String>) -> bool {
+		if let View::Tuple { items } = self.view(statement) {
+			let items: Vec<NodeId> = items.iter().collect();
+			return items
+				.into_iter()
+				.all(|item| self.collect_object_like_fields(item, fields));
+		}
+		let View::Assignment {
+			target,
+			annotation: None,
+			value: Some(value),
+		} = self.view(statement)
+		else {
+			return false;
+		};
+		let View::Name(name) = self.view(target) else {
+			return false;
+		};
+		let text = self.tree.name(name).to_string();
+		if self.is_declared(name) || self.lookup_builtin(&text).is_some() {
+			return false;
+		}
+		fields.push(text);
+		let others: Vec<NodeId> = match self.view(value) {
+			View::Tuple { items } => items.iter().skip(1).collect(),
+			_ => Vec::new(),
+		};
+		others
+			.into_iter()
+			.all(|item| self.collect_object_like_fields(item, fields))
 	}
 }

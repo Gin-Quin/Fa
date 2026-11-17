@@ -1,0 +1,13 @@
+-- Neighbours of T-ERR-11-b: an assertion its facts make always false is
+-- W-BOOL-1; a literal `assert false` is a deliberate stop, and an assertion
+-- always true is the point of a test: neither is reported.
+let count = 2
+function check = (n: Integer) => {
+	assert n > 0
+}
+function stop = () => {
+	assert false
+}
+assert count == 2
+assert count == 3 -- warning: W-BOOL-1
+check(1)

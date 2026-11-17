@@ -1,6 +1,6 @@
--- pending: M2 (imported from the values brief)
+-- corrected: the inner arrays are not proven to have two items: `try let` (operations/destructuring)
 -- brief: → `5`
 let m = [[1, 2], [3, 4]]
-let [[a, b], [c, d]] = m
+try let [[a, b], [c, d]] = m
 console.log(a + d)
 -- prints: 5

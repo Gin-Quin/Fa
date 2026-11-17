@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- review: not self-contained in the brief: same types · `function twice = (id: String): Integer throws ApiError => { · let v = try load(id) · v * 2 · } · console.log(twice("a") catch error => -1)` → `84`
 -- context: the types and `load` of T-ERR-1 (exact signatures: `throws ApiError.NotFound`, E-ERR-10)
 -- brief: → `84`

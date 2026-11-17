@@ -1,5 +1,5 @@
--- pending: M1 (imported from the values brief)
 -- error: E-DECL-7
+-- warning: W-BOOL-1 (the condition `true` is constant)
 -- context: the declarations of the first half of the brief's test
 -- brief: ⇒ E-DECL-7
 let a = 1

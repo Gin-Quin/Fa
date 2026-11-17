@@ -108,6 +108,10 @@ ALIASES = {
 	"E-CMP-9": "TY057",
 	# enumerations are not ordered: a case of E-CMP-2
 	"TY085": "E-CMP-2",
+	# a set element or a map key is read-only: a case of E-DECL-3; an index
+	# binding without positions is E-LOOP-3 (both briefs name it)
+	"CL031": "E-DECL-3",
+	"CL032": "E-LOOP-3",
 	# an empty list without context: a case of E-DECL-11
 	"CL001": "E-DECL-11",
 	# Set elements and Map keys are exact: both briefs name the condition

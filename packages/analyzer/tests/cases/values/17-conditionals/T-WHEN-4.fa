@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `12 6`
 type Position = { x: Float, y: Float }
 type Shape = Union { Point, Circle = { radius: Float }, Rectangle = { width: Float, height: Float }, Segment = Tuple<Position, Position> }

@@ -1,4 +1,4 @@
--- pending: M1 (imported from the values brief)
 -- error: E-LOOP-6
+-- warning: W-BOOL-1 (the condition `false` is constant)
 -- brief: ⇒ E-LOOP-6
 let y = while false { }

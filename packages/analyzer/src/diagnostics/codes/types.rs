@@ -16,8 +16,6 @@ codes! {
 	CL024 = "CL024", Error, [], "sum on non-numbers";
 	CL025 = "CL025", Error, [], "natural order on non-ordered elements";
 	CL030 = "CL030", Error, [], "iterator stored, returned or captured";
-	CL031 = "CL031", Error, [], "write to a set element or a map key";
-	CL032 = "CL032", Error, [], "item, index on a collection without positions";
 	CL040 = "CL040", Error, [], "removal method on a growing collection";
 	CV002 = "CV002", Error, [], "no String(x)";
 	CV003 = "CV003", Error, [], "as outside destructuring and when";

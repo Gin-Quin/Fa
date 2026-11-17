@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- error: E-WHEN-4
 -- brief: ⇒ E-WHEN-4
 function f = (v: Integer) => when v is { Integer as n if n > 0 => 1

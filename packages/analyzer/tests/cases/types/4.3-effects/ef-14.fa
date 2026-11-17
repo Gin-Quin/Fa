@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ ef-14: invalidates implies mutates size
 type Inventory = {
 	items: Pool<String>

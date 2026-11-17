@@ -8,7 +8,7 @@ use crate::check::Walker;
 use crate::diagnostics::codes::analyzer::AN001;
 use crate::diagnostics::codes::types::TY057;
 use crate::diagnostics::codes::values::{
-	E_OBJ_5, E_RNG_4, E_WHEN_1, E_WHEN_3, E_WHEN_5, E_WHEN_8, W_WHEN_1, W_WHEN_2,
+	E_CMP_5, E_OBJ_5, E_RNG_4, E_WHEN_1, E_WHEN_3, E_WHEN_5, E_WHEN_8, W_WHEN_1, W_WHEN_2,
 };
 use crate::flow::FlowState;
 use crate::ids::{NodeId, TypeId};
@@ -309,12 +309,18 @@ impl Walker<'_> {
 				}
 			}
 			View::Name(name) if self.unqualified_member(name, subject).is_some() => {
+				self.report_member_qualification(pattern, name, subject);
+				TypeId::UNKNOWN
+			}
+			// `passing =>` with a range value: `E-CMP-5` (ops.rs)
+			View::Name(name) if self.names_range_value(name) => {
 				let text = self.tree.name(name).to_string();
-				let qualified = self.unqualified_member(name, subject).unwrap_or_default();
 				let diagnostic = self.diagnostic(
-					&TY057,
+					&E_CMP_5,
 					pattern,
-					format!("members are always qualified: write `{qualified}.{text}`"),
+					format!(
+						"`{text}` is a value, not a pattern: write the range itself in the pattern, or test `is in {text}` with an `if` in the `else` branch"
+					),
 				);
 				self.report_once(pattern, diagnostic);
 				TypeId::UNKNOWN
@@ -334,17 +340,55 @@ impl Walker<'_> {
 				ty
 			}
 			View::Tuple { .. } | View::TuplePattern { .. } | View::Object { .. } => {
-				let diagnostic = self.diagnostic(
-					&E_WHEN_5,
-					pattern,
-					"`when` matches a type, a member or a literal: bind the value with `as` and test its parts inside the arm",
-				);
-				self.report_once(pattern, diagnostic);
-				TypeId::UNKNOWN
+				self.report_nested_pattern(pattern)
+			}
+			// `(1, 2) =>`: a tuple in parentheses (read as parameters before `=>`)
+			View::Parameters { .. } => self.report_nested_pattern(pattern),
+			View::Group(inner) if matches!(syntax::view(&tree, inner), View::Tuple { .. }) => {
+				self.report_nested_pattern(pattern)
 			}
 			View::Error => TypeId::UNKNOWN,
 			_ => self.unsupported(pattern, "this pattern"),
 		}
+	}
+
+	/// `E-WHEN-5`: a tuple or nested pattern.
+	fn report_nested_pattern(&mut self, pattern: NodeId) -> TypeId {
+		let diagnostic = self.diagnostic(
+			&E_WHEN_5,
+			pattern,
+			"`when` matches a type, a member or a literal: bind the value with `as` and test its parts inside the arm",
+		);
+		self.report_once(pattern, diagnostic);
+		TypeId::UNKNOWN
+	}
+
+	/// `TY057` for `value is Member` when `Member`, not declared, is a member
+	/// of the type of `value`. Whether it reported.
+	pub(super) fn report_unqualified_member(
+		&mut self,
+		pattern: NodeId,
+		name: Name,
+		value: NodeId,
+	) -> bool {
+		let subject = self.type_of(self.strip_groups(value));
+		if subject.is_unset() || self.unqualified_member(name, subject).is_none() {
+			return false;
+		}
+		self.report_member_qualification(pattern, name, subject);
+		true
+	}
+
+	/// `TY057` (`E-CMP-9`): "members are always qualified".
+	fn report_member_qualification(&mut self, pattern: NodeId, name: Name, subject: TypeId) {
+		let text = self.tree.name(name).to_string();
+		let qualified = self.unqualified_member(name, subject).unwrap_or_default();
+		let diagnostic = self.diagnostic(
+			&TY057,
+			pattern,
+			format!("members are always qualified: write `{qualified}.{text}`"),
+		);
+		self.report_once(pattern, diagnostic);
 	}
 
 	/// The name of the subject's named union or enumeration when `name`, not
@@ -462,8 +506,18 @@ impl Walker<'_> {
 		if coverage.covered.is_empty() || ty.is_unset() || self.s.types.is_recovering(ty) {
 			return false;
 		}
+		// an integer literal given again (`1 => …` twice), whatever the facts
+		if coverage.exact.contains(&ty)
+			&& self
+				.s
+				.types
+				.interval_of(ty)
+				.is_some_and(|interval| interval.lo == interval.hi)
+		{
+			return true;
+		}
 		let parts: Vec<TypeId> = self.s.types.union_members(&ty).to_vec();
-		// integers: by the values left (`unreachable_arm`)
+		// other integers: by the values left (`unreachable_arm`)
 		if parts
 			.iter()
 			.any(|&part| self.s.types.as_int(part).is_some())
@@ -542,6 +596,17 @@ impl Walker<'_> {
 					}
 					matched
 				});
+			}
+			// `Shape.Segment as (start, end)`: the data of a tuple member
+			View::TuplePattern { .. } | View::Tuple { .. } | View::Group(_) => {
+				let mut names = super::destructuring::PatternNames::default();
+				self.destructure(
+					binding,
+					matched,
+					SymbolKind::PatternBinding,
+					None,
+					&mut names,
+				);
 			}
 			_ => {
 				self.unsupported(binding, "this binding");

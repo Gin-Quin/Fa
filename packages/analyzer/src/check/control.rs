@@ -849,7 +849,7 @@ impl Walker<'_> {
 					"{shown} has no positions: its elements have no index (only an `Array`, a `GrowingArray`, an `OrderedColumnar` and a `String` have one)"
 				);
 				let diagnostic =
-					w.diagnostic(&crate::diagnostics::codes::types::CL032, iterable, message);
+					w.diagnostic(&E_LOOP_3, iterable, message);
 				w.report(diagnostic);
 			}
 			if let Some(index) = index.filter(|index| !index.is_empty()) {
@@ -1184,7 +1184,7 @@ impl Walker<'_> {
 		});
 		self.memo(n, |w| {
 			if !w.jump_target(n, "break") {
-				return TypeId::NEVER;
+				return TypeId::UNKNOWN;
 			}
 			let Some((kind, _, used)) = target else {
 				return TypeId::NEVER;
@@ -1246,9 +1246,12 @@ impl Walker<'_> {
 			if state.reachable {
 				cx.breaks.push(state);
 			}
+			self.body.flow.set_unreachable();
+			return TypeId::NEVER;
 		}
-		self.body.flow.set_unreachable();
-		TypeId::NEVER
+		// a `break` without a loop (`E-LOOP-12`, `E-LOOP-13`) leaves nothing:
+		// the code after it is not reported unreachable as well
+		TypeId::UNKNOWN
 	}
 
 	/// `continue`
@@ -1259,8 +1262,11 @@ impl Walker<'_> {
 			.last()
 			.is_some_and(|cx| cx.function_depth == self.body.functions.len());
 		self.memo(n, |w| {
-			w.jump_target(n, "continue");
-			TypeId::NEVER
+			if w.jump_target(n, "continue") {
+				TypeId::NEVER
+			} else {
+				TypeId::UNKNOWN
+			}
 		});
 		if valid && self.body.flow.reachable {
 			let state = self.body.flow.fork();
@@ -1270,6 +1276,10 @@ impl Walker<'_> {
 				.expect("a loop")
 				.continues
 				.push(state);
+		}
+		// as for `break`: an invalid `continue` leaves nothing
+		if !valid {
+			return TypeId::UNKNOWN;
 		}
 		self.body.flow.set_unreachable();
 		TypeId::NEVER

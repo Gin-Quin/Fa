@@ -1426,7 +1426,7 @@ Uncovered: `E-ERR-3` ("`loadScore` can fail with `ApiError`. Use `try` to propag
 | E-ERR-2 | `throw` of an error type the function doesn't declare |
 | E-ERR-3 | failing expression not covered by `try` or `catch` |
 | E-ERR-4 | `try` propagating errors the function doesn't declare |
-| E-ERR-5 | `try`/`throw` in a context that can't propagate (a `watch` block, a detached `start do`, a function type without `throws` for a lambda) |
+| (retired) | `try`/`throw` in a context that can't propagate: each context has its own code, `REA004` (a `watch` block), `REA002` (a `derived` value), `CONC016` (a detached task), and the function type of a lambda without `throws` is a type mismatch of the lambda (2026-11-17, analyzer pending cases) |
 | E-ERR-6 | `try` and `catch` on the same expression (`try a catch e => b`, `try (a catch …)`), or a `try` anywhere inside the left operand of a `catch` in the same body [D-23] |
 | E-ERR-7 | an error type in a return type or a value union (`: Integer \| ApiError`): "errors are declared with `throws`" |
 | E-ERR-8 | `await try f()`: "write `try await f()`" |

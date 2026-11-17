@@ -1,6 +1,6 @@
--- pending: M1 (imported from the values brief)
+-- corrected: `throws` comes before `mutates` in a signature
 -- brief: → `out / [1, 0]`
-function set = (s: Array<Integer>, i: Integer) mutates s throws IndexError => {
+function set = (s: Array<Integer>, i: Integer) throws IndexError mutates s => {
 try s[i] = 0
 }
 mutable xs = [1, 2]

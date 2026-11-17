@@ -1,0 +1,20 @@
+-- Neighbours of T-LOOP-41: a `break` or `continue` that can't reach its loop is
+-- E-LOOP-13 alone: the code after it is not reported unreachable as well.
+for i in 0..3 {
+	if i == 1 {
+		continue
+	}
+	let doubled = [i].map((x) => {
+		continue -- error: E-LOOP-13
+		x * 2
+	})
+	console.log(doubled)
+	if i == 2 {
+		break
+	}
+}
+function outside = () => {
+	break -- error: E-LOOP-12
+	console.log("after")
+}
+outside()

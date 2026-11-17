@@ -17,7 +17,7 @@ use smallvec::SmallVec;
 
 use crate::analysis::NodeFlags;
 use crate::check::Walker;
-use crate::diagnostics::codes::values::{E_CMP_7, E_NAR_1, E_OPT_1, E_WHEN_1, W_CMP_1};
+use crate::diagnostics::codes::values::{E_CMP_7, E_NAR_1, E_OPT_1, E_WHEN_1, W_CMP_1, W_ERR_4};
 use crate::flow::{Fact, FlowState, IntervalSet};
 use crate::ids::{NodeId, PlaceId, SymbolId, TypeId};
 use crate::symbols::Resolution;
@@ -580,7 +580,13 @@ impl Walker<'_> {
 				if positive { "" } else { "not " },
 				self.display(tested)
 			);
-			let diagnostic = self.diagnostic(&W_CMP_1, n, message);
+			// `is Error` has its own warning (values brief §15)
+			let code = if tested == TypeId::ERROR {
+				&W_ERR_4
+			} else {
+				&W_CMP_1
+			};
+			let diagnostic = self.diagnostic(code, n, message);
 			self.report(diagnostic);
 		}
 	}

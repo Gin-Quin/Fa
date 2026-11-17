@@ -17,7 +17,7 @@ codes! {
 	E_CMP_10 = "E-CMP-10", Error, [], "as after is";
 	E_DECL_1 = "E-DECL-1", Error, ["MOD012"], "assignment to, or use of, an undeclared name";
 	E_DECL_2 = "E-DECL-2", Error, ["TY009"], "same name declared twice in one scope (not an invalidated use)";
-	E_DECL_3 = "E-DECL-3", Error, [], "assignment or compound assignment to a let, a use of an immutable place, a loop variable copy, a parameter, or a string item";
+	E_DECL_3 = "E-DECL-3", Error, ["CL031"], "assignment or compound assignment to a let, a use of an immutable place, a loop variable copy, a parameter, or a string item";
 	E_DECL_4 = "E-DECL-4", Error, ["TY023", "EFF012"], "write below an immutable place (myObject.foo += 1 with let myObject)";
 	E_DECL_6 = "E-DECL-6", Error, ["FN001"], "let f = (x) => …";
 	E_DECL_8 = "E-DECL-8", Error, [], "chained assignment";
@@ -40,7 +40,6 @@ codes! {
 	E_ERR_2 = "E-ERR-2", Error, ["EF010"], "throw of an error type the function doesn't declare";
 	E_ERR_3 = "E-ERR-3", Error, ["EF015"], "failing expression not covered by try or catch";
 	E_ERR_4 = "E-ERR-4", Error, [], "try propagating errors the function doesn't declare";
-	E_ERR_5 = "E-ERR-5", Error, [], "try/throw in a context that can't propagate (a watch block, a detached start do, a function type without throws for a lambda)";
 	E_ERR_6 = "E-ERR-6", Error, ["EF017"], "try and catch on the same expression (try a catch e => b, try (a catch …)), or a try anywhere inside the left operand of a catch in the…";
 	E_ERR_7 = "E-ERR-7", Error, [], "an error type in a return type or a value union (: Integer \\";
 	E_ERR_8 = "E-ERR-8", Error, [], "await try f(): \"write try await f()\"";
@@ -57,7 +56,7 @@ codes! {
 	E_LEX_6 = "E-LEX-6", Error, [], "unterminated string or block comment";
 	E_LOOP_1 = "E-LOOP-1", Error, [], "iterable is not a range, collection, string or iterator";
 	E_LOOP_2 = "E-LOOP-2", Error, [], "array pattern in a for";
-	E_LOOP_3 = "E-LOOP-3", Error, [], "index binding on a collection without positions";
+	E_LOOP_3 = "E-LOOP-3", Error, ["CL032"], "index binding on a collection without positions";
 	E_LOOP_6 = "E-LOOP-6", Error, [], "for/while used as a value";
 	E_LOOP_7 = "E-LOOP-7", Error, [], "break <value> in for/while";
 	E_LOOP_9 = "E-LOOP-9", Error, [], "while let with a destructuring pattern";

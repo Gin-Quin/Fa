@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use crate::check::{FnCx, Walker};
 use crate::diagnostics::codes::advanced::{MOD014, TEST002};
+use crate::diagnostics::codes::values::W_BOOL_1;
 use crate::ids::{NodeId, TypeId};
 use crate::symbols::{ScopeKind, Symbol, SymbolKind};
 use crate::syntax::{self, TemplatePart, TestModifier, View};
@@ -135,7 +136,22 @@ impl Walker<'_> {
 	/// condition is true, so it continues from the true state of the
 	/// condition, with its narrowings (values brief D-27).
 	pub(super) fn check_assert(&mut self, n: NodeId, condition: NodeId) -> TypeId {
+		let reachable = self.body.flow.reachable;
 		let (when_true, _) = self.check_cond(condition);
+		// `W-BOOL-1` when it always fails (an assertion always true is the
+		// point of a test, and `assert false` a deliberate stop: not reported)
+		let literal = matches!(self.view(self.strip_groups(condition)), View::Boolean(_));
+		if reachable && !literal && !when_true.reachable {
+			let text = self.tree.text(condition.index()).to_string();
+			let diagnostic = self.diagnostic(
+				&W_BOOL_1,
+				condition,
+				format!(
+					"this assertion always fails: `{text}` is always false, so the program stops here. Fix the condition"
+				),
+			);
+			self.report_flow(diagnostic);
+		}
 		self.body.flow = when_true;
 		self.memo(n, |_| TypeId::VOID)
 	}

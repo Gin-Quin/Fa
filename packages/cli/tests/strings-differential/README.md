@@ -54,6 +54,9 @@ unsupported compile-time operation; semantic probes still use compile-time
 statics. The LLVM IR and C allocation tests separately verify physical layout
 and absence of allocations.
 
+The shared `json-syntax.fa` fixture also runs as a required generated shard:
+all syntax diagnostic classes, UTF-8 failure classes, error precedence and the
+1000-container boundary, each at compile time and runtime for String/Bytes.
 JSON shards cover runtime, compile-time parsing, all-subject round trips,
 String/Bytes union input, and serialization through objects, arrays, maps,
 optionals, primitive/object/empty named members, pinned/unpinned enumerations,

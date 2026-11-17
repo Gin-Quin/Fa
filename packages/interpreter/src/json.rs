@@ -20,36 +20,43 @@ pub fn parse(text: &str) -> Result<Value, Error> {
 	parse_inner(text, false)
 }
 
+// The native grammar is the diagnostic contract. Container frames live on
+// the heap so the 1000-container limit is independent of the Rust stack.
 fn parse_inner(text: &str, maps: bool) -> Result<Value, Error> {
-	let mut parser = Parser {
+	Parser {
 		bytes: text.as_bytes(),
 		text,
 		position: 0,
-		depth: 0,
 		maps,
-	};
-	parser.skip_whitespace();
-	let value = parser.value()?;
-	parser.skip_whitespace();
-	if parser.position < parser.bytes.len() {
-		return Err(parser.error("unexpected text after the value"));
 	}
-	Ok(value)
+	.parse()
 }
 
 struct Parser<'t> {
 	bytes: &'t [u8],
 	text: &'t str,
 	position: usize,
-	depth: u32,
 	maps: bool,
+}
+
+#[derive(Default)]
+struct Frame {
+	object: bool,
+	// 0: first item/key, 1: after comma, 3: separator.
+	state: u8,
+	key: Option<Text>,
+	fields: Vec<(Text, Value)>,
+	items: Vec<Value>,
 }
 
 impl Parser<'_> {
 	fn error(&self, message: &str) -> Error {
+		if self.maps {
+			return json_error(&format!("JSON Parse error: {message}"));
+		}
 		let line = self.bytes[..self.position.min(self.bytes.len())]
 			.iter()
-			.filter(|b| **b == b'\n')
+			.filter(|&&b| b == b'\n')
 			.count() + 1;
 		Error::Thrown(Value::error(
 			"ParseError",
@@ -70,95 +77,124 @@ impl Parser<'_> {
 		}
 	}
 
-	fn expect(&mut self, byte: u8) -> Result<(), Error> {
-		if self.peek() == Some(byte) {
-			self.position += 1;
-			Ok(())
-		} else {
-			Err(self.error(&format!("expected `{}`", byte as char)))
-		}
-	}
-
-	fn keyword(&mut self, word: &str, value: Value) -> Result<Value, Error> {
-		if self.bytes[self.position..].starts_with(word.as_bytes()) {
-			self.position += word.len();
-			Ok(value)
-		} else {
-			Err(self.error("unexpected character"))
-		}
-	}
-
-	fn value(&mut self) -> Result<Value, Error> {
-		self.depth += 1;
-		if self.depth > 512 {
-			return Err(self.error("too deeply nested"));
-		}
-		let value = match self.peek() {
-			Some(b'{') => self.object(),
-			Some(b'[') => self.array(),
-			Some(b'"') => self.string().map(Value::String),
-			Some(b't') => self.keyword("true", Value::Boolean(true)),
-			Some(b'f') => self.keyword("false", Value::Boolean(false)),
-			Some(b'n') => self.keyword("null", Value::None),
-			Some(b'-' | b'0'..=b'9') => self.number(),
-			Some(_) => Err(self.error("unexpected character")),
-			None => Err(self.error("unexpected end of the text")),
-		};
-		self.depth -= 1;
-		value
-	}
-
-	fn object(&mut self) -> Result<Value, Error> {
-		self.expect(b'{')?;
-		let mut fields = Vec::new();
-		self.skip_whitespace();
-		if self.peek() == Some(b'}') {
-			self.position += 1;
-			return self.object_value(fields);
-		}
+	fn parse(&mut self) -> Result<Value, Error> {
+		let mut stack: Vec<Frame> = Vec::new();
 		loop {
 			self.skip_whitespace();
-			let key = self.string()?;
-			self.skip_whitespace();
-			self.expect(b':')?;
-			self.skip_whitespace();
-			let value = self.value()?;
-			if let Some((_, slot)) = fields.iter_mut().find(|(name, _)| *name == key) {
-				*slot = value;
-			} else {
-				fields.push((key, value));
-			}
-			self.skip_whitespace();
-			match self.peek() {
-				Some(b',') => self.position += 1,
-				Some(b'}') => {
+			let mut completed = None;
+			if let Some(frame) = stack.last_mut() {
+				let close = if frame.object { b'}' } else { b']' };
+				if matches!(frame.state, 0 | 3) && self.peek() == Some(close) {
 					self.position += 1;
-					return self.object_value(fields);
+					let frame = stack.pop().expect("the current container");
+					completed = Some(if frame.object {
+						self.object_value(frame.fields)?
+					} else {
+						Value::Array(Arc::new(frame.items))
+					});
+				} else {
+					if frame.state == 3 {
+						if self.peek() != Some(b',') {
+							return Err(self.error(if frame.object {
+								"Expected '}'"
+							} else {
+								"Expected ']'"
+							}));
+						}
+						self.position += 1;
+						frame.state = 1;
+						self.skip_whitespace();
+					}
+					if frame.object {
+						if self.peek() != Some(b'"') {
+							return Err(self.error(if frame.state == 0 {
+								"Expected '}'"
+							} else {
+								"Property name must be a string literal"
+							}));
+						}
+						frame.key = Some(self.string()?);
+						self.skip_whitespace();
+						if self.peek() != Some(b':') {
+							return Err(self
+								.error("Expected ':' before value in object property definition"));
+						}
+						self.position += 1;
+						self.skip_whitespace();
+					} else if frame.state == 1 && self.peek() == Some(b']') {
+						return Err(self.error("Unexpected comma at the end of array expression"));
+					}
+					frame.state = 3;
 				}
-				_ => return Err(self.error("expected `,` or `}`")),
 			}
-		}
-	}
-
-	fn array(&mut self) -> Result<Value, Error> {
-		self.expect(b'[')?;
-		let mut items = Vec::new();
-		self.skip_whitespace();
-		if self.peek() == Some(b']') {
-			self.position += 1;
-			return Ok(Value::Array(Arc::new(items)));
-		}
-		loop {
-			self.skip_whitespace();
-			items.push(self.value()?);
-			self.skip_whitespace();
-			match self.peek() {
-				Some(b',') => self.position += 1,
-				Some(b']') => {
-					self.position += 1;
-					return Ok(Value::Array(Arc::new(items)));
+			let value = match completed {
+				Some(value) => value,
+				None => match self.peek() {
+					Some(byte @ (b'{' | b'[')) => {
+						if stack.len() >= 1000 {
+							return Err(self.error("Exceeded the maximum depth"));
+						}
+						self.position += 1;
+						stack.push(Frame {
+							object: byte == b'{',
+							..Frame::default()
+						});
+						continue;
+					}
+					Some(b'"') => Value::String(self.string()?),
+					Some(b'-' | b'0'..=b'9') => self.number()?,
+					Some(byte @ (b'}' | b']' | b',' | b':' | b'.')) => {
+						return Err(self.error(&format!("Unexpected token '{}'", byte as char)));
+					}
+					Some(byte) if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$') => {
+						let start = self.position;
+						while self
+							.peek()
+							.is_some_and(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'$'))
+						{
+							self.position += 1;
+						}
+						match &self.text[start..self.position] {
+							"true" => Value::Boolean(true),
+							"false" => Value::Boolean(false),
+							"null" => Value::None,
+							word => {
+								return Err(
+									self.error(&format!("Unexpected identifier \"{word}\""))
+								);
+							}
+						}
+					}
+					Some(_) => {
+						return Err(self.error(&format!(
+							"Unrecognized token '{}'",
+							self.text[self.position..]
+								.chars()
+								.next()
+								.expect("a character")
+						)));
+					}
+					None => return Err(self.error("Unexpected EOF")),
+				},
+			};
+			match stack.last_mut() {
+				Some(frame) if frame.object => {
+					let key = frame.key.take().expect("the object key");
+					if let Some((_, slot)) = frame.fields.iter_mut().find(|(name, _)| *name == key)
+					{
+						*slot = value;
+					} else {
+						frame.fields.push((key, value));
+					}
 				}
-				_ => return Err(self.error("expected `,` or `]`")),
+				Some(frame) => frame.items.push(value),
+				None => {
+					self.skip_whitespace();
+					if self.peek().is_some() {
+						return Err(self.error("Unable to parse JSON string"));
+					}
+					return Ok(value);
+				}
 			}
 		}
 	}
@@ -185,54 +221,56 @@ impl Parser<'_> {
 	}
 
 	fn string(&mut self) -> Result<Text, Error> {
-		self.expect(b'"')?;
+		let start = self.position + 1;
+		let mut end = start;
+		// Native precedence: first find a closing quote, then validate escapes.
+		while self.bytes.get(end) != Some(&b'"') {
+			match self.bytes.get(end) {
+				None | Some(0..=31) => return Err(self.error("Unterminated string")),
+				Some(b'\\') => end += 2,
+				_ => end += 1,
+			}
+		}
+		self.position = start;
 		let mut out = Vec::new();
-		loop {
+		while self.position < end {
 			let start = self.position;
-			while !matches!(self.peek(), Some(b'"' | b'\\') | None) {
-				if self.peek().is_some_and(|byte| byte < 0x20) {
-					return Err(self.error("control character in a string"));
-				}
+			while self.position < end && self.peek() != Some(b'\\') {
 				self.position += 1;
 			}
 			out.extend(self.text[start..self.position].encode_utf16());
-			match self.peek() {
-				Some(b'"') => {
-					self.position += 1;
-					return Ok(Text::from_units(&out));
-				}
-				Some(b'\\') => {
-					self.position += 1;
-					let escape = self.peek().ok_or_else(|| self.error("unfinished escape"))?;
-					self.position += 1;
-					let unit = match escape {
-						b'"' => 0x22,
-						b'\\' => 0x5c,
-						b'/' => 0x2f,
-						b'b' => 8,
-						b'f' => 12,
-						b'n' => 10,
-						b'r' => 13,
-						b't' => 9,
-						b'u' => self.hex4()? as u16,
-						_ => return Err(self.error("unknown escape")),
-					};
-					out.push(unit);
-				}
-				_ => return Err(self.error("unfinished string")),
+			if self.position == end {
+				break;
 			}
+			self.position += 1;
+			let escape = self.peek().expect("a terminated escape");
+			self.position += 1;
+			out.push(match escape {
+				b'"' => 34,
+				b'\\' => 92,
+				b'/' => 47,
+				b'b' => 8,
+				b'f' => 12,
+				b'n' => 10,
+				b'r' => 13,
+				b't' => 9,
+				b'u' => {
+					let digits = self.text.get(self.position..self.position + 4).filter(|s| {
+						self.position + 4 <= end && s.bytes().all(|b| b.is_ascii_hexdigit())
+					});
+					let unit = digits
+						.and_then(|s| u16::from_str_radix(s, 16).ok())
+						.ok_or_else(|| self.error("\\u must be followed by 4 hex digits"))?;
+					self.position += 4;
+					unit
+				}
+				_ => {
+					return Err(self.error(&format!("Invalid escape character {}", escape as char)));
+				}
+			});
 		}
-	}
-
-	fn hex4(&mut self) -> Result<u32, Error> {
-		let digits = self
-			.text
-			.get(self.position..self.position + 4)
-			.ok_or_else(|| self.error("invalid unicode escape"))?;
-		let code =
-			u32::from_str_radix(digits, 16).map_err(|_| self.error("invalid unicode escape"))?;
-		self.position += 4;
-		Ok(code)
+		self.position = end + 1;
+		Ok(Text::from_units(&out))
 	}
 
 	fn number(&mut self) -> Result<Value, Error> {
@@ -240,26 +278,25 @@ impl Parser<'_> {
 		if self.peek() == Some(b'-') {
 			self.position += 1;
 		}
-		let digits = |parser: &mut Self| {
-			let start = parser.position;
-			while parser.peek().is_some_and(|byte| byte.is_ascii_digit()) {
-				parser.position += 1;
-			}
-			parser.position > start
-		};
-		if !digits(self) {
-			return Err(self.error("expected a digit"));
+		if !self.peek().is_some_and(|b| b.is_ascii_digit()) {
+			return Err(self.error("Invalid number"));
 		}
-		let digits_start = start + usize::from(self.bytes[start] == b'-');
-		if self.bytes[digits_start] == b'0' && self.position > digits_start + 1 {
-			return Err(self.error("leading zero in a number"));
+		if self.peek() == Some(b'0') {
+			self.position += 1;
+		} else {
+			while self.peek().is_some_and(|b| b.is_ascii_digit()) {
+				self.position += 1;
+			}
 		}
 		let mut integral = true;
 		if self.peek() == Some(b'.') {
 			self.position += 1;
 			integral = false;
-			if !digits(self) {
-				return Err(self.error("expected a digit"));
+			if !self.peek().is_some_and(|b| b.is_ascii_digit()) {
+				return Err(self.error("Invalid digits after decimal point"));
+			}
+			while self.peek().is_some_and(|b| b.is_ascii_digit()) {
+				self.position += 1;
 			}
 		}
 		if matches!(self.peek(), Some(b'e' | b'E')) {
@@ -268,8 +305,11 @@ impl Parser<'_> {
 			if matches!(self.peek(), Some(b'+' | b'-')) {
 				self.position += 1;
 			}
-			if !digits(self) {
-				return Err(self.error("expected a digit"));
+			if !self.peek().is_some_and(|b| b.is_ascii_digit()) {
+				return Err(self.error("Unable to parse JSON string"));
+			}
+			while self.peek().is_some_and(|b| b.is_ascii_digit()) {
+				self.position += 1;
 			}
 		}
 		let literal = &self.text[start..self.position];
@@ -279,7 +319,7 @@ impl Parser<'_> {
 		literal
 			.parse::<f64>()
 			.map(Value::Float)
-			.map_err(|_| self.error("invalid number"))
+			.map_err(|_| self.error("Invalid number"))
 	}
 }
 
@@ -320,7 +360,7 @@ fn read(input: &Value) -> Result<Value, Error> {
 	let parsed = match input {
 		Value::Bytes(bytes) => {
 			let text = std::str::from_utf8(bytes)
-				.map_err(|e| json_error(&format!("invalid UTF-8 at byte {}", e.valid_up_to())))?;
+				.map_err(|_| json_error("invalid UTF-8 in JSON input"))?;
 			parse_inner(text, true)
 		}
 		Value::String(text) => match text.as_str() {
@@ -328,11 +368,7 @@ fn read(input: &Value) -> Result<Value, Error> {
 			None => parse_inner(&escaped_input(text)?, true),
 		},
 		_ => return Err(json_error("expected a String or Bytes")),
-	}
-	.map_err(|error| match error {
-		Error::Thrown(value) => json_error(&value.to_text()),
-		other => other,
-	})?;
+	}?;
 	Ok(parsed)
 }
 

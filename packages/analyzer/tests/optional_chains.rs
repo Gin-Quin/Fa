@@ -37,6 +37,7 @@ type Box = {
 	function maybe = (self): String? => none
 	function factory = (self): Callback? => none
 	async function describe = (self): String => "Ada"
+	async function maybeAsync = (self): String? => none
 }
 "#;
 
@@ -91,5 +92,21 @@ async function good = (box: Box?) => {{
 }}"#
 		),
 		&[],
+	);
+}
+
+#[test]
+fn generic_awaited_and_reactive_nullable_results_keep_their_absence() {
+	assert_errors(
+		"function bad = <Item: { maybe: (self) => String? }>(box: Item?) => box?.maybe().trim()",
+		&["E-OPT-1"],
+	);
+	assert_errors(
+		&format!("{BOX}\nasync function bad = (box: Box?) => await box?.maybeAsync().trim()"),
+		&["E-OPT-1"],
+	);
+	assert_errors(
+		&format!("{BOX}\nreactive box: Box? = none\nderived text = box?.maybe().trim()"),
+		&["E-OPT-1"],
 	);
 }

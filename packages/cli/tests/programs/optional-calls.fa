@@ -87,3 +87,28 @@ function first = (box: Box?): Integer? throws IndexError => try box?.first()
 function inferred = (box: Box?): Integer? => box?.echo(9)
 let box = Box { values = [7] }
 console.log(try first(none), try first(box), inferred(none), inferred(box)) -- prints: none 7 none 9
+
+-- These present-result facts are also consumed by compile-time lowering.
+static absentResult = chained(none, true)
+static nullableResult = chained(Person { name = " Ada " }, false)
+static presentResult = chained(Person { name = " Ada " }, true)
+console.log(absentResult, nullableResult, presentResult) -- prints: none none Ada
+
+type Counter = {
+	value: Integer
+	function increment = (self, by: Integer) mutates self.value => { self.value += by }
+}
+function optionalMutation = (present: Boolean): Integer => {
+	mutable counter: Counter? = if present { Counter { value = 1 } } else { none }
+	mutable arguments = 0
+	counter?.increment(
+		if present { 2 } else {
+			arguments += 100
+			0
+		}
+	)
+	if counter is none { arguments } else { counter.value + arguments }
+}
+static absentMutation = optionalMutation(false)
+static presentMutation = optionalMutation(true)
+console.log(absentMutation, presentMutation, optionalMutation(false), optionalMutation(true)) -- prints: 0 3 0 3

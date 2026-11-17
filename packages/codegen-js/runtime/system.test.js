@@ -303,10 +303,15 @@ describe("JSON byte inputs", () => {
 		]) {
 			expect(faJsonReadBytes(encoder.encode(text))).toEqual(JSON.parse(text));
 		}
-		const deep = "[".repeat(10000) + "0" + "]".repeat(10000);
+		const deep = "[".repeat(1000) + "0" + "]".repeat(1000);
 		let value = faJsonReadBytes(encoder.encode(deep));
-		for (let depth = 0; depth < 10000; depth++) value = value[0];
+		for (let depth = 0; depth < 1000; depth++) value = value[0];
 		expect(value).toBe(0);
+		for (const depth of [1001, 10000]) {
+			const input = "[".repeat(depth) + "0" + "]".repeat(depth);
+			expect(() => faJsonReadBytes(encoder.encode(input))).toThrow("Exceeded the maximum depth");
+			expect(() => faJsonParse(input, ["i", null, null])).toThrow("Exceeded the maximum depth");
+		}
 	});
 	test("malformed JSON and invalid UTF-8 are rejected", async () => {
 		const { faJsonReadBytes } = await import("./system.js");

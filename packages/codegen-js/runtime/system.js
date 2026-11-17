@@ -244,7 +244,7 @@ export function faMonotonic() {
 /** Scan rejected JSON using Fa's grammar and error precedence. Successful
  * String input still uses the engine parser; this scan only runs on errors.
  * Container state is explicit so malformed deep input cannot exhaust the JS stack.
- * @param {string} text @returns {string}
+ * @param {string} text @returns {string | null}
  */
 export function faJsonSyntaxError(text) {
 	let index = 0;
@@ -285,6 +285,7 @@ export function faJsonSyntaxError(text) {
 		space();
 		const frame = stack[stack.length - 1];
 		if (frame === undefined && hasRoot) {
+			if (index === text.length) return null;
 			error = "Unable to parse JSON string";
 			break;
 		}
@@ -412,11 +413,17 @@ export function faJsonSyntaxError(text) {
 export function faJsonParse(text, schema, read = JSON.parse) {
 	let data;
 	try {
+		// A document with 1001 containers needs at least 2002 code units.
+		// Engines have no common nesting bound; enforce Fa's before reading it.
+		if (typeof text === "string" && text.length >= 2002) {
+			const error = faJsonSyntaxError(text);
+			if (error !== null) throw new SyntaxError(error);
+		}
 		data = read(text);
 	} catch (error) {
 		throw new JsonError(
 			typeof text === "string"
-				? faJsonSyntaxError(text)
+				? (faJsonSyntaxError(text) ?? "JSON Parse error: Unable to parse JSON string")
 				: String(/** @type {any} */ (error)?.message ?? error),
 		);
 	}
@@ -871,7 +878,9 @@ export function faJsonReadBytes(bytes) {
 		} catch {
 			throw new SyntaxError("invalid UTF-8 in JSON input");
 		}
-		throw new SyntaxError(faJsonSyntaxError(text));
+		throw new SyntaxError(
+			faJsonSyntaxError(text) ?? "JSON Parse error: Unable to parse JSON string",
+		);
 	}
 }
 
@@ -948,6 +957,7 @@ function faJsonReadByteTokens(bytes) {
 		}
 		const byte = bytes[index];
 		if (byte === 123 || byte === 91) {
+			if (stack.length >= 1000) fail();
 			const object = byte === 123;
 			const value = object ? {} : [];
 			append(value);

@@ -9,9 +9,16 @@ use { Multiplier } = library
 async function call = (present: Boolean) => {
 	mutable worker = if present { Multiplier { factor = 2 } } else { none }
 	console.log(await worker?.multiply(3))
+	let task = start worker?.multiply(4)
+	if task is none { console.log("none") } else { console.log(await task) }
+	start worker?.multiply(5)
 	if worker is not none { worker.stop() }
 }
 export async function = () => {
-	await call(false) -- prints: none
-	await call(true)  -- prints: 6
+	await call(false)
+	-- prints: none
+	-- prints: none
+	await call(true)
+	-- prints: 6
+	-- prints: 8
 }

@@ -35,6 +35,35 @@ describe("equality (values brief section 13, types brief D17, D63)", () => {
 		expect(faKeyEquals(NaN, 1)).toBe(false);
 	});
 
+	test("nested set and map hashes follow complete values independent of order", () => {
+		const a = new FaSet([{ n: 1 }, { n: 2 }]);
+		const b = new FaSet([{ n: 2 }, { n: 1 }]);
+		expect(faKeyEquals(a, b)).toBe(true);
+		expect(faHash(a)).toBe(faHash(b));
+		const sets = new FaSet([a, b]);
+		expect(sets.size).toBe(1);
+		expect(sets.has(new FaSet([{ n: 1 }, { n: 3 }]))).toBe(false);
+		const maps = new FaSet([
+			new Map([
+				[1, "a"],
+				[2, "b"],
+			]),
+			new Map([
+				[2, "b"],
+				[1, "a"],
+			]),
+		]);
+		expect(maps.size).toBe(1);
+		expect(
+			maps.delete(
+				new Map([
+					[1, "a"],
+					[2, "b"],
+				]),
+			),
+		).toBe(true);
+	});
+
 	test("bigints equal numbers of the same value (D-69)", () => {
 		expect(faEquals(5n, 5)).toBe(true);
 		expect(faEquals(5, 5n)).toBe(true);
@@ -231,10 +260,10 @@ describe("copies (types brief 3.2.7, D60, values brief D-81)", () => {
 		expect([...copied.keys()][0]).toBe(key);
 		expect(copied.get({ k: 1 })).toEqual({ v: 1 });
 		expect(copied.get({ k: 1 })).not.toBe(map.get(key));
-		const set = new FaSet(["A"], { key: (/** @type {string} */ t) => t.toLowerCase() });
+		const set = new FaSet([{ name: "A" }]);
 		const setCopy = faCopy(set);
 		expect(setCopy).toBeInstanceOf(FaSet);
-		expect(setCopy.has("a")).toBe(true);
+		expect(setCopy.has({ name: "A" })).toBe(true);
 		const plain = faCopy(new Map([["a", [1]]]));
 		expect(plain).toBeInstanceOf(Map);
 		expect(plain.get("a")).toEqual([1]);

@@ -2544,18 +2544,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Some(Argument::Given(source_node)) = info.arguments.first() else {
 			return Err(self.unsupported(node.index(), "this `from`"));
 		};
-		if matches!(repr, Repr::Set(_)) && matches!(info.arguments.get(1), Some(Argument::Given(_)))
-		{
-			return Err(self.unsupported(node.index(), "the `key` of `Set.from`"));
-		}
 		let source = self.expr(*source_node)?;
 		if source.repr == Repr::Never {
 			return Ok(source);
 		}
-		// `capacity = n`: the table is sized for it (`Map.from(source,
-		// capacity)`, `Set.from(source, key, capacity)`)
-		let capacity_position = if matches!(repr, Repr::Set(_)) { 2 } else { 1 };
-		let capacity = match info.arguments.get(capacity_position) {
+		// Both sets and maps use `from(source, capacity = n)`.
+		let capacity = match info.arguments.get(1) {
 			Some(Argument::Given(capacity_node)) => {
 				let capacity = self.expr(*capacity_node)?;
 				if capacity.repr == Repr::Never {

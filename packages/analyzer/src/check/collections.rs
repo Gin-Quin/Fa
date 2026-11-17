@@ -307,10 +307,10 @@ impl Walker<'_> {
 
 	// ── `from` ───────────────────────────────────────────────────────────
 
-	/// `Set.from(source, key = …)`, `Map.from(source)`, `Set(Float).from(…)`
+	/// `Set.from(source)`, `Map.from(source)`, `Set(Float).from(…)`
 	/// (types brief §5.0.2, D33, D59): a copy of any collection whose
 	/// elements satisfy the element type, given or inferred from the source.
-	/// Options are named: `capacity`, and `key` for sets; anything else is
+	/// The optional `capacity` is named; every unknown option is
 	/// `FN023`. `WCL001` when a literal would do. `None` when the callee is
 	/// not one (`Array.from` is in `from.rs`).
 	pub(super) fn check_set_or_map_from(
@@ -374,7 +374,6 @@ impl Walker<'_> {
 		});
 		// the arguments: the source, then named options
 		let mut source = None;
-		let mut key_option = None;
 		let mut capacity = None;
 		let mut problems: Vec<(NodeId, String)> = Vec::new();
 		for argument in arguments.iter() {
@@ -385,7 +384,15 @@ impl Walker<'_> {
 					value: Some(value),
 				} if matches!(syntax::view(&tree, name), View::Name(_)) => match tree.text(name.index()) {
 					"capacity" if capacity.is_none() => capacity = Some(value),
-					"key" if is_set && key_option.is_none() => key_option = Some(value),
+					"key" if is_set => {
+						problems.push((
+							name,
+							format!(
+								"`{path}` compares complete items: use a `Map` keyed by that value instead of `key`"
+							),
+						));
+						self.check(value, None);
+					}
 					other => {
 						problems.push((name, format!("`{path}` has no option `{other}`")));
 						self.check(value, None);
@@ -432,11 +439,6 @@ impl Walker<'_> {
 		} else {
 			(element, TypeId::NONE)
 		};
-		if let Some(value) = key_option {
-			let result = self.builtin_param("Set.from", "Key", TypeId::UNKNOWN);
-			let callback = self.callback_with(&[item], result, 0);
-			self.check(value, Some(callback));
-		}
 		if let Some(value) = capacity {
 			let natural = self.natural();
 			let actual = self.check(value, Some(natural));
@@ -482,8 +484,8 @@ impl Walker<'_> {
 			// `let s: Set(Integer) = Set.from([1, 2])` is the literal `[1, 2]`
 			if given.is_none()
 				&& hinted.is_some()
-				&& key_option.is_none()
 				&& capacity.is_none()
+				&& arguments.len() == 1
 				&& source.is_some_and(|source| matches!(w.view(source), View::Array { .. }))
 			{
 				let message = format!(
@@ -497,11 +499,6 @@ impl Walker<'_> {
 				let what = if is_map { "key" } else { "element" };
 				w.check_comparable_element(n, kind, what, hashed);
 			}
-			if let Some(value) = key_option
-				&& let Some(sig) = w.signature_of(w.type_of(value))
-			{
-				w.check_comparable_element(value, kind, "key", sig.ret);
-			}
 			let option = |given: Option<NodeId>| match given {
 				Some(value) => Argument::Given(value),
 				None => Argument::Default,
@@ -510,9 +507,6 @@ impl Walker<'_> {
 				Some(source) => Argument::Given(source),
 				None => Argument::Missing,
 			}];
-			if is_set {
-				call_arguments.push(option(key_option));
-			}
 			// `capacity`: every collection takes it (minimal representations)
 			call_arguments.push(option(capacity));
 			w.a.calls.insert(

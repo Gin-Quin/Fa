@@ -160,40 +160,59 @@ impl PartialEq for Value {
 /// Fa's `==`: structural, numbers by value (`NaN != NaN`), sets and maps as
 /// collections (the order doesn't matter), functions by identity of their code.
 pub fn equals(a: &Value, b: &Value) -> bool {
+	equals_with(a, b, false)
+}
+
+/// Standard map-key and set-item equality: structural, with SameValueZero
+/// for floats, including floats nested inside composite keys.
+pub fn key_equals(a: &Value, b: &Value) -> bool {
+	equals_with(a, b, true)
+}
+
+fn equals_with(a: &Value, b: &Value, same_value_zero: bool) -> bool {
 	use Value::*;
 	match (a, b) {
 		(None, None) => true,
 		(Boolean(a), Boolean(b)) => a == b,
 		(Integer(a), Integer(b)) => a == b,
-		(Float(a), Float(b)) | (Percentage(a), Percentage(b)) => a == b,
+		(Float(a), Float(b)) | (Percentage(a), Percentage(b)) => {
+			a == b || (same_value_zero && a.is_nan() && b.is_nan())
+		}
 		(Integer(a), Float(b)) | (Float(b), Integer(a)) => a.as_f64() == *b,
 		(String(a), String(b)) => a == b,
 		(Bytes(a), Bytes(b)) => a == b,
 		(Array(a), Array(b)) | (Tuple(a), Tuple(b)) => {
-			a.len() == b.len() && a.iter().zip(b.iter()).all(|(a, b)| equals(a, b))
+			a.len() == b.len()
+				&& a.iter()
+					.zip(b.iter())
+					.all(|(a, b)| equals_with(a, b, same_value_zero))
 		}
 		(Object(a), Object(b)) => {
 			a.fields.len() == b.fields.len()
-				&& a.fields
-					.iter()
-					.all(|(name, value)| b.get(name).is_some_and(|other| equals(value, other)))
+				&& a.fields.iter().all(|(name, value)| {
+					b.get(name)
+						.is_some_and(|other| equals_with(value, other, same_value_zero))
+				})
 		}
 		(Member(a), Member(b)) => {
 			a.name == b.name
 				&& match (&a.data, &b.data) {
 					(Option::None, Option::None) => true,
-					(Some(a), Some(b)) => equals(a, b),
+					(Some(a), Some(b)) => equals_with(a, b, same_value_zero),
 					_ => false,
 				}
 		}
-		(Set(a), Set(b)) => a.len() == b.len() && a.iter().all(|item| contains(b, item)),
+		(Set(a), Set(b)) => a.len() == b.len() && a.iter().all(|item| set_contains(b, item)),
 		(Pool(a), Pool(b)) => {
 			if a.len != b.len {
 				return false;
 			}
 			let mut unmatched: Vec<_> = b.values().collect();
 			for value in a.values() {
-				let Some(index) = unmatched.iter().position(|other| equals(value, other)) else {
+				let Some(index) = unmatched
+					.iter()
+					.position(|other| equals_with(value, other, same_value_zero))
+				else {
 					return false;
 				};
 				unmatched.swap_remove(index);
@@ -202,8 +221,9 @@ pub fn equals(a: &Value, b: &Value) -> bool {
 		}
 		(Map(a), Map(b)) => {
 			a.len() == b.len()
-				&& a.iter()
-					.all(|(key, value)| map_get(b, key).is_some_and(|other| equals(value, other)))
+				&& a.iter().all(|(key, value)| {
+					map_get(b, key).is_some_and(|other| equals_with(value, other, same_value_zero))
+				})
 		}
 		(
 			Range {
@@ -227,11 +247,16 @@ pub fn contains(items: &[Value], value: &Value) -> bool {
 	items.iter().any(|item| equals(item, value))
 }
 
+/// Whether a set includes an item, using its standard equality.
+pub fn set_contains(items: &[Value], value: &Value) -> bool {
+	items.iter().any(|item| key_equals(item, value))
+}
+
 /// The value of a key in a map's entries.
 pub fn map_get<'v>(entries: &'v [(Value, Value)], key: &Value) -> Option<&'v Value> {
 	entries
 		.iter()
-		.find(|(other, _)| equals(other, key))
+		.find(|(other, _)| key_equals(other, key))
 		.map(|(_, value)| value)
 }
 
@@ -639,6 +664,25 @@ fn format_nested(value: &Value, out: &mut TextBuffer) {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn set_items_use_same_value_zero_recursively() {
+		let nan = Value::Float(f64::NAN);
+		for value in [
+			nan.clone(),
+			Value::array(vec![nan.clone()]),
+			Value::object(vec![("x", nan.clone())]),
+		] {
+			assert!(!equals(&value, &value));
+			assert!(key_equals(&value, &value));
+			assert!(!contains(std::slice::from_ref(&value), &value));
+			assert!(set_contains(std::slice::from_ref(&value), &value));
+		}
+		assert!(key_equals(&Value::Float(-0.0), &Value::Float(0.0)));
+		let a = Value::Set(Arc::new(vec![nan.clone(), Value::int(1)]));
+		let b = Value::Set(Arc::new(vec![Value::int(1), nan]));
+		assert!(equals(&a, &b));
+	}
 
 	#[test]
 	fn values_print_like_the_runtime() {

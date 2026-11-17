@@ -11,7 +11,7 @@ use std::sync::Arc;
 use ethnum::I256;
 
 use crate::eval::{Error, Flow, Interpreter};
-use crate::value::{Object, Value, contains, equals, map_get};
+use crate::value::{Object, Value, contains, equals, key_equals, map_get, set_contains};
 
 fn stop(message: impl Into<String>) -> Error {
 	Error::Stop(message.into())
@@ -59,7 +59,10 @@ pub fn pair(value: Value) -> Result<(Value, Value), Error> {
 
 /// Inserts or replaces an entry of a map.
 pub fn map_insert(entries: &mut Vec<(Value, Value)>, key: Value, value: Value) {
-	match entries.iter_mut().find(|(other, _)| equals(other, &key)) {
+	match entries
+		.iter_mut()
+		.find(|(other, _)| key_equals(other, &key))
+	{
 		Some(entry) => entry.1 = value,
 		None => entries.push((key, value)),
 	}
@@ -135,7 +138,8 @@ pub fn iterate(value: &Value) -> Result<Vec<Value>, Error> {
 /// `value is in collection`.
 pub fn includes(collection: &Value, value: &Value) -> Result<bool, Error> {
 	match collection {
-		Value::Array(items) | Value::Set(items) | Value::Tuple(items) => Ok(contains(items, value)),
+		Value::Array(items) | Value::Tuple(items) => Ok(contains(items, value)),
+		Value::Set(items) => Ok(set_contains(items, value)),
 		Value::Pool(pool) => Ok(pool.values().any(|item| equals(item, value))),
 		Value::Map(entries) => Ok(map_get(entries, value).is_some()),
 		Value::String(haystack) => match value {
@@ -394,7 +398,9 @@ pub fn index_mut(value: &mut Value, key: Value) -> Result<&mut Value, Flow> {
 		}
 		Value::Map(entries) => {
 			let entries = Arc::make_mut(entries);
-			let found = entries.iter().position(|(other, _)| equals(other, &key));
+			let found = entries
+				.iter()
+				.position(|(other, _)| key_equals(other, &key));
 			let position = match found {
 				Some(position) => position,
 				None => {
@@ -773,7 +779,7 @@ pub fn call(
 				"Set#union" => {
 					let mut union = mine;
 					for item in other {
-						if !contains(&union, &item) {
+						if !set_contains(&union, &item) {
 							union.push(item);
 						}
 					}
@@ -781,15 +787,15 @@ pub fn call(
 				}
 				"Set#intersection" => Value::Set(Arc::new(
 					mine.into_iter()
-						.filter(|item| contains(&other, item))
+						.filter(|item| set_contains(&other, item))
 						.collect(),
 				)),
 				"Set#difference" => Value::Set(Arc::new(
 					mine.into_iter()
-						.filter(|item| !contains(&other, item))
+						.filter(|item| !set_contains(&other, item))
 						.collect(),
 				)),
-				_ => Value::Boolean(mine.iter().all(|item| contains(&other, item))),
+				_ => Value::Boolean(mine.iter().all(|item| set_contains(&other, item))),
 			}
 		}
 		"Array.from"
@@ -805,7 +811,7 @@ pub fn call(
 		"Set.from" | "GrowingSet.from" => {
 			let mut set = Vec::new();
 			for item in iterate(&receiver)? {
-				if !contains(&set, &item) {
+				if !set_contains(&set, &item) {
 					set.push(item);
 				}
 			}
@@ -962,7 +968,7 @@ pub fn mutate(
 			let result = match path {
 				"Set#add" => {
 					let value = arg(0)?;
-					let added = !contains(set, &value);
+					let added = !set_contains(set, &value);
 					if added {
 						reserve_growth(interpreter, set.len(), set.capacity())?;
 						set.push(value);
@@ -971,7 +977,7 @@ pub fn mutate(
 				}
 				"Set#delete" | "Set#take" => {
 					let value = arg(0)?;
-					match set.iter().position(|item| equals(item, &value)) {
+					match set.iter().position(|item| key_equals(item, &value)) {
 						Some(position) => {
 							let removed = set.remove(position);
 							if path == "Set#take" {
@@ -997,7 +1003,7 @@ pub fn mutate(
 			let result = match path {
 				"Map#delete" | "Map#take" => {
 					let key = arg(0)?;
-					match map.iter().position(|(other, _)| equals(other, &key)) {
+					match map.iter().position(|(other, _)| key_equals(other, &key)) {
 						Some(position) => {
 							let (_, value) = map.remove(position);
 							if path == "Map#take" {

@@ -59,8 +59,7 @@
 //!   `Tuple(K, V)`. The members of sets and maps resolve to `Set#…` and
 //!   `Map#…` built-ins (shared by `GrowingSet` / `GrowingMap`, told apart by
 //!   the receiver's type); `Set.from` and `Map.from` calls are
-//!   `Callee::Builtin` with their arguments in the order `(source, key,
-//!   capacity)` for sets and `(source, capacity)` otherwise, the type name
+//!   `Callee::Builtin` with arguments `(source, capacity)`, the type name
 //!   before `.from` flagged `TYPE_EXPR` with the built collection type. A
 //!   method type of a collection carries its effects (`FnSig::effects`, rooted
 //!   at `PathRoot::SelfParam`, the first argument as `PathStep::IndexParam(0)`);
@@ -137,9 +136,8 @@
 //!   (`Argument::Default` without capacity); it copies the source's items
 //!   into a new array of the call's type; `capacity` is a hint.
 //! - Capacity (minimal representations, `design/decisions.md`): every
-//!   collection's `from` is a call with the arguments `(source, capacity)`
-//!   (`(source, key, capacity)` for sets), `Argument::Default` without
-//!   `capacity`; `String.from(text, capacity = n)` is `Callee::Builtin`
+//!   collection's `from` is a call with the arguments `(source, capacity)`,
+//!   `Argument::Default` without `capacity`; `String.from(text, capacity = n)` is `Callee::Builtin`
 //!   with `[text, capacity]`. `capacity` is a property (`Array#capacity`,
 //!   `Set#capacity`, `Map#capacity`, `Pool#capacity`, `Columnar#capacity`,
 //!   `OrderedColumnar#capacity`, `String#capacity` in bytes; the growing

@@ -165,6 +165,8 @@ A scalar link and its optional use the same width: absence requires no extra bit
 A stored link adds a containment condition to replacement: resetting a pool is allowed when all its incoming holders die with it. If a root field or another pool may hold links into it, reset the complete owner instead. Clearing one optional root does not prove every possible holder empty. See [link containment](/advanced/reference-checking#link-containment).
 
 :::implementation
+
+`GrowingSet.from` takes only a source and an optional capacity hint, like `Set.from`. Both use complete-item standard hashing and equality; neither stores a key callback. The hint is evaluated once on every target, even when JavaScript ignores its storage request.
 ## Implementation details
 
 ### Native

@@ -46,8 +46,8 @@ describe("sets", () => {
 	});
 
 	test("filter keeps the kind of the set", () => {
-		const keyed = new FaSet([{ id: 1 }, { id: 2 }], { key: (value) => value.id });
-		const filtered = faSetFilter(keyed, (value) => value.id > 1);
+		const objects = new FaSet([{ id: 1 }, { id: 2 }]);
+		const filtered = faSetFilter(objects, (value) => value.id > 1);
 		expect(filtered).toBeInstanceOf(FaSet);
 		expect([...filtered]).toEqual([{ id: 2 }]);
 		expect(faSetFilter(new Set([1, 2, 3]), (value) => value % 2 === 1)).toEqual(new Set([1, 3]));

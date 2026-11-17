@@ -16,8 +16,7 @@ import { faSides } from "./relations.js";
  * (NaN is never equal, `-0` equals `0`), or with SameValueZero when
  * `sameValueZero` (map keys and set elements: NaN finds NaN). A bigint equals
  * a number of the same value (D-69). Arrays (and tuples) compare item by
- * item; maps by keys and values; sets by elements (with the right-hand set's
- * key function); objects by their own properties, which must be the same set,
+ * item; maps by keys and values; sets by complete elements; objects by their own properties, which must be the same set,
  * and by prototype (so a `FaRange` or an error class only equals its own
  * kind); a field set to `none` equals an absent field. Iterative: long
  * recursive chains don't overflow the stack.
@@ -262,7 +261,7 @@ export function faHash(value) {
 			}
 			if (value instanceof FaSet) {
 				for (const item of value) {
-					sum = (sum + faHash(value.keyOf(item))) | 0;
+					sum = (sum + faHash(item)) | 0;
 				}
 				return faHashMix(sum ^ 0xc2b2ae35);
 			}

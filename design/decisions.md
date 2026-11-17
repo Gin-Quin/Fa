@@ -2723,3 +2723,9 @@ Ordinary String arguments are immutable values; explicitly dependent String
 arguments still retain their place. Borrowing a compile-time constant gives it
 caller-lived temporary storage. JSON default closures capture their snapshot
 slots by value, matching their nonescaping parser lifetime.
+
+## Set standard hashing and equality (2026-11-17)
+
+`Set.from` and `GrowingSet.from` now use the common `[source, capacity]` constructor ABI. The removed `key` option emits `FN023` with a `Map` suggestion. No stored-key provenance or special sharing flag exists in the current analyzer; the obsolete callback slot and its type checks are removed. This ports only the Set slices from the ownership WIP, without changing ownership operations.
+
+The JavaScript runtime's `FaSet` stores the complete item as its hash-table key. Set operations probe the other set directly, since both sides use standard equality. Existing source/capacity evaluation and exceptional cleanup are preserved. The compile-time interpreter distinguishes ordinary IEEE equality from structural SameValueZero key equality, so NaN-containing items deduplicate, can be found and can be removed consistently with both backends; arrays retain IEEE membership. Map key lookup/insertion uses that same key equality when maps occur inside set items.

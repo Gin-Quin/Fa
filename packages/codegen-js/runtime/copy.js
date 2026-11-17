@@ -80,7 +80,10 @@ export function faCopy(value) {
 			owner[key] = source;
 			return;
 		}
-		if (faIsBytes(source)) { owner[key] = source.slice(); return; }
+		if (faIsBytes(source)) {
+			owner[key] = source.slice();
+			return;
+		}
 		const target = faCopyShell(source);
 		owner[key] = target;
 		if (Array.isArray(source)) {

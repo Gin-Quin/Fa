@@ -2109,3 +2109,12 @@ The final short-copy path proves the inline byte limit before checking the heap
 representation limit. Keep that latter check on the heap branch before allocation;
 empty/single-byte/inline copies need no second bound check. This removes a
 redundant instruction path without changing any allocation limit.
+
+
+The execution matrix exposed an overbroad runtime assertion: canonical Unicode
+views also passed through `unit_slice_positions`. The capability guards only
+actual half-surrogate boundaries (`first` or `last` odd), rather than every Unicode
+view. Canonical Unicode views remain valid when no edge constructor is present.
+A C test disables the capability and exercises all three split-view constructors
+with Unicode text and a nonempty ASCII separator, including caller storage.
+The existing frame-string and split-view execution fixtures pin the regression.

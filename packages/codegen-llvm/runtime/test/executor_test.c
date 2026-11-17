@@ -1686,6 +1686,32 @@ static void test_unicode_transform_counts(void) {
 	CHECK(allocated == before);
 }
 
+static void test_canonical_split_views_without_edges(void) {
+	long before = allocated;
+	const uint8_t text[] = "é  😀 xx";
+	fa_virtual_string_slices = 0;
+	for (int mode = 0; mode < 3; mode += 1) {
+		_Alignas(16) uint8_t buffer[512];
+		FaArrayHeader *parts = mode == 0
+		    ? fa_string_split_views(text, sizeof text - 1, 0, (const uint8_t *)" ", 1)
+		    : mode == 1
+		        ? fa_string_split_nonempty_views(text, sizeof text - 1, 0, (const uint8_t *)" ", 1)
+		        : fa_string_split_views_into(text, sizeof text - 1, 0, (const uint8_t *)" ", 1, buffer, sizeof buffer);
+		CHECK(parts->length == (mode == 1 ? 3 : 4));
+		FaString *items = (FaString *)(void *)parts->items;
+		const size_t expected[] = {1, 0, 2, 2};
+		for (int64_t index = 0; index < parts->length; index += 1) {
+			size_t expected_index = (size_t)index + (mode == 1 && index > 0);
+			CHECK(!string_owned(items[index].capacity));
+			CHECK(fa_string_is_well_formed(string_bytes(items + index), string_length(items + index), items[index].capacity));
+			CHECK(fa_string_length(string_bytes(items + index), string_length(items + index), items[index].capacity) == expected[expected_index]);
+		}
+		drop_test_string_parts(parts);
+	}
+	fa_virtual_string_slices = 1;
+	CHECK(allocated == before);
+}
+
 static void test_arguments(void) {
 	char *argv[] = {"program", "one", "two"};
 	for (int32_t argc = -1; argc <= 3; argc += 1) {
@@ -3032,6 +3058,7 @@ int main(void) {
 	test_tree_regions();
 	test_utf8_input();
 	test_unicode_transform_counts();
+	test_canonical_split_views_without_edges();
 	test_arguments();
 	test_strict_file_text();
 	test_character_views();

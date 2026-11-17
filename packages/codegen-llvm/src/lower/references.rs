@@ -739,8 +739,85 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(Val::void())
 	}
 
-	/// The global holding the address a top-level reference designates, which
-	/// the functions reading the reference load (created on first use).
+	/// The layout and address convention a function needs before the module
+	/// initializer has supplied the reference's actual address.
+	pub(super) fn shared_reference_repr(
+		&mut self,
+		symbol: SymbolId,
+		node: NodeId,
+	) -> Result<Repr, Error> {
+		let (repr, nullable) = self.declared_reference_repr(symbol, node)?;
+		if nullable {
+			self.nullable_references.insert(symbol, ());
+		}
+		Ok(repr)
+	}
+
+	/// Functions precede module initializers. Determine the designated slot's
+	/// layout without evaluating its initializer or confusing a nullable
+	/// address with an optional stored value.
+	fn declared_reference_repr(
+		&self,
+		mut symbol: SymbolId,
+		node: NodeId,
+	) -> Result<(Repr, bool), Error> {
+		let mut seen = rustc_hash::FxHashSet::default();
+		loop {
+			if !seen.insert(symbol) {
+				return Err(self.unsupported(node.index(), "a cyclic reference declaration"));
+			}
+			let data = self.analysis.symbols.symbol(symbol);
+			let View::Use { mut value, .. } = self.view(data.decl_node) else {
+				return Ok((self.repr_of(data.ty, node.index())?, false));
+			};
+			while let View::Group(inner) | View::Try(inner) = self.view(value) {
+				value = inner;
+			}
+			if let View::Name(_) = self.view(value)
+				&& let Resolution::Local(alias) = self.analysis.resolution(value)
+				&& matches!(
+					self.analysis.symbols.symbol(alias).kind,
+					SymbolKind::Use | SymbolKind::MutableUse
+				) {
+				symbol = alias;
+				continue;
+			}
+			if let Some((element, nullable)) = self.user_reference_result(value) {
+				return Ok((self.reference_result_repr(value, element)?, nullable));
+			}
+			if let View::Call { callee, .. } = self.view(value)
+				&& let Some(call) = self.analysis.call(value)
+				&& let fa_analyzer::analysis::Callee::Builtin(id) = call.callee
+				&& let View::Access { target, members } = self.view(callee)
+			{
+				let receiver = if members.len() == 1 {
+					target
+				} else {
+					members.get(members.len() - 2).unwrap_or(target)
+				};
+				let owner = self.concrete_type(self.type_of(receiver));
+				if let TypeKind::Collection(kind, item, _) = self.types().kind(owner) {
+					let repr = self.item_repr(item, value)?;
+					let repr = match (kind, repr, self.repr_of(owner, value.index())?) {
+						(
+							CollKind::Columnar | CollKind::GrowingColumnar,
+							Repr::Object(object),
+							Repr::Columnar(_),
+						) => Repr::Row(object),
+						_ => repr,
+					};
+					let path = fa_analyzer::builtins::get(id).path;
+					return Ok((repr, path.ends_with("#get") || path.ends_with("#find")));
+				}
+			}
+			if matches!(self.view(value), View::None) {
+				return Ok((self.reference_result_repr(value, data.ty)?, true));
+			}
+			return Ok((self.node_repr(value)?, false));
+		}
+	}
+
+	/// Create the shared address holder after its referent layout is known.
 	pub(crate) fn reference_holder(&mut self, symbol: SymbolId, repr: Repr) -> PointerValue<'ctx> {
 		if let Some(&(holder, _)) = self.references.get(&symbol) {
 			return holder;
@@ -843,7 +920,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// Functions are lowered before module initializers. A reseating may
 		// therefore be the first lowered use of a module-level reference.
 		if !self.references.contains_key(&symbol) && self.shared.contains_key(&symbol) {
-			let repr = self.repr_of(self.analysis.symbols.symbol(symbol).ty, node.index())?;
+			let repr = self.shared_reference_repr(symbol, node)?;
 			self.reference_holder(symbol, repr);
 		}
 		let Some(&(holder, _)) = self.references.get(&symbol) else {

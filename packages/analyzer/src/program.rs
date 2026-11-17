@@ -341,7 +341,12 @@ impl Session {
 		self.declared(decl).is_some_and(|declared| {
 			matches!(
 				declared.kind,
-				SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive | SymbolKind::Derived
+				SymbolKind::Let
+					| SymbolKind::Mutable
+					| SymbolKind::Reactive
+					| SymbolKind::Derived
+					| SymbolKind::Use
+					| SymbolKind::MutableUse
 			)
 		}) && self.module_role(self.module_of_decl(decl)).is_module()
 	}

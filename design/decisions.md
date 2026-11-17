@@ -2797,3 +2797,15 @@ keep their representation, and None-only items have no value to load. Array and
 GrowingArray share the get lowering while retaining their own addressing;
 collection-reference reads use the same optional representation rule. Receiver
 and index evaluation still occur for None-only lookups.
+
+## Native completeness: module reference initialization (2026-11-17)
+
+Module references participate in the existing value initialization graph, with
+keys and initializer dependencies published in interfaces. Both backends emit
+ordinary initializer functions for them; native per-unit builds do so as well.
+The designation borrows its owner and contributes no second owned value.
+Native functions determine a shared reference's slot representation and nullable
+address convention from its declaration before initializers are lowered. An
+optional stored item keeps its own representation. Nullable-reference metadata
+is per file, just like the address holders; equal SymbolIds in separate files
+must not share that state.

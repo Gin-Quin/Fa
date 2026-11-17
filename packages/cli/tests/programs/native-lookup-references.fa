@@ -33,3 +33,24 @@ function exercise = <Item>(first: Item, second: Item): Array<Item> mutates calls
 console.log(exercise(7, 9)) -- prints: [7, 7, 7]
 console.log(exercise("a string beyond inline capacity", "another string beyond inline capacity")) -- prints: ["a string beyond inline capacity", "a string beyond inline capacity", "a string beyond inline capacity"]
 console.log(exercise({ value = 3 }, { value = 5 }).map((item) => item.value)) -- prints: [3, 3, 3]
+
+-- Functions are lowered before these module initializers.
+mutable sharedMap: Map<String, Integer> = [("a", 1)]
+mutable use sharedCurrent = sharedMap.get("a")
+function readShared = (): Integer => sharedCurrent ?? 0
+console.log(readShared()) -- prints: 1
+reuse sharedCurrent = none
+console.log(readShared()) -- prints: 0
+reuse sharedCurrent = sharedMap.get("a")
+console.log(readShared()) -- prints: 1
+
+mutable sharedItems: Array<Integer?> = [none, 7]
+mutable use sharedOptional = sharedItems.get(1)
+use fixed = sharedOptional
+function readOptional = (): Integer => sharedOptional ?? -1
+function readFixed = (): Integer => fixed ?? -1
+console.log(readOptional(), readFixed()) -- prints: 7 7
+reuse sharedOptional = none
+console.log(readOptional(), readFixed()) -- prints: -1 7
+reuse sharedOptional = sharedItems.get(0)
+console.log(readOptional()) -- prints: -1

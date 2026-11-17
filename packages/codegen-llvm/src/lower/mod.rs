@@ -2470,18 +2470,19 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Ok(*slot);
 		}
 		let data = self.analysis.symbols.symbol(symbol);
+		if matches!(data.kind, SymbolKind::Use | SymbolKind::MutableUse)
+			&& self.shared.contains_key(&symbol)
+		{
+			// a top-level reference that functions read: its address in a global
+			let repr = self.shared_reference_repr(symbol, node)?;
+			self.reference_holder(symbol, repr);
+			return self.slot_of(symbol, node);
+		}
 		let repr = self.repr_of(data.ty, node.index())?;
 		if !repr.has_value() {
 			return Err(self.unsupported(node.index(), "a local without a value"));
 		}
 		let owner = self.owner_of_scope(data.scope);
-		if matches!(data.kind, SymbolKind::Use | SymbolKind::MutableUse)
-			&& self.shared.contains_key(&symbol)
-		{
-			// a top-level reference that functions read: its address in a global
-			self.reference_holder(symbol, repr);
-			return self.slot_of(symbol, node);
-		}
 		let slot = if self.shared.contains_key(&symbol) {
 			let ty = self.llvm_type(repr);
 			let constant = self.immutable_scalar(symbol)?;

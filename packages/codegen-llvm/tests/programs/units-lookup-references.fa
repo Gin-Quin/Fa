@@ -2,10 +2,12 @@
 -- asynchronous: false
 -- prints: 7
 -- prints: a string beyond inline capacity
+-- prints: 1 0
 -- file: application/main.fa
 export function = () => {
 	console.log(library.exercise(7, 9))
 	console.log(library.exercise("a string beyond inline capacity", "another string beyond inline capacity"))
+	library.shared()
 }
 -- file: library/exercise.fa
 export function = <Item>(first: Item, second: Item): Item => {
@@ -22,4 +24,13 @@ export function = <Item>(first: Item, second: Item): Item => {
 	reuse selected = items.get(-1)
 	if selected is not none { selected = first }
 	items[1]
+}
+-- file: library/shared.fa
+mutable values: Map<String, Integer> = [("a", 1)]
+mutable use current = values.get("a")
+function read = (): Integer => current ?? 0
+export function = () => {
+	let first = read()
+	reuse current = none
+	console.log(first, read())
 }

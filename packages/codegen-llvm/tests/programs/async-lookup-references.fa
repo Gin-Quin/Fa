@@ -19,3 +19,13 @@ async function exercise = () => {
 await exercise()
 -- prints: managed string beyond inline storage
 -- prints: [10, 23]
+
+mutable globalMap: Map<String, String> = [("a", "module string beyond inline capacity")]
+mutable use globalText = globalMap.get("a")
+async function readGlobal = (): String => {
+	await sleep(0)
+	globalText ?? "absent"
+}
+console.log(await readGlobal()) -- prints: module string beyond inline capacity
+reuse globalText = none
+console.log(await readGlobal()) -- prints: absent

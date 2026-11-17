@@ -597,6 +597,7 @@ To work on several packages at once, group them in a [workspace](/architecture/w
 ### Native
 
 - A module-level value is a global with a stable address. A value computed at compile time is emitted as constant data. The others are initialized by one generated function, called before the entry function, in the order defined above; another generated function destroys them in reverse order at normal exit.
+- Module-level `use` and `mutable use` declarations take part in that dependency order: their owners initialize first, then the borrowed designation. They do not own a second copy of the referenced data. JavaScript gives these declarations the same explicit initialization functions as other module values.
 - `export mutable` is replaced in place: an assignment destroys the old value and writes the new one at the same address.
 
 - `Json.parse` checks a parsed tree against the expected type's schema, using the same messages as JavaScript, then a generated reader builds the value. Native integers accept all `Int64` values; JavaScript JSON integers stop at ±(2^53 − 1). On `wasm`, the generated JavaScript loader supplies file and clock operations (`node:fs` for files).

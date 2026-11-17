@@ -582,6 +582,7 @@ impl Walker<'_> {
 	/// Forgets what the check of a body recorded on its nodes, before it is
 	/// checked for another key.
 	fn forget_body(&mut self, nodes: &[NodeId]) {
+		self.a.ownership_source_graph = Default::default();
 		for &node in nodes {
 			if matches!(self.view(node), View::Lambda { .. }) {
 				self.forget_callable_capture_sources(node);

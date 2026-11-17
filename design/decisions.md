@@ -2185,3 +2185,21 @@ the known callee ignores them. These readiness facts are metadata until source
 observations, capture-store plans and target declaration bindings activate
 together; the existing stricter declaration-order diagnostics are not relaxed
 by publishing them.
+
+## Ownership enforcement: conditional source graph (2026-11-17)
+
+The persistent source graph has one borrowed entry per function/default and
+an owned entry for an escaping environment. Its observations retain correlated
+whole-owner roots and logical capture inputs. Owned observations stop at that
+entry's captures; borrowed observations rebase through the frozen creation
+inputs, preserving an enclosing capture input rather than replacing it with a
+direct source. Independent global reads and omitted-default observations remain.
+
+Call dependencies carry at most one declaration guard per edge. Mixed calls
+keep the borrowed/unreached and owned/reached edges separately; nested tests
+remain paths in the graph. Self calls use the running entry mode. Unfinished
+source facts, unresolved indirect invocation dependencies and unavailable
+readiness make an entry pending, never an empty proof. Key rechecking clears
+the graph before rebuilding it. This publication does not activate declaration
+binding or capture transfers: those consumers must resolve the graph at the
+invocation's owning block and retain pending states conservatively.

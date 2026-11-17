@@ -683,6 +683,9 @@ pub struct Analysis {
 	/// Frozen whole-owner source facts. No walker-local PlaceId escapes
 	/// into these snapshots; path validity remains in the reference checker.
 	pub ownership_sources: OwnershipSourceFacts,
+	/// Conditional invocation dependencies. Guards stay on edges rather
+	/// than being expanded into combinations of caller conditions.
+	pub ownership_source_graph: OwnershipSourceGraph,
 	/// Parameters whose callable data can be retained by their function.
 	pub kept_parameters: rustc_hash::FxHashSet<SymbolId>,
 	/// Retention inferred conservatively from an unknown function value.
@@ -1418,6 +1421,46 @@ pub struct OwnershipSourceFacts {
 	pub pending_functions: rustc_hash::FxHashSet<NodeId>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub enum OwnershipEntryMode {
+	Borrowed,
+	Owned,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct OwnershipEntry {
+	/// A function body, omitted default, or the module root.
+	pub context: NodeId,
+	pub mode: OwnershipEntryMode,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OwnershipDeclarationGuard {
+	pub declaration: NodeId,
+	pub reached: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OwnershipInvocationEdge {
+	pub site: NodeId,
+	pub target: OwnershipEntry,
+	/// One declaration condition per edge; nested conditions remain paths.
+	pub guard: Option<OwnershipDeclarationGuard>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct OwnershipEntrySources {
+	pub reads: FxHashMap<NodeId, OwnershipSources>,
+	pub calls: Vec<OwnershipInvocationEdge>,
+	/// Missing facts are never an empty source-observation proof.
+	pub pending: bool,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct OwnershipSourceGraph {
+	pub entries: FxHashMap<OwnershipEntry, OwnershipEntrySources>,
+}
+
 /// What the backends need of a function or a lambda node.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FnInfo {
@@ -1685,6 +1728,7 @@ impl Analysis {
 			function_capture_states: FxHashMap::default(),
 			named_function_readiness: FxHashMap::default(),
 			ownership_sources: OwnershipSourceFacts::default(),
+			ownership_source_graph: OwnershipSourceGraph::default(),
 			kept_parameters: rustc_hash::FxHashSet::default(),
 			unknown_kept_parameters: rustc_hash::FxHashSet::default(),
 			non_escaping: rustc_hash::FxHashSet::default(),

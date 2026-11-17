@@ -68,6 +68,17 @@ impl Walker<'_> {
 						.iter()
 						.filter(|cx| !cx.captures.is_empty())
 						.map(|cx| cx.node),
+				)
+				.chain(
+					self.ownership_capture_origins
+						.values()
+						.flatten()
+						.filter_map(|source| match source.origin {
+							crate::flow::ownership::Origin::Capture { function, .. } => {
+								Some(function)
+							}
+							crate::flow::ownership::Origin::Direct => None,
+						}),
 				),
 			&reverse,
 		);

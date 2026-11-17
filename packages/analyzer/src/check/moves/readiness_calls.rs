@@ -14,6 +14,9 @@ use crate::ids::{NodeId, SymbolId, TypeId};
 use crate::symbols::{Resolution, SymbolKind};
 use crate::syntax::View;
 
+#[path = "readiness_sources.rs"]
+mod source_graph;
+
 const EARLY: u8 = 1;
 const READY: u8 = 2;
 
@@ -45,6 +48,7 @@ struct Propagation {
 	inherited: FxHashMap<Entry, Vec<u8>>,
 	owners: FxHashMap<NodeId, NodeId>,
 	outgoing: FxHashMap<NodeId, Vec<Invocation>>,
+	unresolved: FxHashSet<NodeId>,
 }
 
 impl Propagation {
@@ -112,15 +116,14 @@ impl Walker<'_> {
 			.collect();
 		declarations.sort_unstable_by_key(|data| data.node);
 		declarations.dedup_by_key(|data| data.node);
-		let Some(marker) = declarations.first().map(|data| data.symbol) else {
-			return;
-		};
+		let marker = declarations.first().map(|data| data.symbol);
 		let mut propagation = Propagation {
 			declarations,
 			local: FxHashMap::default(),
 			inherited: FxHashMap::default(),
 			owners: FxHashMap::default(),
 			outgoing: FxHashMap::default(),
+			unresolved: FxHashSet::default(),
 		};
 		let mut bodies = FxHashMap::default();
 		bodies.insert(NodeId::new(self.tree.root), NodeId::new(self.tree.root));
@@ -131,10 +134,13 @@ impl Walker<'_> {
 				propagation.owners.insert(default, info.lambda);
 			}
 		}
-		propagation.outgoing = self.readiness_invocations(&defaults);
-		self.readiness_barriers(&mut propagation, &bodies, &defaults, marker);
+		(propagation.outgoing, propagation.unresolved) = self.readiness_invocations(&defaults);
+		if let Some(marker) = marker {
+			self.readiness_barriers(&mut propagation, &bodies, &defaults, marker);
+		}
 		self.solve_readiness(&mut propagation, &bodies);
 		self.publish_propagated_readiness(&propagation, &defaults);
+		self.publish_ownership_source_graph(&propagation, &bodies, &defaults);
 	}
 
 	fn solve_readiness(&self, propagation: &mut Propagation, bodies: &FxHashMap<NodeId, NodeId>) {
@@ -166,27 +172,7 @@ impl Walker<'_> {
 				.unwrap_or_default();
 			for edge in &edges {
 				debug_assert_eq!(edge.caller, entry.context);
-				let escapes = self.a.escapes.contains(&edge.target)
-					&& self.a.function_capture_states.get(&edge.target)
-						== Some(&FunctionCaptureState::Capturing);
-				let owner = propagation
-					.owners
-					.get(&entry.context)
-					.copied()
-					.unwrap_or(entry.context);
-				let modes = if !escapes {
-					EARLY
-				} else if edge.target == owner {
-					if entry.owned { READY } else { EARLY }
-				} else if !edge.direct {
-					READY
-				} else {
-					propagation
-						.declarations
-						.iter()
-						.position(|data| data.lambda == edge.target)
-						.map_or(0, |index| propagation.phase(entry, index, edge.site))
-				};
+				let modes = self.readiness_invocation_modes(propagation, entry, edge);
 				for owned in [false, true] {
 					if modes & if owned { READY } else { EARLY } == 0 {
 						continue;
@@ -207,8 +193,9 @@ impl Walker<'_> {
 	fn readiness_invocations(
 		&mut self,
 		defaults: &FxHashSet<NodeId>,
-	) -> FxHashMap<NodeId, Vec<Invocation>> {
+	) -> (FxHashMap<NodeId, Vec<Invocation>>, FxHashSet<NodeId>) {
 		let mut outgoing: FxHashMap<NodeId, Vec<Invocation>> = FxHashMap::default();
+		let mut unresolved = FxHashSet::default();
 		for index in 0..self.tree.nodes.len() {
 			let site = NodeId::new(index);
 			let View::Call {
@@ -243,6 +230,14 @@ impl Walker<'_> {
 				|| self.callable_borrowed_targets(site),
 				|function| vec![function],
 			);
+			if targets.is_empty()
+				&& info
+					.as_ref()
+					.is_some_and(|info| info.callee == Callee::Value)
+			{
+				unresolved.insert(caller);
+			}
+
 			for function in targets {
 				let Some(function) = self.a.function(function) else {
 					continue;
@@ -290,7 +285,7 @@ impl Walker<'_> {
 			}
 		}
 
-		outgoing
+		(outgoing, unresolved)
 	}
 	fn publish_propagated_readiness(
 		&mut self,
@@ -383,6 +378,34 @@ impl Walker<'_> {
 					.map_or(0, |ready| if ready { READY } else { EARLY });
 				propagation.local.insert((site, declaration.node), phase);
 			}
+		}
+	}
+	fn readiness_invocation_modes(
+		&self,
+		propagation: &Propagation,
+		entry: Entry,
+		edge: &Invocation,
+	) -> u8 {
+		let escapes = self.a.escapes.contains(&edge.target)
+			&& self.a.function_capture_states.get(&edge.target)
+				== Some(&FunctionCaptureState::Capturing);
+		let owner = propagation
+			.owners
+			.get(&entry.context)
+			.copied()
+			.unwrap_or(entry.context);
+		if !escapes {
+			EARLY
+		} else if edge.target == owner {
+			if entry.owned { READY } else { EARLY }
+		} else if !edge.direct {
+			READY
+		} else {
+			propagation
+				.declarations
+				.iter()
+				.position(|data| data.lambda == edge.target)
+				.map_or(0, |index| propagation.phase(entry, index, edge.site))
 		}
 	}
 }

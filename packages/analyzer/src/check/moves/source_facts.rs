@@ -39,6 +39,20 @@ impl Walker<'_> {
 			facts
 				.captures
 				.insert(key, self.stable_ownership_sources(sources));
+			// A nested creation may reveal a logical input not yet carried
+			// by its enclosing function's concrete capture layout. Preserve
+			// capturefulness, but never treat that layout as settled.
+			for source in sources {
+				if let Origin::Capture { function, input } = source.origin
+					&& let PlaceRoot::Symbol(symbol) = self.places.get(input).root
+					&& self
+						.a
+						.function(function)
+						.is_none_or(|info| !info.captures.contains(&symbol))
+				{
+					facts.pending_functions.insert(function);
+				}
+			}
 		}
 		facts
 			.pending_functions
@@ -50,6 +64,18 @@ impl Walker<'_> {
 						(*state == FunctionCaptureState::Pending).then_some(function)
 					}),
 			);
+		// A lambda used directly as a default has two runtime contexts at
+		// one syntax node. Until context identity separates them, neither
+		// its body nor the containing default can provide a settled proof.
+		for info in self.a.functions.values() {
+			for default in info.params.iter().filter_map(|param| param.default) {
+				if self.a.function(default).is_some() {
+					facts.pending_functions.insert(info.lambda);
+					facts.pending_functions.insert(default);
+				}
+			}
+		}
+
 		// A retained key-loop function body can have resolved reads without
 		// current-pass observations. Preserve that incompleteness explicitly,
 		// rather than treating absent reads as a proof that the source died.
@@ -120,7 +146,7 @@ impl Walker<'_> {
 		None
 	}
 
-	fn stable_ownership_sources(&self, sources: &Sources) -> OwnershipSources {
+	pub(super) fn stable_ownership_sources(&self, sources: &Sources) -> OwnershipSources {
 		let mut result = OwnershipSources::new();
 		for source in sources {
 			let origin = match source.origin {
@@ -233,6 +259,22 @@ mod tests {
 			.collect();
 		assert_eq!(snapshots.len(), 2);
 		for snapshot in snapshots {
+			assert_eq!(
+				snapshot.ownership_source_graph,
+				snapshot.clone().ownership_source_graph
+			);
+			for &function in &snapshot.ownership_sources.pending_functions {
+				if let Some(entry) =
+					snapshot
+						.ownership_source_graph
+						.entries
+						.get(&crate::analysis::OwnershipEntry {
+							context: function,
+							mode: crate::analysis::OwnershipEntryMode::Borrowed,
+						}) {
+					assert!(entry.pending);
+				}
+			}
 			assert_eq!(
 				snapshot.ownership_sources,
 				snapshot.clone().ownership_sources

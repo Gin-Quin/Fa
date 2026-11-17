@@ -1880,7 +1880,7 @@ impl Generator<'_> {
 			return Vec::new();
 		}
 		let captures = info.captures.clone();
-		self.copy_captured(&captures)
+		self.capture_values(&captures, false, Some(info.lambda))
 	}
 
 	/// Copies of the local values `symbols` that may change later, which a
@@ -1904,6 +1904,15 @@ impl Generator<'_> {
 		symbols: &[SymbolId],
 		module_values: bool,
 	) -> Vec<(SymbolId, Option<String>)> {
+		self.capture_values(symbols, module_values, None)
+	}
+
+	fn capture_values(
+		&mut self,
+		symbols: &[SymbolId],
+		module_values: bool,
+		owner: Option<NodeId>,
+	) -> Vec<(SymbolId, Option<String>)> {
 		let mut saved = Vec::new();
 		for &symbol in symbols {
 			let kind = self.analysis.symbols.symbol(symbol).kind;
@@ -1916,7 +1925,10 @@ impl Generator<'_> {
 			// snapshot regardless of the binding's own mutability.
 			let ordinary_composite = self.is_composite(ty)
 				&& self.types.ownership(ty) == fa_analyzer::types::Ownership::Ordinary;
-			let changes = self.is_mutable_place(symbol)
+			let moved =
+				owner.is_some_and(|owner| self.analysis.capture_moves.contains(&(owner, symbol)));
+			let changes = moved
+				|| self.is_mutable_place(symbol)
 				|| self.aliases.contains_key(&symbol)
 				|| kind == SymbolKind::Use
 				|| ordinary_composite;
@@ -1925,7 +1937,7 @@ impl Generator<'_> {
 				continue;
 			}
 			let current = Expr::name(self.name_of(symbol), true);
-			let value = if self.is_composite(ty) {
+			let value = if !moved && self.is_composite(ty) {
 				self.copy_value(current, ty)
 			} else {
 				current

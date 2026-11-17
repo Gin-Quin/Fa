@@ -210,6 +210,9 @@ struct Frame<'ctx> {
 	/// Avoid repeated inline-byte snapshots in recursive frames.
 	readonly_strings: rustc_hash::FxHashSet<PointerValue<'ctx>>,
 	collection_locals: rustc_hash::FxHashSet<(FileId, SymbolId)>,
+	/// Immortal read-only backing may enter an immutable environment;
+	/// frame-backed collection storage may not.
+	static_collections: rustc_hash::FxHashSet<(FileId, SymbolId)>,
 	function: FunctionValue<'ctx>,
 	/// The original concrete entry and the environment shared by its
 	/// synchronous/async forms. Absent for functions without an environment.
@@ -1888,6 +1891,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			collection_offer_bytes: 0,
 			readonly_strings: rustc_hash::FxHashSet::default(),
 			collection_locals: rustc_hash::FxHashSet::default(),
+			static_collections: rustc_hash::FxHashSet::default(),
 			function,
 			self_environment: None,
 			frame_strings: FxHashMap::default(),
@@ -3210,6 +3214,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			} else {
 				let key = (self.file, symbol);
 				self.frame_mut().collection_locals.insert(key);
+				self.frame_mut().static_collections.insert(key);
 				self.fresh(value)
 			}
 		} else {

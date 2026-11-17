@@ -1,0 +1,17 @@
+type Reader = () => Integer
+function make = (): Reader => {
+	let items = [1, 2]
+	function read = (): Integer => items.length
+	read
+}
+function anonymous = (): Reader => {
+	let items = [3, 4, 5]
+	() => items.length
+}
+function inspect = (): Integer => {
+	let first = make()
+	let second = anonymous()
+	first() + second()
+}
+static compiled = @inspect()
+console.log(compiled, inspect()) -- prints: 5 5

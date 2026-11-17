@@ -463,6 +463,30 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn structure_captures_transfer_their_last_use_owner() {
+		let source =
+			include_str!("../../analyzer/tests/cases/ownership-structure-capture-moves.fa");
+		for target in [Target::Native, Target::Wasm] {
+			let ir = ir_at_target(
+				"structure-capture-transfer",
+				source,
+				true,
+				OptLevel::O0,
+				target,
+			);
+			for name in ["fa.make", "fa.anonymous"] {
+				let body = function(&ir, name);
+				assert!(
+					!body
+						.lines()
+						.any(|line| line.contains("call ptr") && line.contains("@fa.copy")),
+					"{target:?}: {body}"
+				);
+			}
+		}
+	}
+
+	#[test]
 	fn union_equality_borrows_the_plain_values_payload() {
 		let source =
 			include_str!("../../analyzer/tests/cases/collections/ownership-inspecting-unions.fa");

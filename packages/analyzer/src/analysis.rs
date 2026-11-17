@@ -688,6 +688,9 @@ pub struct Analysis {
 	/// capture materialization must distinguish that logical type from the
 	/// source's physical representation. This table makes no transfer claim.
 	pub capture_types: FxHashMap<(NodeId, SymbolId), TypeId>,
+	/// Checked whole-owner transfers at environment creation. Each target
+	/// must clear this source only after preparing every captured value.
+	pub capture_moves: rustc_hash::FxHashSet<(NodeId, SymbolId)>,
 	/// Nonlocal named callable bindings, including lexical transport. Retain
 	/// these edges even when a callee's capture facts are still pending in a
 	/// per-key snapshot. Capture state decides which need environment slots.
@@ -1829,6 +1832,7 @@ impl Analysis {
 			callback_types: FxHashMap::default(),
 			escapes: rustc_hash::FxHashSet::default(),
 			capture_types: FxHashMap::default(),
+			capture_moves: rustc_hash::FxHashSet::default(),
 			named_function_dependencies: FxHashMap::default(),
 			function_capture_states: FxHashMap::default(),
 			named_function_readiness: FxHashMap::default(),

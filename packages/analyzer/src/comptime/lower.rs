@@ -1550,12 +1550,19 @@ impl<'a> Lowerer<'a> {
 		let owned = self.a.escapes.contains(&lambda);
 		let mut preparation = Vec::new();
 		let mut temporary = Vec::new();
+		let mut transfers = Vec::new();
 		for capture in captures {
 			match self.slots.get(&capture) {
 				Some(&slot) => {
 					let ty = self.a.symbols.symbol(capture).ty;
 					let plan = self.copy_plan(ty, ty);
-					if owned
+					if owned && self.a.capture_moves.contains(&(lambda, capture)) {
+						let staged = self.temp();
+						preparation.push(Expr::Let(staged, Expr::Local(slot).boxed()));
+						temporary.push(staged);
+						transfers.push(slot);
+						slots.push(staged);
+					} else if owned
 						&& self.types().ownership(ty) == crate::types::Ownership::Ordinary
 						&& !matches!(
 							plan.steps[plan.root as usize],
@@ -1592,6 +1599,7 @@ impl<'a> Lowerer<'a> {
 			return closure;
 		}
 		let result = self.temp();
+		preparation.extend(transfers.into_iter().map(Expr::Move));
 		preparation.push(Expr::Let(result, closure.boxed()));
 		preparation.extend(temporary.into_iter().map(Expr::Move));
 		preparation.push(Expr::Move(result));

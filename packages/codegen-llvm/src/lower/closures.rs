@@ -323,11 +323,43 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let pointer = self.allocate(structure.size_of().expect("a sized environment"))?;
 			let (drop, copy) = self.environment_functions(structure, captures)?;
 			self.initialize_environment(pointer, drop, copy, true)?;
-			for (index, &symbol) in captures.iter().enumerate() {
+			let lambda = self
+				.analysis
+				.function(node)
+				.map_or(node, |info| info.lambda);
+			let mut prepared = Vec::with_capacity(captures.len());
+			let mut transfers = Vec::new();
+			for &symbol in captures {
 				let slot = self.slot_of(symbol, node)?;
 				let loaded = self.load(slot)?;
-				// the environment holds copies
-				let loaded = self.emit_copy(loaded)?;
+				let moved = self.analysis.capture_moves.contains(&(lambda, symbol));
+				let loaded = if moved {
+					if !self.owned_locals.get(&symbol).is_some_and(|owner| {
+						owner.pointer == slot.pointer
+							&& (owner.repr == slot.repr || self.same_layout(owner.repr, slot.repr))
+					}) || self.holds_views(symbol)
+						|| (self
+							.frame()
+							.collection_locals
+							.contains(&(self.file, symbol))
+							&& !self
+								.frame()
+								.static_collections
+								.contains(&(self.file, symbol)))
+					{
+						return Err(self.unsupported(
+							node.index(),
+							"transferring this capture's borrowed storage",
+						));
+					}
+					transfers.push((slot, loaded));
+					loaded
+				} else {
+					self.emit_copy(loaded)?
+				};
+				prepared.push(loaded);
+			}
+			for (index, loaded) in prepared.into_iter().enumerate() {
 				let field = self.builder.build_struct_gep(
 					structure,
 					pointer,
@@ -336,6 +368,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				)?;
 				self.builder
 					.build_store(field, loaded.value.expect("a value"))?;
+			}
+			for (slot, loaded) in transfers {
+				self.move_owned_slot(slot, loaded)?;
 			}
 			pointer
 		})

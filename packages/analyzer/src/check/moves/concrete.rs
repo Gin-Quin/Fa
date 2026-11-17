@@ -200,6 +200,21 @@ impl Walker<'_> {
 	/// arguments. Include globals and transitive local calls in that read.
 	fn ownership_reads(&mut self) -> FxHashMap<NodeId, Vec<SymbolId>> {
 		let mut reads = self.move_reads.clone();
+		// An owned named handle observes its declaration environment. Reads
+		// of its spelling no longer keep the original payload alive.
+		for (&node, symbols) in &mut reads {
+			if !matches!(self.view(node), View::Name(_)) {
+				continue;
+			}
+			if let Resolution::Local(symbol) = self.a.resolution(node)
+				&& self.a.symbols.symbol(symbol).kind == SymbolKind::Function
+				&& let Some(function) = self.direct_function(symbol)
+				&& let Some(info) = self.a.function(function)
+				&& self.a.escapes.contains(&info.lambda)
+			{
+				symbols.retain(|read| *read == symbol);
+			}
+		}
 		// Alias construction can preserve more current alternatives than
 		// the reference checker's single canonical walk-order path. Keep
 		// each source live; storage-origin filtering belongs to the later
@@ -289,6 +304,25 @@ impl Walker<'_> {
 				continue;
 			}
 			let body = self.ownership_read_context(node, &defaults);
+			let entry = self.ownership_observation_entry(body, &defaults);
+			if let Some(data) = self.a.ownership_source_graph.entries.get(&entry)
+				&& !data.pending
+			{
+				let sources = data.reads.get(&node).cloned().unwrap_or_default();
+				for source in sources {
+					if let crate::flow::PlaceRoot::Symbol(symbol) = source.root
+						&& self.ownership_read_context(
+							self.a.symbols.symbol(symbol).decl_node,
+							&defaults,
+						) != body
+					{
+						free.entry(body)
+							.or_default()
+							.insert(self.places.symbol(symbol));
+					}
+				}
+				continue;
+			}
 			for &symbol in symbols {
 				if self.ownership_read_context(self.a.symbols.symbol(symbol).decl_node, &defaults)
 					== body
@@ -446,6 +480,72 @@ impl Walker<'_> {
 				}
 			}
 		}
+	}
+
+	fn ownership_observation_entry(
+		&self,
+		context: NodeId,
+		defaults: &FxHashSet<NodeId>,
+	) -> crate::analysis::OwnershipEntry {
+		use crate::analysis::{OwnershipContext, OwnershipEntry, OwnershipEntryMode};
+		let owner = if defaults.contains(&context) {
+			self.a
+				.functions
+				.values()
+				.find(|info| {
+					info.params
+						.iter()
+						.any(|param| param.default == Some(context))
+				})
+				.map_or(context, |info| info.lambda)
+		} else {
+			context
+		};
+		OwnershipEntry {
+			context: if defaults.contains(&context) {
+				OwnershipContext::Default(context)
+			} else {
+				OwnershipContext::Body(context)
+			},
+			mode: if self.a.escapes.contains(&owner) {
+				OwnershipEntryMode::Owned
+			} else {
+				OwnershipEntryMode::Borrowed
+			},
+		}
+	}
+
+	/// A settled invocation graph proves that every possible original-source
+	/// observation is present. Mixed readiness and unresolved inputs require
+	/// the conditional consumer rather than an empty-observation assumption.
+	pub(super) fn capture_observations_complete(&self, creation: NodeId) -> bool {
+		let defaults = self
+			.a
+			.functions
+			.values()
+			.flat_map(|info| info.params.iter().filter_map(|param| param.default))
+			.collect();
+		let context = self.ownership_read_context(creation, &defaults);
+		let mut pending = vec![self.ownership_observation_entry(context, &defaults)];
+		let mut seen = FxHashSet::default();
+		while let Some(entry) = pending.pop() {
+			if !seen.insert(entry) {
+				continue;
+			}
+			let Some(data) = self.a.ownership_source_graph.entries.get(&entry) else {
+				return false;
+			};
+			if data.pending {
+				return false;
+			}
+			for edge in &data.calls {
+				if edge.guard.is_some_and(|guard| !guard.reached) {
+					return false;
+				}
+				pending.push(edge.target);
+			}
+		}
+		true
 	}
 
 	/// Defaults run only at calls which omit them. Keep their observations

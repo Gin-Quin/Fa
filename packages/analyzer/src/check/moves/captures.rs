@@ -43,31 +43,41 @@ impl Walker<'_> {
 					continue;
 				}
 				let owned = self.ownership_source_owned(symbol, creation);
-				let later = graph.later_uses_where(symbol, |node| {
-					let creation = matches!(
-						self.view(node),
-						View::Lambda { .. } | View::Function { .. } | View::ExportFunction { .. }
-					) && self.a.function(node).is_some_and(|info| {
-						info.declaration.unwrap_or(info.lambda) == node
-							&& self.a.escapes.contains(&info.lambda)
-					});
-					creation
-						|| borrowed_calls
-							.get(&node)
-							.is_some_and(|roots| roots.contains(&symbol))
-						|| matches!(self.view(node), View::Name(_))
-							&& self.move_places.get(&node).is_some_and(|places| {
-								places
-									.iter()
-									.any(|&place| self.place_symbol(place) == Some(symbol))
-							})
-				});
+				let later = if self.capture_observations_complete(creation) {
+					graph.later_uses(symbol)
+				} else {
+					graph.later_uses_where(symbol, |node| {
+						let creation = matches!(
+							self.view(node),
+							View::Lambda { .. }
+								| View::Function { .. } | View::ExportFunction { .. }
+						) && self.a.function(node).is_some_and(|info| {
+							info.declaration.unwrap_or(info.lambda) == node
+								&& self.a.escapes.contains(&info.lambda)
+						});
+						creation
+							|| borrowed_calls
+								.get(&node)
+								.is_some_and(|roots| roots.contains(&symbol))
+							|| matches!(self.view(node), View::Name(_))
+								&& self.move_places.get(&node).is_some_and(|places| {
+									places
+										.iter()
+										.any(|&place| self.place_symbol(place) == Some(symbol))
+								})
+					})
+				};
+
 				let witness = events
 					.iter()
 					.filter(|&&index| graph.reachable[index])
 					.find_map(|&index| later[index]);
 				if !owned || witness.is_some() {
 					copies.push((symbol, ty, witness));
+				} else if self.capture_observations_complete(creation)
+					&& self.a.capture_moves.insert((info.lambda, symbol))
+				{
+					self.retention_version += 1;
 				}
 			}
 			if copies.is_empty() || !self.reported_once.insert((info.lambda, "capture-copy")) {
@@ -279,6 +289,27 @@ mod tests {
 			.filter(|diagnostic| diagnostic.code.id != "W-DECL-2")
 			.map(|diagnostic| diagnostic.code.id)
 			.collect()
+	}
+
+	#[test]
+	fn owned_last_use_captures_publish_transfers_for_every_engine() {
+		let source = include_str!("../../../tests/cases/ownership-structure-capture-moves.fa");
+		let (session, file) = analyzed(source);
+		let errors: Vec<_> = session
+			.diagnostics(file)
+			.iter()
+			.filter(|d| d.severity == crate::Severity::Error)
+			.map(|d| &d.message)
+			.collect();
+		assert!(errors.is_empty(), "{errors:?}");
+		let analysis = session.analysis(file);
+		assert_eq!(
+			analysis.capture_moves.len(),
+			2,
+			"{:?}",
+			analysis.capture_moves
+		);
+		assert_eq!(analysis.capture_moves, analysis.clone().capture_moves);
 	}
 
 	#[test]

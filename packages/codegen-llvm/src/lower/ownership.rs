@@ -1637,16 +1637,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if let Some(node) = node
 			&& let Some(slot) = self.movable_local(node, value.repr)
 		{
-			// the local gives its value up: its drop sees a zero
-			self.builder
-				.build_store(slot.pointer, self.llvm_type(slot.repr).const_zero())?;
-			if let Some(&flag) = self.resource_flags.borrow().get(&slot.pointer) {
-				self.builder
-					.build_store(flag, self.context.bool_type().const_zero())?;
-			}
+			let value = self.move_owned_slot(slot, value)?;
 			return self.escape_owned_storage(value);
 		}
 		self.emit_copy(value)
+	}
+
+	/// Commit a proven whole-owner transfer after its input reads finish.
+	/// This does not rescue borrowed backing by copying it.
+	pub(super) fn move_owned_slot(
+		&self,
+		slot: Slot<'ctx>,
+		value: Val<'ctx>,
+	) -> Result<Val<'ctx>, Error> {
+		self.builder
+			.build_store(slot.pointer, self.llvm_type(slot.repr).const_zero())?;
+		if let Some(&flag) = self.resource_flags.borrow().get(&slot.pointer) {
+			self.builder
+				.build_store(flag, self.context.bool_type().const_zero())?;
+		}
+		Ok(value)
 	}
 
 	/// A local read for the last time (`node`), given up so that the caller

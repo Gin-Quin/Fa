@@ -244,6 +244,7 @@ impl Walker<'_> {
 		for symbol in captures {
 			let key = (lambda, symbol);
 			changed |= self.a.capture_types.remove(&key).is_some();
+			changed |= self.a.capture_moves.remove(&key);
 			changed |= self.capture_places.remove(&key).is_some();
 			changed |= self.ownership_capture_origins.remove(&key).is_some();
 			changed |= self.callable_captures.remove(&key).is_some();

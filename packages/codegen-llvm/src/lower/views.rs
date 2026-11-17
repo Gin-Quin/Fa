@@ -241,7 +241,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 		};
 		let holder = self.analysis.symbols.symbol_of_decl(declaration)?;
-		if self.analysis.symbols.symbol(holder).kind != SymbolKind::Let {
+		if self.analysis.symbols.symbol(holder).kind != SymbolKind::Let
+			|| self
+				.analysis
+				.capture_moves
+				.iter()
+				.any(|&(_, symbol)| symbol == holder)
+		{
 			return None;
 		}
 		// the scope of the holder after its declaration: the rest of its block

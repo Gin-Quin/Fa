@@ -45,3 +45,11 @@ runner: pass this directory and a scratch output directory; expected stdout
 is `per-unit ok`. The runner executes every target at O0/O3 with leak checking;
 the current compiler fails the nested-fill assertion. `run-package.py` compiles
 that existing Rust runner against the current warm LLVM-enabled libraries.
+
+Closing validation: LLVM-enabled workspace **1,400 passed / zero failed /
+eight existing ignored**, 74 groups, including 104 IR checks and all three
+runtime corpora. Clippy is warning-free; fmt and all three formatter corpus
+tests pass. The intentionally failing review programs are outside the regular
+runtime corpus. C1 is the new merge blocker; the UInt32 issue reproduces on
+the base. Per-unit freestanding O0 also retains the already documented hosted
+runtime link failure (M1); the other five combinations expose C1.

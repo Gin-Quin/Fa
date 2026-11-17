@@ -168,10 +168,7 @@ impl Generator<'_> {
 				self.out.line(format!("const {name} = {};", composed.text));
 			}
 			_ => {
-				self.internal_error(
-					n,
-					"the checked function declaration has no body metadata, alias or composition",
-				);
+				self.unsupported(n, "this function declaration");
 			}
 		}
 	}

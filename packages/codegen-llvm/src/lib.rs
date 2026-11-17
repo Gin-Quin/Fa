@@ -76,6 +76,23 @@ pub fn compile(
 	Err(Error::Unavailable)
 }
 
+/// Without LLVM: always [`Error::Unavailable`], like [`compile`].
+#[cfg(not(fa_llvm))]
+pub fn compile_file(
+	_path: &std::path::Path,
+	_target: Target,
+	_options: &Options,
+	_output: &std::path::Path,
+) -> Result<Artifact, Error> {
+	Err(Error::Unavailable)
+}
+
+/// Without LLVM: always [`Error::Unavailable`].
+#[cfg(not(fa_llvm))]
+pub fn run(_artifact: &Artifact, _arguments: &[&str]) -> Result<std::process::Output, Error> {
+	Err(Error::Unavailable)
+}
+
 /// What the backend compiles into one module.
 #[derive(Clone, Copy)]
 pub enum Source<'a> {

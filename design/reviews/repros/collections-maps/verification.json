@@ -1,1270 +1,1270 @@
 {
-  "reviewed_revision": "6436bed3a914e19582ae3a476ee341b96597c842",
-  "base": "cbe3c5a6bd024977be3414b40dee74f4ac681b72",
-  "standalone": [
-    {
-      "case": "aliases-closures",
-      "target": "bun",
-      "passed": true,
-      "code": 0,
-      "output": "aliases ok\n",
-      "peak_rss_kib": 388
-    },
-    {
-      "case": "aliases-closures",
-      "target": "native",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "aliases ok\n",
-      "peak_rss_kib": 83340,
-      "limit": null
-    },
-    {
-      "case": "aliases-closures",
-      "target": "native",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "aliases ok\n",
-      "peak_rss_kib": 91736,
-      "limit": null
-    },
-    {
-      "case": "aliases-closures",
-      "target": "wasm",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "aliases ok\n",
-      "peak_rss_kib": 81808,
-      "limit": null
-    },
-    {
-      "case": "aliases-closures",
-      "target": "wasm",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "aliases ok\n",
-      "peak_rss_kib": 87760,
-      "limit": null
-    },
-    {
-      "case": "aliases-closures",
-      "target": "native-freestanding",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "aliases ok\n",
-      "peak_rss_kib": 83576,
-      "limit": null
-    },
-    {
-      "case": "aliases-closures",
-      "target": "native-freestanding",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "aliases ok\n",
-      "peak_rss_kib": 91748,
-      "limit": null
-    },
-    {
-      "case": "await",
-      "target": "bun",
-      "passed": true,
-      "code": 0,
-      "output": "await ok\n",
-      "peak_rss_kib": 29596
-    },
-    {
-      "case": "await",
-      "target": "native",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "await ok\n",
-      "peak_rss_kib": 84536,
-      "limit": null
-    },
-    {
-      "case": "await",
-      "target": "native",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "await ok\n",
-      "peak_rss_kib": 91416,
-      "limit": null
-    },
-    {
-      "case": "await",
-      "target": "wasm",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "await ok\n",
-      "peak_rss_kib": 86136,
-      "limit": null
-    },
-    {
-      "case": "await",
-      "target": "wasm",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "await ok\n",
-      "peak_rss_kib": 87228,
-      "limit": null
-    },
-    {
-      "case": "await",
-      "target": "native-freestanding",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "await ok\n",
-      "peak_rss_kib": 84716,
-      "limit": null
-    },
-    {
-      "case": "await",
-      "target": "native-freestanding",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "await ok\n",
-      "peak_rss_kib": 91604,
-      "limit": null
-    },
-    {
-      "case": "budgets",
-      "target": "bun",
-      "passed": true,
-      "code": 0,
-      "output": "budgets ok\n",
-      "peak_rss_kib": 20400
-    },
-    {
-      "case": "budgets",
-      "target": "native",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "budgets ok\n",
-      "peak_rss_kib": 90584,
-      "limit": null
-    },
-    {
-      "case": "budgets",
-      "target": "native",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "budgets ok\n",
-      "peak_rss_kib": 98844,
-      "limit": null
-    },
-    {
-      "case": "budgets",
-      "target": "wasm",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "budgets ok\n",
-      "peak_rss_kib": 97872,
-      "limit": null
-    },
-    {
-      "case": "budgets",
-      "target": "wasm",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "budgets ok\n",
-      "peak_rss_kib": 144280,
-      "limit": null
-    },
-    {
-      "case": "budgets",
-      "target": "native-freestanding",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "budgets ok\n",
-      "peak_rss_kib": 85496,
-      "limit": null
-    },
-    {
-      "case": "budgets",
-      "target": "native-freestanding",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "budgets ok\n",
-      "peak_rss_kib": 113708,
-      "limit": null
-    },
-    {
-      "case": "captured",
-      "target": "bun",
-      "passed": true,
-      "code": 0,
-      "output": "capture ok\n",
-      "peak_rss_kib": 29660
-    },
-    {
-      "case": "captured",
-      "target": "native",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "capture ok\n",
-      "peak_rss_kib": 83552,
-      "limit": null
-    },
-    {
-      "case": "captured",
-      "target": "native",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "capture ok\n",
-      "peak_rss_kib": 91344,
-      "limit": null
-    },
-    {
-      "case": "captured",
-      "target": "wasm",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "capture ok\n",
-      "peak_rss_kib": 81928,
-      "limit": null
-    },
-    {
-      "case": "captured",
-      "target": "wasm",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "capture ok\n",
-      "peak_rss_kib": 86544,
-      "limit": null
-    },
-    {
-      "case": "captured",
-      "target": "native-freestanding",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "capture ok\n",
-      "peak_rss_kib": 83440,
-      "limit": null
-    },
-    {
-      "case": "captured",
-      "target": "native-freestanding",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "capture ok\n",
-      "peak_rss_kib": 91844,
-      "limit": null
-    },
-    {
-      "case": "compile-time",
-      "target": "bun",
-      "passed": true,
-      "code": 0,
-      "output": "compile-time ok\n",
-      "peak_rss_kib": 29828
-    },
-    {
-      "case": "compile-time",
-      "target": "native",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "compile-time ok\n",
-      "peak_rss_kib": 83280,
-      "limit": null
-    },
-    {
-      "case": "compile-time",
-      "target": "native",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "compile-time ok\n",
-      "peak_rss_kib": 91100,
-      "limit": null
-    },
-    {
-      "case": "compile-time",
-      "target": "wasm",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "compile-time ok\n",
-      "peak_rss_kib": 85632,
-      "limit": null
-    },
-    {
-      "case": "compile-time",
-      "target": "wasm",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "compile-time ok\n",
-      "peak_rss_kib": 86440,
-      "limit": null
-    },
-    {
-      "case": "compile-time",
-      "target": "native-freestanding",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "compile-time ok\n",
-      "peak_rss_kib": 83672,
-      "limit": null
-    },
-    {
-      "case": "compile-time",
-      "target": "native-freestanding",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "compile-time ok\n",
-      "peak_rss_kib": 91380,
-      "limit": null
-    },
-    {
-      "case": "escape",
-      "target": "bun",
-      "passed": true,
-      "code": 0,
-      "output": "escape ok\n",
-      "peak_rss_kib": 29540
-    },
-    {
-      "case": "escape",
-      "target": "native",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "escape ok\n",
-      "peak_rss_kib": 83348,
-      "limit": null
-    },
-    {
-      "case": "escape",
-      "target": "native",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "escape ok\n",
-      "peak_rss_kib": 91200,
-      "limit": null
-    },
-    {
-      "case": "escape",
-      "target": "wasm",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "escape ok\n",
-      "peak_rss_kib": 85568,
-      "limit": null
-    },
-    {
-      "case": "escape",
-      "target": "wasm",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "escape ok\n",
-      "peak_rss_kib": 87160,
-      "limit": null
-    },
-    {
-      "case": "escape",
-      "target": "native-freestanding",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "escape ok\n",
-      "peak_rss_kib": 83588,
-      "limit": null
-    },
-    {
-      "case": "escape",
-      "target": "native-freestanding",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "escape ok\n",
-      "peak_rss_kib": 92140,
-      "limit": null
-    },
-    {
-      "case": "generic-delete",
-      "target": "bun",
-      "passed": true,
-      "code": 0,
-      "output": "generic delete ok\n",
-      "peak_rss_kib": 384
-    },
-    {
-      "case": "generic-delete",
-      "target": "native",
-      "opt": 0,
-      "passed": false,
-      "code": 1,
-      "output": "",
-      "peak_rss_kib": 83344,
-      "limit": null
-    },
-    {
-      "case": "generic-delete",
-      "target": "native",
-      "opt": 3,
-      "passed": false,
-      "code": 1,
-      "output": "",
-      "peak_rss_kib": 90796,
-      "limit": null
-    },
-    {
-      "case": "generic-delete",
-      "target": "wasm",
-      "opt": 0,
-      "passed": false,
-      "code": 101,
-      "output": "stop: assertion failed: map.size == 0\n       \u21b3 left: 3, right: 0\n  at /home/claude-dev/projects/Fa/.claude/worktrees/trunk/design/reviews/repros/collections-maps/generic-delete.fa:7:1\n",
-      "peak_rss_kib": 82096,
-      "limit": null
-    },
-    {
-      "case": "generic-delete",
-      "target": "wasm",
-      "opt": 3,
-      "passed": false,
-      "code": 101,
-      "output": "stop: assertion failed: map.size == 0\n       \u21b3 left: 3, right: 0\n  at /home/claude-dev/projects/Fa/.claude/worktrees/trunk/design/reviews/repros/collections-maps/generic-delete.fa:7:1\n",
-      "peak_rss_kib": 86328,
-      "limit": null
-    },
-    {
-      "case": "generic-delete",
-      "target": "native-freestanding",
-      "opt": 0,
-      "passed": false,
-      "code": 1,
-      "output": "",
-      "peak_rss_kib": 83328,
-      "limit": null
-    },
-    {
-      "case": "generic-delete",
-      "target": "native-freestanding",
-      "opt": 3,
-      "passed": false,
-      "code": 1,
-      "output": "",
-      "peak_rss_kib": 91160,
-      "limit": null
-    },
-    {
-      "case": "generic",
-      "target": "bun",
-      "passed": true,
-      "code": 0,
-      "output": "generic ok\n",
-      "peak_rss_kib": 224
-    },
-    {
-      "case": "generic",
-      "target": "native",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "generic ok\n",
-      "peak_rss_kib": 83068,
-      "limit": null
-    },
-    {
-      "case": "generic",
-      "target": "native",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "generic ok\n",
-      "peak_rss_kib": 91312,
-      "limit": null
-    },
-    {
-      "case": "generic",
-      "target": "wasm",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "generic ok\n",
-      "peak_rss_kib": 82448,
-      "limit": null
-    },
-    {
-      "case": "generic",
-      "target": "wasm",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "generic ok\n",
-      "peak_rss_kib": 86488,
-      "limit": null
-    },
-    {
-      "case": "generic",
-      "target": "native-freestanding",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "generic ok\n",
-      "peak_rss_kib": 83484,
-      "limit": null
-    },
-    {
-      "case": "generic",
-      "target": "native-freestanding",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "generic ok\n",
-      "peak_rss_kib": 91328,
-      "limit": null
-    },
-    {
-      "case": "owner-method",
-      "target": "bun",
-      "passed": true,
-      "code": 0,
-      "output": "method ok\n",
-      "peak_rss_kib": 27548
-    },
-    {
-      "case": "owner-method",
-      "target": "native",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "method ok\n",
-      "peak_rss_kib": 83064,
-      "limit": null
-    },
-    {
-      "case": "owner-method",
-      "target": "native",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "method ok\n",
-      "peak_rss_kib": 91032,
-      "limit": null
-    },
-    {
-      "case": "owner-method",
-      "target": "wasm",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "method ok\n",
-      "peak_rss_kib": 81096,
-      "limit": null
-    },
-    {
-      "case": "owner-method",
-      "target": "wasm",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "method ok\n",
-      "peak_rss_kib": 86476,
-      "limit": null
-    },
-    {
-      "case": "owner-method",
-      "target": "native-freestanding",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "method ok\n",
-      "peak_rss_kib": 83952,
-      "limit": null
-    },
-    {
-      "case": "owner-method",
-      "target": "native-freestanding",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "method ok\n",
-      "peak_rss_kib": 91248,
-      "limit": null
-    },
-    {
-      "case": "private-error",
-      "target": "bun",
-      "passed": true,
-      "code": 0,
-      "output": "cleanup ok\n",
-      "peak_rss_kib": 27560
-    },
-    {
-      "case": "private-error",
-      "target": "native",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "cleanup ok\n",
-      "peak_rss_kib": 83452,
-      "limit": null
-    },
-    {
-      "case": "private-error",
-      "target": "native",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "cleanup ok\n",
-      "peak_rss_kib": 91404,
-      "limit": null
-    },
-    {
-      "case": "private-error",
-      "target": "wasm",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "cleanup ok\n",
-      "peak_rss_kib": 84072,
-      "limit": null
-    },
-    {
-      "case": "private-error",
-      "target": "wasm",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "cleanup ok\n",
-      "peak_rss_kib": 86792,
-      "limit": null
-    },
-    {
-      "case": "private-error",
-      "target": "native-freestanding",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "cleanup ok\n",
-      "peak_rss_kib": 83888,
-      "limit": null
-    },
-    {
-      "case": "private-error",
-      "target": "native-freestanding",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "cleanup ok\n",
-      "peak_rss_kib": 91588,
-      "limit": null
-    },
-    {
-      "case": "probe-effects",
-      "target": "bun",
-      "passed": true,
-      "code": 0,
-      "output": "effects ok\n",
-      "peak_rss_kib": 29572
-    },
-    {
-      "case": "probe-effects",
-      "target": "native",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "effects ok\n",
-      "peak_rss_kib": 83488,
-      "limit": null
-    },
-    {
-      "case": "probe-effects",
-      "target": "native",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "effects ok\n",
-      "peak_rss_kib": 91424,
-      "limit": null
-    },
-    {
-      "case": "probe-effects",
-      "target": "wasm",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "effects ok\n",
-      "peak_rss_kib": 86728,
-      "limit": null
-    },
-    {
-      "case": "probe-effects",
-      "target": "wasm",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "effects ok\n",
-      "peak_rss_kib": 87392,
-      "limit": null
-    },
-    {
-      "case": "probe-effects",
-      "target": "native-freestanding",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "effects ok\n",
-      "peak_rss_kib": 84080,
-      "limit": null
-    },
-    {
-      "case": "probe-effects",
-      "target": "native-freestanding",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "effects ok\n",
-      "peak_rss_kib": 92236,
-      "limit": null
-    },
-    {
-      "case": "probe-shifts",
-      "target": "bun",
-      "passed": true,
-      "code": 0,
-      "output": "true\nfalse\ntrue\ntrue\n",
-      "peak_rss_kib": 436
-    },
-    {
-      "case": "probe-shifts",
-      "target": "native",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "true\nfalse\ntrue\ntrue\n",
-      "peak_rss_kib": 83052,
-      "limit": null
-    },
-    {
-      "case": "probe-shifts",
-      "target": "native",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "true\nfalse\ntrue\ntrue\n",
-      "peak_rss_kib": 91296,
-      "limit": null
-    },
-    {
-      "case": "probe-shifts",
-      "target": "wasm",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "true\nfalse\ntrue\ntrue\n",
-      "peak_rss_kib": 85452,
-      "limit": null
-    },
-    {
-      "case": "probe-shifts",
-      "target": "wasm",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "true\nfalse\ntrue\ntrue\n",
-      "peak_rss_kib": 86400,
-      "limit": null
-    },
-    {
-      "case": "probe-shifts",
-      "target": "native-freestanding",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "true\nfalse\ntrue\ntrue\n",
-      "peak_rss_kib": 83688,
-      "limit": null
-    },
-    {
-      "case": "probe-shifts",
-      "target": "native-freestanding",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "true\nfalse\ntrue\ntrue\n",
-      "peak_rss_kib": 91736,
-      "limit": null
-    },
-    {
-      "case": "stable",
-      "target": "bun",
-      "passed": true,
-      "code": 0,
-      "output": "stable ok\n",
-      "peak_rss_kib": 29612
-    },
-    {
-      "case": "stable",
-      "target": "native",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "stable ok\n",
-      "peak_rss_kib": 83360,
-      "limit": null
-    },
-    {
-      "case": "stable",
-      "target": "native",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "stable ok\n",
-      "peak_rss_kib": 91708,
-      "limit": null
-    },
-    {
-      "case": "stable",
-      "target": "wasm",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "stable ok\n",
-      "peak_rss_kib": 83864,
-      "limit": null
-    },
-    {
-      "case": "stable",
-      "target": "wasm",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "stable ok\n",
-      "peak_rss_kib": 89216,
-      "limit": null
-    },
-    {
-      "case": "stable",
-      "target": "native-freestanding",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "stable ok\n",
-      "peak_rss_kib": 84024,
-      "limit": null
-    },
-    {
-      "case": "stable",
-      "target": "native-freestanding",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "stable ok\n",
-      "peak_rss_kib": 91828,
-      "limit": null
-    },
-    {
-      "case": "stress",
-      "target": "bun",
-      "passed": true,
-      "code": 0,
-      "output": "stress ok\n",
-      "peak_rss_kib": 31596
-    },
-    {
-      "case": "stress",
-      "target": "native",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "stress ok\n",
-      "peak_rss_kib": 84040,
-      "limit": null
-    },
-    {
-      "case": "stress",
-      "target": "native",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "stress ok\n",
-      "peak_rss_kib": 92568,
-      "limit": null
-    },
-    {
-      "case": "stress",
-      "target": "wasm",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "stress ok\n",
-      "peak_rss_kib": 88776,
-      "limit": null
-    },
-    {
-      "case": "stress",
-      "target": "wasm",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "stress ok\n",
-      "peak_rss_kib": 87632,
-      "limit": null
-    },
-    {
-      "case": "stress",
-      "target": "native-freestanding",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "stress ok\n",
-      "peak_rss_kib": 84360,
-      "limit": null
-    },
-    {
-      "case": "stress",
-      "target": "native-freestanding",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "stress ok\n",
-      "peak_rss_kib": 92536,
-      "limit": null
-    },
-    {
-      "case": "widths",
-      "target": "bun",
-      "passed": true,
-      "code": 0,
-      "output": "widths ok\n",
-      "peak_rss_kib": 33988
-    },
-    {
-      "case": "widths",
-      "target": "native",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "widths ok\n",
-      "peak_rss_kib": 86660,
-      "limit": null
-    },
-    {
-      "case": "widths",
-      "target": "native",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "widths ok\n",
-      "peak_rss_kib": 120100,
-      "limit": null
-    },
-    {
-      "case": "widths",
-      "target": "wasm",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "widths ok\n",
-      "peak_rss_kib": 104584,
-      "limit": null
-    },
-    {
-      "case": "widths",
-      "target": "wasm",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "widths ok\n",
-      "peak_rss_kib": 196548,
-      "limit": null
-    },
-    {
-      "case": "widths",
-      "target": "native-freestanding",
-      "opt": 0,
-      "passed": true,
-      "code": 0,
-      "output": "widths ok\n",
-      "peak_rss_kib": 86852,
-      "limit": null
-    },
-    {
-      "case": "widths",
-      "target": "native-freestanding",
-      "opt": 3,
-      "passed": true,
-      "code": 0,
-      "output": "widths ok\n",
-      "peak_rss_kib": 125764,
-      "limit": null
-    }
-  ],
-  "per_unit": [
-    {
-      "case": "per-unit",
-      "target": "native",
-      "opt": 0,
-      "passed": true
-    },
-    {
-      "case": "per-unit",
-      "target": "native",
-      "opt": 3,
-      "passed": true
-    },
-    {
-      "case": "per-unit",
-      "target": "wasm",
-      "opt": 0,
-      "passed": true
-    },
-    {
-      "case": "per-unit",
-      "target": "wasm",
-      "opt": 3,
-      "passed": true
-    },
-    {
-      "case": "per-unit",
-      "target": "native-freestanding",
-      "opt": 0,
-      "passed": false,
-      "failure": "link: unresolved libc symbols (pre-existing M1)"
-    },
-    {
-      "case": "per-unit",
-      "target": "native-freestanding",
-      "opt": 3,
-      "passed": true
-    },
-    {
-      "case": "per-unit-delete",
-      "target": "native",
-      "opt": 0,
-      "passed": false,
-      "failure": "Output { status: ExitStatus(unix_wait_status(139)), stdout: \"\", stderr: \"crash: segmentation fault at 0x8 (a bug of the compiler or of foreign code)\\n\" }"
-    },
-    {
-      "case": "per-unit-delete",
-      "target": "native",
-      "opt": 3,
-      "passed": false,
-      "failure": "Output { status: ExitStatus(unix_wait_status(139)), stdout: \"\", stderr: \"crash: segmentation fault at 0x8 (a bug of the compiler or of foreign code)\\n\" }"
-    },
-    {
-      "case": "per-unit-delete",
-      "target": "wasm",
-      "opt": 0,
-      "passed": false,
-      "failure": "Output { status: ExitStatus(unix_wait_status(25856)), stdout: \"\", stderr: \"stop: assertion failed: map.size == 0\\n       \u21b3 left: 3, right: 0\\n  at application/main.fa:4:2\\n\" }"
-    },
-    {
-      "case": "per-unit-delete",
-      "target": "wasm",
-      "opt": 3,
-      "passed": false,
-      "failure": "Output { status: ExitStatus(unix_wait_status(25856)), stdout: \"\", stderr: \"stop: assertion failed: map.size == 0\\n       \u21b3 left: 3, right: 0\\n  at application/main.fa:4:2\\n\" }"
-    },
-    {
-      "case": "per-unit-delete",
-      "target": "native-freestanding",
-      "opt": 0,
-      "passed": false,
-      "failure": "link: unresolved libc symbols (pre-existing M1)"
-    },
-    {
-      "case": "per-unit-delete",
-      "target": "native-freestanding",
-      "opt": 3,
-      "passed": false,
-      "failure": "Output { status: ExitStatus(unix_wait_status(139)), stdout: \"\", stderr: \"\" }"
-    },
-    {
-      "case": "per-unit-generic",
-      "target": "native",
-      "opt": 0,
-      "passed": false,
-      "failure": "Output { status: ExitStatus(unix_wait_status(25856)), stdout: \"\", stderr: \"stop: assertion failed: map.get(7) == UInt64(70)\\n       \u21b3 left: none, right: 70\\n  at application/main.fa:5:2\\n\" }"
-    },
-    {
-      "case": "per-unit-generic",
-      "target": "native",
-      "opt": 3,
-      "passed": false,
-      "failure": "Output { status: ExitStatus(unix_wait_status(25856)), stdout: \"\", stderr: \"stop: assertion failed: map.get(7) == UInt64(70)\\n       \u21b3 left: none, right: 70\\n  at application/main.fa:5:2\\n\" }"
-    },
-    {
-      "case": "per-unit-generic",
-      "target": "wasm",
-      "opt": 0,
-      "passed": false,
-      "failure": "Output { status: ExitStatus(unix_wait_status(25856)), stdout: \"\", stderr: \"stop: assertion failed: map.get(7) == UInt64(70)\\n       \u21b3 left: none, right: 70\\n  at application/main.fa:5:2\\n\" }"
-    },
-    {
-      "case": "per-unit-generic",
-      "target": "wasm",
-      "opt": 3,
-      "passed": false,
-      "failure": "Output { status: ExitStatus(unix_wait_status(25856)), stdout: \"\", stderr: \"stop: assertion failed: map.get(7) == UInt64(70)\\n       \u21b3 left: none, right: 70\\n  at application/main.fa:5:2\\n\" }"
-    },
-    {
-      "case": "per-unit-generic",
-      "target": "native-freestanding",
-      "opt": 0,
-      "passed": false,
-      "failure": "link: unresolved libc symbols (pre-existing M1)"
-    },
-    {
-      "case": "per-unit-generic",
-      "target": "native-freestanding",
-      "opt": 3,
-      "passed": false,
-      "failure": "Output { status: ExitStatus(unix_wait_status(25856)), stdout: \"\", stderr: \"stop: assertion failed: map.get(7) == UInt64(70)\\n       \u21b3 left: none, right: 70\\n  at application/main.fa:5:2\\n\" }"
-    }
-  ],
-  "package_bun": {
-    "per-unit": "per-unit ok\n",
-    "per-unit-delete": "per-unit ok\n",
-    "per-unit-generic": "per-unit ok\n"
-  },
-  "ir_controls": [
-    "negative native off firing assertions False",
-    "negative native on firing assertions True",
-    "negative wasm off firing assertions False",
-    "negative wasm on firing assertions True",
-    "header native off firing assertions False",
-    "header native on firing assertions True",
-    "header wasm off firing assertions False",
-    "header wasm on firing assertions True",
-    "positive native off firing assertions False",
-    "positive native on firing assertions True",
-    "positive wasm off firing assertions False",
-    "positive wasm on firing assertions True",
-    "scalar64 native off firing assertions False",
-    "scalar64 native on firing assertions True",
-    "scalar64 wasm off firing assertions False",
-    "scalar64 wasm on firing assertions True",
-    "ordinary native off headers 0 required 42",
-    "ordinary native on headers 42 required 42",
-    "ordinary wasm off headers 0 required 42",
-    "ordinary wasm on headers 42 required 42",
-    "recursive native off headers 0 required 5",
-    "recursive native on headers 5 required 5",
-    "recursive wasm off headers 0 required 5",
-    "recursive wasm on headers 5 required 5",
-    "literal native off headers 0 required 41",
-    "literal native on headers 41 required 41",
-    "literal wasm off headers 0 required 41",
-    "literal wasm on headers 41 required 41"
-  ],
-  "runtime_sanitizers": "GCC ASan + UBSan script passed",
-  "audit_tables": [
-    "probes",
-    "lru 200000 20241014 18739665 -7.41736061% 17889204 53780368",
-    "word-count 500000 235017839 235017834 -0.00000213% 146467634 381596173",
-    "words 100000 28382789 28382789 +0.00000000% 22413653 62230740",
-    "above +1%: []",
-    "headers",
-    "lru 200000 18739665 19070292 +1.76431649% 17889180 53712435",
-    "word-count 500000 235017834 235017858 +0.00001021% 146467656 381608431",
-    "words 100000 28382789 28382794 +0.00001762% 22413721 62227869",
-    "above +1%: [('lru', 1.7643164912499731)]",
-    "positive",
-    "lru 200000 19070292 19047821 -0.11783249% 17889269 53682858",
-    "word-count 500000 235017858 235017839 -0.00000808% 146467652 381578404",
-    "words 100000 28382794 28382794 +0.00000000% 22413662 62224686",
-    "above +1%: []",
-    "scalar64",
-    "lru 200000 19047821 19153936 +0.55709784% 17889269 53800078",
-    "word-count 500000 235017839 235017865 +0.00001106% 146467652 381588055",
-    "words 100000 28382794 28382794 +0.00000000% 22413662 62225986",
-    "above +1%: []"
-  ],
-  "source_sha256": {
-    "aliases-closures.fa": "997ab3d860bf0ef52db0beefb56133120975a6cae57b887f6c526039c72b1dfd",
-    "await.fa": "316f3a2e5aea2d17d13305d6b818a028b3ff80ffa4e77570868ef055373cbe63",
-    "budgets.fa": "a63a31f281876252ba731c9f803f0e845cc73efa2f72b714c0f7a5158fdf46db",
-    "captured.fa": "06a18fe75a1a97a15d1e8a18f82900abbc92d8e0bcde6f6e92f2d7a9019268ad",
-    "compile-time.fa": "e681c02b1f662d4a3cbe04e19a96b7d9d970f64af36f2eea6f5ee60d3daa6263",
-    "escape.fa": "4d34ff19f9e3cf134b98319a2c53eb4bc612283523bbc97b8c8306e2a19aadf6",
-    "generic-delete.fa": "534245bf8be0fe1d0be93fb1e7aae8f68c2128278dde5e1f38e7d4605fb98a12",
-    "generic.fa": "b3ce39e04d9156df82c3f705ddb8eb1f91cea7e072e712e6b542b7a9b961d6c8",
-    "illegal-iteration.fa": "e88fe72689c587164be2c4068957bbd6f2bd41f74b0ee4c10d2ac00d3e78ac45",
-    "owner-method.fa": "2d00e408e5a691871c8995c0078ade786378d938a98f002732f1be387d6be101",
-    "per-unit/application/main.fa": "82d0e46cccc73a10c8b1c90821a9106352e6c7aef6d0dd3de737673d94c2889f",
-    "per-unit/library/create.fa": "f7f1250a7f6831b095d15f29502f39aef04fef9f3951f9ad742cafca8f8cd4b5",
-    "per-unit/library/inline.fa": "96cf94bc9108810d87ab72ae51421f5f97283e9a7ebdcbfb8d0e9d8186d16e13",
-    "per-unit/library/replace.fa": "6af419eef5f28edfe6cf607922c478628cbb2ec0810f54678b1548042f27598f",
-    "per-unit/package.fa": "dc583079a04a4bab55e496014b51d5f35f363d5d24b187d6c953bc1310908df1",
-    "per-unit-delete/application/main.fa": "e4015c952465afdec7b983af79e0a30ec41c1be2dc697260c806979725c7a4c8",
-    "per-unit-delete/library/prune.fa": "6d9125e47de4e68340611e724ac257ae13961a6451a5e2533422471ea0b05bc3",
-    "per-unit-delete/package.fa": "dc583079a04a4bab55e496014b51d5f35f363d5d24b187d6c953bc1310908df1",
-    "per-unit-generic/application/main.fa": "82d0e46cccc73a10c8b1c90821a9106352e6c7aef6d0dd3de737673d94c2889f",
-    "per-unit-generic/library/create.fa": "f7f1250a7f6831b095d15f29502f39aef04fef9f3951f9ad742cafca8f8cd4b5",
-    "per-unit-generic/library/inline.fa": "96cf94bc9108810d87ab72ae51421f5f97283e9a7ebdcbfb8d0e9d8186d16e13",
-    "per-unit-generic/library/replace.fa": "521a35831fb246b54a24c67710c342d25f69ff5d305de66674370f3a37350918",
-    "per-unit-generic/package.fa": "dc583079a04a4bab55e496014b51d5f35f363d5d24b187d6c953bc1310908df1",
-    "private-error.fa": "bd2184d192bb69ff3e8619469400839281c73257f807ff55ba893e42485768c3",
-    "probe-effects.fa": "b3df1a96f7cedbd084f410701475b9ceb77157684fd90d4814f8c2ccf1f4e66c",
-    "probe-shifts.fa": "c05c8dc209118650d16509b555340b4deda77fb4946b51d93cf54a8ed78773a0",
-    "stable.fa": "d3cd3648ec142d0d7a8bd74ba298e693144c726c254f35067a66cafcb4ecefc6",
-    "stress.fa": "dcbb91b86c92f2ad70bb5fd0c0eb5a91aff27f6dc24010f46e435aadcfebfaf1",
-    "widths.fa": "cd08e4dc5809c68cedce109789caf21549fa1e3568b9df426eb18795d3eb098a"
-  },
-  "direct_native_signal_checks": [
-    {
-      "target": "native",
-      "opt": 0,
-      "returncode": -11,
-      "stdout": "",
-      "stderr": ""
-    },
-    {
-      "target": "native",
-      "opt": 3,
-      "returncode": -11,
-      "stdout": "",
-      "stderr": ""
-    },
-    {
-      "target": "native-freestanding",
-      "opt": 0,
-      "returncode": -11,
-      "stdout": "",
-      "stderr": ""
-    },
-    {
-      "target": "native-freestanding",
-      "opt": 3,
-      "returncode": -11,
-      "stdout": "",
-      "stderr": ""
-    }
-  ],
-  "benchmark_roundtrips": "probes, headers, positive, scalar64 JSON and Markdown byte-identical",
-  "archived_compiler_hashes": "base/probes/headers/positive fa and fa-native match their retained profile JSON"
+	"reviewed_revision": "6436bed3a914e19582ae3a476ee341b96597c842",
+	"base": "cbe3c5a6bd024977be3414b40dee74f4ac681b72",
+	"standalone": [
+		{
+			"case": "aliases-closures",
+			"target": "bun",
+			"passed": true,
+			"code": 0,
+			"output": "aliases ok\n",
+			"peak_rss_kib": 388
+		},
+		{
+			"case": "aliases-closures",
+			"target": "native",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "aliases ok\n",
+			"peak_rss_kib": 83340,
+			"limit": null
+		},
+		{
+			"case": "aliases-closures",
+			"target": "native",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "aliases ok\n",
+			"peak_rss_kib": 91736,
+			"limit": null
+		},
+		{
+			"case": "aliases-closures",
+			"target": "wasm",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "aliases ok\n",
+			"peak_rss_kib": 81808,
+			"limit": null
+		},
+		{
+			"case": "aliases-closures",
+			"target": "wasm",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "aliases ok\n",
+			"peak_rss_kib": 87760,
+			"limit": null
+		},
+		{
+			"case": "aliases-closures",
+			"target": "native-freestanding",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "aliases ok\n",
+			"peak_rss_kib": 83576,
+			"limit": null
+		},
+		{
+			"case": "aliases-closures",
+			"target": "native-freestanding",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "aliases ok\n",
+			"peak_rss_kib": 91748,
+			"limit": null
+		},
+		{
+			"case": "await",
+			"target": "bun",
+			"passed": true,
+			"code": 0,
+			"output": "await ok\n",
+			"peak_rss_kib": 29596
+		},
+		{
+			"case": "await",
+			"target": "native",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "await ok\n",
+			"peak_rss_kib": 84536,
+			"limit": null
+		},
+		{
+			"case": "await",
+			"target": "native",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "await ok\n",
+			"peak_rss_kib": 91416,
+			"limit": null
+		},
+		{
+			"case": "await",
+			"target": "wasm",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "await ok\n",
+			"peak_rss_kib": 86136,
+			"limit": null
+		},
+		{
+			"case": "await",
+			"target": "wasm",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "await ok\n",
+			"peak_rss_kib": 87228,
+			"limit": null
+		},
+		{
+			"case": "await",
+			"target": "native-freestanding",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "await ok\n",
+			"peak_rss_kib": 84716,
+			"limit": null
+		},
+		{
+			"case": "await",
+			"target": "native-freestanding",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "await ok\n",
+			"peak_rss_kib": 91604,
+			"limit": null
+		},
+		{
+			"case": "budgets",
+			"target": "bun",
+			"passed": true,
+			"code": 0,
+			"output": "budgets ok\n",
+			"peak_rss_kib": 20400
+		},
+		{
+			"case": "budgets",
+			"target": "native",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "budgets ok\n",
+			"peak_rss_kib": 90584,
+			"limit": null
+		},
+		{
+			"case": "budgets",
+			"target": "native",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "budgets ok\n",
+			"peak_rss_kib": 98844,
+			"limit": null
+		},
+		{
+			"case": "budgets",
+			"target": "wasm",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "budgets ok\n",
+			"peak_rss_kib": 97872,
+			"limit": null
+		},
+		{
+			"case": "budgets",
+			"target": "wasm",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "budgets ok\n",
+			"peak_rss_kib": 144280,
+			"limit": null
+		},
+		{
+			"case": "budgets",
+			"target": "native-freestanding",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "budgets ok\n",
+			"peak_rss_kib": 85496,
+			"limit": null
+		},
+		{
+			"case": "budgets",
+			"target": "native-freestanding",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "budgets ok\n",
+			"peak_rss_kib": 113708,
+			"limit": null
+		},
+		{
+			"case": "captured",
+			"target": "bun",
+			"passed": true,
+			"code": 0,
+			"output": "capture ok\n",
+			"peak_rss_kib": 29660
+		},
+		{
+			"case": "captured",
+			"target": "native",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "capture ok\n",
+			"peak_rss_kib": 83552,
+			"limit": null
+		},
+		{
+			"case": "captured",
+			"target": "native",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "capture ok\n",
+			"peak_rss_kib": 91344,
+			"limit": null
+		},
+		{
+			"case": "captured",
+			"target": "wasm",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "capture ok\n",
+			"peak_rss_kib": 81928,
+			"limit": null
+		},
+		{
+			"case": "captured",
+			"target": "wasm",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "capture ok\n",
+			"peak_rss_kib": 86544,
+			"limit": null
+		},
+		{
+			"case": "captured",
+			"target": "native-freestanding",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "capture ok\n",
+			"peak_rss_kib": 83440,
+			"limit": null
+		},
+		{
+			"case": "captured",
+			"target": "native-freestanding",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "capture ok\n",
+			"peak_rss_kib": 91844,
+			"limit": null
+		},
+		{
+			"case": "compile-time",
+			"target": "bun",
+			"passed": true,
+			"code": 0,
+			"output": "compile-time ok\n",
+			"peak_rss_kib": 29828
+		},
+		{
+			"case": "compile-time",
+			"target": "native",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "compile-time ok\n",
+			"peak_rss_kib": 83280,
+			"limit": null
+		},
+		{
+			"case": "compile-time",
+			"target": "native",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "compile-time ok\n",
+			"peak_rss_kib": 91100,
+			"limit": null
+		},
+		{
+			"case": "compile-time",
+			"target": "wasm",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "compile-time ok\n",
+			"peak_rss_kib": 85632,
+			"limit": null
+		},
+		{
+			"case": "compile-time",
+			"target": "wasm",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "compile-time ok\n",
+			"peak_rss_kib": 86440,
+			"limit": null
+		},
+		{
+			"case": "compile-time",
+			"target": "native-freestanding",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "compile-time ok\n",
+			"peak_rss_kib": 83672,
+			"limit": null
+		},
+		{
+			"case": "compile-time",
+			"target": "native-freestanding",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "compile-time ok\n",
+			"peak_rss_kib": 91380,
+			"limit": null
+		},
+		{
+			"case": "escape",
+			"target": "bun",
+			"passed": true,
+			"code": 0,
+			"output": "escape ok\n",
+			"peak_rss_kib": 29540
+		},
+		{
+			"case": "escape",
+			"target": "native",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "escape ok\n",
+			"peak_rss_kib": 83348,
+			"limit": null
+		},
+		{
+			"case": "escape",
+			"target": "native",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "escape ok\n",
+			"peak_rss_kib": 91200,
+			"limit": null
+		},
+		{
+			"case": "escape",
+			"target": "wasm",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "escape ok\n",
+			"peak_rss_kib": 85568,
+			"limit": null
+		},
+		{
+			"case": "escape",
+			"target": "wasm",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "escape ok\n",
+			"peak_rss_kib": 87160,
+			"limit": null
+		},
+		{
+			"case": "escape",
+			"target": "native-freestanding",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "escape ok\n",
+			"peak_rss_kib": 83588,
+			"limit": null
+		},
+		{
+			"case": "escape",
+			"target": "native-freestanding",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "escape ok\n",
+			"peak_rss_kib": 92140,
+			"limit": null
+		},
+		{
+			"case": "generic-delete",
+			"target": "bun",
+			"passed": true,
+			"code": 0,
+			"output": "generic delete ok\n",
+			"peak_rss_kib": 384
+		},
+		{
+			"case": "generic-delete",
+			"target": "native",
+			"opt": 0,
+			"passed": false,
+			"code": 1,
+			"output": "",
+			"peak_rss_kib": 83344,
+			"limit": null
+		},
+		{
+			"case": "generic-delete",
+			"target": "native",
+			"opt": 3,
+			"passed": false,
+			"code": 1,
+			"output": "",
+			"peak_rss_kib": 90796,
+			"limit": null
+		},
+		{
+			"case": "generic-delete",
+			"target": "wasm",
+			"opt": 0,
+			"passed": false,
+			"code": 101,
+			"output": "stop: assertion failed: map.size == 0\n       \u21b3 left: 3, right: 0\n  at /home/claude-dev/projects/Fa/.claude/worktrees/trunk/design/reviews/repros/collections-maps/generic-delete.fa:7:1\n",
+			"peak_rss_kib": 82096,
+			"limit": null
+		},
+		{
+			"case": "generic-delete",
+			"target": "wasm",
+			"opt": 3,
+			"passed": false,
+			"code": 101,
+			"output": "stop: assertion failed: map.size == 0\n       \u21b3 left: 3, right: 0\n  at /home/claude-dev/projects/Fa/.claude/worktrees/trunk/design/reviews/repros/collections-maps/generic-delete.fa:7:1\n",
+			"peak_rss_kib": 86328,
+			"limit": null
+		},
+		{
+			"case": "generic-delete",
+			"target": "native-freestanding",
+			"opt": 0,
+			"passed": false,
+			"code": 1,
+			"output": "",
+			"peak_rss_kib": 83328,
+			"limit": null
+		},
+		{
+			"case": "generic-delete",
+			"target": "native-freestanding",
+			"opt": 3,
+			"passed": false,
+			"code": 1,
+			"output": "",
+			"peak_rss_kib": 91160,
+			"limit": null
+		},
+		{
+			"case": "generic",
+			"target": "bun",
+			"passed": true,
+			"code": 0,
+			"output": "generic ok\n",
+			"peak_rss_kib": 224
+		},
+		{
+			"case": "generic",
+			"target": "native",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "generic ok\n",
+			"peak_rss_kib": 83068,
+			"limit": null
+		},
+		{
+			"case": "generic",
+			"target": "native",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "generic ok\n",
+			"peak_rss_kib": 91312,
+			"limit": null
+		},
+		{
+			"case": "generic",
+			"target": "wasm",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "generic ok\n",
+			"peak_rss_kib": 82448,
+			"limit": null
+		},
+		{
+			"case": "generic",
+			"target": "wasm",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "generic ok\n",
+			"peak_rss_kib": 86488,
+			"limit": null
+		},
+		{
+			"case": "generic",
+			"target": "native-freestanding",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "generic ok\n",
+			"peak_rss_kib": 83484,
+			"limit": null
+		},
+		{
+			"case": "generic",
+			"target": "native-freestanding",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "generic ok\n",
+			"peak_rss_kib": 91328,
+			"limit": null
+		},
+		{
+			"case": "owner-method",
+			"target": "bun",
+			"passed": true,
+			"code": 0,
+			"output": "method ok\n",
+			"peak_rss_kib": 27548
+		},
+		{
+			"case": "owner-method",
+			"target": "native",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "method ok\n",
+			"peak_rss_kib": 83064,
+			"limit": null
+		},
+		{
+			"case": "owner-method",
+			"target": "native",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "method ok\n",
+			"peak_rss_kib": 91032,
+			"limit": null
+		},
+		{
+			"case": "owner-method",
+			"target": "wasm",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "method ok\n",
+			"peak_rss_kib": 81096,
+			"limit": null
+		},
+		{
+			"case": "owner-method",
+			"target": "wasm",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "method ok\n",
+			"peak_rss_kib": 86476,
+			"limit": null
+		},
+		{
+			"case": "owner-method",
+			"target": "native-freestanding",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "method ok\n",
+			"peak_rss_kib": 83952,
+			"limit": null
+		},
+		{
+			"case": "owner-method",
+			"target": "native-freestanding",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "method ok\n",
+			"peak_rss_kib": 91248,
+			"limit": null
+		},
+		{
+			"case": "private-error",
+			"target": "bun",
+			"passed": true,
+			"code": 0,
+			"output": "cleanup ok\n",
+			"peak_rss_kib": 27560
+		},
+		{
+			"case": "private-error",
+			"target": "native",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "cleanup ok\n",
+			"peak_rss_kib": 83452,
+			"limit": null
+		},
+		{
+			"case": "private-error",
+			"target": "native",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "cleanup ok\n",
+			"peak_rss_kib": 91404,
+			"limit": null
+		},
+		{
+			"case": "private-error",
+			"target": "wasm",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "cleanup ok\n",
+			"peak_rss_kib": 84072,
+			"limit": null
+		},
+		{
+			"case": "private-error",
+			"target": "wasm",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "cleanup ok\n",
+			"peak_rss_kib": 86792,
+			"limit": null
+		},
+		{
+			"case": "private-error",
+			"target": "native-freestanding",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "cleanup ok\n",
+			"peak_rss_kib": 83888,
+			"limit": null
+		},
+		{
+			"case": "private-error",
+			"target": "native-freestanding",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "cleanup ok\n",
+			"peak_rss_kib": 91588,
+			"limit": null
+		},
+		{
+			"case": "probe-effects",
+			"target": "bun",
+			"passed": true,
+			"code": 0,
+			"output": "effects ok\n",
+			"peak_rss_kib": 29572
+		},
+		{
+			"case": "probe-effects",
+			"target": "native",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "effects ok\n",
+			"peak_rss_kib": 83488,
+			"limit": null
+		},
+		{
+			"case": "probe-effects",
+			"target": "native",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "effects ok\n",
+			"peak_rss_kib": 91424,
+			"limit": null
+		},
+		{
+			"case": "probe-effects",
+			"target": "wasm",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "effects ok\n",
+			"peak_rss_kib": 86728,
+			"limit": null
+		},
+		{
+			"case": "probe-effects",
+			"target": "wasm",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "effects ok\n",
+			"peak_rss_kib": 87392,
+			"limit": null
+		},
+		{
+			"case": "probe-effects",
+			"target": "native-freestanding",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "effects ok\n",
+			"peak_rss_kib": 84080,
+			"limit": null
+		},
+		{
+			"case": "probe-effects",
+			"target": "native-freestanding",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "effects ok\n",
+			"peak_rss_kib": 92236,
+			"limit": null
+		},
+		{
+			"case": "probe-shifts",
+			"target": "bun",
+			"passed": true,
+			"code": 0,
+			"output": "true\nfalse\ntrue\ntrue\n",
+			"peak_rss_kib": 436
+		},
+		{
+			"case": "probe-shifts",
+			"target": "native",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "true\nfalse\ntrue\ntrue\n",
+			"peak_rss_kib": 83052,
+			"limit": null
+		},
+		{
+			"case": "probe-shifts",
+			"target": "native",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "true\nfalse\ntrue\ntrue\n",
+			"peak_rss_kib": 91296,
+			"limit": null
+		},
+		{
+			"case": "probe-shifts",
+			"target": "wasm",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "true\nfalse\ntrue\ntrue\n",
+			"peak_rss_kib": 85452,
+			"limit": null
+		},
+		{
+			"case": "probe-shifts",
+			"target": "wasm",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "true\nfalse\ntrue\ntrue\n",
+			"peak_rss_kib": 86400,
+			"limit": null
+		},
+		{
+			"case": "probe-shifts",
+			"target": "native-freestanding",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "true\nfalse\ntrue\ntrue\n",
+			"peak_rss_kib": 83688,
+			"limit": null
+		},
+		{
+			"case": "probe-shifts",
+			"target": "native-freestanding",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "true\nfalse\ntrue\ntrue\n",
+			"peak_rss_kib": 91736,
+			"limit": null
+		},
+		{
+			"case": "stable",
+			"target": "bun",
+			"passed": true,
+			"code": 0,
+			"output": "stable ok\n",
+			"peak_rss_kib": 29612
+		},
+		{
+			"case": "stable",
+			"target": "native",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "stable ok\n",
+			"peak_rss_kib": 83360,
+			"limit": null
+		},
+		{
+			"case": "stable",
+			"target": "native",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "stable ok\n",
+			"peak_rss_kib": 91708,
+			"limit": null
+		},
+		{
+			"case": "stable",
+			"target": "wasm",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "stable ok\n",
+			"peak_rss_kib": 83864,
+			"limit": null
+		},
+		{
+			"case": "stable",
+			"target": "wasm",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "stable ok\n",
+			"peak_rss_kib": 89216,
+			"limit": null
+		},
+		{
+			"case": "stable",
+			"target": "native-freestanding",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "stable ok\n",
+			"peak_rss_kib": 84024,
+			"limit": null
+		},
+		{
+			"case": "stable",
+			"target": "native-freestanding",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "stable ok\n",
+			"peak_rss_kib": 91828,
+			"limit": null
+		},
+		{
+			"case": "stress",
+			"target": "bun",
+			"passed": true,
+			"code": 0,
+			"output": "stress ok\n",
+			"peak_rss_kib": 31596
+		},
+		{
+			"case": "stress",
+			"target": "native",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "stress ok\n",
+			"peak_rss_kib": 84040,
+			"limit": null
+		},
+		{
+			"case": "stress",
+			"target": "native",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "stress ok\n",
+			"peak_rss_kib": 92568,
+			"limit": null
+		},
+		{
+			"case": "stress",
+			"target": "wasm",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "stress ok\n",
+			"peak_rss_kib": 88776,
+			"limit": null
+		},
+		{
+			"case": "stress",
+			"target": "wasm",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "stress ok\n",
+			"peak_rss_kib": 87632,
+			"limit": null
+		},
+		{
+			"case": "stress",
+			"target": "native-freestanding",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "stress ok\n",
+			"peak_rss_kib": 84360,
+			"limit": null
+		},
+		{
+			"case": "stress",
+			"target": "native-freestanding",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "stress ok\n",
+			"peak_rss_kib": 92536,
+			"limit": null
+		},
+		{
+			"case": "widths",
+			"target": "bun",
+			"passed": true,
+			"code": 0,
+			"output": "widths ok\n",
+			"peak_rss_kib": 33988
+		},
+		{
+			"case": "widths",
+			"target": "native",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "widths ok\n",
+			"peak_rss_kib": 86660,
+			"limit": null
+		},
+		{
+			"case": "widths",
+			"target": "native",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "widths ok\n",
+			"peak_rss_kib": 120100,
+			"limit": null
+		},
+		{
+			"case": "widths",
+			"target": "wasm",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "widths ok\n",
+			"peak_rss_kib": 104584,
+			"limit": null
+		},
+		{
+			"case": "widths",
+			"target": "wasm",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "widths ok\n",
+			"peak_rss_kib": 196548,
+			"limit": null
+		},
+		{
+			"case": "widths",
+			"target": "native-freestanding",
+			"opt": 0,
+			"passed": true,
+			"code": 0,
+			"output": "widths ok\n",
+			"peak_rss_kib": 86852,
+			"limit": null
+		},
+		{
+			"case": "widths",
+			"target": "native-freestanding",
+			"opt": 3,
+			"passed": true,
+			"code": 0,
+			"output": "widths ok\n",
+			"peak_rss_kib": 125764,
+			"limit": null
+		}
+	],
+	"per_unit": [
+		{
+			"case": "per-unit",
+			"target": "native",
+			"opt": 0,
+			"passed": true
+		},
+		{
+			"case": "per-unit",
+			"target": "native",
+			"opt": 3,
+			"passed": true
+		},
+		{
+			"case": "per-unit",
+			"target": "wasm",
+			"opt": 0,
+			"passed": true
+		},
+		{
+			"case": "per-unit",
+			"target": "wasm",
+			"opt": 3,
+			"passed": true
+		},
+		{
+			"case": "per-unit",
+			"target": "native-freestanding",
+			"opt": 0,
+			"passed": false,
+			"failure": "link: unresolved libc symbols (pre-existing M1)"
+		},
+		{
+			"case": "per-unit",
+			"target": "native-freestanding",
+			"opt": 3,
+			"passed": true
+		},
+		{
+			"case": "per-unit-delete",
+			"target": "native",
+			"opt": 0,
+			"passed": false,
+			"failure": "Output { status: ExitStatus(unix_wait_status(139)), stdout: \"\", stderr: \"crash: segmentation fault at 0x8 (a bug of the compiler or of foreign code)\\n\" }"
+		},
+		{
+			"case": "per-unit-delete",
+			"target": "native",
+			"opt": 3,
+			"passed": false,
+			"failure": "Output { status: ExitStatus(unix_wait_status(139)), stdout: \"\", stderr: \"crash: segmentation fault at 0x8 (a bug of the compiler or of foreign code)\\n\" }"
+		},
+		{
+			"case": "per-unit-delete",
+			"target": "wasm",
+			"opt": 0,
+			"passed": false,
+			"failure": "Output { status: ExitStatus(unix_wait_status(25856)), stdout: \"\", stderr: \"stop: assertion failed: map.size == 0\\n       \u21b3 left: 3, right: 0\\n  at application/main.fa:4:2\\n\" }"
+		},
+		{
+			"case": "per-unit-delete",
+			"target": "wasm",
+			"opt": 3,
+			"passed": false,
+			"failure": "Output { status: ExitStatus(unix_wait_status(25856)), stdout: \"\", stderr: \"stop: assertion failed: map.size == 0\\n       \u21b3 left: 3, right: 0\\n  at application/main.fa:4:2\\n\" }"
+		},
+		{
+			"case": "per-unit-delete",
+			"target": "native-freestanding",
+			"opt": 0,
+			"passed": false,
+			"failure": "link: unresolved libc symbols (pre-existing M1)"
+		},
+		{
+			"case": "per-unit-delete",
+			"target": "native-freestanding",
+			"opt": 3,
+			"passed": false,
+			"failure": "Output { status: ExitStatus(unix_wait_status(139)), stdout: \"\", stderr: \"\" }"
+		},
+		{
+			"case": "per-unit-generic",
+			"target": "native",
+			"opt": 0,
+			"passed": false,
+			"failure": "Output { status: ExitStatus(unix_wait_status(25856)), stdout: \"\", stderr: \"stop: assertion failed: map.get(7) == UInt64(70)\\n       \u21b3 left: none, right: 70\\n  at application/main.fa:5:2\\n\" }"
+		},
+		{
+			"case": "per-unit-generic",
+			"target": "native",
+			"opt": 3,
+			"passed": false,
+			"failure": "Output { status: ExitStatus(unix_wait_status(25856)), stdout: \"\", stderr: \"stop: assertion failed: map.get(7) == UInt64(70)\\n       \u21b3 left: none, right: 70\\n  at application/main.fa:5:2\\n\" }"
+		},
+		{
+			"case": "per-unit-generic",
+			"target": "wasm",
+			"opt": 0,
+			"passed": false,
+			"failure": "Output { status: ExitStatus(unix_wait_status(25856)), stdout: \"\", stderr: \"stop: assertion failed: map.get(7) == UInt64(70)\\n       \u21b3 left: none, right: 70\\n  at application/main.fa:5:2\\n\" }"
+		},
+		{
+			"case": "per-unit-generic",
+			"target": "wasm",
+			"opt": 3,
+			"passed": false,
+			"failure": "Output { status: ExitStatus(unix_wait_status(25856)), stdout: \"\", stderr: \"stop: assertion failed: map.get(7) == UInt64(70)\\n       \u21b3 left: none, right: 70\\n  at application/main.fa:5:2\\n\" }"
+		},
+		{
+			"case": "per-unit-generic",
+			"target": "native-freestanding",
+			"opt": 0,
+			"passed": false,
+			"failure": "link: unresolved libc symbols (pre-existing M1)"
+		},
+		{
+			"case": "per-unit-generic",
+			"target": "native-freestanding",
+			"opt": 3,
+			"passed": false,
+			"failure": "Output { status: ExitStatus(unix_wait_status(25856)), stdout: \"\", stderr: \"stop: assertion failed: map.get(7) == UInt64(70)\\n       \u21b3 left: none, right: 70\\n  at application/main.fa:5:2\\n\" }"
+		}
+	],
+	"package_bun": {
+		"per-unit": "per-unit ok\n",
+		"per-unit-delete": "per-unit ok\n",
+		"per-unit-generic": "per-unit ok\n"
+	},
+	"ir_controls": [
+		"negative native off firing assertions False",
+		"negative native on firing assertions True",
+		"negative wasm off firing assertions False",
+		"negative wasm on firing assertions True",
+		"header native off firing assertions False",
+		"header native on firing assertions True",
+		"header wasm off firing assertions False",
+		"header wasm on firing assertions True",
+		"positive native off firing assertions False",
+		"positive native on firing assertions True",
+		"positive wasm off firing assertions False",
+		"positive wasm on firing assertions True",
+		"scalar64 native off firing assertions False",
+		"scalar64 native on firing assertions True",
+		"scalar64 wasm off firing assertions False",
+		"scalar64 wasm on firing assertions True",
+		"ordinary native off headers 0 required 42",
+		"ordinary native on headers 42 required 42",
+		"ordinary wasm off headers 0 required 42",
+		"ordinary wasm on headers 42 required 42",
+		"recursive native off headers 0 required 5",
+		"recursive native on headers 5 required 5",
+		"recursive wasm off headers 0 required 5",
+		"recursive wasm on headers 5 required 5",
+		"literal native off headers 0 required 41",
+		"literal native on headers 41 required 41",
+		"literal wasm off headers 0 required 41",
+		"literal wasm on headers 41 required 41"
+	],
+	"runtime_sanitizers": "GCC ASan + UBSan script passed",
+	"audit_tables": [
+		"probes",
+		"lru 200000 20241014 18739665 -7.41736061% 17889204 53780368",
+		"word-count 500000 235017839 235017834 -0.00000213% 146467634 381596173",
+		"words 100000 28382789 28382789 +0.00000000% 22413653 62230740",
+		"above +1%: []",
+		"headers",
+		"lru 200000 18739665 19070292 +1.76431649% 17889180 53712435",
+		"word-count 500000 235017834 235017858 +0.00001021% 146467656 381608431",
+		"words 100000 28382789 28382794 +0.00001762% 22413721 62227869",
+		"above +1%: [('lru', 1.7643164912499731)]",
+		"positive",
+		"lru 200000 19070292 19047821 -0.11783249% 17889269 53682858",
+		"word-count 500000 235017858 235017839 -0.00000808% 146467652 381578404",
+		"words 100000 28382794 28382794 +0.00000000% 22413662 62224686",
+		"above +1%: []",
+		"scalar64",
+		"lru 200000 19047821 19153936 +0.55709784% 17889269 53800078",
+		"word-count 500000 235017839 235017865 +0.00001106% 146467652 381588055",
+		"words 100000 28382794 28382794 +0.00000000% 22413662 62225986",
+		"above +1%: []"
+	],
+	"source_sha256": {
+		"aliases-closures.fa": "997ab3d860bf0ef52db0beefb56133120975a6cae57b887f6c526039c72b1dfd",
+		"await.fa": "316f3a2e5aea2d17d13305d6b818a028b3ff80ffa4e77570868ef055373cbe63",
+		"budgets.fa": "a63a31f281876252ba731c9f803f0e845cc73efa2f72b714c0f7a5158fdf46db",
+		"captured.fa": "06a18fe75a1a97a15d1e8a18f82900abbc92d8e0bcde6f6e92f2d7a9019268ad",
+		"compile-time.fa": "e681c02b1f662d4a3cbe04e19a96b7d9d970f64af36f2eea6f5ee60d3daa6263",
+		"escape.fa": "4d34ff19f9e3cf134b98319a2c53eb4bc612283523bbc97b8c8306e2a19aadf6",
+		"generic-delete.fa": "534245bf8be0fe1d0be93fb1e7aae8f68c2128278dde5e1f38e7d4605fb98a12",
+		"generic.fa": "b3ce39e04d9156df82c3f705ddb8eb1f91cea7e072e712e6b542b7a9b961d6c8",
+		"illegal-iteration.fa": "e88fe72689c587164be2c4068957bbd6f2bd41f74b0ee4c10d2ac00d3e78ac45",
+		"owner-method.fa": "2d00e408e5a691871c8995c0078ade786378d938a98f002732f1be387d6be101",
+		"per-unit/application/main.fa": "82d0e46cccc73a10c8b1c90821a9106352e6c7aef6d0dd3de737673d94c2889f",
+		"per-unit/library/create.fa": "f7f1250a7f6831b095d15f29502f39aef04fef9f3951f9ad742cafca8f8cd4b5",
+		"per-unit/library/inline.fa": "96cf94bc9108810d87ab72ae51421f5f97283e9a7ebdcbfb8d0e9d8186d16e13",
+		"per-unit/library/replace.fa": "6af419eef5f28edfe6cf607922c478628cbb2ec0810f54678b1548042f27598f",
+		"per-unit/package.fa": "dc583079a04a4bab55e496014b51d5f35f363d5d24b187d6c953bc1310908df1",
+		"per-unit-delete/application/main.fa": "e4015c952465afdec7b983af79e0a30ec41c1be2dc697260c806979725c7a4c8",
+		"per-unit-delete/library/prune.fa": "6d9125e47de4e68340611e724ac257ae13961a6451a5e2533422471ea0b05bc3",
+		"per-unit-delete/package.fa": "dc583079a04a4bab55e496014b51d5f35f363d5d24b187d6c953bc1310908df1",
+		"per-unit-generic/application/main.fa": "82d0e46cccc73a10c8b1c90821a9106352e6c7aef6d0dd3de737673d94c2889f",
+		"per-unit-generic/library/create.fa": "f7f1250a7f6831b095d15f29502f39aef04fef9f3951f9ad742cafca8f8cd4b5",
+		"per-unit-generic/library/inline.fa": "96cf94bc9108810d87ab72ae51421f5f97283e9a7ebdcbfb8d0e9d8186d16e13",
+		"per-unit-generic/library/replace.fa": "521a35831fb246b54a24c67710c342d25f69ff5d305de66674370f3a37350918",
+		"per-unit-generic/package.fa": "dc583079a04a4bab55e496014b51d5f35f363d5d24b187d6c953bc1310908df1",
+		"private-error.fa": "bd2184d192bb69ff3e8619469400839281c73257f807ff55ba893e42485768c3",
+		"probe-effects.fa": "b3df1a96f7cedbd084f410701475b9ceb77157684fd90d4814f8c2ccf1f4e66c",
+		"probe-shifts.fa": "c05c8dc209118650d16509b555340b4deda77fb4946b51d93cf54a8ed78773a0",
+		"stable.fa": "d3cd3648ec142d0d7a8bd74ba298e693144c726c254f35067a66cafcb4ecefc6",
+		"stress.fa": "dcbb91b86c92f2ad70bb5fd0c0eb5a91aff27f6dc24010f46e435aadcfebfaf1",
+		"widths.fa": "cd08e4dc5809c68cedce109789caf21549fa1e3568b9df426eb18795d3eb098a"
+	},
+	"direct_native_signal_checks": [
+		{
+			"target": "native",
+			"opt": 0,
+			"returncode": -11,
+			"stdout": "",
+			"stderr": ""
+		},
+		{
+			"target": "native",
+			"opt": 3,
+			"returncode": -11,
+			"stdout": "",
+			"stderr": ""
+		},
+		{
+			"target": "native-freestanding",
+			"opt": 0,
+			"returncode": -11,
+			"stdout": "",
+			"stderr": ""
+		},
+		{
+			"target": "native-freestanding",
+			"opt": 3,
+			"returncode": -11,
+			"stdout": "",
+			"stderr": ""
+		}
+	],
+	"benchmark_roundtrips": "probes, headers, positive, scalar64 JSON and Markdown byte-identical",
+	"archived_compiler_hashes": "base/probes/headers/positive fa and fa-native match their retained profile JSON"
 }

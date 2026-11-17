@@ -3211,6 +3211,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		if value_lowered.repr == Repr::Never {
 			return Ok(Val::never());
 		}
+		if self.range_assignment(target, value_lowered)? {
+			return Ok(Val::void());
+		}
 		// an array read from a place into an array local: its items are
 		// copied into the local's own block (no allocation, nothing leaked)
 		if let (View::Name(_), Repr::Array(item_type)) = (self.view(target), value_lowered.repr)

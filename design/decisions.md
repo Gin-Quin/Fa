@@ -2529,3 +2529,9 @@ constant table built from nominal payload literals, in the destination integer
 representation. Every unit can construct that table from shared type metadata,
 without an exported runtime table or a second enum representation. Names,
 matching, parsing and iteration continue to use declaration indices.
+
+Range field writes retain the packed range ABI. Assignment resolves the owning
+place once, then updates the bound and its presence flag together; clearing a
+bound stores zero so range keys keep canonical hashes. Equality compares all
+flags and only the present bounds. No heap storage or new runtime helper is
+needed for ranges, including generic, async and per-unit compilation.

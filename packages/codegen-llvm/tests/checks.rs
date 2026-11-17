@@ -17,6 +17,16 @@ mod with_llvm {
 	use fa_codegen_llvm::{OptLevel, Options, Target, compile};
 
 	#[test]
+	fn range_fields_and_equality_keep_the_value_in_inline_storage() {
+		let source = "function update = (bound: Integer?): Boolean => {\nmutable r = 1..3\nr.start = bound\nr.end = none\nr.includesEnd = true\nr == ..\n}\nconsole.log(update(none))\n";
+		for target in [Target::Native, Target::Wasm, Target::NativeFreestanding] {
+			let ir = ir_at_target("range-fields-inline", source, true, OptLevel::O0, target);
+			assert!(ir.contains("icmp eq i8"), "{target:?}: {ir}");
+			assert!(!ir.contains("call ptr @fa_alloc"), "{target:?}: {ir}");
+		}
+	}
+
+	#[test]
 	fn direct_code_point_counts_read_the_analyzer_fact_without_an_array() {
 		let source = include_str!("../../cli/tests/programs/review-code-point-count-array.fa");
 		for target in [Target::Native, Target::Wasm] {

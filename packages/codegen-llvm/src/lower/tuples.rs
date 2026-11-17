@@ -9,6 +9,7 @@
 
 use fa_analyzer::analysis::{NodeFlags, PatternBinding};
 use fa_analyzer::ids::{NodeId, TypeId};
+use fa_analyzer::symbols::Resolution;
 use fa_analyzer::syntax::{NodeList, View};
 use fa_analyzer::types::TypeKind;
 use inkwell::IntPredicate;
@@ -563,6 +564,103 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.build_extract_value(structure, 2, "")?
 			.into_int_value();
 		Ok((start, end, flags))
+	}
+
+	/// Writes a logical range field into its packed bounds/flags storage.
+	pub(crate) fn range_assignment(
+		&mut self,
+		target: NodeId,
+		value: Val<'ctx>,
+	) -> Result<bool, Error> {
+		let View::Access {
+			target: base,
+			members,
+		} = self.view(target)
+		else {
+			return Ok(false);
+		};
+		let Some(member) = members.iter().last() else {
+			return Ok(false);
+		};
+		let Resolution::Builtin(builtin) = self.analysis.resolution(member) else {
+			return Ok(false);
+		};
+		let (index, flag) = match fa_analyzer::builtins::get(builtin).path {
+			"Range#start" => (0, HAS_START),
+			"Range#end" => (1, HAS_END),
+			"Range#includesEnd" => (2, INCLUSIVE),
+			_ => return Ok(false),
+		};
+		let slot = self.place(base)?;
+		let slot = self.place_members(
+			slot,
+			self.type_of(base),
+			members.iter().take(members.len() - 1),
+		)?;
+		let range = self.load(slot)?.value.expect("a range").into_struct_value();
+		let flags = self
+			.builder
+			.build_extract_value(range, 2, "")?
+			.into_int_value();
+		let (present, range) = if index == 2 {
+			(
+				self.convert(value, Repr::Bool, target.index())?.int(),
+				range,
+			)
+		} else {
+			let value = self.convert(
+				value,
+				Repr::Optional(Scalar::Int(IntRepr::I64)),
+				target.index(),
+			)?;
+			let (present, bound) = self.split_optional(&self.builder, value)?;
+			// Keep absent bounds canonical, including for range keys' hashes.
+			let bound = self.builder.build_select(
+				present,
+				bound.int(),
+				self.context.i64_type().const_zero(),
+				"",
+			)?;
+			let range = self
+				.builder
+				.build_insert_value(range, bound, index, "")?
+				.into_struct_value();
+			(present, range)
+		};
+		let bit = flags.get_type().const_int(flag, false);
+		let cleared = self
+			.builder
+			.build_and(flags, self.builder.build_not(bit, "")?, "")?;
+		let set = self.builder.build_or(cleared, bit, "")?;
+		let flags = self.builder.build_select(present, set, cleared, "")?;
+		let range = self.builder.build_insert_value(range, flags, 2, "")?;
+		self.store(
+			slot,
+			Val::new(Repr::Range, range.into_struct_value()),
+			target,
+		)?;
+		Ok(true)
+	}
+
+	pub(crate) fn ranges_equal(
+		&self,
+		left: Val<'ctx>,
+		right: Val<'ctx>,
+	) -> Result<IntValue<'ctx>, Error> {
+		let (a, b, flags) = self.range_parts(left)?;
+		let (c, d, other_flags) = self.range_parts(right)?;
+		let mut equal = self
+			.builder
+			.build_int_compare(IntPredicate::EQ, flags, other_flags, "")?;
+		for (left, right, flag) in [(a, c, HAS_START), (b, d, HAS_END)] {
+			let same = self
+				.builder
+				.build_int_compare(IntPredicate::EQ, left, right, "")?;
+			let absent = self.builder.build_not(self.range_flag(flags, flag)?, "")?;
+			let same = self.builder.build_or(absent, same, "")?;
+			equal = self.builder.build_and(equal, same, "")?;
+		}
+		Ok(equal)
 	}
 
 	/// Whether a flag of a range is set.

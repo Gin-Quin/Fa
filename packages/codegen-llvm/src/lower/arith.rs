@@ -1119,6 +1119,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				Ok(equal)
 			}
+			Repr::Range if op.is_none() && right.repr == Repr::Range => {
+				self.ranges_equal(left, right)
+			}
 			Repr::Bytes if op.is_none() => {
 				let right = self.convert(right, Repr::Bytes, node.index())?;
 				let equal = self

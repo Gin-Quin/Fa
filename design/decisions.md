@@ -2817,3 +2817,7 @@ receive an absent lookup by reseating or aliasing. Read it through the existing
 flattened optional loader regardless of its first designation. The loader accepts
 both nullable addresses to scalar items and addresses to stored optionals; no
 reference cell or copied referent is needed.
+
+JavaScript scalar reference metadata also derives optionality from the declared
+type, so a present first designation cannot disable nullable container access
+after reseating. Immutable aliases inherit the same locator convention.

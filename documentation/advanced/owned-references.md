@@ -380,6 +380,9 @@ chooses direct reads and writes of those locals; its other alternative uses the
 container and key. Copying that reference with `use` snapshots the selector and
 location, without copying the referent or allocating a cell. A map slot uses its existing `get`/`set` operations; a primitive pool
 uses its slot array and stable slot index, with direct member accesses. There are no accessor cells or reference caches.
+An optional primitive reference keeps nullable container access even when its
+initial designation is a present optional-valued slot; `reuse` may later select
+an absent lookup, and immutable aliases preserve that optionality.
 
 At a function boundary a primitive or mixed-union reference has two parts:
 **(innermost container, key)**. For `values[i]` these are `(values, i)`;

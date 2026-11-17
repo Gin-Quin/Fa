@@ -956,6 +956,8 @@ impl Generator<'_> {
 		let Some(mut parts) = self.reference_parts(value, true) else {
 			return;
 		};
+		// A present optional-valued slot can later be reseated to an absent lookup.
+		parts.optional |= self.may_be_none(ty);
 		if mutable {
 			let locals = self.scalar_reference_targets(symbol);
 			if !locals.is_empty() && self.bind_local_choice(symbol, parts.clone(), locals) {

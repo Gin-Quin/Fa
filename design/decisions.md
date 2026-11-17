@@ -2305,3 +2305,11 @@ while literal sharing retains all String representation flags. Keep Bytes hashin
 alongside the initialized-prefix array hash helper. Preserve frozen String method
 specialization and the target machine's unique function/data sections together;
 the object-cache version includes both String generation 6 and inline length 4.
+
+
+A generic compile-time JSON reader substitutes its VM capacity value into the
+InlineArray schema before conversion. Only dynamic schema paths are constructed;
+static subtrees and lazy defaults remain shared constants. This preserves bound
+checks through generic decoders of String or Bytes JSON inputs. CapacityError
+retains the trunk's internal error ID 12; Utf8Error is appended at 13, with its
+runtime constructor and explicit ID assertions updated together.

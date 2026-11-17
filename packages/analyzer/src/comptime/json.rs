@@ -249,7 +249,13 @@ fn decorate(
 				}
 			}
 		}
-		TypeKind::Collection(_, item, _) => {
+		TypeKind::Collection(kind, item, capacity) => {
+			if kind == crate::types::CollKind::InlineArray
+				&& matches!(types.kind(capacity), TypeKind::Param(_))
+				&& let Some(data) = data(schema)
+			{
+				data.set(Arc::from("$capacityType"), Value::int(capacity.0 as i64));
+			}
 			if let Some(definition) = data(schema).and_then(|d| d.get_mut("item")) {
 				decorate(types, analysis, file, item, definition, defaults, depth + 1);
 			}

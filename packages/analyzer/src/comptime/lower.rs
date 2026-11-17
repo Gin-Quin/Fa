@@ -1740,7 +1740,7 @@ impl<'a> Lowerer<'a> {
 						self.file,
 						self.a.type_of(*argument),
 					);
-					values.push(Expr::Const(schema));
+					values.push(self.json_schema(&schema));
 				}
 				if path == "Json.parse" {
 					let (schema, defaults) =
@@ -1767,7 +1767,7 @@ impl<'a> Lowerer<'a> {
 					}
 					values.push(Expr::Builtin(
 						"$Json.bindDefaults",
-						vec![Expr::Const(schema), Expr::Array(closures)],
+						vec![self.json_schema(&schema), Expr::Array(closures)],
 					));
 					values.push(Expr::Const(Value::Boolean(crate::comptime::is_js_target(
 						&self.session.comptime.target,
@@ -1971,6 +1971,60 @@ impl<'a> Lowerer<'a> {
 				))
 			})
 			.collect()
+	}
+
+	/// Substitute VM value parameters only along the schema's dynamic paths.
+	/// Static subtrees stay shared constants, including lazy field defaults.
+	fn json_schema(&self, schema: &Value) -> Expr {
+		fn dynamic(lowerer: &Lowerer<'_>, value: &Value) -> Option<Expr> {
+			match value {
+				Value::Member(member) => Some(Expr::Member {
+					name: Arc::clone(&member.name),
+					kind: member.kind,
+					data: Some(dynamic(lowerer, member.data.as_ref()?)?.boxed()),
+				}),
+				Value::Object(object) => {
+					let capacity = object.get("$capacityType").and_then(Value::as_int);
+					let mut changed = capacity.is_some();
+					let fields = object
+						.fields
+						.iter()
+						.filter(|(name, _)| name.as_ref() != "$capacityType")
+						.map(|(name, value)| {
+							let value = if name.as_ref() == "capacity"
+								&& let Some(ty) = capacity
+							{
+								lowerer.generic_value(TypeId(ty.as_u32()))
+							} else if let Some(expression) = dynamic(lowerer, value) {
+								changed = true;
+								expression
+							} else {
+								Expr::Const(value.clone())
+							};
+							(Arc::clone(name), value)
+						})
+						.collect();
+					changed.then_some(Expr::Object(fields))
+				}
+				Value::Array(items) => {
+					let mut changed = false;
+					let items = items
+						.iter()
+						.map(|value| {
+							Item::One(if let Some(expression) = dynamic(lowerer, value) {
+								changed = true;
+								expression
+							} else {
+								Expr::Const(value.clone())
+							})
+						})
+						.collect();
+					changed.then_some(Expr::Array(items))
+				}
+				_ => None,
+			}
+		}
+		dynamic(self, schema).unwrap_or_else(|| Expr::Const(schema.clone()))
 	}
 
 	fn key_argument(&self, binding: TypeId) -> Expr {

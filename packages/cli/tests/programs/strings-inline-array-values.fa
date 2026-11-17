@@ -1,16 +1,19 @@
 -- Borrowed inline prefixes retain raw String units and mutable Bytes owners.
 function append = <capacity: UInt32>(items: InlineArray<String, capacity>, value: String) throws CapacityError mutates items.length => { try items.push(value) }
 function identity = (value: String): String => value
-function update = (value: Bytes) => { value[0] = 122 }
-function observe = (): String throws CapacityError => {
+function update = (value: Bytes) throws IndexError mutates value => { try value[0] = 122 }
+function observe = (): String throws CapacityError | IndexError => {
 	mutable values: InlineArray<String, 2> = []
 	let pair = String.from("😀")
 	try append<2>(values, identity(pair[0]))
 	try append<2>(values, identity(pair[1]))
-	let joined = values[0] + values[1]
+	let high = try values[0]
+	let low = try values[1]
+	let joined = high + low
 	mutable bytes = "ab".toUtf8()
-	update(bytes)
-	"{joined == pair}:{joined.length}:{values[0].length}:{values[0].isWellFormed()}:{bytes[0]}"
+	try update(bytes)
+	let byte = try bytes[0]
+	"{joined == pair}:{joined.length}:{high.length}:{high.isWellFormed()}:{byte}"
 }
 static expected = @observe()
 console.log(expected) -- prints: true:2:1:false:122

@@ -1251,7 +1251,7 @@ static void test_utf8_byte_conversions(void) {
 	void *bad = fa_bytes_from((const uint8_t *)"a\xF0\x9F", 3);
 	FaString output;
 	const int64_t *error = fa_string_decode_bytes(bad, 1, 0, &output);
-	CHECK(error && error[0] == 12 && error[1] == 1);
+	CHECK(error && error[0] == 13 && error[1] == 1);
 	fa_free((void *)error, 16, sizeof(int64_t));
 	bad = fa_bytes_from((const uint8_t *)"\xED\xA0\x80", 3);
 	CHECK(!fa_string_decode_bytes(bad, 1, 1, &output));

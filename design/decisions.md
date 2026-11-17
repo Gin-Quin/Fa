@@ -2723,3 +2723,18 @@ Ordinary String arguments are immutable values; explicitly dependent String
 arguments still retain their place. Borrowing a compile-time constant gives it
 caller-lived temporary storage. JSON default closures capture their snapshot
 slots by value, matching their nonescaping parser lifetime.
+
+## Dev loop speed (2026-11-17)
+
+Keep Cargo targets private to each worktree and share only immutable registry
+compilation through sccache. `scripts/dev-env.sh` selects a wrapper that passes
+workspace/path crates straight to rustc, retaining their incremental compilation.
+Do not normalize checkout paths: code may embed `CARGO_MANIFEST_DIR`. A shared
+target would serialize engineers behind Cargo's directory lock. The pinned,
+checksum-verified installer needs no root and the wrapper falls back to rustc
+when the user has not installed it.
+
+Measure complete suites through a Cargo runner that preserves every argument and
+exit status and appends per-binary elapsed times. Optional program-harness traces
+separate compilation phases and execution. Rust 1.99 already uses bundled lld on
+this machine and Fa already uses lld 18; do not add a redundant linker override.

@@ -31,6 +31,43 @@ Fa is organized as a Rust workspace rooted in `Cargo.toml`, with active crates u
 - `bun check` (from `packages/benchmark-typescript`): type checks the benchmark.
 - Async benchmarks (`benchmarks/async/`, see `design/async-spike.md`): `cargo run --release -- [n] [current|multi]` from `benchmarks/async` runs the Tokio side (its own Cargo project, not in the workspace). Go is installed user-locally in `~/.local/go`: download the linux-amd64 tarball of the latest version from go.dev/dl (`curl -s 'https://go.dev/VERSION?m=text'` names it), check its SHA-256 against `https://go.dev/dl/?mode=json`, and extract it with `tar -C ~/.local -xzf go<version>.linux-amd64.tar.gz` (replacing `~/.local/go`). Run `~/.local/go/bin/go` (or add `~/.local/go/bin` to `PATH`) with `GOTOOLCHAIN=local`, e.g. `GOTOOLCHAIN=local ~/.local/go/bin/go -C benchmarks/async/go run . [n]` (`GOMAXPROCS=1` for one thread). `cargo run -p fa-codegen-llvm --release --example coroutines [-- switches]` runs the LLVM coroutine spike (`examples/coroutines/`, tested by `tests/coroutines.rs`).
 
+## Faster worktree builds and measurements
+
+For a new Linux x86-64 worktree, install LLVM if needed with `scripts/setup-llvm.sh`,
+then run `scripts/setup-sccache.sh` once per user and `source scripts/dev-env.sh` in
+its shell. The latter adds Bun and user-local tools to `PATH`, enables installed
+LLVM 18, sets `CARGO_BUILD_JOBS=2` unless already set, and selects the registry-only
+compiler wrapper. Run builds and tests on CPUs 0–4 on the shared machine:
+
+```bash
+source scripts/dev-env.sh
+taskset -c 0-4 cargo build --workspace --timings
+taskset -c 0-4 cargo test --workspace
+sccache --show-stats
+```
+
+Each worktree keeps its own `target/` and Cargo lock. Registry dependencies use
+`~/.cache/fa/sccache` (4 GiB limit); workspace/path crates retain Cargo incremental
+compilation. `SCCACHE_DIR` and `SCCACHE_CACHE_SIZE` override the shared cache;
+`FA_RUST_CACHE=0` bypasses it. Without sccache the wrapper runs rustc directly.
+Do not share `CARGO_TARGET_DIR` between engineers or normalize embedded checkout
+paths. The wrapper tests are `python3 scripts/test_dev_tools.py`.
+
+To measure the suite without changing its test selection or arguments:
+
+```bash
+FA_SUITE_TIMINGS=/tmp/fa-tests.jsonl FA_TEST_TIMINGS=1 \
+  taskset -c 0-4 cargo test --workspace \
+  --config 'target.x86_64-unknown-linux-gnu.runner="scripts/test-timings.py"' \
+  -- --nocapture > /tmp/fa-tests.log 2>&1
+```
+
+Use the runner's absolute path when starting Cargo outside the workspace root.
+The JSON lines contain each test binary's elapsed time and exit code. The program
+harnesses emit `FA_TEST_COMPILE`, `FA_TEST_RUN`, and `FA_TEST_PROCESS` stage timings
+only when `FA_TEST_TIMINGS` is set. This does not change workers, cases, targets,
+optimization levels, timeouts, ratchets, or full tiers.
+
 ## Coding Style & Naming Conventions
 
 ### Rust Code

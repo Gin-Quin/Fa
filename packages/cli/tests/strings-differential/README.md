@@ -14,6 +14,8 @@ quick tier, O0/O3 in the full tier).
 Freestanding JSON retains its documented AN004 restriction. No disagreement is
 ratcheted, ignored or treated as success. Output and error logs are unique to
 shard, engine and optimization level.
+The RSS check starts after exec: a just-spawned child can briefly expose the
+runner's inherited LLVM heap, which is not memory allocated by that program.
 
 The independent standard-library Python generator runs direct JavaScript
 expressions under Bun, without Fa analysis, interpretation or code generation.

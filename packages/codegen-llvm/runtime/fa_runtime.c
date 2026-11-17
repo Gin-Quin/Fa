@@ -3064,7 +3064,9 @@ FA_EXPORT int64_t fa_string_index_of(const uint8_t *text, size_t text_length, si
 
 /// Non-overlapping byte matches in an ASCII source. Unicode callers use
 /// the code-unit cursor; an empty needle visits every code-unit boundary.
-static void each_ascii_match(const uint8_t *text, size_t text_length,
+// All callers supply a fixed callback. Expose it before optimizing the scan,
+// so callback dispatch and mutable splitting metadata cannot hide that fact.
+static __attribute__((always_inline)) inline void each_ascii_match(const uint8_t *text, size_t text_length,
     const uint8_t *search, size_t search_length, void (*found)(void *, size_t), void *context) {
 	if (!search_length) {
 		for (size_t offset = 0; offset <= text_length; offset += 1) { found(context, offset); }

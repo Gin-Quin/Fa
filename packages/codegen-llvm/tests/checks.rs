@@ -2944,6 +2944,28 @@ console.log(try read(T.One { child = T.Leaf { value = 7 } }, false))
 	}
 
 	#[test]
+	fn materialized_splits_expose_their_fixed_search_callback() {
+		let source = "function summarize = (text: String): Integer => {\nlet parts = text.split(\";\")\nparts.length + parts.join(\"\\n\").length\n}\nconsole.log(summarize(arguments.get(0) ?? \"a;b\"))\n";
+		for target in [Target::Native, Target::Wasm] {
+			for level in [OptLevel::O0, OptLevel::O3] {
+				let ir =
+					complete_ir_at_target("split-fixed-callback", source, false, level, target);
+				assert!(
+					!ir.contains("@each_ascii_match("),
+					"{target:?}/{level:?}: {ir}"
+				);
+				assert!(
+					!ir.contains("@fa_string_split_next("),
+					"{target:?}/{level:?}: {ir}"
+				);
+				if level == OptLevel::O0 {
+					assert!(ir.contains("@fa_string_split_into("), "{ir}");
+				}
+			}
+		}
+	}
+
+	#[test]
 	fn private_nonempty_splits_stream_only_supported_observers() {
 		for target in [Target::Native, Target::Wasm] {
 			let source = "function run = (input: String): Integer => {\nlet text = input\nlet parts = text.split(\" \").filter((part) => not part.isEmpty())\nmutable sum = 0\nfor part, index in parts { sum += part.length + index }\nsum + parts.length\n}\nconsole.log(run(arguments.get(0) ?? \"a b\"))\n";

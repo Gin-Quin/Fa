@@ -481,6 +481,17 @@ impl Walker<'_> {
 			if let Some(bindings) = &inferred {
 				let ordered = w.declaration_order(bindings, &declared);
 				w.record_instantiation(n, &ordered);
+			} else if !declared.is_empty()
+				&& declared.iter().all(|param| w.rigid_params.contains(param))
+			{
+				// A recursive call uses the enclosing instance. Record the
+				// identity application without making its signature generic.
+				let mut bindings = crate::types::Bindings::new(&declared);
+				bindings.types = declared
+					.iter()
+					.map(|&param| w.s.types.intern(TypeKind::Param(param)))
+					.collect();
+				w.record_instantiation(n, &bindings);
 			}
 			// `Json.parse(text)`, `File.read(path)` (std_library.rs)
 			let ret = match kind {

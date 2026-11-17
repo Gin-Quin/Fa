@@ -1372,7 +1372,18 @@ impl Walker<'_> {
 			return self
 				.a
 				.function(declaration)
-				.map(|info| info.generics.clone())
+				.map(|info| {
+					if !info.generics.is_empty() {
+						return info.generics.clone();
+					}
+					// In its own body a generic function is the current
+					// instance, but its erased call still forwards its binders.
+					self.generic_params
+						.get(&info.lambda)
+						.or_else(|| self.generic_params.get(&declaration))
+						.cloned()
+						.unwrap_or_default()
+				})
 				.unwrap_or_default();
 		}
 		let named = match self.view(callee) {

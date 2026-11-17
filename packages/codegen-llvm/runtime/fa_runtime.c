@@ -12028,8 +12028,14 @@ static int json_string(JsonReader *reader, const uint8_t **bytes, size_t *length
 			written += json_utf8(code, out + written);
 			break;
 		}
-		default:
-			return json_fail(reader, "Invalid escape character ", reader->text + index - 1, 1, 0);
+		default: {
+			// The invalid escape can be a scalar or a lone WTF-8 unit.
+			// Keep it whole so the diagnostic itself remains valid Fa text.
+			size_t start = index - 1;
+			size_t end = start;
+			(void)decode(reader->text, at, &end);
+			return json_fail(reader, "Invalid escape character ", reader->text + start, end - start, 0);
+		}
 		}
 	}
 	*bytes = out;

@@ -517,8 +517,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// file).
 	fn constraint_method(&self, callee: NodeId) -> Option<GenericMethod> {
 		use fa_analyzer::types::{FieldFlags, TypeKind};
-		let View::Access { target, members } = self.view(callee) else {
-			return None;
+		let (target, members) = match self.view(callee) {
+			View::Access { target, members } | View::OptionalAccess { target, members } => {
+				(target, members)
+			}
+			_ => return None,
 		};
 		let member = members.last()?;
 		let fa_analyzer::symbols::Resolution::Field(shape, index) =
@@ -535,7 +538,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.checked_sub(2)
 			.and_then(|index| members.get(index))
 			.unwrap_or(target);
-		let TypeKind::Param(param) = self.types().kind(self.type_of(receiver)) else {
+		let receiver_type = self
+			.analysis
+			.optional_receivers
+			.get(&member)
+			.copied()
+			.unwrap_or_else(|| self.type_of(receiver));
+		let TypeKind::Param(param) = self.types().kind(receiver_type) else {
 			return None;
 		};
 		self.method_bindings
@@ -668,8 +677,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		while let View::Group(inner) = self.view(callee) {
 			callee = inner;
 		}
-		let View::Access { target, members } = self.view(callee) else {
-			return None;
+		let (target, members) = match self.view(callee) {
+			View::Access { target, members } | View::OptionalAccess { target, members } => {
+				(target, members)
+			}
+			_ => return None,
 		};
 		match members.len() {
 			0 | 1 => Some(target),

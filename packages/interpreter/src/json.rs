@@ -28,6 +28,7 @@ fn parse_inner(text: &str, maps: bool) -> Result<Value, Error> {
 		text,
 		position: 0,
 		maps,
+		surrogates: &[],
 	}
 	.parse()
 }
@@ -37,6 +38,8 @@ struct Parser<'t> {
 	text: &'t str,
 	position: usize,
 	maps: bool,
+	/// Byte positions replaced by a valid UTF-8 placeholder on malformed String input.
+	surrogates: &'t [(usize, u16)],
 }
 
 #[derive(Default)]
@@ -65,6 +68,37 @@ impl Parser<'_> {
 				Value::String(format!("malformed JSON at line {line}: {message}").into()),
 			)],
 		))
+	}
+
+	/// A token is one complete code point, or the original lone UTF-16 unit.
+	fn token_error(&self, prefix: &str, at: usize, quoted: bool) -> Error {
+		let suffix = if quoted { "'" } else { "" };
+		if let Ok(index) = self.surrogates.binary_search_by_key(&at, |&(at, _)| at) {
+			let mut units: Vec<_> = format!("JSON Parse error: {prefix}")
+				.encode_utf16()
+				.collect();
+			units.push(self.surrogates[index].1);
+			units.extend(suffix.encode_utf16());
+			return json_error_text(Text::from_units(&units));
+		}
+		let token = self.text[at..].chars().next().expect("an input character");
+		self.error(&format!("{prefix}{token}{suffix}"))
+	}
+
+	fn string_units(&self, start: usize, end: usize, out: &mut Vec<u16>) {
+		if self.surrogates.is_empty() {
+			out.extend(self.text[start..end].encode_utf16());
+			return;
+		}
+		for (offset, scalar) in self.text[start..end].char_indices() {
+			match self
+				.surrogates
+				.binary_search_by_key(&(start + offset), |&(at, _)| at)
+			{
+				Ok(index) => out.push(self.surrogates[index].1),
+				Err(_) => out.extend(scalar.encode_utf16(&mut [0; 2]).iter().copied()),
+			}
+		}
 	}
 
 	fn peek(&self) -> Option<u8> {
@@ -166,13 +200,7 @@ impl Parser<'_> {
 						}
 					}
 					Some(_) => {
-						return Err(self.error(&format!(
-							"Unrecognized token '{}'",
-							self.text[self.position..]
-								.chars()
-								.next()
-								.expect("a character")
-						)));
+						return Err(self.token_error("Unrecognized token '", self.position, true));
 					}
 					None => return Err(self.error("Unexpected EOF")),
 				},
@@ -238,7 +266,7 @@ impl Parser<'_> {
 			while self.position < end && self.peek() != Some(b'\\') {
 				self.position += 1;
 			}
-			out.extend(self.text[start..self.position].encode_utf16());
+			self.string_units(start, self.position, &mut out);
 			if self.position == end {
 				break;
 			}
@@ -265,7 +293,11 @@ impl Parser<'_> {
 					unit
 				}
 				_ => {
-					return Err(self.error(&format!("Invalid escape character {}", escape as char)));
+					return Err(self.token_error(
+						"Invalid escape character ",
+						self.position - 1,
+						false,
+					));
 				}
 			});
 		}
@@ -354,8 +386,8 @@ pub(crate) fn bind_defaults(value: &mut Value, closures: &[Value]) {
 }
 
 /// JSON inputs use the same parser on a borrowed UTF-8 view of bytes. A
-/// malformed Fa string is escaped losslessly before parsing; no U+FFFD is
-/// introduced into a string value by the parser.
+/// malformed Fa string tags its lone units with byte-position placeholders;
+/// token reads and diagnostics restore those units without U+FFFD.
 fn read(input: &Value) -> Result<Value, Error> {
 	let parsed = match input {
 		Value::Bytes(bytes) => {
@@ -365,7 +397,7 @@ fn read(input: &Value) -> Result<Value, Error> {
 		}
 		Value::String(text) => match text.as_str() {
 			Some(text) => parse_inner(text, true),
-			None => parse_inner(&escaped_input(text)?, true),
+			None => parse_malformed(text),
 		},
 		_ => return Err(json_error("expected a String or Bytes")),
 	}?;
@@ -442,37 +474,38 @@ impl Reader {
 	}
 }
 
-fn escaped_input(text: &Text) -> Result<String, Error> {
-	use std::fmt::Write as _;
+/// Keep UTF-8 byte scanning for ordinary input. Only a malformed String
+/// needs placeholders, distinguished from real U+E000 by their byte positions.
+fn parse_malformed(text: &Text) -> Result<Value, Error> {
 	let mut output = String::new();
-	let (mut quoted, mut escaped) = (false, false);
+	let mut surrogates = Vec::new();
 	for scalar in char::decode_utf16(text.units()) {
 		match scalar {
-			Ok(c) => {
-				output.push(c);
-				if escaped {
-					escaped = false;
-				} else if c == '\\' && quoted {
-					escaped = true;
-				} else if c == '"' {
-					quoted = !quoted;
-				}
-			}
+			Ok(c) => output.push(c),
 			Err(surrogate) => {
-				if !quoted || escaped {
-					return Err(json_error("unexpected lone surrogate in JSON"));
-				}
-				let _ = write!(output, "\\u{:04X}", surrogate.unpaired_surrogate());
+				surrogates.push((output.len(), surrogate.unpaired_surrogate()));
+				output.push('\u{e000}');
 			}
 		}
 	}
-	Ok(output)
+	Parser {
+		bytes: output.as_bytes(),
+		text: &output,
+		position: 0,
+		maps: true,
+		surrogates: &surrogates,
+	}
+	.parse()
 }
 
 fn json_error(message: &str) -> Error {
+	json_error_text(message.into())
+}
+
+fn json_error_text(message: Text) -> Error {
 	Error::Thrown(Value::error(
 		"JsonError",
-		vec![("message", Value::string(message))],
+		vec![("message", Value::String(message))],
 	))
 }
 

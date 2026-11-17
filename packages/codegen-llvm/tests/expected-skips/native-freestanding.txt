@@ -84,7 +84,5 @@ codegen-llvm/tests/programs/packed-arrays.fa: floats (`snprintf` of the C librar
 codegen-llvm/tests/programs/recursive-container-layout.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
 codegen-llvm/tests/programs/units-generic-values.fa: application/main.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
 
-# js/followups LLVM audit: whole optional continuation/import dispatch needs native lowering.
-analyzer/tests/cases/review/optional-call-imports.fa: optional imported/generic method resolution still treats the guarded callee as a runtime member
-analyzer/tests/cases/review/optional-worker-calls.fa: optional worker method resolution still treats the guarded callee as a runtime member
+# js/followups LLVM audit: remaining optional continuation lowering.
 cli/tests/programs/optional-calls.fa: native continuation after an optional call lacks present-result lowering (Optional<Object> to Object); requires the full chain normalizer

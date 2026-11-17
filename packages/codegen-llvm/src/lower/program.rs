@@ -469,7 +469,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			{
 				return self.callee_function(inner);
 			}
-			View::Access { target, members } => {
+			View::Access { target, members } | View::OptionalAccess { target, members } => {
 				let members: Vec<NodeId> = members.iter().collect();
 				match self.namespace_reach(target, &members) {
 					Some((reached, used)) if used == members.len() => reached,

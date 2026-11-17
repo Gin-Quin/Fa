@@ -11,6 +11,7 @@
 
 use fa_analyzer::ids::{NodeId, SymbolId, TypeId};
 use fa_analyzer::symbols::{Resolution, SymbolKind};
+use fa_analyzer::syntax::View;
 use fa_analyzer::types::TypeKind;
 use inkwell::module::Linkage;
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FunctionType, StructType};
@@ -50,7 +51,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					captures.push(symbol);
 				}
 			}
-			self.tree.nodes[node].for_each_child(|child| stack.push(child));
+			if let View::Call { callee, arguments } = self.view(NodeId::new(node)) {
+				stack.push(callee.index());
+				for argument in arguments.iter() {
+					// A named argument's label resolves to the callee's parameter
+					// for navigation; it does not read or capture that parameter.
+					let value = match self.view(argument) {
+						View::Assignment {
+							value: Some(value), ..
+						} => value,
+						_ => argument,
+					};
+					stack.push(value.index());
+				}
+			} else {
+				self.tree.nodes[node].for_each_child(|child| stack.push(child));
+			}
 		}
 		captures.sort();
 		captures

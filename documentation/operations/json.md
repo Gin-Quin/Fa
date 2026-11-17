@@ -30,7 +30,10 @@ Native serialization bypasses surrogate inspection when the String flags rule it
 
 The interpreter reads containers with an explicit heap stack, using the native
 parser's grammar, diagnostic wording, precedence and 1000-container limit.
-UTF-8 validation precedes grammar checks on Bytes input.
+UTF-8 validation precedes grammar checks on Bytes input. Malformed String input
+uses byte-position markers for raw lone UTF-16 units, restored in token values
+and diagnostics; this never rewrites an invalid escape into a valid escape.
+Invalid-escape diagnostics retain the complete scalar or lone unit on every target.
 
 JavaScript retains the engine's JSON parser for successful String input. On a syntax error, an iterative Fa scanner reproduces the native parser's error grammar and precedence, including unfinished strings taking precedence over invalid escapes inside them. Failed byte input may decode the whole document for this error scan; successful byte input only decodes string tokens. Engine exception wording and offsets do not enter `JsonError`. String inputs
 long enough to exceed the depth limit are checked with the same iterative scanner

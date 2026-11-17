@@ -405,3 +405,45 @@ console.log(utf8Extra6) -- prints: invalid UTF-8 in JSON input
 attempt("\n[1,]")       -- prints: JSON Parse error: Unexpected comma at the end of array expression
 static multiline = message("\n[1,]")
 console.log(multiline) -- prints: JSON Parse error: Unexpected comma at the end of array expression
+
+-- Diagnostic text preserves complete scalars and lone UTF-16 units.
+function quotedMessage = (text: String | Bytes): String =>
+	"quoted: " + Json.stringify(message(text))
+static high = "\u{10000}"[0]
+static low = "\u{10000}"[1]
+static invalidEscapeScalarText0 = quotedMessage("\"\\é\"")
+console.log(invalidEscapeScalarText0) -- prints: quoted: "JSON Parse error: Invalid escape character é"
+console.log(quotedMessage("\"\\é\"")) -- prints: quoted: "JSON Parse error: Invalid escape character é"
+static invalidEscapeScalarBytes0 = quotedMessage(("\"\\é\"").toUtf8())
+console.log(invalidEscapeScalarBytes0)           -- prints: quoted: "JSON Parse error: Invalid escape character é"
+console.log(quotedMessage(("\"\\é\"").toUtf8())) -- prints: quoted: "JSON Parse error: Invalid escape character é"
+static invalidEscapeScalarText1 = quotedMessage("\"\\😀\"")
+console.log(invalidEscapeScalarText1) -- prints: quoted: "JSON Parse error: Invalid escape character 😀"
+console.log(quotedMessage("\"\\😀\"")) -- prints: quoted: "JSON Parse error: Invalid escape character 😀"
+static invalidEscapeScalarBytes1 = quotedMessage(("\"\\😀\"").toUtf8())
+console.log(invalidEscapeScalarBytes1)           -- prints: quoted: "JSON Parse error: Invalid escape character 😀"
+console.log(quotedMessage(("\"\\😀\"").toUtf8())) -- prints: quoted: "JSON Parse error: Invalid escape character 😀"
+static errorUnit0 = quotedMessage(high)
+console.log(errorUnit0)          -- prints: quoted: "JSON Parse error: Unrecognized token '\ud800'"
+console.log(quotedMessage(high)) -- prints: quoted: "JSON Parse error: Unrecognized token '\ud800'"
+static errorUnit1 = quotedMessage(low)
+console.log(errorUnit1)         -- prints: quoted: "JSON Parse error: Unrecognized token '\udc00'"
+console.log(quotedMessage(low)) -- prints: quoted: "JSON Parse error: Unrecognized token '\udc00'"
+static errorUnit2 = quotedMessage("\"\\" + high + "\"")
+console.log(errorUnit2)                          -- prints: quoted: "JSON Parse error: Invalid escape character \ud800"
+console.log(quotedMessage("\"\\" + high + "\"")) -- prints: quoted: "JSON Parse error: Invalid escape character \ud800"
+static errorUnit3 = quotedMessage("\"\\" + low + "\"")
+console.log(errorUnit3)                         -- prints: quoted: "JSON Parse error: Invalid escape character \udc00"
+console.log(quotedMessage("\"\\" + low + "\"")) -- prints: quoted: "JSON Parse error: Invalid escape character \udc00"
+static errorUnit4 = quotedMessage("[" + high)
+console.log(errorUnit4)                -- prints: quoted: "JSON Parse error: Unrecognized token '\ud800'"
+console.log(quotedMessage("[" + high)) -- prints: quoted: "JSON Parse error: Unrecognized token '\ud800'"
+static errorUnit5 = quotedMessage("{{" + high)
+console.log(errorUnit5)                 -- prints: quoted: "JSON Parse error: Expected '}'"
+console.log(quotedMessage("{{" + high)) -- prints: quoted: "JSON Parse error: Expected '}'"
+static errorUnit6 = quotedMessage("null " + high)
+console.log(errorUnit6)                    -- prints: quoted: "JSON Parse error: Unable to parse JSON string"
+console.log(quotedMessage("null " + high)) -- prints: quoted: "JSON Parse error: Unable to parse JSON string"
+static errorUnit7 = quotedMessage("\"\\q" + high)
+console.log(errorUnit7)                    -- prints: quoted: "JSON Parse error: Unterminated string"
+console.log(quotedMessage("\"\\q" + high)) -- prints: quoted: "JSON Parse error: Unterminated string"

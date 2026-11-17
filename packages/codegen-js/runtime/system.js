@@ -272,7 +272,8 @@ export function faJsonSyntaxError(text) {
 				if (!/^[0-9a-fA-F]{4}$/.test(text.slice(at + 1, at + 5)) || at + 4 >= end)
 					return "\\u must be followed by 4 hex digits";
 				at += 4;
-			} else if (!'"\\/bfnrt'.includes(escaped)) return `Invalid escape character ${escaped}`;
+			} else if (!'"\\/bfnrt'.includes(escaped))
+				return `Invalid escape character ${String.fromCodePoint(text.codePointAt(at) ?? 0)}`;
 		}
 		return null;
 	};

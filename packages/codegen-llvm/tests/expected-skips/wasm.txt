@@ -24,7 +24,6 @@ cli/tests/programs/number-api.fa: line 47: this name is not supported by the nat
 cli/tests/programs/references.fa: line 42: a `use` of this value is not supported by the native backend yet
 cli/tests/programs/tuples-ranges-patterns.fa: line 27: this place is not supported by the native backend yet
 
-# js/followups LLVM audit: whole optional continuation/import dispatch needs native lowering.
-analyzer/tests/cases/review/optional-call-imports.fa: optional imported/generic method resolution still treats the guarded callee as a runtime member
-analyzer/tests/cases/review/optional-worker-calls.fa: optional worker method resolution still treats the guarded callee as a runtime member
+# js/followups LLVM audit: remaining optional continuation lowering.
+analyzer/tests/cases/review/optional-worker-calls.fa: threaded worker calls are unavailable on wasm (CONC010); native and freestanding pass
 cli/tests/programs/optional-calls.fa: native continuation after an optional call lacks present-result lowering (Optional<Object> to Object); requires the full chain normalizer

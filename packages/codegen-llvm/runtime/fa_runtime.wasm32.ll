@@ -42997,340 +42997,347 @@ declare void @fa_host_file_take(ptr noundef) local_unnamed_addr #66
 ; Function Attrs: nounwind optsize
 define internal fastcc noundef i32 @json_string(ptr nocapture noundef %0, ptr nocapture noundef writeonly %1, ptr nocapture noundef writeonly %2) unnamed_addr #17 {
   %4 = alloca i32, align 4
-  %5 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 2
-  %6 = load i32, ptr %5, align 4, !tbaa !545
-  %7 = add i32 %6, 1
-  %8 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 1
-  %9 = load i32, ptr %8, align 4, !tbaa !543
-  %10 = icmp ult i32 %7, %9
-  br i1 %10, label %11, label %13
+  %5 = alloca i32, align 4
+  %6 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 2
+  %7 = load i32, ptr %6, align 4, !tbaa !545
+  %8 = add i32 %7, 1
+  %9 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 1
+  %10 = load i32, ptr %9, align 4, !tbaa !543
+  %11 = icmp ult i32 %8, %10
+  br i1 %11, label %12, label %14
 
-11:                                               ; preds = %3
-  %12 = load ptr, ptr %0, align 4, !tbaa !541
-  br label %18
+12:                                               ; preds = %3
+  %13 = load ptr, ptr %0, align 4, !tbaa !541
+  br label %19
 
-13:                                               ; preds = %31, %3
-  %14 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 8
-  store ptr @.str.141, ptr %14, align 4, !tbaa !546
-  %15 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 9
-  store ptr null, ptr %15, align 4, !tbaa !547
-  %16 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 10
-  store i32 0, ptr %16, align 4, !tbaa !548
-  %17 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 11
-  store i8 0, ptr %17, align 4, !tbaa !549
-  br label %201
+14:                                               ; preds = %32, %3
+  %15 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 8
+  store ptr @.str.141, ptr %15, align 4, !tbaa !546
+  %16 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 9
+  store ptr null, ptr %16, align 4, !tbaa !547
+  %17 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 10
+  store i32 0, ptr %17, align 4, !tbaa !548
+  %18 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 11
+  store i8 0, ptr %18, align 4, !tbaa !549
+  br label %205
 
-18:                                               ; preds = %11, %31
-  %19 = phi i32 [ %7, %11 ], [ %35, %31 ]
-  %20 = phi i32 [ 0, %11 ], [ %33, %31 ]
-  %21 = getelementptr inbounds i8, ptr %12, i32 %19
-  %22 = load i8, ptr %21, align 1, !tbaa !12
-  %23 = icmp eq i8 %22, 34
-  br i1 %23, label %37, label %24
+19:                                               ; preds = %12, %32
+  %20 = phi i32 [ %8, %12 ], [ %36, %32 ]
+  %21 = phi i32 [ 0, %12 ], [ %34, %32 ]
+  %22 = getelementptr inbounds i8, ptr %13, i32 %20
+  %23 = load i8, ptr %22, align 1, !tbaa !12
+  %24 = icmp eq i8 %23, 34
+  br i1 %24, label %38, label %25
 
-24:                                               ; preds = %18
-  %25 = icmp ult i8 %22, 32
-  br i1 %25, label %26, label %31
+25:                                               ; preds = %19
+  %26 = icmp ult i8 %23, 32
+  br i1 %26, label %27, label %32
 
-26:                                               ; preds = %24
-  %27 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 8
-  store ptr @.str.141, ptr %27, align 4, !tbaa !546
-  %28 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 9
-  store ptr null, ptr %28, align 4, !tbaa !547
-  %29 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 10
-  store i32 0, ptr %29, align 4, !tbaa !548
-  %30 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 11
-  store i8 0, ptr %30, align 4, !tbaa !549
-  br label %201
+27:                                               ; preds = %25
+  %28 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 8
+  store ptr @.str.141, ptr %28, align 4, !tbaa !546
+  %29 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 9
+  store ptr null, ptr %29, align 4, !tbaa !547
+  %30 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 10
+  store i32 0, ptr %30, align 4, !tbaa !548
+  %31 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 11
+  store i8 0, ptr %31, align 4, !tbaa !549
+  br label %205
 
-31:                                               ; preds = %24
-  %32 = icmp eq i8 %22, 92
-  %33 = select i1 %32, i32 1, i32 %20
-  %34 = select i1 %32, i32 2, i32 1
-  %35 = add i32 %34, %19
-  %36 = icmp ult i32 %35, %9
-  br i1 %36, label %18, label %13
+32:                                               ; preds = %25
+  %33 = icmp eq i8 %23, 92
+  %34 = select i1 %33, i32 1, i32 %21
+  %35 = select i1 %33, i32 2, i32 1
+  %36 = add i32 %35, %20
+  %37 = icmp ult i32 %36, %10
+  br i1 %37, label %19, label %14
 
-37:                                               ; preds = %18
-  %38 = add nuw i32 %19, 1
-  store i32 %38, ptr %5, align 4, !tbaa !545
-  %39 = icmp eq i32 %20, 0
-  %40 = sub i32 %19, %7
-  br i1 %39, label %41, label %43
+38:                                               ; preds = %19
+  %39 = add nuw i32 %20, 1
+  store i32 %39, ptr %6, align 4, !tbaa !545
+  %40 = icmp eq i32 %21, 0
+  %41 = sub i32 %20, %8
+  br i1 %40, label %42, label %44
 
-41:                                               ; preds = %37
-  %42 = getelementptr inbounds i8, ptr %12, i32 %7
-  store ptr %42, ptr %1, align 4, !tbaa !8
-  store i32 %40, ptr %2, align 4, !tbaa !9
-  br label %201
+42:                                               ; preds = %38
+  %43 = getelementptr inbounds i8, ptr %13, i32 %8
+  store ptr %43, ptr %1, align 4, !tbaa !8
+  store i32 %41, ptr %2, align 4, !tbaa !9
+  br label %205
 
-43:                                               ; preds = %37
-  %44 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 3
-  %45 = load ptr, ptr %44, align 4, !tbaa !544
-  %46 = tail call fastcc ptr @json_alloc(ptr noundef %45, i32 noundef %40) #74
-  %47 = getelementptr i8, ptr %46, i32 1
-  %48 = getelementptr i8, ptr %46, i32 2
-  %49 = getelementptr i8, ptr %46, i32 3
-  %50 = icmp ult i32 %7, %19
-  br i1 %50, label %52, label %51
+44:                                               ; preds = %38
+  %45 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 3
+  %46 = load ptr, ptr %45, align 4, !tbaa !544
+  %47 = tail call fastcc ptr @json_alloc(ptr noundef %46, i32 noundef %41) #74
+  %48 = getelementptr i8, ptr %47, i32 1
+  %49 = getelementptr i8, ptr %47, i32 2
+  %50 = getelementptr i8, ptr %47, i32 3
+  %51 = icmp ult i32 %8, %20
+  br i1 %51, label %53, label %52
 
-51:                                               ; preds = %43
-  store ptr %46, ptr %1, align 4, !tbaa !8
-  br label %199
+52:                                               ; preds = %44
+  store ptr %47, ptr %1, align 4, !tbaa !8
+  br label %203
 
-52:                                               ; preds = %43, %190
-  %53 = phi i32 [ %193, %190 ], [ 0, %43 ]
-  %54 = phi i32 [ %192, %190 ], [ %7, %43 ]
-  %55 = phi i32 [ %191, %190 ], [ 0, %43 ]
-  %56 = load ptr, ptr %0, align 4, !tbaa !541
-  %57 = getelementptr inbounds i8, ptr %56, i32 %54
-  %58 = load i8, ptr %57, align 1, !tbaa !12
-  %59 = icmp eq i8 %58, 92
-  br i1 %59, label %64, label %60
+53:                                               ; preds = %44, %194
+  %54 = phi i32 [ %197, %194 ], [ 0, %44 ]
+  %55 = phi i32 [ %196, %194 ], [ 0, %44 ]
+  %56 = phi i32 [ %195, %194 ], [ %8, %44 ]
+  %57 = load ptr, ptr %0, align 4, !tbaa !541
+  %58 = getelementptr inbounds i8, ptr %57, i32 %56
+  %59 = load i8, ptr %58, align 1, !tbaa !12
+  %60 = icmp eq i8 %59, 92
+  br i1 %60, label %65, label %61
 
-60:                                               ; preds = %52
-  %61 = getelementptr inbounds i8, ptr %46, i32 %55
-  store i8 %58, ptr %61, align 1, !tbaa !12
-  %62 = add i32 %55, 1
-  %63 = add nuw i32 %54, 1
-  br label %190, !llvm.loop !685
+61:                                               ; preds = %53
+  %62 = getelementptr inbounds i8, ptr %47, i32 %54
+  store i8 %59, ptr %62, align 1, !tbaa !12
+  %63 = add i32 %54, 1
+  %64 = add nuw i32 %56, 1
+  br label %194, !llvm.loop !685
 
-64:                                               ; preds = %52
-  %65 = getelementptr i8, ptr %57, i32 1
-  %66 = load i8, ptr %65, align 1, !tbaa !12
-  %67 = add i32 %54, 2
-  switch i8 %66, label %183 [
-    i8 34, label %68
-    i8 92, label %68
-    i8 47, label %68
-    i8 98, label %71
-    i8 102, label %74
-    i8 110, label %77
-    i8 114, label %80
-    i8 116, label %83
-    i8 117, label %86
+65:                                               ; preds = %53
+  %66 = getelementptr i8, ptr %58, i32 1
+  %67 = load i8, ptr %66, align 1, !tbaa !12
+  %68 = add i32 %56, 2
+  switch i8 %67, label %184 [
+    i8 34, label %69
+    i8 92, label %69
+    i8 47, label %69
+    i8 98, label %72
+    i8 102, label %75
+    i8 110, label %78
+    i8 114, label %81
+    i8 116, label %84
+    i8 117, label %87
   ]
 
-68:                                               ; preds = %64, %64, %64
-  %69 = add i32 %55, 1
-  %70 = getelementptr inbounds i8, ptr %46, i32 %55
-  store i8 %66, ptr %70, align 1, !tbaa !12
-  br label %190
+69:                                               ; preds = %65, %65, %65
+  %70 = add i32 %54, 1
+  %71 = getelementptr inbounds i8, ptr %47, i32 %54
+  store i8 %67, ptr %71, align 1, !tbaa !12
+  br label %194
 
-71:                                               ; preds = %64
-  %72 = add i32 %55, 1
-  %73 = getelementptr inbounds i8, ptr %46, i32 %55
-  store i8 8, ptr %73, align 1, !tbaa !12
-  br label %190
+72:                                               ; preds = %65
+  %73 = add i32 %54, 1
+  %74 = getelementptr inbounds i8, ptr %47, i32 %54
+  store i8 8, ptr %74, align 1, !tbaa !12
+  br label %194
 
-74:                                               ; preds = %64
-  %75 = add i32 %55, 1
-  %76 = getelementptr inbounds i8, ptr %46, i32 %55
-  store i8 12, ptr %76, align 1, !tbaa !12
-  br label %190
+75:                                               ; preds = %65
+  %76 = add i32 %54, 1
+  %77 = getelementptr inbounds i8, ptr %47, i32 %54
+  store i8 12, ptr %77, align 1, !tbaa !12
+  br label %194
 
-77:                                               ; preds = %64
-  %78 = add i32 %55, 1
-  %79 = getelementptr inbounds i8, ptr %46, i32 %55
-  store i8 10, ptr %79, align 1, !tbaa !12
-  br label %190
+78:                                               ; preds = %65
+  %79 = add i32 %54, 1
+  %80 = getelementptr inbounds i8, ptr %47, i32 %54
+  store i8 10, ptr %80, align 1, !tbaa !12
+  br label %194
 
-80:                                               ; preds = %64
-  %81 = add i32 %55, 1
-  %82 = getelementptr inbounds i8, ptr %46, i32 %55
-  store i8 13, ptr %82, align 1, !tbaa !12
-  br label %190
+81:                                               ; preds = %65
+  %82 = add i32 %54, 1
+  %83 = getelementptr inbounds i8, ptr %47, i32 %54
+  store i8 13, ptr %83, align 1, !tbaa !12
+  br label %194
 
-83:                                               ; preds = %64
-  %84 = add i32 %55, 1
-  %85 = getelementptr inbounds i8, ptr %46, i32 %55
-  store i8 9, ptr %85, align 1, !tbaa !12
-  br label %190
+84:                                               ; preds = %65
+  %85 = add i32 %54, 1
+  %86 = getelementptr inbounds i8, ptr %47, i32 %54
+  store i8 9, ptr %86, align 1, !tbaa !12
+  br label %194
 
-86:                                               ; preds = %64
-  %87 = tail call fastcc i32 @json_code_unit(ptr noundef nonnull %0, i32 noundef %67) #74
-  %88 = icmp slt i32 %87, 0
-  br i1 %88, label %173, label %89
+87:                                               ; preds = %65
+  %88 = tail call fastcc i32 @json_code_unit(ptr noundef nonnull %0, i32 noundef %68) #74
+  %89 = icmp slt i32 %88, 0
+  br i1 %89, label %174, label %90
 
-89:                                               ; preds = %86
-  %90 = add i32 %54, 6
-  %91 = icmp ugt i32 %90, %19
-  br i1 %91, label %173, label %92
+90:                                               ; preds = %87
+  %91 = add i32 %56, 6
+  %92 = icmp ugt i32 %91, %20
+  br i1 %92, label %174, label %93
 
-92:                                               ; preds = %89
-  %93 = and i32 %87, 2147482624
-  %94 = icmp eq i32 %93, 55296
-  br i1 %94, label %95, label %116
+93:                                               ; preds = %90
+  %94 = and i32 %88, 2147482624
+  %95 = icmp eq i32 %94, 55296
+  br i1 %95, label %96, label %117
 
-95:                                               ; preds = %92
-  %96 = add i32 %54, 12
-  %97 = icmp ugt i32 %96, %19
-  br i1 %97, label %114, label %98
+96:                                               ; preds = %93
+  %97 = add i32 %56, 12
+  %98 = icmp ugt i32 %97, %20
+  br i1 %98, label %115, label %99
 
-98:                                               ; preds = %95
-  %99 = getelementptr inbounds i8, ptr %56, i32 %90
-  %100 = load i8, ptr %99, align 1, !tbaa !12
-  %101 = icmp eq i8 %100, 92
-  br i1 %101, label %102, label %114
+99:                                               ; preds = %96
+  %100 = getelementptr inbounds i8, ptr %57, i32 %91
+  %101 = load i8, ptr %100, align 1, !tbaa !12
+  %102 = icmp eq i8 %101, 92
+  br i1 %102, label %103, label %115
 
-102:                                              ; preds = %98
-  %103 = getelementptr i8, ptr %57, i32 7
-  %104 = load i8, ptr %103, align 1, !tbaa !12
-  %105 = icmp eq i8 %104, 117
-  br i1 %105, label %106, label %114
+103:                                              ; preds = %99
+  %104 = getelementptr i8, ptr %58, i32 7
+  %105 = load i8, ptr %104, align 1, !tbaa !12
+  %106 = icmp eq i8 %105, 117
+  br i1 %106, label %107, label %115
 
-106:                                              ; preds = %102
-  %107 = add i32 %54, 8
-  %108 = tail call fastcc i32 @json_code_unit(ptr noundef nonnull %0, i32 noundef %107) #74
-  %109 = and i32 %108, -1024
-  %110 = icmp eq i32 %109, 56320
-  %111 = shl nuw nsw i32 %87, 10
-  %112 = add nsw i32 %111, -56613888
-  %113 = add i32 %112, %108
-  br i1 %110, label %116, label %114
+107:                                              ; preds = %103
+  %108 = add i32 %56, 8
+  %109 = tail call fastcc i32 @json_code_unit(ptr noundef nonnull %0, i32 noundef %108) #74
+  %110 = and i32 %109, -1024
+  %111 = icmp eq i32 %110, 56320
+  %112 = shl nuw nsw i32 %88, 10
+  %113 = add nsw i32 %112, -56613888
+  %114 = add i32 %113, %109
+  br i1 %111, label %117, label %115
 
-114:                                              ; preds = %95, %98, %102, %106
-  %115 = getelementptr inbounds i8, ptr %46, i32 %55
-  br label %137
+115:                                              ; preds = %96, %99, %103, %107
+  %116 = getelementptr inbounds i8, ptr %47, i32 %54
+  br label %138
 
-116:                                              ; preds = %106, %92
-  %117 = phi i32 [ %90, %92 ], [ %96, %106 ]
-  %118 = phi i32 [ %87, %92 ], [ %113, %106 ]
-  %119 = and i32 %118, -2048
-  %120 = icmp eq i32 %119, 55296
-  %121 = zext i1 %120 to i32
-  %122 = or i32 %53, %121
-  %123 = getelementptr inbounds i8, ptr %46, i32 %55
-  %124 = icmp ult i32 %118, 128
-  br i1 %124, label %125, label %127
+117:                                              ; preds = %107, %93
+  %118 = phi i32 [ %91, %93 ], [ %97, %107 ]
+  %119 = phi i32 [ %88, %93 ], [ %114, %107 ]
+  %120 = and i32 %119, -2048
+  %121 = icmp eq i32 %120, 55296
+  %122 = zext i1 %121 to i32
+  %123 = or i32 %55, %122
+  %124 = getelementptr inbounds i8, ptr %47, i32 %54
+  %125 = icmp ult i32 %119, 128
+  br i1 %125, label %126, label %128
 
-125:                                              ; preds = %116
-  %126 = trunc i32 %118 to i8
-  store i8 %126, ptr %123, align 1, !tbaa !12
-  br label %178
+126:                                              ; preds = %117
+  %127 = trunc i32 %119 to i8
+  store i8 %127, ptr %124, align 1, !tbaa !12
+  br label %179
 
-127:                                              ; preds = %116
-  %128 = icmp ult i32 %118, 2048
-  br i1 %128, label %129, label %137
+128:                                              ; preds = %117
+  %129 = icmp ult i32 %119, 2048
+  br i1 %129, label %130, label %138
 
-129:                                              ; preds = %127
-  %130 = lshr i32 %118, 6
-  %131 = trunc i32 %130 to i8
-  %132 = or disjoint i8 %131, -64
-  store i8 %132, ptr %123, align 1, !tbaa !12
-  %133 = trunc i32 %118 to i8
-  %134 = and i8 %133, 63
-  %135 = or disjoint i8 %134, -128
-  %136 = getelementptr inbounds i8, ptr %123, i32 1
-  store i8 %135, ptr %136, align 1, !tbaa !12
-  br label %178
+130:                                              ; preds = %128
+  %131 = lshr i32 %119, 6
+  %132 = trunc i32 %131 to i8
+  %133 = or disjoint i8 %132, -64
+  store i8 %133, ptr %124, align 1, !tbaa !12
+  %134 = trunc i32 %119 to i8
+  %135 = and i8 %134, 63
+  %136 = or disjoint i8 %135, -128
+  %137 = getelementptr inbounds i8, ptr %124, i32 1
+  store i8 %136, ptr %137, align 1, !tbaa !12
+  br label %179
 
-137:                                              ; preds = %114, %127
-  %138 = phi i32 [ %90, %114 ], [ %117, %127 ]
-  %139 = phi i32 [ %87, %114 ], [ %118, %127 ]
-  %140 = phi i32 [ 1, %114 ], [ %122, %127 ]
-  %141 = phi ptr [ %115, %114 ], [ %123, %127 ]
-  %142 = icmp ult i32 %139, 65536
-  %143 = getelementptr i8, ptr %47, i32 %55
-  br i1 %142, label %144, label %156
+138:                                              ; preds = %115, %128
+  %139 = phi i32 [ %91, %115 ], [ %118, %128 ]
+  %140 = phi i32 [ %88, %115 ], [ %119, %128 ]
+  %141 = phi i32 [ 1, %115 ], [ %123, %128 ]
+  %142 = phi ptr [ %116, %115 ], [ %124, %128 ]
+  %143 = icmp ult i32 %140, 65536
+  %144 = getelementptr i8, ptr %48, i32 %54
+  br i1 %143, label %145, label %157
 
-144:                                              ; preds = %137
-  %145 = lshr i32 %139, 12
-  %146 = trunc i32 %145 to i8
-  %147 = or disjoint i8 %146, -32
-  store i8 %147, ptr %141, align 1, !tbaa !12
-  %148 = lshr i32 %139, 6
-  %149 = trunc i32 %148 to i8
-  %150 = and i8 %149, 63
-  %151 = or disjoint i8 %150, -128
-  store i8 %151, ptr %143, align 1, !tbaa !12
-  %152 = trunc i32 %139 to i8
-  %153 = and i8 %152, 63
-  %154 = or disjoint i8 %153, -128
-  %155 = getelementptr i8, ptr %48, i32 %55
-  store i8 %154, ptr %155, align 1, !tbaa !12
-  br label %178
+145:                                              ; preds = %138
+  %146 = lshr i32 %140, 12
+  %147 = trunc i32 %146 to i8
+  %148 = or disjoint i8 %147, -32
+  store i8 %148, ptr %142, align 1, !tbaa !12
+  %149 = lshr i32 %140, 6
+  %150 = trunc i32 %149 to i8
+  %151 = and i8 %150, 63
+  %152 = or disjoint i8 %151, -128
+  store i8 %152, ptr %144, align 1, !tbaa !12
+  %153 = trunc i32 %140 to i8
+  %154 = and i8 %153, 63
+  %155 = or disjoint i8 %154, -128
+  %156 = getelementptr i8, ptr %49, i32 %54
+  store i8 %155, ptr %156, align 1, !tbaa !12
+  br label %179
 
-156:                                              ; preds = %137
-  %157 = lshr i32 %139, 18
-  %158 = trunc i32 %157 to i8
-  %159 = or i8 %158, -16
-  store i8 %159, ptr %141, align 1, !tbaa !12
-  %160 = lshr i32 %139, 12
-  %161 = trunc i32 %160 to i8
-  %162 = and i8 %161, 63
-  %163 = or disjoint i8 %162, -128
-  store i8 %163, ptr %143, align 1, !tbaa !12
-  %164 = lshr i32 %139, 6
-  %165 = trunc i32 %164 to i8
-  %166 = and i8 %165, 63
-  %167 = or disjoint i8 %166, -128
-  %168 = getelementptr i8, ptr %48, i32 %55
-  store i8 %167, ptr %168, align 1, !tbaa !12
-  %169 = trunc i32 %139 to i8
-  %170 = and i8 %169, 63
-  %171 = or disjoint i8 %170, -128
-  %172 = getelementptr i8, ptr %49, i32 %55
-  store i8 %171, ptr %172, align 1, !tbaa !12
-  br label %178
+157:                                              ; preds = %138
+  %158 = lshr i32 %140, 18
+  %159 = trunc i32 %158 to i8
+  %160 = or i8 %159, -16
+  store i8 %160, ptr %142, align 1, !tbaa !12
+  %161 = lshr i32 %140, 12
+  %162 = trunc i32 %161 to i8
+  %163 = and i8 %162, 63
+  %164 = or disjoint i8 %163, -128
+  store i8 %164, ptr %144, align 1, !tbaa !12
+  %165 = lshr i32 %140, 6
+  %166 = trunc i32 %165 to i8
+  %167 = and i8 %166, 63
+  %168 = or disjoint i8 %167, -128
+  %169 = getelementptr i8, ptr %49, i32 %54
+  store i8 %168, ptr %169, align 1, !tbaa !12
+  %170 = trunc i32 %140 to i8
+  %171 = and i8 %170, 63
+  %172 = or disjoint i8 %171, -128
+  %173 = getelementptr i8, ptr %50, i32 %54
+  store i8 %172, ptr %173, align 1, !tbaa !12
+  br label %179
 
-173:                                              ; preds = %86, %89
-  %174 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 8
-  store ptr @.str.142, ptr %174, align 4, !tbaa !546
-  %175 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 9
-  store ptr null, ptr %175, align 4, !tbaa !547
-  %176 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 10
-  store i32 0, ptr %176, align 4, !tbaa !548
-  %177 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 11
-  store i8 0, ptr %177, align 4, !tbaa !549
-  br label %201
+174:                                              ; preds = %87, %90
+  %175 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 8
+  store ptr @.str.142, ptr %175, align 4, !tbaa !546
+  %176 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 9
+  store ptr null, ptr %176, align 4, !tbaa !547
+  %177 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 10
+  store i32 0, ptr %177, align 4, !tbaa !548
+  %178 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 11
+  store i8 0, ptr %178, align 4, !tbaa !549
+  br label %205
 
-178:                                              ; preds = %156, %144, %129, %125
-  %179 = phi i32 [ %122, %125 ], [ %122, %129 ], [ %140, %144 ], [ %140, %156 ]
-  %180 = phi i32 [ %117, %125 ], [ %117, %129 ], [ %138, %144 ], [ %138, %156 ]
-  %181 = phi i32 [ 1, %125 ], [ 2, %129 ], [ 3, %144 ], [ 4, %156 ]
-  %182 = add i32 %181, %55
-  br label %190
+179:                                              ; preds = %157, %145, %130, %126
+  %180 = phi i32 [ %123, %126 ], [ %123, %130 ], [ %141, %145 ], [ %141, %157 ]
+  %181 = phi i32 [ %118, %126 ], [ %118, %130 ], [ %139, %145 ], [ %139, %157 ]
+  %182 = phi i32 [ 1, %126 ], [ 2, %130 ], [ 3, %145 ], [ 4, %157 ]
+  %183 = add i32 %182, %54
+  br label %194
 
-183:                                              ; preds = %64
-  %184 = getelementptr inbounds i8, ptr %56, i32 %67
-  %185 = getelementptr inbounds i8, ptr %184, i32 -1
-  %186 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 8
-  store ptr @.str.143, ptr %186, align 4, !tbaa !546
-  %187 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 9
-  store ptr %185, ptr %187, align 4, !tbaa !547
-  %188 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 10
-  store i32 1, ptr %188, align 4, !tbaa !548
-  %189 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 11
-  store i8 0, ptr %189, align 4, !tbaa !549
-  br label %201
-
-190:                                              ; preds = %178, %83, %80, %77, %74, %71, %68, %60
-  %191 = phi i32 [ %62, %60 ], [ %84, %83 ], [ %81, %80 ], [ %78, %77 ], [ %75, %74 ], [ %72, %71 ], [ %69, %68 ], [ %182, %178 ]
-  %192 = phi i32 [ %63, %60 ], [ %67, %83 ], [ %67, %80 ], [ %67, %77 ], [ %67, %74 ], [ %67, %71 ], [ %67, %68 ], [ %180, %178 ]
-  %193 = phi i32 [ %53, %60 ], [ %53, %83 ], [ %53, %80 ], [ %53, %77 ], [ %53, %74 ], [ %53, %71 ], [ %53, %68 ], [ %179, %178 ]
-  %194 = icmp ult i32 %192, %19
-  br i1 %194, label %52, label %195
-
-195:                                              ; preds = %190
-  %196 = icmp eq i32 %193, 0
-  store ptr %46, ptr %1, align 4, !tbaa !8
-  br i1 %196, label %199, label %197
-
-197:                                              ; preds = %195
+184:                                              ; preds = %65
+  %185 = add nuw i32 %56, 1
   call void @llvm.lifetime.start.p0(i64 4, ptr nonnull %4) #78
-  %198 = call fastcc i32 @string_join_pairs(ptr noundef nonnull %46, i32 noundef %191, ptr noundef nonnull %4) #74
+  store i32 %185, ptr %4, align 4, !tbaa !9
+  %186 = call fastcc i32 @decode(ptr noundef nonnull %57, i32 noundef %20, ptr noundef nonnull %4) #74
+  %187 = getelementptr inbounds i8, ptr %57, i32 %185
+  %188 = load i32, ptr %4, align 4, !tbaa !9
+  %189 = sub i32 %188, %185
+  %190 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 8
+  store ptr @.str.143, ptr %190, align 4, !tbaa !546
+  %191 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 9
+  store ptr %187, ptr %191, align 4, !tbaa !547
+  %192 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 10
+  store i32 %189, ptr %192, align 4, !tbaa !548
+  %193 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 11
+  store i8 0, ptr %193, align 4, !tbaa !549
   call void @llvm.lifetime.end.p0(i64 4, ptr nonnull %4) #78
-  br label %199
+  br label %205
 
-199:                                              ; preds = %51, %197, %195
-  %200 = phi i32 [ %198, %197 ], [ %191, %195 ], [ 0, %51 ]
-  store i32 %200, ptr %2, align 4, !tbaa !9
-  br label %201
+194:                                              ; preds = %179, %84, %81, %78, %75, %72, %69, %61
+  %195 = phi i32 [ %64, %61 ], [ %68, %84 ], [ %68, %81 ], [ %68, %78 ], [ %68, %75 ], [ %68, %72 ], [ %68, %69 ], [ %181, %179 ]
+  %196 = phi i32 [ %55, %61 ], [ %55, %84 ], [ %55, %81 ], [ %55, %78 ], [ %55, %75 ], [ %55, %72 ], [ %55, %69 ], [ %180, %179 ]
+  %197 = phi i32 [ %63, %61 ], [ %85, %84 ], [ %82, %81 ], [ %79, %78 ], [ %76, %75 ], [ %73, %72 ], [ %70, %69 ], [ %183, %179 ]
+  %198 = icmp ult i32 %195, %20
+  br i1 %198, label %53, label %199
 
-201:                                              ; preds = %173, %183, %26, %199, %41, %13
-  %202 = phi i32 [ 0, %13 ], [ 1, %41 ], [ 1, %199 ], [ 0, %26 ], [ 0, %183 ], [ 0, %173 ]
-  ret i32 %202
+199:                                              ; preds = %194
+  %200 = icmp eq i32 %196, 0
+  store ptr %47, ptr %1, align 4, !tbaa !8
+  br i1 %200, label %203, label %201
+
+201:                                              ; preds = %199
+  call void @llvm.lifetime.start.p0(i64 4, ptr nonnull %5) #78
+  %202 = call fastcc i32 @string_join_pairs(ptr noundef nonnull %47, i32 noundef %197, ptr noundef nonnull %5) #74
+  call void @llvm.lifetime.end.p0(i64 4, ptr nonnull %5) #78
+  br label %203
+
+203:                                              ; preds = %52, %201, %199
+  %204 = phi i32 [ %202, %201 ], [ %197, %199 ], [ 0, %52 ]
+  store i32 %204, ptr %2, align 4, !tbaa !9
+  br label %205
+
+205:                                              ; preds = %174, %184, %27, %203, %42, %14
+  %206 = phi i32 [ 0, %14 ], [ 1, %42 ], [ 1, %203 ], [ 0, %27 ], [ 0, %184 ], [ 0, %174 ]
+  ret i32 %206
 }
 
 ; Function Attrs: nofree norecurse nosync nounwind optsize memory(argmem: read)

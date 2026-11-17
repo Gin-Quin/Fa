@@ -698,6 +698,18 @@ fn json_reads_utf8_bytes_and_preserves_escaped_surrogates() {
 		),
 		Ok(units(&[0xd800]))
 	);
+	// Private-use characters are ordinary data even next to a lone unit.
+	assert_eq!(
+		call(
+			"Json.parse",
+			vec![
+				units(&[34, 0xe000, 0xd800, 0xe001, 34]),
+				schema.clone(),
+				Value::Boolean(true)
+			]
+		),
+		Ok(units(&[0xe000, 0xd800, 0xe001]))
+	);
 	for bad in [bytes(&[255]), bytes(b"["), bytes(b"1")] {
 		assert!(
 			matches!(call("Json.parse",vec![bad,schema.clone(),Value::Boolean(true)]),Err(Error::Thrown(Value::Member(ref m))) if m.name.as_ref() == "JsonError")

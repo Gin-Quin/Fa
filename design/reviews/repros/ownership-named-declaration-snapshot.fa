@@ -1,0 +1,16 @@
+-- Specification result: 1 1 (one snapshot when read is declared).
+-- Reproduction only: promoted to the shared acceptance corpus with the fix.
+
+type Reader = () => Integer
+
+function make = (): Reader => {
+	mutable n = 1
+	function read = (): Integer => n
+	n = 2
+	read
+}
+
+function summary = (): Integer => make()()
+
+static compiled = @summary()
+console.log(compiled, summary())

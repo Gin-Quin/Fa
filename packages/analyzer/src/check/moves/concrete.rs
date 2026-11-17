@@ -407,7 +407,11 @@ impl Walker<'_> {
 
 	/// Defaults run only at calls which omit them. Keep their observations
 	/// separate from the unconditional observations of the function body.
-	fn ownership_read_context(&self, mut node: NodeId, defaults: &FxHashSet<NodeId>) -> NodeId {
+	pub(super) fn ownership_read_context(
+		&self,
+		mut node: NodeId,
+		defaults: &FxHashSet<NodeId>,
+	) -> NodeId {
 		loop {
 			if defaults.contains(&node)
 				|| matches!(

@@ -718,6 +718,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 	walker.finish_relations();
 	// the last uses that are copies are moves (moves.rs)
 	walker.finish_moves();
+	// Freeze every observation, including reads after the last callable change.
+	walker.publish_callable_capture_facts();
 	// Demand-time code precedes these final ownership facts.
 	walker.s.comptime.invalidate_functions();
 	// the static sets of reactivity, and its tables (reactivity.rs)

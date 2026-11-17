@@ -677,6 +677,9 @@ pub struct Analysis {
 	/// Named reads in borrowed and owned invocation contexts. Pending
 	/// wrapper/default states must settle before target selection.
 	pub named_function_readiness: FxHashMap<NodeId, NamedFunctionReadiness>,
+	/// Frozen whole-owner source facts. No walker-local PlaceId escapes
+	/// into these snapshots; path validity remains in the reference checker.
+	pub ownership_sources: OwnershipSourceFacts,
 	/// Parameters whose callable data can be retained by their function.
 	pub kept_parameters: rustc_hash::FxHashSet<SymbolId>,
 	/// Retention inferred conservatively from an unknown function value.
@@ -1376,6 +1379,40 @@ pub struct NamedFunctionReadiness {
 	pub owned: DeclarationReadiness,
 }
 
+/// Logical input supplying an ownership observation. Direct and captured
+/// reads remain distinct even when they designate the same owner.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum OwnershipSourceOrigin {
+	Direct,
+	Capture { function: NodeId, symbol: SymbolId },
+}
+
+/// Whole-owner provenance. Exact field/index paths remain in the walk's
+/// checked place arena; these facts alone never authorize a partial move.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct OwnershipSource {
+	pub root: crate::flow::PlaceRoot,
+	pub origin: OwnershipSourceOrigin,
+}
+
+pub type OwnershipSources = smallvec::SmallVec<[OwnershipSource; 2]>;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OwnershipRead {
+	/// The executing body or parameter-default context.
+	pub context: NodeId,
+	pub sources: OwnershipSources,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct OwnershipSourceFacts {
+	pub reads: FxHashMap<NodeId, OwnershipRead>,
+	pub captures: FxHashMap<(NodeId, SymbolId), OwnershipSources>,
+	/// Retained or unfinished bodies whose source observations are not
+	/// complete. Their summaries must not authorize a source transfer.
+	pub pending_functions: rustc_hash::FxHashSet<NodeId>,
+}
+
 /// What the backends need of a function or a lambda node.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FnInfo {
@@ -1642,6 +1679,7 @@ impl Analysis {
 			named_function_dependencies: FxHashMap::default(),
 			function_capture_states: FxHashMap::default(),
 			named_function_readiness: FxHashMap::default(),
+			ownership_sources: OwnershipSourceFacts::default(),
 			kept_parameters: rustc_hash::FxHashSet::default(),
 			unknown_kept_parameters: rustc_hash::FxHashSet::default(),
 			non_escaping: rustc_hash::FxHashSet::default(),

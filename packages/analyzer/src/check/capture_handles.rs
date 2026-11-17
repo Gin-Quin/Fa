@@ -102,6 +102,7 @@ impl Walker<'_> {
 			.collect();
 		self.a.named_function_dependencies = handles;
 		self.publish_local_function_readiness();
+		self.publish_ownership_source_facts();
 	}
 
 	fn function_binding_owner(&self, lambda: NodeId) -> NodeId {

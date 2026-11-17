@@ -24,6 +24,7 @@ mod copies;
 mod graph;
 mod origins;
 mod readiness;
+mod source_facts;
 mod validity;
 
 /// The last use of a local seen so far.

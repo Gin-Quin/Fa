@@ -59,9 +59,20 @@ impl Graph {
 		};
 		// The function exit: uncaught failures and returns have no successor.
 		builder.event(body, SmallVec::new(), SmallVec::new(), SmallVec::new());
+		// An exported callable can run only after successful initialization.
+		// Keep its observations after the initializer's last definition, not
+		// at the export's textual declaration or on a failure edge.
+		let success = if body.index() == walker.tree.root && !walker.module_owner_borrows.is_empty()
+		{
+			let mut sources: SmallVec<_> = walker.module_owner_borrows.keys().copied().collect();
+			sources.sort_unstable();
+			builder.event(body, sources, SmallVec::new(), smallvec![0])
+		} else {
+			0
+		};
 		let entry = builder.expression(
 			body,
-			0,
+			success,
 			Exits {
 				failure: 0,
 				break_: None,

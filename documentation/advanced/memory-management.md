@@ -530,6 +530,8 @@ Named callable dependencies are published separately from data captures, includi
 
 A map literal consumes an owned entry tuple as a whole before transferring its key and value into the map. Grouping parentheses do not change that transfer. The temporary tuple is no longer an owner, and no copier duplicates a unique value.
 
+An exported function, callable value or namespace callable can read module state after successful initialization. Its body and omitted defaults provide future source observations on that successful exit, including callable handles stored in an exported object, tuple or array. Replacing a module binding before that exit ends its previous owner’s lifetime; retained-owner flags apply to the observed version, not every value ever stored in the binding.
+
 Pending-task ownership observations freeze the active tasks at each place read and capture declaration, then use the final invocation summaries to include argument, capture and module sources. The retained-owner fact also forbids native last-use heuristics from transferring ordinary String and record owners. Awaiting an immutable moved Task follows the same start identity and ends its borrow.
 
 Default argument binding distinguishes an existing borrowed place from a fresh temporary on each selected result path. Native binding preserves the place's address, so mutation reaches its owner, and guards cleanup of the temporary before evaluating any later default. JavaScript similarly records whether the selected branch constructed its value and finalizes only that branch's temporary. Blocks, conditionals and coalescing do not themselves authorize a copy; locals created by the argument must leave their inner scope under the ordinary move rules.

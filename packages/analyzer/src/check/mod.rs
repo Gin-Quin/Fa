@@ -532,6 +532,8 @@ pub struct Walker<'s> {
 	pub(crate) move_writes: FxHashMap<NodeId, PlaceId>,
 	/// Module owners observed by an exported callable after initialization.
 	pub(crate) module_owner_borrows: FxHashMap<SymbolId, NodeId>,
+	/// Reads of the same owner version retained by a future module observer.
+	pub(crate) module_owner_loans: FxHashMap<(NodeId, SymbolId), NodeId>,
 	/// Explicit operations ending a unique handle's lifetime in place.
 	pub(crate) lifetime_ends: FxHashMap<NodeId, PlaceId>,
 	/// The providers of the requirements of the call being applied.
@@ -737,6 +739,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		closure_writes: FxHashMap::default(),
 		unknown_callback_escapes: FxHashMap::default(),
 		module_owner_borrows: FxHashMap::default(),
+		module_owner_loans: FxHashMap::default(),
 		retention_version: 0,
 		retention_checked_version: None,
 		rejected_effect_roots: rustc_hash::FxHashSet::default(),

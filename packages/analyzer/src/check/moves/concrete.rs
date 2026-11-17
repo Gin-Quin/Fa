@@ -18,11 +18,11 @@ impl Walker<'_> {
 		self.collect_store_values();
 		let reads = self.ownership_reads();
 		self.finish_ownership_task_borrows(&reads);
-		self.mark_reserved_module_reads();
 		let mut commits: FxHashMap<NodeId, Vec<NodeId>> = FxHashMap::default();
 		for value in self.copy_sites.iter().copied() {
 			commits.entry(value).or_default().push(value);
 		}
+		self.mark_reserved_module_reads(&reads, &commits);
 		let root = NodeId::new(self.tree.root);
 		let mut bodies = vec![root];
 		bodies.extend(self.a.functions.values().map(|info| info.body));
@@ -58,7 +58,7 @@ impl Walker<'_> {
 				let later = graph.later_uses(symbol);
 				for value in values {
 					if self.pending_ownership_task(value, symbol).is_some()
-						|| self.module_owner_borrows.contains_key(&symbol)
+						|| self.module_owner_loans.contains_key(&(value, symbol))
 					{
 						self.clear_flag(value, NodeFlags::MOVE);
 						self.a.moved_reads.remove(&value);
@@ -716,6 +716,57 @@ mod tests {
 					"{source}"
 				);
 			}
+		}
+	}
+
+	#[test]
+	fn exported_callable_values_keep_their_module_sources_live() {
+		for exported in [
+			"read",
+			"reader",
+			"{ run = reader }",
+			"[reader]",
+			"(reader, 0)",
+		] {
+			let source = format!(
+				"mutable original = [1]\nfunction read = (): Integer => original.sum()\nlet reader = read\nmutable target = original\ntarget.push(2)\nexport = {exported}\n"
+			);
+			assert_eq!(
+				crate::check::test_support::codes(&source),
+				["MEM004"],
+				"{source}"
+			);
+		}
+	}
+
+	#[test]
+	fn public_namespace_callables_keep_their_module_sources_live() {
+		for member in [
+			"function read = (): Integer => original.sum()",
+			"let handle = reader",
+			"namespace inner = { function read = (): Integer => original.sum() }",
+		] {
+			let source = format!(
+				"mutable original = [1]\nfunction reader = (): Integer => original.sum()\nmutable target = original\ntarget.push(2)\nexport namespace = {{ {member} }}\n"
+			);
+			assert_eq!(
+				crate::check::test_support::codes(&source),
+				["MEM004"],
+				"{source}"
+			);
+		}
+	}
+
+	#[test]
+	fn an_exported_reader_observes_the_replacement_module_owner() {
+		for exported in [
+			"export function = (): Integer => original.sum()",
+			"function read = (): Integer => original.sum()\nexport = read",
+		] {
+			let source = format!(
+				"mutable original: Array<Integer> = [1]\nmutable target = original\noriginal = [2]\ntarget.push(3)\n{exported}\n"
+			);
+			crate::check::test_support::analyzed(&source);
 		}
 	}
 

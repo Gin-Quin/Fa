@@ -1,0 +1,10 @@
+function make = (count: Integer<min = 0>): Array<Integer> => {
+	mutable items: Array<Integer> = []
+	for index in 0..count { items.push(index) }
+	items
+}
+mutable original = make(arguments.length + 2)
+mutable saved = original
+original = make(arguments.length + 3)
+saved.push(9)
+export function = () => console.log(original.sum(), saved.sum()) -- prints: 3 10

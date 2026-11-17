@@ -261,7 +261,7 @@ impl Walker<'_> {
 				continue;
 			}
 			if let Some(symbol) = crate::lower::copies::value_place_root(&self.tree, &self.a, value)
-				&& let Some(&reader) = self.module_owner_borrows.get(&symbol)
+				&& let Some(&reader) = self.module_owner_loans.get(&(value, symbol))
 			{
 				if category == Ownership::Unique
 					&& self.output.iter().any(|diagnostic| {
@@ -285,8 +285,8 @@ impl Walker<'_> {
 						),
 					)
 				};
-				let mut diagnostic = self.diagnostic(code, value, format!("`{text}` remains available to the exported function on line {}, which may read it after module initialization; transferring its owner would invalidate that read: {fix}", self.line_of(reader)))
-					.with_related(Location { file: self.file, span: self.span(reader) }, "this exported function keeps the module owner live");
+				let mut diagnostic = self.diagnostic(code, value, format!("`{text}` remains available to the exported callable on line {}, which may read it after module initialization; transferring its owner would invalidate that read: {fix}", self.line_of(reader)))
+					.with_related(Location { file: self.file, span: self.span(reader) }, "this export keeps the module owner live");
 				if category == Ownership::Structure {
 					diagnostic = diagnostic.with_fix(Fix {
 						title: format!("Make an independent copy of `{text}`"),

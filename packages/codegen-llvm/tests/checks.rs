@@ -482,6 +482,23 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn module_replacement_ends_the_previous_exported_owner_version() {
+		let source = include_str!("../../analyzer/tests/cases/ownershipExportedOwnerVersions.fa");
+		for target in [Target::Native, Target::Wasm] {
+			let ir = ir_at_target("exported-owner-version", source, true, OptLevel::O0, target);
+			let main = function(
+				&ir,
+				if target == Target::Native {
+					"main"
+				} else {
+					"_start"
+				},
+			);
+			assert!(!main.contains("@fa.copy"), "{target:?}: {main}");
+		}
+	}
+
+	#[test]
 	fn captures_transfer_the_old_owner_before_a_borrowed_replacement() {
 		let source = include_str!("../../analyzer/tests/cases/ownership-capture-replacements.fa");
 		for target in [Target::Native, Target::Wasm] {

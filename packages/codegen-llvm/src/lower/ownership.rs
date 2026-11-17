@@ -2283,14 +2283,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 	}
 
-	/// A closed synchronous initializer has no observer left behind its
-	/// checked last uses. More general module lifetimes keep the existing
-	/// guard until their deferred-observer proof is available.
+	/// A closed synchronous initializer accounts for its future exports in
+	/// the move graph. Other deferred observers still need their lifetime
+	/// proof before physical module slots can transfer.
 	fn closed_module_transfers(&self) -> bool {
-		use fa_analyzer::analysis::Callee;
-		if self.module_file
-			|| !self.analysis.escapes.is_empty()
-			|| !self.analysis.starts.is_empty()
+		use fa_analyzer::analysis::{Callee, FunctionCaptureState};
+		if self.analysis.escapes.iter().any(|function| {
+			self.analysis.function_capture_states.get(function)
+				!= Some(&FunctionCaptureState::Empty)
+		}) || !self.analysis.starts.is_empty()
 			|| !self.analysis.watches.is_empty()
 			|| !self.analysis.type_decls.is_empty()
 			|| !self.analysis.function_owners.is_empty()
@@ -2319,9 +2320,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		self.analysis.functions.values().all(|info| {
 			info.sig.is_some_and(|sig| !self.types().sig(sig).is_async)
-				&& info
-					.declaration
-					.is_some_and(|node| matches!(self.view(node), View::Function { .. }))
+				&& info.declaration.is_some_and(|node| {
+					matches!(
+						self.view(node),
+						View::Function { .. } | View::ExportFunction { .. }
+					)
+				})
 		}) && self.analysis.calls.values().all(|call| match call.callee {
 			Callee::Builtin(_) | Callee::Conversion(_) => true,
 			Callee::Function(node) => self.analysis.function(node).is_some(),
@@ -2329,11 +2333,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}) && (0..self.tree.nodes.len()).all(|index| {
 			!matches!(
 				self.view(NodeId::new(index)),
-				View::ExportValue { .. }
-					| View::ExportFunction { .. }
-					| View::ExportType { .. }
-					| View::ExportNamespace(_)
-					| View::Await(_)
+				View::ExportNamespace(_) | View::Await(_)
 			)
 		})
 	}

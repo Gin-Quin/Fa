@@ -549,9 +549,10 @@ retain(entries, "key", 7)
 		complete.resolve_maps(facts::map_facts(&session, &[file]));
 		let mut types = TypeStore::new();
 		let integer = types.collection(CollKind::Map, TypeId::INTEGER, TypeId::STRING);
-		let int64 = types.collection(CollKind::Map, TypeId::INT64, TypeId::STRING);
+		let literal = types.int_literal(ethnum::I256::from(7));
+		let refined = types.collection(CollKind::Map, literal, TypeId::STRING);
 		let unrelated = types.collection(CollKind::Map, TypeId::STRING, TypeId::STRING);
-		for ty in [integer, int64] {
+		for ty in [integer, refined] {
 			assert!(facts::map_excluded(&types, ty, |key| complete.contains(REFERENCED_MAPS, key)));
 		}
 		assert!(!facts::map_excluded(&types, unrelated, |key| complete
@@ -567,7 +568,7 @@ function retain = <Key, Item>(entries: Map<Key, Item>, key: Key, value: Item) mu
  entries[key] = copy value
  slot = copy value
 }
-mutable a: Map<String, Int64> = []
+mutable a: Map<String, Integer> = []
 retain(a, "key", 7)
 mutable b: Map<Int8, String> = []
 retain(b, Int8(1), "text")
@@ -580,10 +581,10 @@ retain(b, Int8(1), "text")
 		);
 		let facts = facts::map_facts(&session, &[file]);
 		let found = facts.set(REFERENCED_MAPS).unwrap();
-		assert!(found.contains("Map<String, Int64>"), "{found:?}");
+		assert!(found.contains("Map<String, Integer>"), "{found:?}");
 		assert!(found.contains("Map<Int8, String>"), "{found:?}");
 		assert!(!found.contains("Map<String, String>"), "{found:?}");
-		assert!(!found.contains("Map<Int8, Int64>"), "{found:?}");
+		assert!(!found.contains("Map<Int8, Integer>"), "{found:?}");
 	}
 
 	#[test]
@@ -597,7 +598,7 @@ function unused = <Item>(entries: Map<String, Item>, value: Item) mutates entrie
  unused(entries, value)
 }
 function used = <Item>(entries: Map<String, Item>, value: Item) mutates entries => { entries["key"] = copy value }
-mutable a: Map<String, Int64> = []
+mutable a: Map<String, Integer> = []
 used(a, 7)
 "#,
 		);
@@ -612,7 +613,7 @@ used(a, 7)
 		assert!(
 			!facts
 				.consulted(REFERENCED_MAPS, Some(&log))
-				.contains("Map<String, Int64>")
+				.contains("Map<String, Integer>")
 		);
 		assert!(facts::FactLog::still_holds(&log.to_text(), Some(&facts)));
 		facts.extend(
@@ -620,7 +621,7 @@ used(a, 7)
 			BTreeSet::from(["\u{1f}map-family:String\u{1e}*".into()]),
 		);
 		assert!(!facts::FactLog::still_holds(&log.to_text(), Some(&facts)));
-		assert!(!facts.contains(REFERENCED_MAPS, "Map<Int8, Int64>"));
+		assert!(!facts.contains(REFERENCED_MAPS, "Map<Int8, Integer>"));
 	}
 
 	#[test]
@@ -660,8 +661,8 @@ function read = <Item>(entries: Map<String, Item>): Item? => {
  pause()
  if slot is none { none } else { copy slot }
 }
-function invoke = (action: <Value>(entries: Map<String, Value>) => Value?, entries: Map<String, Int64>): Integer => action(entries) ?? 0
-let entries: Map<String, Int64> = [("key", 9)]
+function invoke = (action: <Value>(entries: Map<String, Value>) => Value?, entries: Map<String, Integer>): Integer => action(entries) ?? 0
+let entries: Map<String, Integer> = [("key", 9)]
 let result = invoke(read, entries)
 "#,
 		);
@@ -672,7 +673,7 @@ let result = invoke(read, entries)
 		);
 		let facts = facts::map_facts(&session, &[file]);
 		assert!(
-			facts.contains(REFERENCED_MAPS, "Map<String, Int64>"),
+			facts.contains(REFERENCED_MAPS, "Map<String, Integer>"),
 			"{facts:?}"
 		);
 	}
@@ -689,7 +690,7 @@ let result = invoke(read, entries)
 		);
 		let facts = facts::map_facts(&session, &[file]);
 		assert!(
-			facts.contains(REFERENCED_MAPS, "Map<String, Int64>"),
+			facts.contains(REFERENCED_MAPS, "Map<String, Integer>"),
 			"{facts:?}"
 		);
 		assert!(
@@ -701,7 +702,7 @@ let result = invoke(read, entries)
 			"{facts:?}"
 		);
 		assert!(
-			!facts.contains(REFERENCED_MAPS, "Map<Int8, Int64>"),
+			!facts.contains(REFERENCED_MAPS, "Map<Int8, Integer>"),
 			"{facts:?}"
 		);
 	}

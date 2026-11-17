@@ -2754,13 +2754,31 @@ impl Walker<'_> {
 		}
 	}
 
+	/// Storing a closure moves its owned handles immediately. Borrowed capture
+	/// lifetimes are checked when the evaluated value leaves its local owner.
+	pub(crate) fn store_closures(&mut self, value: NodeId, at: NodeId) {
+		for closure in self.evaluated_origins(value).closures {
+			if let Some(lambda) = closure.callable.local()
+				&& self.a.functions.get(&lambda).is_some_and(|info| {
+					info.captures
+						.iter()
+						.any(|&symbol| self.is_moved_handle(self.a.symbols.symbol(symbol).ty))
+				}) {
+				self.snapshot_closure(lambda, at);
+			}
+		}
+	}
+
 	/// A closure (a lambda node, or a `watch` node or `derived` declaration,
 	/// which copy their captures too) that escapes: `REF021` on its writes
 	/// of what it captures.
 	pub(crate) fn escape_closure(&mut self, lambda: NodeId, at: NodeId) {
-		self.a.escapes.insert(lambda);
 		self.check_escaping_references(lambda, at);
-		// a captured task or worker's handle moves into an escaping closure
+		self.snapshot_closure(lambda, at);
+	}
+
+	fn snapshot_closure(&mut self, lambda: NodeId, at: NodeId) {
+		self.a.escapes.insert(lambda);
 		let captured: Vec<SymbolId> = self
 			.a
 			.functions
@@ -2768,9 +2786,10 @@ impl Walker<'_> {
 			.map(|info| info.captures.clone())
 			.unwrap_or_default();
 		for symbol in captured {
-			let symbol_type = self.a.symbols.symbol(symbol).ty;
-			if self.is_moved_handle(symbol_type)
-				&& self.body.flow.reachable
+			if !self.is_moved_handle(self.a.symbols.symbol(symbol).ty) {
+				continue;
+			}
+			if self.body.flow.reachable
 				&& !self
 					.body
 					.flow

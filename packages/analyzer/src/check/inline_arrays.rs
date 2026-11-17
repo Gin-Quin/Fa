@@ -72,7 +72,7 @@ impl Walker<'_> {
 			} else {
 				let ty = self.check(value, Some(item));
 				self.sink(value, ty, item);
-				self.escape(value, n);
+				self.store_closures(value, n);
 			}
 		}
 		if items.len() > capacity as usize {

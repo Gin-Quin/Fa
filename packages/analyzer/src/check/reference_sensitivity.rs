@@ -198,7 +198,7 @@ impl Walker<'_> {
 
 	fn representation_parameters(&self, ty: TypeId, params: &mut FxHashSet<ParamId>) {
 		match self.s.types.kind(ty) {
-			TypeKind::Param(param) => {
+			TypeKind::Param(param) if !self.s.types.param(param).value => {
 				params.insert(param);
 			}
 			TypeKind::Union(list) => {

@@ -88,6 +88,9 @@ impl Generator<'_> {
 	}
 
 	pub(crate) fn call_returns_reference(&self, node: NodeId) -> bool {
+		if self.has(node, NodeFlags::GENERIC_APPLICATION) {
+			return false;
+		}
 		let View::Call { callee, .. } = self.view(node) else {
 			return false;
 		};

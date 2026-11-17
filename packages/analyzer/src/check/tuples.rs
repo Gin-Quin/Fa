@@ -32,7 +32,7 @@ impl Walker<'_> {
 		for (index, item) in items.iter().enumerate() {
 			let element = expected_items.as_ref().map(|elements| elements[index]);
 			let ty = self.check(item, element);
-			self.escape(item, n);
+			self.store_closures(item, n);
 			if let Some(element) = element {
 				self.sink(item, ty, element);
 			}

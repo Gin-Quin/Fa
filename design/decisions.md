@@ -2182,3 +2182,10 @@ that complete result, keeping unused generics and unrelated maps optimized. Cach
 lookups retain matching families and invalidation logging. Exact helper type
 bindings, aggregate/async function entries and reference results remain combined;
 the object-cache generation includes both branches and a landing suffix.
+
+Aggregate construction records owned-handle capture transfers without declaring
+that a local borrowed capture has left its lifetime boundary. The eventual
+boundary checks evaluated origins after field replacements. A closure that owns
+its captured handle reads that owned capture when called; the original local
+remains consumed. Explicit generic applications produce function values, so they
+do not use the synchronous reference-result container/key read protocol.

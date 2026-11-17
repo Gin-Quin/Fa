@@ -188,11 +188,29 @@ impl Generator<'_> {
 		self.hidden_arguments_bound(call, generics, hidden, &bindings, &methods)
 	}
 
+	pub(super) fn generic_application_site(&self, call: NodeId) -> NodeId {
+		if let View::Call { callee, .. } = self.view(call) {
+			let callee = self.strip_groups(callee);
+			if self.has(
+				callee,
+				fa_analyzer::analysis::NodeFlags::GENERIC_APPLICATION,
+			) {
+				return callee;
+			}
+		}
+		call
+	}
+
 	pub(super) fn generic_call_bindings(
 		&self,
 		call: NodeId,
 		generics: &[ParamId],
 	) -> (Vec<TypeId>, Vec<fa_analyzer::analysis::GenericMethod>) {
+		let call = if self.analysis.instantiation(call).is_some() {
+			call
+		} else {
+			self.generic_application_site(call)
+		};
 		let mut bindings: Vec<TypeId> = self
 			.analysis
 			.instantiation(call)

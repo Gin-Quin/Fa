@@ -239,7 +239,13 @@ impl Generator<'_> {
 					true,
 				)
 			}
-			Resolution::Local(_) if direct && self.analysis.instantiation(site).is_some() => {
+			Resolution::Local(_)
+				if direct
+					&& self
+						.analysis
+						.instantiation(self.generic_application_site(site))
+						.is_some() =>
+			{
 				// A generic callable parameter can contain any representation family.
 				// Each edge is a property of an existing function, without a wrapper,
 				// a representation argument, a table object or dynamic key allocation.

@@ -1314,6 +1314,11 @@ impl Walker<'_> {
 		else {
 			return;
 		};
+		let owns_captures = self
+			.a
+			.functions
+			.get(&function)
+			.is_some_and(|info| self.a.escapes.contains(&info.lambda));
 		for symbol in captures {
 			if self.is_captured(symbol)
 				&& let Some(cx) = self.body.functions.last_mut()
@@ -1322,7 +1327,8 @@ impl Walker<'_> {
 				cx.captures.push(symbol);
 			}
 			// a captured task (worker's handle, resource) moved away since
-			if self.body.flow.reachable
+			if !(owns_captures && self.is_moved_handle(self.a.symbols.symbol(symbol).ty))
+				&& self.body.flow.reachable
 				&& let Some(&(_, at)) = self
 					.body
 					.flow

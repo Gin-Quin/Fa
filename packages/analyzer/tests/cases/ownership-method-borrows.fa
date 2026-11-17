@@ -15,7 +15,8 @@ let saved = copy original
 mutate()
 console.log(saved, total()) -- prints: [3] 7
 
-function make = (): () => Integer => {
+type Reader = () => Integer
+function make = (): Reader => {
 	let items = [5, 6]
 	function read = (): Integer => items.sum()
 	read

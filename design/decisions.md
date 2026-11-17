@@ -3063,3 +3063,7 @@ Original-source observations use the same Body/Default context identity as the i
 ### Ownership enforcement: exported module observers (implementation, 2026-11-17)
 
 An exported callable observes module state after its initializer. Its original-source body and omitted-default summaries, including transitive helper calls, reserve those module owners: a structure store needs explicit copy, and a unique owner cannot be transferred away. These reservations also forbid ordinary-value last-use optimizations. The native shared-slot guard remains until the remaining escaped/default/namespace observer proofs are complete.
+
+### Ownership enforcement: method receiver observations (implementation, 2026-11-17)
+
+Selecting a method reads its receiver even though the selected method is not a place. Freeze the receiver's logical storage origin and exact checked path at that expression, outside memoized type checking. Canonical move paths alone do not establish an original-source observation. This keeps a source live across later borrowed method calls, while an owned closure's method reads stop at its stored environment.

@@ -101,8 +101,8 @@ impl Walker<'_> {
 			})
 			.collect();
 		self.a.named_function_dependencies = handles;
-		self.publish_local_function_readiness();
 		self.publish_ownership_source_facts();
+		self.publish_local_function_readiness();
 	}
 
 	fn function_binding_owner(&self, lambda: NodeId) -> NodeId {
@@ -303,8 +303,8 @@ mod tests {
 			assert_eq!(snapshot.function_capture_states.get(&lambda), Some(&state));
 			let uses: Vec<_> = snapshot
 				.named_function_readiness
-				.values()
-				.filter(|read| {
+				.iter()
+				.filter(|(_, read)| {
 					snapshot
 						.symbols
 						.symbol_of_decl(read.declaration)
@@ -338,9 +338,26 @@ mod tests {
 			} else {
 				crate::analysis::DeclarationReadiness::Ready
 			};
-			assert!(uses.iter().any(|read| read.borrowed
-				== crate::analysis::DeclarationReadiness::Pending
-				&& read.owned == expected_owned));
+			// Each key snapshot can be at a different completion stage.
+			// Require the exact state its current expression/source facts prove.
+			assert!(
+				uses.iter().copied().all(|(&node, read)| {
+					let incomplete = snapshot.type_of(node) == crate::ids::TypeId::UNSET
+						|| snapshot
+							.ownership_sources
+							.pending_functions
+							.contains(&lambda);
+					let expected_borrowed = if incomplete {
+						crate::analysis::DeclarationReadiness::Pending
+					} else {
+						expected_owned
+					};
+					read.borrowed == expected_borrowed && read.owned == expected_owned
+				}),
+				"readiness {uses:?}; pending {:?}",
+				snapshot.ownership_sources.pending_functions
+			);
+
 			assert_eq!(
 				snapshot.named_function_readiness,
 				snapshot.clone().named_function_readiness

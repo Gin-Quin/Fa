@@ -2167,3 +2167,21 @@ freestanding runtime was kept this way, with its `strtod`, and the split O0
 freestanding imports fixtures no longer linked; the trunk's leak-checked
 per-unit map packages failed the same way. Wasm and ThinLTO objects are
 unchanged. The object-cache version is bumped.
+
+## Ownership enforcement: invocation readiness (2026-11-17)
+
+Named declaration readiness is propagated from invocation sites through known
+borrowed wrappers and callback handles. A body and each omitted default have
+at most two entry states, borrowed and owned; the worklist joins early and
+ready states instead of specializing a body for each caller. A borrowed call
+can therefore be early, ready, mixed, or pending while dependencies are still
+incomplete. An owned invocation uses initialized captured handles. Self calls
+retain the running invocation's mode. Lexical block-entry CFG barriers are
+cached per declaration, so a new loop iteration starts unreached.
+
+Defaults are separate invocation contexts and contribute only at calls that
+omit them. Borrowed callbacks remain live for their receiving call even if
+the known callee ignores them. These readiness facts are metadata until source
+observations, capture-store plans and target declaration bindings activate
+together; the existing stricter declaration-order diagnostics are not relaxed
+by publishing them.

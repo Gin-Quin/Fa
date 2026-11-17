@@ -1,5 +1,5 @@
 //! Lexical readiness facts, separate from capturefulness and ownership.
-//! External borrowed-wrapper states remain Pending until call propagation.
+//! External borrowed-wrapper states are completed by call propagation.
 
 use rustc_hash::FxHashMap;
 
@@ -91,9 +91,10 @@ impl Walker<'_> {
 			);
 		}
 		self.a.named_function_readiness = published;
+		self.propagate_function_readiness();
 	}
 
-	fn function_declaration_block(&self, mut declaration: NodeId) -> NodeId {
+	pub(super) fn function_declaration_block(&self, mut declaration: NodeId) -> NodeId {
 		while let Some(parent) = self.parent(declaration) {
 			if matches!(self.view(parent), View::Block { .. } | View::Module { .. }) {
 				return parent;
@@ -183,5 +184,57 @@ mod tests {
 			found.iter().map(|state| state.borrowed).collect::<Vec<_>>(),
 			[Ready::Early, Ready::Ready]
 		);
+	}
+	#[test]
+	fn wrapper_readiness_joins_actual_call_positions() {
+		let source = "function make = (n: Integer): Integer => {\n function invoke = (): Integer => read()\n let before = invoke()\n function read = (): Integer => n\n before + invoke()\n}\n";
+		let found = states(source, "read");
+		assert_eq!(found[0].borrowed, Ready::Mixed);
+	}
+
+	#[test]
+	fn wrappers_called_on_one_side_keep_a_precise_state() {
+		for (body, expected) in [
+			(
+				"let value = invoke()\n function read = (): Integer => n\n value",
+				Ready::Early,
+			),
+			("function read = (): Integer => n\n invoke()", Ready::Ready),
+		] {
+			let source = format!(
+				"function make = (n: Integer): Integer => {{\n function invoke = (): Integer => read()\n {body}\n}}\n"
+			);
+			assert_eq!(states(&source, "read")[0].borrowed, expected);
+		}
+	}
+
+	#[test]
+	fn readiness_flows_through_multiple_borrowed_wrappers() {
+		let source = "function make = (n: Integer): Integer => {\n function first = (): Integer => second()\n function second = (): Integer => read()\n let before = first()\n function read = (): Integer => n\n before + first()\n}\n";
+		assert_eq!(states(source, "read")[0].borrowed, Ready::Mixed);
+	}
+
+	#[test]
+	fn borrowed_callback_uses_the_receiving_calls_position() {
+		let source = "function invoke = (callback: () => Integer): Integer => callback()\n function make = (n: Integer): Integer => {\n function wrapper = (): Integer => read()\n let before = invoke(wrapper)\n function read = (): Integer => n\n before + invoke(wrapper)\n}\n";
+		assert_eq!(states(source, "read")[0].borrowed, Ready::Mixed);
+	}
+
+	#[test]
+	fn omitted_defaults_inherit_the_calls_readiness() {
+		let source = "function make = (n: Integer): Integer => {\n function invoke = (value: Integer = read()): Integer => value\n let before = invoke()\n function read = (): Integer => n\n before + invoke()\n}\n";
+		assert_eq!(states(source, "read")[0].borrowed, Ready::Mixed);
+	}
+
+	#[test]
+	fn written_arguments_do_not_activate_a_default_context() {
+		let source = "function make = (n: Integer): Integer => {\n function invoke = (value: Integer = read()): Integer => value\n let before = invoke(0)\n function read = (): Integer => n\n before + invoke(1)\n}\n";
+		assert_eq!(states(source, "read")[0].borrowed, Ready::Pending);
+	}
+
+	#[test]
+	fn mutually_calling_borrowed_wrappers_converge() {
+		let source = "function make = (n: Integer): Integer => {\n function first = (again: Boolean): Integer => if again { second() } else { read() }\n function second = (): Integer => first(false)\n let before = first(false)\n function read = (): Integer => n\n before + second()\n}\n";
+		assert_eq!(states(source, "read")[0].borrowed, Ready::Mixed);
 	}
 }

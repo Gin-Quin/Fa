@@ -1371,6 +1371,8 @@ pub enum DeclarationReadiness {
 	Pending,
 	Early,
 	Ready,
+	/// Borrowed invocations can run on either side of the declaration.
+	Mixed,
 	/// The running invocation supplies its own environment and mode.
 	SelfInvocation,
 }

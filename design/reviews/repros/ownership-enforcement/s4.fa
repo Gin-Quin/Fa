@@ -1,0 +1,9 @@
+function apply = (callback: () => Integer): Integer => callback()
+function run = (): Integer => {
+	let items = [1, 2, 3]
+	function reader = () => items.length
+	mutable other = items
+	other.push(4)
+	apply(reader) + other.length
+}
+console.log(run())

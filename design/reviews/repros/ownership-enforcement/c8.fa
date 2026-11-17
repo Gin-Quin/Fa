@@ -1,0 +1,11 @@
+-- failure edge after a move
+function run = (text: String): Integer => {
+	let items = [1, 2, 3]
+	mutable other = [0]
+	let parsed = do {
+		other = items
+		Integer.parse(text)
+	} catch _error => other.length
+	parsed + other.length
+}
+console.log(run("x"), run("5"))

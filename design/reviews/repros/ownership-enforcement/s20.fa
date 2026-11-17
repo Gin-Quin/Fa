@@ -1,0 +1,6 @@
+function run = (): Integer => {
+	let pair = ([1, 2], [3])
+	let (left, right) = pair
+	left.length + right.length + pair[0].length
+}
+console.log(run())

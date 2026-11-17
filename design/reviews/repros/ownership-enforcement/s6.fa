@@ -1,0 +1,8 @@
+function run = (): Integer => {
+	mutable holder = { items = [1, 2, 3], count = 1 }
+	use inner = holder.items
+	mutable moved = holder
+	moved.items.push(4)
+	inner.length + moved.items.length
+}
+console.log(run())

@@ -1,0 +1,5 @@
+let original = [1, 2, 3]
+function total = (): Integer => original.length
+mutable target = original
+target.push(4)
+console.log(total(), target.length)

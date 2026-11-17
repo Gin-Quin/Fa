@@ -1,0 +1,5 @@
+let base = [1, 2]
+function size = (items: Array<Integer> = base): Integer => items.length
+mutable other = base
+other.push(3)
+console.log(size(), other.length)

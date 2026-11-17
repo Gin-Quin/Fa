@@ -1,0 +1,9 @@
+-- capture, then the source is replaced
+function make = (): (() => Integer) => {
+	mutable items = [1, 2, 3]
+	function reader = () => items.length
+	items = [9]
+	console.log(items.length)
+	reader
+}
+console.log(make()())

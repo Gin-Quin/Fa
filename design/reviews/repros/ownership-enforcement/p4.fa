@@ -1,0 +1,11 @@
+function run = (): Integer => {
+	let items = [1, 2, 3]
+	mutable all: GrowingArray<Array<Integer>> = []
+	mutable index = 0
+	while index < 3 {
+		all.push(items)
+		index += 1
+	}
+	all.length
+}
+console.log(run())

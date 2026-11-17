@@ -1,0 +1,7 @@
+function run = (): Integer => {
+	let row = [1, 2, 3]
+	mutable table: GrowingMap<String, Array<Integer>> = GrowingMap {}
+	table.set("a", row)
+	row.length + table.size
+}
+console.log(run())

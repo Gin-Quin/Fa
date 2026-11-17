@@ -1,0 +1,11 @@
+-- move in a loop with a replacement on each round
+function run = (): Integer => {
+	mutable current = [0]
+	mutable all: GrowingArray<Array<Integer>> = []
+	for index in 0..3 {
+		all.push(current)
+		current = [index, index]
+	}
+	all.length + current.length + all[1].length
+}
+console.log(run())

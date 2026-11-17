@@ -1,0 +1,8 @@
+function run = (flag: Boolean): Integer => {
+	let items = [1, 2, 3]
+	let fallback = [0]
+	mutable chosen = if flag { items } else { fallback }
+	chosen.push(4)
+	chosen.length + items.length
+}
+console.log(run(true))

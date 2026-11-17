@@ -1,0 +1,8 @@
+-- escaping closure captures at last use, then the factory mutates nothing
+function make = (): (() => Integer) => {
+	let items = [1, 2, 3]
+	function reader = () => items.length
+	reader
+}
+let read = make()
+console.log(read(), read())

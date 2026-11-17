@@ -1,0 +1,8 @@
+-- nonescaping callback mutating through a borrowed capture, then a move
+function run = (): Integer => {
+	mutable items: GrowingArray<Integer> = [1]
+	[1, 2, 3].forEach((value) => { items.push(value) })
+	let moved = items
+	moved.length
+}
+console.log(run())

@@ -1,0 +1,6 @@
+let original = [1, 2, 3]
+function total = (): Integer => original.length
+let handlers = [total]
+mutable target = original
+target.push(4)
+console.log(handlers[0](), target.length)

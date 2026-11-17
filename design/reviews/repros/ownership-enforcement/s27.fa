@@ -1,0 +1,8 @@
+function run = (): Integer => {
+	let items = [1, 2, 3]
+	mutable holder = { items = [0] }
+	holder.items = items
+	holder.items.push(4)
+	holder.items.length + items.length
+}
+console.log(run())

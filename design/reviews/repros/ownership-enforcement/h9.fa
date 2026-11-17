@@ -1,0 +1,7 @@
+function run = (): Integer => {
+	let pair = ([1, 2], [3])
+	mutable (left, right) = pair
+	left.push(9)
+	left.length + right.length + pair[0].length
+}
+console.log(run())

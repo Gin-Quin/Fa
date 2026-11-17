@@ -1,0 +1,8 @@
+function run = (): Integer => {
+	mutable items = [1, 2, 3]
+	use alias = items
+	mutable other = items
+	other.push(4)
+	alias.length + other.length
+}
+console.log(run())

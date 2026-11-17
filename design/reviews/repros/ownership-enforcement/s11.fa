@@ -1,0 +1,6 @@
+mutable shared = [1]
+function add = () => { shared.push(1) }
+mutable other = shared
+add()
+other.push(5)
+console.log(other.length)

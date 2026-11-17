@@ -1,0 +1,7 @@
+function size = (items: Array<Integer>, other: Array<Integer>): Integer => items.length + other.length
+function run = (): Integer => {
+	let items = [1, 2, 3]
+	size(items, { let moved = items
+		moved })
+}
+console.log(run())

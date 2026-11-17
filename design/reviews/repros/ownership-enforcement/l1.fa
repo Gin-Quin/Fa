@@ -1,0 +1,7 @@
+function build = (): Array<Integer> => {
+	let values = [1, 2]
+	let other = values
+	console.log(values.length)
+	other
+}
+console.log(build())

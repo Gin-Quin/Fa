@@ -1,0 +1,12 @@
+type Shape = Union { Group = { items: Array<Integer> }, Dot = { size: Integer } }
+function run = (shape: Shape): Integer => {
+	mutable kept = [0]
+	when shape is {
+		Shape.Group => { kept = shape.items }
+		Shape.Dot => { kept = [shape.size] }
+	}
+	kept.push(1)
+	kept.length
+}
+let group = Shape.Group { items = [1, 2] }
+console.log(run(group), run(group))

@@ -1,0 +1,8 @@
+type Holder = { items: Array<Integer> }
+function first = (holder: Holder): Array<Integer> => holder.items
+function run = (): Integer => {
+	let holder = Holder { items = [1, 2] }
+	let taken = first(holder)
+	taken.length + holder.items.length
+}
+console.log(run())

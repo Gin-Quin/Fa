@@ -1,0 +1,9 @@
+function run = (text: String): Integer => {
+	let items = [1, 2, 3]
+	mutable other = [0]
+	do {
+		other = items
+		Integer.parse(text)
+	} catch _error => items.length
+}
+console.log(run("x"))

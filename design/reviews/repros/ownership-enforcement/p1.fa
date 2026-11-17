@@ -1,0 +1,9 @@
+function make = (): () => Integer => {
+	let items = [1, 2, 3]
+	let reader = () => items.length
+	mutable other = items
+	other.push(4)
+	console.log(other.length)
+	reader
+}
+console.log(make()())

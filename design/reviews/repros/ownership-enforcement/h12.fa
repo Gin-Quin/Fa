@@ -1,0 +1,12 @@
+function run = (): Integer => {
+	mutable items = [1, 2, 3]
+	mutable log: GrowingArray<Array<Integer>> = []
+	mutable round = 0
+	while round < 2 {
+		log.push(items)
+		if round == 0 { items = [7] }
+		round += 1
+	}
+	log.length
+}
+console.log(run())

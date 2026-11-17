@@ -1,0 +1,9 @@
+function run = (): Integer => {
+	let matrix = [[1], [2, 3]]
+	mutable kept = [0]
+	for row in matrix {
+		kept = row
+	}
+	kept.length + matrix.length
+}
+console.log(run())

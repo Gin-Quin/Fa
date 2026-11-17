@@ -1,0 +1,9 @@
+-- two closures share a captured structure
+function make = (): Array<() => Integer> => {
+	let items = [1, 2, 3]
+	function size = () => items.length
+	function first = () => items[0]
+	[size, first]
+}
+let pair = make()
+console.log(pair[0](), pair[1]())

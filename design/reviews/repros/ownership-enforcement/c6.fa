@@ -1,0 +1,8 @@
+-- last-use store in mutually exclusive branches, then nothing
+function choose = (flag: Boolean): Array<Integer> => {
+	let values = [1, 2]
+	mutable kept = [0]
+	if flag { kept = values } else { kept = values }
+	kept
+}
+console.log(choose(true), choose(false))

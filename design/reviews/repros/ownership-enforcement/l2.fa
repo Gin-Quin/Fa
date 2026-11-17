@@ -1,0 +1,9 @@
+function build = (flag: Boolean): Array<Integer> => {
+	let values = [1, 2]
+	mutable kept = [0]
+	for index in 0..2 {
+		kept = values
+	}
+	kept
+}
+console.log(build(true))

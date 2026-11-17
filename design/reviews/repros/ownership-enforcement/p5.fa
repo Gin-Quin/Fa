@@ -1,0 +1,10 @@
+function run = (flag: Boolean): Integer => {
+	let items = [1, 2, 3]
+	mutable holder = { items = [0] }
+	if flag {
+		holder = { items }
+	}
+	holder.items.push(9)
+	items.length + holder.items.length
+}
+console.log(run(true))

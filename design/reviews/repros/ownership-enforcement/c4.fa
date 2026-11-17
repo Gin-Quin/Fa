@@ -1,0 +1,11 @@
+-- closure created in a loop capturing an outer structure
+function make = (): Array<() => Integer> => {
+	let items = [1, 2, 3]
+	mutable readers: GrowingArray<() => Integer> = []
+	for index in 0..2 {
+		readers.push(() => items.length + index)
+	}
+	readers.toArray()
+}
+let readers = make()
+console.log(readers[0](), readers[1]())

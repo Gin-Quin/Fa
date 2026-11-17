@@ -1,0 +1,8 @@
+function run = (): Integer => {
+	let items = [1, 2, 3]
+	let wrapped: Array<Integer>? = items
+	mutable total = 0
+	if wrapped is not none { total += wrapped.length }
+	total + items.length
+}
+console.log(run())

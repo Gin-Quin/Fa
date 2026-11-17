@@ -148,4 +148,26 @@ console.log(count)
 	fn values_in_a_loop_are_freed() {
 		all_targets("values", VALUES, "500000");
 	}
+
+	#[test]
+	fn inline_arrays_in_a_loop_are_freed() {
+		all_targets(
+			"inline-array",
+			r#"
+function make = (label: String): InlineArray<String, 4> => [label, label.repeat(1000)]
+mutable total = 0
+for index in 0..50_000 {
+	mutable values = make("item {index}")
+	let duplicate = copy values
+	let last = values.pop()
+	values.clear()
+	total += duplicate.length
+	if index %% 2 == 0 { continue }
+	assert last is not none
+}
+console.log(total)
+"#,
+			"100000",
+		);
+	}
 }

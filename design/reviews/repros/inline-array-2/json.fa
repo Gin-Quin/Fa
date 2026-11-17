@@ -1,0 +1,12 @@
+use { Json, JsonError } = std.json
+type Envelope<capacity: UInt32> = { items: InlineArray<String, capacity> }
+function read = <capacity: UInt32>(text: String): Envelope<capacity> throws JsonError => try Json.parse(text)
+function write = <capacity: UInt32>(value: Envelope<capacity>): String => Json.stringify(value)
+console.log(write<1>(try read<1>("{{\"items\":[\"one long heap string for initialized prefix cleanup\"]}}")))
+-- prints: {"items":["one long heap string for initialized prefix cleanup"]}
+console.log(write<2>(try read<2>("{{\"items\":[\"two\",\"entries\"]}}"))) -- prints: {"items":["two","entries"]}
+read<1>("{{\"items\":[\"first heap string for failed JSON cleanup\",\"second heap string for failed JSON cleanup\"]}}") catch _error => console.log("full")
+-- prints: full
+read<2>("{{\"items\":[\"initialized heap string before invalid JSON item\",42]}}") catch _error => console.log("item")
+-- prints: item
+console.log(write<0>(try read<0>("{{\"items\":[]}}"))) -- prints: {"items":[]}

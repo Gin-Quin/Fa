@@ -1,0 +1,58 @@
+type Resource = {
+	name: String
+	payload: String = "owned".repeat(12)
+	function destroy = (self) => {
+		assert self.payload.length == 60
+		console.log("drop {self.name}")
+	}
+}
+type List = InlineArray<Resource, 1>
+type Failure = Errors { No }
+function make = (name: String): List => [Resource { name }]
+function read = (value: Resource): String => value.name
+function readList = (items: List): String throws IndexError => (try items[0]).name
+function generic = <Item>(value: Item, callback: (value: Item) => String): String => callback(value)
+console.log(read(Resource { name = "direct" }))
+let callback = read
+console.log(callback(Resource { name = "value" }))
+console.log(generic<Resource>(Resource { name = "generic" }, read))
+console.log(try readList(make("list-direct")))
+let listCallback = readList
+console.log(try listCallback(make("list-value")))
+console.log([0].map((_index) => read(Resource { name = "arrow" })))
+function defaulted = (value: Resource = { name = "default" }): String => value.name
+console.log(defaulted())
+function failing = (_value: Resource): String throws Failure => { throw Failure.No }
+failing(Resource { name = "throw" }) catch _error => console.log("failed")
+function failIndex = (): Integer throws Failure => { throw Failure.No }
+function pair = (items: List, index: Integer): Integer => items.length + index
+pair(make("prefix"), failIndex()) catch _error => console.log("prefix failed")
+async function suspended = (items: List): String throws IndexError => {
+	await Task.yield()
+	(try items[0]).name
+}
+let asynchronous = suspended
+console.log(try await asynchronous(make("async")))
+console.log("done")
+
+-- prints: direct
+-- prints: drop direct
+-- prints: value
+-- prints: drop value
+-- prints: generic
+-- prints: drop generic
+-- prints: list-direct
+-- prints: drop list-direct
+-- prints: list-value
+-- prints: drop list-value
+-- prints: drop arrow
+-- prints: ["arrow"]
+-- prints: drop default
+-- prints: default
+-- prints: drop throw
+-- prints: failed
+-- prints: drop prefix
+-- prints: prefix failed
+-- prints: async
+-- prints: drop async
+-- prints: done

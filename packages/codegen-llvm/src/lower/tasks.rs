@@ -881,6 +881,39 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let flag = self.alloca(Repr::Bool, "owns_parameters")?;
 		self.builder.build_store(flag.pointer, owns)?;
 		for (index, param) in params.iter().enumerate() {
+			if by_pointer.get(index) == Some(&true)
+				&& let Some(&source) = self.slots.get(&param.symbol)
+				&& self.borrows_parameter(source.repr)
+			{
+				// An awaited/kept task borrows the caller's place. Only a
+				// detached task owns a snapshot, made before its first suspend.
+				let snapshot = self.alloca(source.repr, "detached_parameter")?;
+				let borrowed = self.builder.get_insert_block().expect("a block");
+				let copy = self.append_block("snapshot_parameter");
+				let join = self.append_block("parameter_ready");
+				self.builder.build_conditional_branch(owns, copy, join)?;
+				self.builder.position_at_end(copy);
+				let value = self.load(source)?;
+				let value = self.emit_copy(value)?;
+				self.builder
+					.build_store(snapshot.pointer, value.value.expect("a copy"))?;
+				let copied = self.builder.get_insert_block().expect("a block");
+				self.builder.build_unconditional_branch(join)?;
+				self.builder.position_at_end(join);
+				let parameter = self.builder.build_phi(self.pointer_type(), "parameter")?;
+				parameter.add_incoming(&[(&source.pointer, borrowed), (&snapshot.pointer, copied)]);
+				self.slots.insert(
+					param.symbol,
+					Slot {
+						pointer: parameter.as_basic_value().into_pointer_value(),
+						repr: source.repr,
+					},
+				);
+				if self.needs_drop(source.repr) {
+					self.own_flagged(snapshot, flag.pointer);
+				}
+				continue;
+			}
 			if param.default.is_some() || by_pointer.get(index).copied().unwrap_or(false) {
 				continue;
 			}
@@ -1819,8 +1852,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		while let View::Group(group) = self.view(inner) {
 			inner = group;
 		}
-		// a task, a resource, a type holding one (`TypeStore::owns_unique`)
-		if !self.types().owns_unique(self.type_of(inner)) {
+		// Only Task-consuming parameters transfer; a Resource (including
+		// one containing a Task) still borrows from its caller.
+		if !self
+			.types()
+			.consumes_parameter(self.concrete_type(self.type_of(inner)))
+		{
 			return Ok(value);
 		}
 		if !self.is_temporary(value)
@@ -1848,7 +1885,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A constant box of a built-in error without data (`Cancelled`).
-	fn builtin_error(&self, name: &str) -> PointerValue<'ctx> {
+	pub(super) fn builtin_error(&self, name: &str) -> PointerValue<'ctx> {
 		let id = fa_analyzer::builtins::errors::ERRORS
 			.iter()
 			.position(|error| error.name == name)
@@ -3058,7 +3095,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		given.sort_by_key(|(_, value)| self.tree.spans[value.index()].start);
 		let mut evaluated: FxHashMap<usize, Val<'ctx>> = FxHashMap::default();
 		for (position, value) in given {
-			if function.by_pointer.get(position) == Some(&true) {
+			if function.by_pointer.get(position) == Some(&true)
+				&& function.borrowed.get(position) != Some(&true)
+			{
 				return Err(self.unsupported(value.index(), "a mutated argument of a worker"));
 			}
 			let lowered = self.expr(value)?;
@@ -3302,7 +3341,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		for index in 0..block_type.count_fields() {
 			let field_type = block_type.get_field_type_at_index(index).expect("a field");
 			let at = builder.build_struct_gep(block_type, arguments, index, "")?;
-			values.push(builder.build_load(field_type, at, "")?.into());
+			if field_type.is_struct_type()
+				&& function.value.get_type().get_param_types()[values.len()].is_pointer_type()
+			{
+				values.push(at.into());
+			} else {
+				values.push(builder.build_load(field_type, at, "")?.into());
+			}
 		}
 		let call = builder.build_call(function.value, &values, "")?;
 		call.set_call_convention(FAST_CALLING_CONVENTION);
@@ -3385,22 +3430,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 // ── async function values (design/async.md §2.2) ─────────────────────────
 
 impl<'ctx> Lowering<'_, 'ctx> {
-	/// The entry of a function value: `sync` (its function, taking the
-	/// environment first), or, for an `async` function of an asynchronous
-	/// program, a constant table `{ sync, async }` whose address is tagged
-	/// with its low bit. A value of an `async` function type stays two words
-	/// (`{ entry, environment }`); a call through it reads the tag (a value
-	/// of a function that isn't `async` has none: awaiting it calls it).
-	/// `thunk`: `sync` is the thunk of a declaration, so the async entry is
-	/// a thunk too (it skips the environment).
+	/// The entry of a function value: a direct pointer in synchronous
+	/// programs, a constant table `{ sync, async }` in asynchronous ones.
+	/// The async entry is null for synchronous functions. The value stays
+	/// two words, with one environment shared by both entries.
+	/// `thunk` skips a declaration's unused environment and supplies defaults.
 	pub(crate) fn async_value_entry(
 		&mut self,
 		function: &Function<'ctx>,
 		sync: PointerValue<'ctx>,
 		thunk: bool,
 	) -> Result<PointerValue<'ctx>, Error> {
-		if !self.tasks.asynchronous || !self.is_async_function(function) {
+		if !self.tasks.asynchronous {
 			return Ok(sync);
+		}
+		if !self.is_async_function(function) {
+			return Ok(self.value_entries(sync, self.pointer_type().const_null()));
 		}
 		let instance = self.async_instance(function)?;
 		let entry = if thunk {
@@ -3408,9 +3453,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			match self.module.get_function(&name) {
 				Some(existing) => existing,
 				None => {
-					let mut parameters: Vec<BasicMetadataTypeEnum<'ctx>> =
-						vec![self.pointer_type().into()];
-					parameters.extend(instance.get_type().get_param_types());
+					// Match the synchronous value ABI, including its omission
+					// of declaration-only default flags. The async target gets
+					// those flags reinserted by this thunk too.
+					let mut parameters = self.thunk_of(function)?.get_type().get_param_types();
+					parameters.push(self.context.i32_type().into());
 					let thunk_type = self.pointer_type().fn_type(&parameters, false);
 					let thunk =
 						self.module
@@ -3419,8 +3466,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.runtime.add_attributes(thunk, &["nounwind"]);
 					let builder = self.context.create_builder();
 					builder.position_at_end(self.context.append_basic_block(thunk, "entry"));
-					let arguments: Vec<BasicMetadataValueEnum<'ctx>> =
-						thunk.get_param_iter().skip(1).map(Into::into).collect();
+					let mut given = thunk.get_param_iter().skip(1);
+					let returns = usize::from(function.return_slot)
+						+ 2 * usize::from(function.return_collection);
+					let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> =
+						given.by_ref().take(returns).map(Into::into).collect();
+					for (_, has_default) in &function.params {
+						arguments.push(given.next().expect("an argument").into());
+						if *has_default {
+							arguments.push(self.context.bool_type().const_int(1, false).into());
+						}
+					}
+					arguments.extend(given.map(BasicMetadataValueEnum::from));
 					let call = builder.build_call(instance, &arguments, "")?;
 					call.set_call_convention(FAST_CALLING_CONVENTION);
 					let frame = call.try_as_basic_value().basic().expect("a frame");
@@ -3431,25 +3488,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else {
 			instance
 		};
+		Ok(self.value_entries(sync, entry.as_global_value().as_pointer_value()))
+	}
+
+	/// Every function value in an asynchronous program has an entry table,
+	/// even a synchronous function. Function-table indices on wasm have no
+	/// spare tag bit, so testing their parity cannot distinguish code/data.
+	pub(super) fn value_entries(
+		&self,
+		sync: PointerValue<'ctx>,
+		asynchronous: PointerValue<'ctx>,
+	) -> PointerValue<'ctx> {
+		if !self.tasks.asynchronous {
+			return sync;
+		}
 		let pointer = self.pointer_type();
-		let table_type = self
+		let ty = self
 			.context
 			.struct_type(&[pointer.into(), pointer.into()], false);
-		let table = self.module.add_global(table_type, None, "fa.async_entries");
-		table.set_initializer(&table_type.const_named_struct(&[
-			sync.into(),
-			entry.as_global_value().as_pointer_value().into(),
-		]));
+		let table = self.module.add_global(ty, None, "fa.value_entries");
+		table.set_initializer(&ty.const_named_struct(&[sync.into(), asynchronous.into()]));
 		table.set_constant(true);
 		table.set_linkage(Linkage::Private);
-		table.set_alignment(16);
-		// SAFETY: one byte into a global of 16 bytes
-		Ok(unsafe {
-			table.as_pointer_value().const_gep(
-				self.context.i8_type(),
-				&[self.context.i64_type().const_int(1, false)],
-			)
-		})
+		table.as_pointer_value()
 	}
 
 	/// A call through a value of an `async` function type in an asynchronous
@@ -3462,6 +3523,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		closure: Val<'ctx>,
 		ty: TypeId,
 		arguments: &[Val<'ctx>],
+		places: &[Option<PointerValue<'ctx>>],
 		node: NodeId,
 	) -> Result<Option<Val<'ctx>>, Error> {
 		if !self.tasks.asynchronous {
@@ -3485,29 +3547,31 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.into_pointer_value();
 		let environment = self.builder.build_extract_value(pair, 1, "")?;
 		let mut lowered: Vec<BasicMetadataValueEnum<'ctx>> = vec![environment.into()];
-		for (repr, argument) in params.iter().zip(arguments) {
+		for (position, (repr, argument)) in params.iter().zip(arguments).enumerate() {
+			if self.borrows_parameter(*repr) {
+				let pointer = match places.get(position).copied().flatten() {
+					Some(pointer) => pointer,
+					None => {
+						let argument = self.convert(*argument, *repr, node.index())?;
+						let slot = self.alloca(*repr, "argument")?;
+						self.builder
+							.build_store(slot.pointer, argument.value.expect("an argument"))?;
+						slot.pointer
+					}
+				};
+				lowered.push(pointer.into());
+				continue;
+			}
 			let argument = self.convert(*argument, *repr, node.index())?;
 			lowered.push(argument.value.expect("an argument").into());
 		}
 		let pointer = self.pointer_type();
-		let address = self.builder.build_ptr_to_int(entry, self.usize, "")?;
-		let tag = self
+		let table = entry;
+		let entry = self.load_entry(table, 0)?;
+		let asynchronous = self.load_entry(table, 1)?;
+		let has_async = self
 			.builder
-			.build_and(address, self.usize.const_int(1, false), "")?;
-		let tagged = self.builder.build_int_compare(
-			IntPredicate::NE,
-			tag,
-			self.usize.const_zero(),
-			"tagged",
-		)?;
-		let table = unsafe {
-			self.builder.build_gep(
-				self.context.i8_type(),
-				entry,
-				&[self.context.i64_type().const_all_ones()],
-				"table",
-			)?
-		};
+			.build_is_not_null(asynchronous, "has_async_entry")?;
 		let sync_type = self.indirect_type(&params, ret, throws);
 		let mut async_params = sync_type.get_param_types();
 		async_params.push(self.context.i32_type().into());
@@ -3524,7 +3588,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					None => None,
 				};
 				self.builder
-					.build_conditional_branch(tagged, with_async, without)?;
+					.build_conditional_branch(has_async, with_async, without)?;
 				self.builder.position_at_end(with_async);
 				let function = self.load_entry(table, 1)?;
 				let mut arguments = lowered.clone();
@@ -3569,7 +3633,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}) if self.start_kind() == Some(true) => {
 				let slot = self.alloca_type(pointer.into(), "task")?;
 				self.builder
-					.build_conditional_branch(tagged, with_async, without)?;
+					.build_conditional_branch(has_async, with_async, without)?;
 				self.builder.position_at_end(with_async);
 				let function = self.load_entry(table, 1)?;
 				let mut arguments = lowered.clone();
@@ -3610,7 +3674,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let slot = self.alloca_type(pointer.into(), "entry")?;
 				self.builder.build_store(slot, entry)?;
 				self.builder
-					.build_conditional_branch(tagged, with_async, without)?;
+					.build_conditional_branch(has_async, with_async, without)?;
 				self.builder.position_at_end(with_async);
 				let function = self.load_entry(table, 0)?;
 				self.builder.build_store(slot, function)?;
@@ -3982,8 +4046,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		);
 		let builder = self.context.create_builder();
 		let entry_block = self.context.append_basic_block(run, "entry");
-		let tagged_block = self.context.append_basic_block(run, "tagged");
-		let call_block = self.context.append_basic_block(run, "call");
 		builder.position_at_end(entry_block);
 		let worker = run.get_nth_param(0).expect("a worker");
 		let block = run
@@ -3998,29 +4060,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.build_extract_value(closure, 0, "")?
 			.into_pointer_value();
 		let environment = builder.build_extract_value(closure, 1, "")?;
-		// an async function's value: its synchronous entry is in its table
-		let address = builder.build_ptr_to_int(entry, self.usize, "")?;
-		let tag = builder.build_and(address, self.usize.const_int(1, false), "")?;
-		let tagged =
-			builder.build_int_compare(IntPredicate::NE, tag, self.usize.const_zero(), "")?;
-		builder.build_conditional_branch(tagged, tagged_block, call_block)?;
-		builder.position_at_end(tagged_block);
-		let table = unsafe {
-			builder.build_gep(
-				self.context.i8_type(),
-				entry,
-				&[self.context.i64_type().const_all_ones()],
-				"",
-			)?
-		};
-		let sync_entry = builder.build_load(pointer, table, "")?.into_pointer_value();
-		builder.build_unconditional_branch(call_block)?;
-		builder.position_at_end(call_block);
-		let function = builder.build_phi(pointer, "entry")?;
-		function.add_incoming(&[(&entry, entry_block), (&sync_entry, tagged_block)]);
+		let function = self.synchronous_entry(&builder, entry)?;
 		let call = builder.build_indirect_call(
 			sync_type,
-			function.as_basic_value().into_pointer_value(),
+			function,
 			&[environment.into(), worker.into()],
 			"",
 		)?;

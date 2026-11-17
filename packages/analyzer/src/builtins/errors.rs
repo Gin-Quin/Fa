@@ -81,6 +81,10 @@ pub static ERRORS: &[BuiltinError] = &[
 		fields: &[("message", TypeId::STRING)],
 	},
 	BuiltinError {
+		name: "CapacityError",
+		fields: &[],
+	},
+	BuiltinError {
 		name: "Utf8Error",
 		fields: &[("position", TypeId::INTEGER)],
 	},
@@ -114,7 +118,8 @@ error_types!(
 	"FileError",
 	"JsonError",
 	"NetError",
-	"Utf8Error"
+	"Utf8Error",
+	"CapacityError"
 );
 
 /// The built-in error named `name`, with its `Errors` type and member.
@@ -128,7 +133,11 @@ pub fn error_type(types: &mut TypeStore, name: &str) -> Option<TypeId> {
 	find(name)?;
 	let module = types.module(PRELUDE_MODULE);
 	let key = types.decl_key(module, &[name], 0);
-	let member = types.syms.intern(name);
+	let member = types.syms.intern(if name == "CapacityError" {
+		"InlineFull"
+	} else {
+		name
+	});
 	let members = types.intern_sym_list(&[member]);
 	let nominal = types.intern_nominal(NominalInfo {
 		key,
@@ -176,7 +185,8 @@ mod tests {
 		assert_eq!(id("WorkerTimeout"), 8);
 		assert_eq!(id("FileError"), 9);
 		assert_eq!(id("NetError"), 11);
-		assert_eq!(id("Utf8Error"), 12);
+		assert_eq!(id("CapacityError"), 12);
+		assert_eq!(id("Utf8Error"), 13);
 	}
 	use crate::types::Mode;
 

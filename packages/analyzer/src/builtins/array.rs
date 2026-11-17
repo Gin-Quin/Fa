@@ -388,16 +388,26 @@ pub fn effects(kind: CollKind, operation: &str) -> &'static [CollectionEffect] {
 	const INVALIDATES_LAST: &[CollectionEffect] = &[invalidates(Last)];
 	const INVALIDATES_ARGUMENT: &[CollectionEffect] = &[invalidates(Argument)];
 	match (kind, operation) {
-		(CollKind::Array | CollKind::OrderedColumnar | CollKind::GrowingArray, "[]=") => {
-			MUTATES_ELEMENT
+		(
+			CollKind::Array
+			| CollKind::InlineArray
+			| CollKind::OrderedColumnar
+			| CollKind::GrowingArray,
+			"[]=",
+		) => MUTATES_ELEMENT,
+		(
+			CollKind::Array | CollKind::InlineArray | CollKind::OrderedColumnar,
+			"delete" | "take",
+		) => INVALIDATES_FROM,
+		(CollKind::Array | CollKind::InlineArray | CollKind::OrderedColumnar, "pop") => {
+			INVALIDATES_LAST
 		}
-		(CollKind::Array | CollKind::OrderedColumnar, "delete" | "take") => INVALIDATES_FROM,
-		(CollKind::Array | CollKind::OrderedColumnar, "pop") => INVALIDATES_LAST,
 		(
 			CollKind::Array,
 			"push" | "insert" | "sortInPlace" | "reverseInPlace" | "deleteWhere" | "clear",
 		) => MUTATES_SELF,
-		(CollKind::GrowingArray, "push") => MUTATES_LENGTH,
+		(CollKind::GrowingArray | CollKind::InlineArray, "push") => MUTATES_LENGTH,
+		(CollKind::InlineArray, "clear") => MUTATES_SELF,
 		(CollKind::Map | CollKind::GrowingMap, "[]=") => MUTATES_ELEMENT_AND_SIZE,
 		(CollKind::Map | CollKind::GrowingMap, "getOrInsert") => MUTATES_SIZE,
 		(CollKind::Map, "delete" | "take") => INVALIDATES_ELEMENT,

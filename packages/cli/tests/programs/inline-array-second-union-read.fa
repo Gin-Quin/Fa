@@ -1,0 +1,3 @@
+type Value = Union { None, Number = Integer }
+let items: InlineArray<Value, 1> = [Value.Number(7)]
+for item in items { console.log(item is Value.Number) } -- prints: true

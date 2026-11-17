@@ -580,6 +580,8 @@ bitflags! {
 		/// use the target's direct encoding loop (a native cursor, or one
 		/// bulk encoding followed by indexed iteration on JavaScript).
 		const UTF8_ITERATION = 1 << 21;
+		/// An inline append needs its capacity guard.
+		const CAPACITY_CHECK = 1 << 22;
 	}
 }
 
@@ -592,7 +594,8 @@ impl NodeFlags {
 		.union(NodeFlags::INDEX_CHECK)
 		.union(NodeFlags::CONVERSION_CHECK)
 		.union(NodeFlags::EXPONENT_CHECK)
-		.union(NodeFlags::SHIFT_CHECK);
+		.union(NodeFlags::SHIFT_CHECK)
+		.union(NodeFlags::CAPACITY_CHECK);
 }
 
 /// The analysis of one file.

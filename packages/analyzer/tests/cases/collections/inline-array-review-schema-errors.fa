@@ -1,0 +1,5 @@
+type Negative = TypeFromSchema<Schema.InlineArray { item = Schema.Integer { bits = 64 }, capacity = -1 }> -- error: E-NUM-6, TF042
+type Huge = TypeFromSchema<Schema.InlineArray { item = Schema.String, capacity = 4294967296 }> -- error: TF042
+type Fraction = TypeFromSchema<Schema.InlineArray { item = Schema.String, capacity = 1.5 }> -- error: E-TYPE-1, TF042
+type Missing = TypeFromSchema<Schema.InlineArray { item = Schema.String }> -- error: E-OBJ-2, TF042
+type EmptyItem = TypeFromSchema<Schema.InlineArray { item = Schema.Void, capacity = 1 }> -- error: TF042

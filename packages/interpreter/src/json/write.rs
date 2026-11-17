@@ -327,6 +327,7 @@ impl<'s> Writer<'_, '_, 's> {
 			"Tuple" => {
 				matches!(value, Value::Tuple(items) if items.len() == list_property(schema, "items").len())
 			}
+			"InlineArray" => matches!(value, Value::Array(_)),
 			"Collection" => match property(schema, "kind").and_then(Value::as_str) {
 				Some("Array" | "GrowingArray") => matches!(value, Value::Array(_)),
 				Some("Set" | "GrowingSet") => matches!(value, Value::Set(_)),

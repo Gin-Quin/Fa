@@ -1,0 +1,16 @@
+-- skip-target: native-freestanding (std.json requires libc)
+-- InlineArray capacities and raw UTF-16 Strings share the typed JSON reader.
+use { Json, JsonError } = std.json
+
+function decode = <capacity: UInt32>(input: Bytes): InlineArray<String, capacity> throws JsonError => try Json.parse(input)
+function encode = <capacity: UInt32>(values: InlineArray<String, capacity>): String => Json.stringify(values)
+function observe = (): String throws JsonError => {
+	let input = "[\"é\",\"\\ud800\"]".toUtf8()
+	let values = try decode<2>(input)
+	let full = decode<1>(input) catch _error => []
+	let empty = try decode<0>("[]".toUtf8())
+	"{encode<2>(values)}:{values[1].length}:{values[1].isWellFormed()}:{full.length}:{empty.length}"
+}
+static expected = @observe()
+console.log(expected) -- prints: ["é","\ud800"]:1:false:0:0
+console.log(try observe()) -- prints: ["é","\ud800"]:1:false:0:0

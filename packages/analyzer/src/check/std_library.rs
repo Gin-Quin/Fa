@@ -432,9 +432,11 @@ impl Walker<'_> {
 					.into_iter()
 					.find_map(|payload| self.not_json(payload, depth + 1))
 			}
-			TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item, _) => {
-				self.not_json(item, depth + 1)
-			}
+			TypeKind::Collection(
+				CollKind::Array | CollKind::InlineArray | CollKind::GrowingArray,
+				item,
+				_,
+			) => self.not_json(item, depth + 1),
 			TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, value, key) => {
 				if !matches!(self.s.types.kind(key), TypeKind::String) {
 					return Some(ty);

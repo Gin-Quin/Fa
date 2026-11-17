@@ -1,0 +1,10 @@
+-- Bound async function values must mutate the caller's inline storage.
+function append = <capacity: UInt32>(items: InlineArray<String, capacity>)
+	throws CapacityError mutates items.length => {
+	try items.push("kept")
+}
+mutable items: InlineArray<String, 1> = []
+let callback = append<1>
+await Task.yield()
+try callback(items)
+console.log(items) -- prints: ["kept"]

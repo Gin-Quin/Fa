@@ -83,15 +83,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.contains(fa_analyzer::analysis::NodeFlags::GENERIC_APPLICATION)
 				&& let Some(reached) = self.callee_function(callee)
 			{
-				let function = match reached {
-					super::program::Reached::Function(file, declaration) => {
-						self.function_in(file, declaration, node)?
-					}
-					super::program::Reached::RemoteFunction(key) => {
-						self.remote_function(key, node)?
-					}
-					_ => unreachable!("callee_function returns a function"),
-				};
+				let function = self.reached_function(reached, node)?;
 				return self.applied_external_function_value(&function, node);
 			}
 			return Err(self.unsupported(node.index(), "this call"));

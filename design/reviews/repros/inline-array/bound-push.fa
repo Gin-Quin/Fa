@@ -1,0 +1,5 @@
+mutable values: InlineArray<Integer, 1> = []
+let append = values.push
+try append(7)
+append(8) catch _error => console.log("full")
+console.log(values) -- expected: [7]

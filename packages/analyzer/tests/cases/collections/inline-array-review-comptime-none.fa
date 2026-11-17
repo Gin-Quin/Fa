@@ -1,0 +1,8 @@
+function build = (): InlineArray<none, 2> => {
+	mutable values: InlineArray<none, 2> = []
+	values.push(none)
+	values
+}
+console.log(build()) -- prints: [none]
+static result = @build()
+console.log(result) -- prints: [none]

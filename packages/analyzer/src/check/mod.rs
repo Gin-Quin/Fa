@@ -35,6 +35,9 @@ mod foreign;
 mod from;
 mod functions;
 mod generics;
+#[cfg(test)]
+mod inline_array_tests;
+mod inline_arrays;
 mod interface;
 mod iterators;
 mod key_sets;
@@ -357,6 +360,7 @@ pub struct Walker<'s> {
 	pub(crate) generic_params: FxHashMap<NodeId, Vec<crate::ids::ParamId>>,
 	/// The parameters of the generic declarations being walked: rigid, not inferred.
 	pub(crate) rigid_params: Vec<crate::ids::ParamId>,
+	pub(crate) value_param_symbols: FxHashMap<SymbolId, crate::ids::ParamId>,
 	/// Whether the type expression about to be checked is the type of a
 	/// parameter, the one place where a generic function type is written
 	/// (`GN030` elsewhere; `check_parameter_type`).
@@ -610,6 +614,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		hoisted_blocks: rustc_hash::FxHashSet::default(),
 		generic_params: FxHashMap::default(),
 		rigid_params: Vec::new(),
+		value_param_symbols: FxHashMap::default(),
 		parameter_type: false,
 		schema_logic: rustc_hash::FxHashSet::default(),
 		deferred_comptime: 0,

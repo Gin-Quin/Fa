@@ -715,8 +715,8 @@ impl Walker<'_> {
 			}
 			self.end_task_borrow(symbol);
 		}
-		// a task or a worker's handle given to a function moves into it
-		// (concurrency.md: they can't be copied; the callee owns them)
+		// Only the Task-consuming parameter contract transfers ownership.
+		// Resource and aggregate parameters borrow, including unique owners.
 		if let Some(CallInfo {
 			callee: crate::analysis::Callee::Function(_) | crate::analysis::Callee::Value,
 			arguments,
@@ -730,7 +730,10 @@ impl Walker<'_> {
 			let given: Vec<NodeId> = arguments
 				.iter()
 				.filter_map(|argument| match argument {
-					Argument::Given(value) if Some(self.strip_groups(*value)) != receiver => {
+					Argument::Given(value)
+						if Some(self.strip_groups(*value)) != receiver
+							&& self.s.types.consumes_parameter(self.a.type_of(*value)) =>
+					{
 						Some(*value)
 					}
 					_ => None,

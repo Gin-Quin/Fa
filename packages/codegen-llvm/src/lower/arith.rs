@@ -1089,6 +1089,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				Ok(equal)
 			}
+			Repr::Tuple(ty) if op.is_none() && self.inline_info(ty).is_some() => {
+				let (item, _) = self.inline_info(ty).expect("an inline array");
+				let left = self.inline_view(left, ty)?;
+				let right = self.inline_view(right, ty)?;
+				self.arrays_equal(left, right, item, node)
+			}
 			Repr::Tuple(ty) if op.is_none() => {
 				let left_struct = left.value.expect("a tuple").into_struct_value();
 				let right_struct = right.value.expect("a tuple").into_struct_value();
@@ -1182,7 +1188,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// Two arrays of the same length with equal items.
-	fn arrays_equal(
+	pub(super) fn arrays_equal(
 		&mut self,
 		left: Val<'ctx>,
 		right: Val<'ctx>,

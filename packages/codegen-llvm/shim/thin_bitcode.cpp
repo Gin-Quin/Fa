@@ -246,3 +246,14 @@ extern "C" unsigned fa_specialize_frozen_strings(LLVMModuleRef module) {
 	for (auto &variant : variants) { frozen_wrapper(variant); }
 	return variants.size();
 }
+
+// Makes a target machine give each function, global and jump table its own
+// ELF section (clang's `-ffunction-sections -fdata-sections`), so that
+// `--gc-sections` discards what nothing uses. Sections named in the IR would
+// leave the jump tables in one shared `.rodata`, which keeps every function
+// they jump into.
+extern "C" void fa_use_unique_sections(LLVMTargetMachineRef machine) {
+	llvm::TargetOptions &options = reinterpret_cast<llvm::TargetMachine *>(machine)->Options;
+	options.FunctionSections = true;
+	options.DataSections = true;
+}

@@ -22,7 +22,6 @@ analyzer/tests/cases/types/3.8-enumerations/en-1.fa: line 5: converting a value 
 analyzer/tests/cases/types/3.8-enumerations/en-2.fa: line 3: converting a value from Enum(NominalId(2147483659)) to Int(IntRepr { bits: 64, signed: true }) is not supported by the native backend yet
 analyzer/tests/cases/types/3.9-fields-and-key-sets/fields-json.fa: line 8: error[AN004]: `Json.stringify` doesn't exist without a C library (`native-freestanding`): build for `native`
 analyzer/tests/cases/types/3.9-fields-and-key-sets/key-sets.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/types/4.8-function-types-and-assignability/ft-9.fa: line 3: this member is not supported by the native backend yet
 analyzer/tests/cases/types/5.1-array-t/ar-11.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
 analyzer/tests/cases/types/5.4-set-t-and-growingset-t/se-3.fa: line 3: the `key` of `Set.from` is not supported by the native backend yet
 analyzer/tests/cases/values/06-numbers/T-NUM-2.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet

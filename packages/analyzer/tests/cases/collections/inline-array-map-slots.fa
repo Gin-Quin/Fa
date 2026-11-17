@@ -1,0 +1,45 @@
+-- InlineArray keys and values beside the inline map slots: one generic helper
+-- instantiated with KEY32/KEY64 inline maps and with chunked InlineArray maps.
+function replaceAndTake = <Key, Value>(
+	map: Map<Key, Value>
+	key: Key
+	first: Value
+	second: Value
+): Value? mutates map => {
+	map[copy key] = first
+	map[copy key] = second
+	map.take(key)
+}
+function run = () throws KeyNotFound => {
+	mutable narrow: Map<UInt32, UInt32> = [(1, 10)]
+	narrow[2] = 20
+	narrow[2] = 21
+	console.log(narrow.take(2), narrow.size) -- prints: 21 1
+	mutable wide: Map<Int64, Int64> = [(Int64(1), Int64(10))]
+	console.log(replaceAndTake(wide, Int64(5), Int64(50), Int64(51)), wide.size) -- prints: 51 1
+	console.log(replaceAndTake<UInt32, UInt32>(narrow, 7, 70, 71), narrow.size)  -- prints: 71 1
+	mutable rows: Map<UInt32, InlineArray<String, 2>> = [(1, ["one"])]
+	rows[2] = ["two"]
+	rows[2] = ["deux", "zwei"]
+	console.log(try rows[2], rows.size)  -- prints: ["deux", "zwei"] 2
+	console.log(rows.take(2), rows.size) -- prints: ["deux", "zwei"] 1
+	console.log(
+		replaceAndTake<UInt32, InlineArray<String, 2>>(rows, 3, ["a"], ["b", "c"])
+		rows.size
+	) -- prints: ["b", "c"] 1
+	mutable numbers: Map<Int64, InlineArray<Int64, 3>> = []
+	numbers[Int64(9)] = [Int64(1)]
+	numbers[Int64(9)] = [Int64(1), Int64(2), Int64(3)]
+	console.log(try numbers[Int64(9)]) -- prints: [1, 2, 3]
+	numbers.delete(Int64(9))
+	console.log(numbers.size) -- prints: 0
+	mutable keyed: Map<InlineArray<UInt32, 2>, InlineArray<String, 1>> = []
+	let key: InlineArray<UInt32, 2> = [4, 2]
+	console.log(
+		replaceAndTake<InlineArray<UInt32, 2>, InlineArray<String, 1>>(keyed, key, ["x"], ["y"])
+		keyed.size
+	) -- prints: ["y"] 0
+	keyed[copy key] = ["kept"]
+	console.log(try keyed[[4, 2]]) -- prints: ["kept"]
+}
+try run()

@@ -324,32 +324,33 @@ source_filename = "fa_runtime.c"
 @.str.162 = private unnamed_addr constant [20 x i8] c" should be at most \00", align 1
 @.str.163 = private unnamed_addr constant [7 x i8] c", not \00", align 1
 @.str.164 = private unnamed_addr constant [9 x i8] c"an array\00", align 1
-@.str.165 = private unnamed_addr constant [2 x i8] c"[\00", align 1
-@.str.166 = private unnamed_addr constant [2 x i8] c"]\00", align 1
-@.str.167 = private unnamed_addr constant [10 x i8] c"an object\00", align 1
-@.str.168 = private unnamed_addr constant [2 x i8] c".\00", align 1
-@.str.169 = private unnamed_addr constant [16 x i8] c" has no field `\00", align 1
-@.str.170 = private unnamed_addr constant [2 x i8] c"`\00", align 1
-@.str.171 = private unnamed_addr constant [32 x i8] c"one of the members of its union\00", align 1
-@.str.172 = private unnamed_addr constant [19 x i8] c" should be one of \00", align 1
-@.str.173 = private unnamed_addr constant [24 x i8] c".type should be one of \00", align 1
-@.str.174 = private unnamed_addr constant [6 x i8] c"value\00", align 1
-@.str.175 = private unnamed_addr constant [22 x i8] c" has no field `value`\00", align 1
-@.str.176 = private unnamed_addr constant [7 x i8] c".value\00", align 1
-@.str.177 = private unnamed_addr constant [32 x i8] c" has a type JSON can't describe\00", align 1
-@.str.178 = private unnamed_addr constant [12 x i8] c" should be \00", align 1
-@.str.179 = private unnamed_addr constant [8 x i8] c"boolean\00", align 1
-@.str.180 = private unnamed_addr constant [7 x i8] c"number\00", align 1
-@.str.181 = private unnamed_addr constant [7 x i8] c"string\00", align 1
-@.str.182 = private unnamed_addr constant [7 x i8] c"object\00", align 1
-@.str.183 = private unnamed_addr constant [5 x i8] c"type\00", align 1
-@.str.184 = private unnamed_addr constant [3 x i8] c"\\u\00", align 1
+@.str.165 = private unnamed_addr constant [36 x i8] c"an array within its inline capacity\00", align 1
+@.str.166 = private unnamed_addr constant [2 x i8] c"[\00", align 1
+@.str.167 = private unnamed_addr constant [2 x i8] c"]\00", align 1
+@.str.168 = private unnamed_addr constant [10 x i8] c"an object\00", align 1
+@.str.169 = private unnamed_addr constant [2 x i8] c".\00", align 1
+@.str.170 = private unnamed_addr constant [16 x i8] c" has no field `\00", align 1
+@.str.171 = private unnamed_addr constant [2 x i8] c"`\00", align 1
+@.str.172 = private unnamed_addr constant [32 x i8] c"one of the members of its union\00", align 1
+@.str.173 = private unnamed_addr constant [19 x i8] c" should be one of \00", align 1
+@.str.174 = private unnamed_addr constant [24 x i8] c".type should be one of \00", align 1
+@.str.175 = private unnamed_addr constant [6 x i8] c"value\00", align 1
+@.str.176 = private unnamed_addr constant [22 x i8] c" has no field `value`\00", align 1
+@.str.177 = private unnamed_addr constant [7 x i8] c".value\00", align 1
+@.str.178 = private unnamed_addr constant [32 x i8] c" has a type JSON can't describe\00", align 1
+@.str.179 = private unnamed_addr constant [12 x i8] c" should be \00", align 1
+@.str.180 = private unnamed_addr constant [8 x i8] c"boolean\00", align 1
+@.str.181 = private unnamed_addr constant [7 x i8] c"number\00", align 1
+@.str.182 = private unnamed_addr constant [7 x i8] c"string\00", align 1
+@.str.183 = private unnamed_addr constant [7 x i8] c"object\00", align 1
+@.str.184 = private unnamed_addr constant [5 x i8] c"type\00", align 1
+@.str.185 = private unnamed_addr constant [3 x i8] c"\\u\00", align 1
 @quote_json_bytes.hex = internal unnamed_addr constant [17 x i8] c"0123456789abcdef\00", align 1
-@.str.185 = private unnamed_addr constant [3 x i8] c"\\b\00", align 1
-@.str.186 = private unnamed_addr constant [3 x i8] c"\\f\00", align 1
-@.str.187 = private unnamed_addr constant [5 x i8] c"\\u00\00", align 1
+@.str.186 = private unnamed_addr constant [3 x i8] c"\\b\00", align 1
+@.str.187 = private unnamed_addr constant [3 x i8] c"\\f\00", align 1
+@.str.188 = private unnamed_addr constant [5 x i8] c"\\u00\00", align 1
 @switch.table.next_boundary = private unnamed_addr constant [3 x i32] [i32 1, i32 0, i32 0], align 4
-@switch.table.json_mismatch = private unnamed_addr constant [5 x ptr] [ptr @.str.25, ptr @.str.179, ptr @.str.180, ptr @.str.181, ptr @.str.164], align 8
+@switch.table.json_mismatch = private unnamed_addr constant [5 x ptr] [ptr @.str.25, ptr @.str.180, ptr @.str.181, ptr @.str.182, ptr @.str.164], align 8
 
 ; Function Attrs: alwaysinline mustprogress nofree norecurse nosync nounwind optsize willreturn memory(argmem: readwrite)
 define noundef ptr @fa_string_reference(ptr noundef readonly %0, ptr noundef writeonly %1) local_unnamed_addr #0 {
@@ -22519,7 +22520,7 @@ define noundef ptr @fa_string_decode_bytes(ptr noundef %0, i32 noundef %1, i32 n
 ; Function Attrs: cold noinline nounwind optsize
 define noundef ptr @fa_error_utf8(i64 noundef %0) local_unnamed_addr #12 {
   %2 = tail call ptr @fa_alloc(i64 noundef 16, i64 noundef 8) #66
-  store i64 12, ptr %2, align 8, !tbaa !211
+  store i64 13, ptr %2, align 8, !tbaa !211
   %3 = getelementptr inbounds %struct.anon, ptr %2, i64 0, i32 1
   store i64 %0, ptr %3, align 8, !tbaa !213
   ret ptr %2
@@ -40193,7 +40194,7 @@ define internal fastcc i32 @json_check(ptr noundef %0, ptr nocapture noundef rea
   %7 = alloca %struct.JsonMember, align 8
   %8 = alloca %struct.JsonMember, align 8
   %9 = load i8, ptr %2, align 1, !tbaa !14
-  switch i8 %9, label %698 [
+  switch i8 %9, label %729 [
     i8 98, label %10
     i8 115, label %16
     i8 102, label %22
@@ -40203,12 +40204,13 @@ define internal fastcc i32 @json_check(ptr noundef %0, ptr nocapture noundef rea
     i8 84, label %177
     i8 70, label %177
     i8 73, label %187
+    i8 65, label %222
     i8 97, label %222
-    i8 109, label %326
-    i8 111, label %355
-    i8 117, label %446
-    i8 69, label %483
-    i8 78, label %587
+    i8 109, label %357
+    i8 111, label %386
+    i8 117, label %477
+    i8 69, label %514
+    i8 78, label %618
   ]
 
 10:                                               ; preds = %4
@@ -40222,7 +40224,7 @@ define internal fastcc i32 @json_check(ptr noundef %0, ptr nocapture noundef rea
 
 14:                                               ; preds = %13, %10
   %15 = zext i1 %12 to i32
-  br label %704
+  br label %735
 
 16:                                               ; preds = %4
   %17 = load i32, ptr %1, align 8, !tbaa !556
@@ -40235,7 +40237,7 @@ define internal fastcc i32 @json_check(ptr noundef %0, ptr nocapture noundef rea
 
 20:                                               ; preds = %19, %16
   %21 = zext i1 %18 to i32
-  br label %704
+  br label %735
 
 22:                                               ; preds = %4
   %23 = load i32, ptr %1, align 8, !tbaa !556
@@ -40248,7 +40250,7 @@ define internal fastcc i32 @json_check(ptr noundef %0, ptr nocapture noundef rea
 
 26:                                               ; preds = %25, %22
   %27 = zext i1 %24 to i32
-  br label %704
+  br label %735
 
 28:                                               ; preds = %4
   %29 = load i32, ptr %1, align 8, !tbaa !556
@@ -40261,7 +40263,7 @@ define internal fastcc i32 @json_check(ptr noundef %0, ptr nocapture noundef rea
 
 32:                                               ; preds = %31, %28
   %33 = zext i1 %30 to i32
-  br label %704
+  br label %735
 
 34:                                               ; preds = %4
   %35 = getelementptr inbounds i8, ptr %2, i64 1
@@ -40330,7 +40332,7 @@ define internal fastcc i32 @json_check(ptr noundef %0, ptr nocapture noundef rea
 
 87:                                               ; preds = %82, %76
   tail call fastcc void @json_mismatch(ptr noundef %0, ptr noundef nonnull %1, ptr noundef nonnull @.str.159, ptr noundef null, i32 noundef %3) #64
-  br label %704
+  br label %735
 
 88:                                               ; preds = %82
   %89 = and i32 %84, 2
@@ -40339,13 +40341,13 @@ define internal fastcc i32 @json_check(ptr noundef %0, ptr nocapture noundef rea
 
 91:                                               ; preds = %88
   %92 = icmp eq i32 %3, 0
-  br i1 %92, label %704, label %93
+  br i1 %92, label %735, label %93
 
 93:                                               ; preds = %91
   tail call fastcc void @json_error_start(ptr noundef %0) #64
   tail call fastcc void @append_c(ptr noundef nonnull @.str.160) #64
   tail call fastcc void @json_error_end(ptr noundef %0) #64
-  br label %704
+  br label %735
 
 94:                                               ; preds = %88
   br i1 %41, label %99, label %95
@@ -40357,21 +40359,21 @@ define internal fastcc i32 @json_check(ptr noundef %0, ptr nocapture noundef rea
   br i1 %98, label %106, label %99
 
 99:                                               ; preds = %95, %94
-  br i1 %64, label %704, label %100
+  br i1 %64, label %735, label %100
 
 100:                                              ; preds = %99
   %101 = getelementptr inbounds %struct.FaJson, ptr %1, i64 0, i32 2
   %102 = load i64, ptr %101, align 8, !tbaa !563
   %103 = icmp sgt i64 %102, %79
-  br i1 %103, label %104, label %704
+  br i1 %103, label %104, label %735
 
 104:                                              ; preds = %100
   %105 = icmp eq i32 %3, 0
-  br i1 %105, label %704, label %108
+  br i1 %105, label %735, label %108
 
 106:                                              ; preds = %95
   %107 = icmp eq i32 %3, 0
-  br i1 %107, label %704, label %110
+  br i1 %107, label %735, label %110
 
 108:                                              ; preds = %104
   br i1 %41, label %109, label %110
@@ -40405,7 +40407,7 @@ define internal fastcc i32 @json_check(ptr noundef %0, ptr nocapture noundef rea
   %126 = trunc i64 %125 to i32
   tail call fastcc void @append_u64(i64 noundef %124, i32 noundef %126) #64
   tail call fastcc void @json_error_end(ptr noundef %0) #64
-  br label %704
+  br label %735
 
 127:                                              ; preds = %4
   %128 = getelementptr inbounds i8, ptr %2, i64 1
@@ -40448,7 +40450,7 @@ define internal fastcc i32 @json_check(ptr noundef %0, ptr nocapture noundef rea
 
 158:                                              ; preds = %152
   %159 = icmp eq i64 %154, 0
-  br i1 %159, label %704, label %160
+  br i1 %159, label %735, label %160
 
 160:                                              ; preds = %158
   %161 = getelementptr inbounds %struct.FaJson, ptr %1, i64 0, i32 4
@@ -40457,7 +40459,7 @@ define internal fastcc i32 @json_check(ptr noundef %0, ptr nocapture noundef rea
 
 163:                                              ; preds = %165
   %164 = icmp eq i32 %173, 0
-  br i1 %164, label %176, label %704
+  br i1 %164, label %176, label %735
 
 165:                                              ; preds = %160, %165
   %166 = phi i32 [ 1, %160 ], [ %173, %165 ]
@@ -40474,7 +40476,7 @@ define internal fastcc i32 @json_check(ptr noundef %0, ptr nocapture noundef rea
 
 176:                                              ; preds = %163, %152, %146
   tail call fastcc void @json_mismatch(ptr noundef %0, ptr noundef nonnull %1, ptr noundef null, ptr noundef nonnull %2, i32 noundef %3) #64
-  br label %704
+  br label %735
 
 177:                                              ; preds = %4, %4
   %178 = load i32, ptr %1, align 8, !tbaa !556
@@ -40487,11 +40489,11 @@ define internal fastcc i32 @json_check(ptr noundef %0, ptr nocapture noundef rea
   %183 = icmp eq i8 %9, 84
   %184 = zext i1 %183 to i32
   %185 = icmp eq i32 %182, %184
-  br i1 %185, label %704, label %186
+  br i1 %185, label %735, label %186
 
 186:                                              ; preds = %180, %177
   tail call fastcc void @json_mismatch(ptr noundef %0, ptr noundef nonnull %1, ptr noundef null, ptr noundef nonnull %2, i32 noundef %3) #64
-  br label %704
+  br label %735
 
 187:                                              ; preds = %4
   %188 = getelementptr inbounds i8, ptr %2, i64 1
@@ -40535,258 +40537,263 @@ define internal fastcc i32 @json_check(ptr noundef %0, ptr nocapture noundef rea
   %218 = getelementptr inbounds %struct.FaJson, ptr %1, i64 0, i32 2
   %219 = load i64, ptr %218, align 8, !tbaa !563
   %220 = icmp eq i64 %219, %209
-  br i1 %220, label %704, label %221
+  br i1 %220, label %735, label %221
 
 221:                                              ; preds = %217, %212, %206
   tail call fastcc void @json_mismatch(ptr noundef %0, ptr noundef nonnull %1, ptr noundef null, ptr noundef nonnull %2, i32 noundef %3) #64
-  br label %704
+  br label %735
 
-222:                                              ; preds = %4
-  %223 = load i32, ptr %1, align 8, !tbaa !556
-  %224 = icmp eq i32 %223, 4
-  br i1 %224, label %226, label %225
+222:                                              ; preds = %4, %4
+  %223 = getelementptr inbounds i8, ptr %2, i64 1
+  %224 = icmp eq i8 %9, 65
+  br i1 %224, label %225, label %249
 
 225:                                              ; preds = %222
+  %226 = load i8, ptr %223, align 1, !tbaa !14
+  %227 = icmp eq i8 %226, 45
+  %228 = zext i1 %227 to i64
+  %229 = getelementptr inbounds i8, ptr %223, i64 %228
+  %230 = load i8, ptr %229, align 1, !tbaa !14
+  %231 = icmp eq i8 %230, 59
+  br i1 %231, label %243, label %232
+
+232:                                              ; preds = %225, %232
+  %233 = phi i8 [ %241, %232 ], [ %230, %225 ]
+  %234 = phi i64 [ %239, %232 ], [ 0, %225 ]
+  %235 = phi ptr [ %240, %232 ], [ %229, %225 ]
+  %236 = zext i8 %233 to i64
+  %237 = mul i64 %234, 10
+  %238 = add nsw i64 %236, -48
+  %239 = add i64 %238, %237
+  %240 = getelementptr inbounds i8, ptr %235, i64 1
+  %241 = load i8, ptr %240, align 1, !tbaa !14
+  %242 = icmp eq i8 %241, 59
+  br i1 %242, label %243, label %232, !llvm.loop !570
+
+243:                                              ; preds = %232, %225
+  %244 = phi ptr [ %229, %225 ], [ %240, %232 ]
+  %245 = phi i64 [ 0, %225 ], [ %239, %232 ]
+  %246 = getelementptr inbounds i8, ptr %244, i64 1
+  %247 = sub i64 0, %245
+  %248 = select i1 %227, i64 %247, i64 %245
+  br label %249
+
+249:                                              ; preds = %222, %243
+  %250 = phi ptr [ %246, %243 ], [ %223, %222 ]
+  %251 = phi i64 [ %248, %243 ], [ 9223372036854775807, %222 ]
+  %252 = load i32, ptr %1, align 8, !tbaa !556
+  %253 = icmp eq i32 %252, 4
+  br i1 %253, label %255, label %254
+
+254:                                              ; preds = %249
   tail call fastcc void @json_mismatch(ptr noundef %0, ptr noundef nonnull %1, ptr noundef nonnull @.str.164, ptr noundef null, i32 noundef %3) #64
-  br label %704
+  br label %735
 
-226:                                              ; preds = %222
-  %227 = getelementptr inbounds %struct.JsonCheck, ptr %0, i64 0, i32 1
-  %228 = load i64, ptr %227, align 8, !tbaa !568
-  %229 = getelementptr inbounds %struct.FaJson, ptr %1, i64 0, i32 9
-  %230 = load i64, ptr %229, align 8, !tbaa !574
-  %231 = icmp eq i64 %230, 0
-  br i1 %231, label %704, label %232
+255:                                              ; preds = %249
+  %256 = getelementptr inbounds %struct.FaJson, ptr %1, i64 0, i32 9
+  %257 = load i64, ptr %256, align 8, !tbaa !574
+  %258 = icmp ugt i64 %257, %251
+  br i1 %258, label %259, label %260
 
-232:                                              ; preds = %226
-  %233 = getelementptr inbounds %struct.FaJson, ptr %1, i64 0, i32 8
-  %234 = getelementptr inbounds i8, ptr %2, i64 1
-  br label %239
+259:                                              ; preds = %255
+  tail call fastcc void @json_mismatch(ptr noundef %0, ptr noundef nonnull %1, ptr noundef nonnull @.str.165, ptr noundef null, i32 noundef %3) #64
+  br label %735
 
-235:                                              ; preds = %316
-  %236 = add nuw i64 %240, 1
-  %237 = load i64, ptr %229, align 8, !tbaa !574
-  %238 = icmp ult i64 %236, %237
-  br i1 %238, label %239, label %324, !llvm.loop !575
+260:                                              ; preds = %255
+  %261 = getelementptr inbounds %struct.JsonCheck, ptr %0, i64 0, i32 1
+  %262 = load i64, ptr %261, align 8, !tbaa !568
+  %263 = icmp eq i64 %257, 0
+  br i1 %263, label %735, label %264
 
-239:                                              ; preds = %232, %235
-  %240 = phi i64 [ 0, %232 ], [ %236, %235 ]
+264:                                              ; preds = %260
+  %265 = getelementptr inbounds %struct.FaJson, ptr %1, i64 0, i32 8
+  br label %270
+
+266:                                              ; preds = %347
+  %267 = add nuw i64 %271, 1
+  %268 = load i64, ptr %256, align 8, !tbaa !574
+  %269 = icmp ult i64 %267, %268
+  br i1 %269, label %270, label %355, !llvm.loop !575
+
+270:                                              ; preds = %264, %266
+  %271 = phi i64 [ 0, %264 ], [ %267, %266 ]
   call void @llvm.lifetime.start.p0(i64 24, ptr nonnull %5) #68
-  %241 = icmp ugt i64 %240, 4294967295
-  br i1 %241, label %242, label %255
+  %272 = icmp ugt i64 %271, 4294967295
+  br i1 %272, label %273, label %286
 
-242:                                              ; preds = %239, %242
-  %243 = phi i64 [ %246, %242 ], [ %240, %239 ]
-  %244 = phi i64 [ %249, %242 ], [ 24, %239 ]
-  %245 = freeze i64 %243
-  %246 = udiv i64 %245, 100
-  %247 = mul i64 %246, 100
-  %248 = sub i64 %245, %247
-  %249 = add i64 %244, -2
-  %250 = getelementptr inbounds i8, ptr %5, i64 %249
-  %251 = shl nuw nsw i64 %248, 1
-  %252 = getelementptr inbounds i8, ptr @decimal_u64.pairs, i64 %251
-  %253 = load i16, ptr %252, align 1
-  store i16 %253, ptr %250, align 1
-  %254 = icmp ugt i64 %243, 429496729599
-  br i1 %254, label %242, label %255, !llvm.loop !37
+273:                                              ; preds = %270, %273
+  %274 = phi i64 [ %277, %273 ], [ %271, %270 ]
+  %275 = phi i64 [ %280, %273 ], [ 24, %270 ]
+  %276 = freeze i64 %274
+  %277 = udiv i64 %276, 100
+  %278 = mul i64 %277, 100
+  %279 = sub i64 %276, %278
+  %280 = add i64 %275, -2
+  %281 = getelementptr inbounds i8, ptr %5, i64 %280
+  %282 = shl nuw nsw i64 %279, 1
+  %283 = getelementptr inbounds i8, ptr @decimal_u64.pairs, i64 %282
+  %284 = load i16, ptr %283, align 1
+  store i16 %284, ptr %281, align 1
+  %285 = icmp ugt i64 %274, 429496729599
+  br i1 %285, label %273, label %286, !llvm.loop !37
 
-255:                                              ; preds = %242, %239
-  %256 = phi i64 [ 24, %239 ], [ %249, %242 ]
-  %257 = phi i64 [ %240, %239 ], [ %246, %242 ]
-  %258 = trunc i64 %257 to i32
-  %259 = icmp ugt i32 %258, 9999
-  br i1 %259, label %260, label %283
+286:                                              ; preds = %273, %270
+  %287 = phi i64 [ 24, %270 ], [ %280, %273 ]
+  %288 = phi i64 [ %271, %270 ], [ %277, %273 ]
+  %289 = trunc i64 %288 to i32
+  %290 = icmp ugt i32 %289, 9999
+  br i1 %290, label %291, label %314
 
-260:                                              ; preds = %255, %260
-  %261 = phi i64 [ %267, %260 ], [ %256, %255 ]
-  %262 = phi i32 [ %264, %260 ], [ %258, %255 ]
-  %263 = freeze i32 %262
-  %264 = udiv i32 %263, 10000
-  %265 = mul i32 %264, 10000
-  %266 = sub i32 %263, %265
-  %267 = add i64 %261, -4
-  %268 = getelementptr inbounds i8, ptr %5, i64 %267
-  %269 = trunc i32 %266 to i16
-  %270 = udiv i16 %269, 100
-  %271 = shl nuw nsw i16 %270, 1
-  %272 = zext nneg i16 %271 to i64
-  %273 = getelementptr inbounds i8, ptr @decimal_u64.pairs, i64 %272
-  %274 = load i16, ptr %273, align 1
-  store i16 %274, ptr %268, align 1
-  %275 = getelementptr inbounds i8, ptr %268, i64 2
-  %276 = mul i16 %270, 100
-  %277 = sub i16 %269, %276
-  %278 = shl nuw nsw i16 %277, 1
-  %279 = zext nneg i16 %278 to i64
-  %280 = getelementptr inbounds i8, ptr @decimal_u64.pairs, i64 %279
-  %281 = load i16, ptr %280, align 1
-  store i16 %281, ptr %275, align 1
-  %282 = icmp ugt i32 %262, 99999999
-  br i1 %282, label %260, label %283, !llvm.loop !38
+291:                                              ; preds = %286, %291
+  %292 = phi i64 [ %298, %291 ], [ %287, %286 ]
+  %293 = phi i32 [ %295, %291 ], [ %289, %286 ]
+  %294 = freeze i32 %293
+  %295 = udiv i32 %294, 10000
+  %296 = mul i32 %295, 10000
+  %297 = sub i32 %294, %296
+  %298 = add i64 %292, -4
+  %299 = getelementptr inbounds i8, ptr %5, i64 %298
+  %300 = trunc i32 %297 to i16
+  %301 = udiv i16 %300, 100
+  %302 = shl nuw nsw i16 %301, 1
+  %303 = zext nneg i16 %302 to i64
+  %304 = getelementptr inbounds i8, ptr @decimal_u64.pairs, i64 %303
+  %305 = load i16, ptr %304, align 1
+  store i16 %305, ptr %299, align 1
+  %306 = getelementptr inbounds i8, ptr %299, i64 2
+  %307 = mul i16 %301, 100
+  %308 = sub i16 %300, %307
+  %309 = shl nuw nsw i16 %308, 1
+  %310 = zext nneg i16 %309 to i64
+  %311 = getelementptr inbounds i8, ptr @decimal_u64.pairs, i64 %310
+  %312 = load i16, ptr %311, align 1
+  store i16 %312, ptr %306, align 1
+  %313 = icmp ugt i32 %293, 99999999
+  br i1 %313, label %291, label %314, !llvm.loop !38
 
-283:                                              ; preds = %260, %255
-  %284 = phi i32 [ %258, %255 ], [ %264, %260 ]
-  %285 = phi i64 [ %256, %255 ], [ %267, %260 ]
-  %286 = icmp ugt i32 %284, 99
-  br i1 %286, label %287, label %300
+314:                                              ; preds = %291, %286
+  %315 = phi i32 [ %289, %286 ], [ %295, %291 ]
+  %316 = phi i64 [ %287, %286 ], [ %298, %291 ]
+  %317 = icmp ugt i32 %315, 99
+  br i1 %317, label %318, label %331
 
-287:                                              ; preds = %283
-  %288 = trunc i32 %284 to i16
-  %289 = freeze i16 %288
-  %290 = udiv i16 %289, 100
-  %291 = mul i16 %290, 100
-  %292 = sub i16 %289, %291
-  %293 = zext nneg i16 %290 to i32
-  %294 = add i64 %285, -2
-  %295 = getelementptr inbounds i8, ptr %5, i64 %294
-  %296 = shl nuw nsw i16 %292, 1
-  %297 = zext nneg i16 %296 to i64
-  %298 = getelementptr inbounds i8, ptr @decimal_u64.pairs, i64 %297
-  %299 = load i16, ptr %298, align 1
-  store i16 %299, ptr %295, align 1
-  br label %300
+318:                                              ; preds = %314
+  %319 = trunc i32 %315 to i16
+  %320 = freeze i16 %319
+  %321 = udiv i16 %320, 100
+  %322 = mul i16 %321, 100
+  %323 = sub i16 %320, %322
+  %324 = zext nneg i16 %321 to i32
+  %325 = add i64 %316, -2
+  %326 = getelementptr inbounds i8, ptr %5, i64 %325
+  %327 = shl nuw nsw i16 %323, 1
+  %328 = zext nneg i16 %327 to i64
+  %329 = getelementptr inbounds i8, ptr @decimal_u64.pairs, i64 %328
+  %330 = load i16, ptr %329, align 1
+  store i16 %330, ptr %326, align 1
+  br label %331
 
-300:                                              ; preds = %287, %283
-  %301 = phi i32 [ %293, %287 ], [ %284, %283 ]
-  %302 = phi i64 [ %294, %287 ], [ %285, %283 ]
-  %303 = icmp ugt i32 %301, 9
-  br i1 %303, label %304, label %311
+331:                                              ; preds = %318, %314
+  %332 = phi i32 [ %324, %318 ], [ %315, %314 ]
+  %333 = phi i64 [ %325, %318 ], [ %316, %314 ]
+  %334 = icmp ugt i32 %332, 9
+  br i1 %334, label %335, label %342
 
-304:                                              ; preds = %300
-  %305 = add i64 %302, -2
-  %306 = getelementptr inbounds i8, ptr %5, i64 %305
-  %307 = shl nuw nsw i32 %301, 1
-  %308 = zext nneg i32 %307 to i64
-  %309 = getelementptr inbounds i8, ptr @decimal_u64.pairs, i64 %308
-  %310 = load i16, ptr %309, align 1
-  store i16 %310, ptr %306, align 1
-  br label %316
+335:                                              ; preds = %331
+  %336 = add i64 %333, -2
+  %337 = getelementptr inbounds i8, ptr %5, i64 %336
+  %338 = shl nuw nsw i32 %332, 1
+  %339 = zext nneg i32 %338 to i64
+  %340 = getelementptr inbounds i8, ptr @decimal_u64.pairs, i64 %339
+  %341 = load i16, ptr %340, align 1
+  store i16 %341, ptr %337, align 1
+  br label %347
 
-311:                                              ; preds = %300
-  %312 = trunc i32 %301 to i8
-  %313 = or disjoint i8 %312, 48
-  %314 = add i64 %302, -1
-  %315 = getelementptr inbounds i8, ptr %5, i64 %314
-  store i8 %313, ptr %315, align 1, !tbaa !14
-  br label %316
+342:                                              ; preds = %331
+  %343 = trunc i32 %332 to i8
+  %344 = or disjoint i8 %343, 48
+  %345 = add i64 %333, -1
+  %346 = getelementptr inbounds i8, ptr %5, i64 %345
+  store i8 %344, ptr %346, align 1, !tbaa !14
+  br label %347
 
-316:                                              ; preds = %304, %311
-  %317 = phi i64 [ %305, %304 ], [ %314, %311 ]
-  tail call fastcc void @json_path(ptr noundef %0, ptr noundef nonnull @.str.165, i64 noundef 1) #64
-  %318 = getelementptr inbounds i8, ptr %5, i64 %317
-  %319 = sub i64 24, %317
-  call fastcc void @json_path(ptr noundef %0, ptr noundef nonnull %318, i64 noundef %319) #64
+347:                                              ; preds = %335, %342
+  %348 = phi i64 [ %336, %335 ], [ %345, %342 ]
   tail call fastcc void @json_path(ptr noundef %0, ptr noundef nonnull @.str.166, i64 noundef 1) #64
-  %320 = load ptr, ptr %233, align 8, !tbaa !576
-  %321 = getelementptr inbounds %struct.FaJson, ptr %320, i64 %240
-  %322 = tail call fastcc i32 @json_check(ptr noundef %0, ptr noundef %321, ptr noundef nonnull %234, i32 noundef %3) #64
-  store i64 %228, ptr %227, align 8, !tbaa !568
-  %323 = icmp ne i32 %322, 0
+  %349 = getelementptr inbounds i8, ptr %5, i64 %348
+  %350 = sub i64 24, %348
+  call fastcc void @json_path(ptr noundef %0, ptr noundef nonnull %349, i64 noundef %350) #64
+  tail call fastcc void @json_path(ptr noundef %0, ptr noundef nonnull @.str.167, i64 noundef 1) #64
+  %351 = load ptr, ptr %265, align 8, !tbaa !576
+  %352 = getelementptr inbounds %struct.FaJson, ptr %351, i64 %271
+  %353 = tail call fastcc i32 @json_check(ptr noundef %0, ptr noundef %352, ptr noundef nonnull %250, i32 noundef %3) #64
+  store i64 %262, ptr %261, align 8, !tbaa !568
+  %354 = icmp ne i32 %353, 0
   call void @llvm.lifetime.end.p0(i64 24, ptr nonnull %5) #68
-  br i1 %323, label %235, label %324
+  br i1 %354, label %266, label %355
 
-324:                                              ; preds = %235, %316
-  %325 = zext i1 %323 to i32
-  br label %704
+355:                                              ; preds = %266, %347
+  %356 = zext i1 %354 to i32
+  br label %735
 
-326:                                              ; preds = %4
-  %327 = load i32, ptr %1, align 8, !tbaa !556
-  %328 = icmp eq i32 %327, 5
-  br i1 %328, label %330, label %329
+357:                                              ; preds = %4
+  %358 = load i32, ptr %1, align 8, !tbaa !556
+  %359 = icmp eq i32 %358, 5
+  br i1 %359, label %361, label %360
 
-329:                                              ; preds = %326
-  tail call fastcc void @json_mismatch(ptr noundef %0, ptr noundef nonnull %1, ptr noundef nonnull @.str.167, ptr noundef null, i32 noundef %3) #64
-  br label %704
+360:                                              ; preds = %357
+  tail call fastcc void @json_mismatch(ptr noundef %0, ptr noundef nonnull %1, ptr noundef nonnull @.str.168, ptr noundef null, i32 noundef %3) #64
+  br label %735
 
-330:                                              ; preds = %326
-  %331 = getelementptr inbounds %struct.JsonCheck, ptr %0, i64 0, i32 1
-  %332 = load i64, ptr %331, align 8, !tbaa !568
-  %333 = getelementptr inbounds %struct.FaJson, ptr %1, i64 0, i32 8
-  %334 = getelementptr inbounds %struct.FaJson, ptr %1, i64 0, i32 9
-  %335 = load i64, ptr %334, align 8, !tbaa !574
-  %336 = icmp eq i64 %335, 0
-  br i1 %336, label %704, label %337
+361:                                              ; preds = %357
+  %362 = getelementptr inbounds %struct.JsonCheck, ptr %0, i64 0, i32 1
+  %363 = load i64, ptr %362, align 8, !tbaa !568
+  %364 = getelementptr inbounds %struct.FaJson, ptr %1, i64 0, i32 8
+  %365 = getelementptr inbounds %struct.FaJson, ptr %1, i64 0, i32 9
+  %366 = load i64, ptr %365, align 8, !tbaa !574
+  %367 = icmp eq i64 %366, 0
+  br i1 %367, label %735, label %368
 
-337:                                              ; preds = %330
-  %338 = getelementptr inbounds i8, ptr %2, i64 1
-  br label %343
+368:                                              ; preds = %361
+  %369 = getelementptr inbounds i8, ptr %2, i64 1
+  br label %374
 
-339:                                              ; preds = %343
-  %340 = add nuw i64 %344, 1
-  %341 = load i64, ptr %334, align 8, !tbaa !574
-  %342 = icmp ult i64 %340, %341
-  br i1 %342, label %343, label %353, !llvm.loop !577
+370:                                              ; preds = %374
+  %371 = add nuw i64 %375, 1
+  %372 = load i64, ptr %365, align 8, !tbaa !574
+  %373 = icmp ult i64 %371, %372
+  br i1 %373, label %374, label %384, !llvm.loop !577
 
-343:                                              ; preds = %337, %339
-  %344 = phi i64 [ 0, %337 ], [ %340, %339 ]
-  %345 = load ptr, ptr %333, align 8, !tbaa !576
-  %346 = getelementptr inbounds %struct.FaJson, ptr %345, i64 %344
-  tail call fastcc void @json_path(ptr noundef nonnull %0, ptr noundef nonnull @.str.168, i64 noundef 1) #64
-  %347 = getelementptr inbounds %struct.FaJson, ptr %345, i64 %344, i32 6
-  %348 = load ptr, ptr %347, align 8, !tbaa !558
-  %349 = getelementptr inbounds %struct.FaJson, ptr %345, i64 %344, i32 7
-  %350 = load i64, ptr %349, align 8, !tbaa !559
-  tail call fastcc void @json_path(ptr noundef nonnull %0, ptr noundef %348, i64 noundef %350) #64
-  %351 = tail call fastcc i32 @json_check(ptr noundef nonnull %0, ptr noundef %346, ptr noundef nonnull %338, i32 noundef %3) #64
-  store i64 %332, ptr %331, align 8, !tbaa !568
-  %352 = icmp ne i32 %351, 0
-  br i1 %352, label %339, label %353
+374:                                              ; preds = %368, %370
+  %375 = phi i64 [ 0, %368 ], [ %371, %370 ]
+  %376 = load ptr, ptr %364, align 8, !tbaa !576
+  %377 = getelementptr inbounds %struct.FaJson, ptr %376, i64 %375
+  tail call fastcc void @json_path(ptr noundef nonnull %0, ptr noundef nonnull @.str.169, i64 noundef 1) #64
+  %378 = getelementptr inbounds %struct.FaJson, ptr %376, i64 %375, i32 6
+  %379 = load ptr, ptr %378, align 8, !tbaa !558
+  %380 = getelementptr inbounds %struct.FaJson, ptr %376, i64 %375, i32 7
+  %381 = load i64, ptr %380, align 8, !tbaa !559
+  tail call fastcc void @json_path(ptr noundef nonnull %0, ptr noundef %379, i64 noundef %381) #64
+  %382 = tail call fastcc i32 @json_check(ptr noundef nonnull %0, ptr noundef %377, ptr noundef nonnull %369, i32 noundef %3) #64
+  store i64 %363, ptr %362, align 8, !tbaa !568
+  %383 = icmp ne i32 %382, 0
+  br i1 %383, label %370, label %384
 
-353:                                              ; preds = %339, %343
-  %354 = zext i1 %352 to i32
-  br label %704
+384:                                              ; preds = %370, %374
+  %385 = zext i1 %383 to i32
+  br label %735
 
-355:                                              ; preds = %4
-  %356 = load i32, ptr %1, align 8, !tbaa !556
-  %357 = icmp eq i32 %356, 5
-  br i1 %357, label %359, label %358
+386:                                              ; preds = %4
+  %387 = load i32, ptr %1, align 8, !tbaa !556
+  %388 = icmp eq i32 %387, 5
+  br i1 %388, label %390, label %389
 
-358:                                              ; preds = %355
-  tail call fastcc void @json_mismatch(ptr noundef %0, ptr noundef nonnull %1, ptr noundef nonnull @.str.167, ptr noundef null, i32 noundef %3) #64
-  br label %704
+389:                                              ; preds = %386
+  tail call fastcc void @json_mismatch(ptr noundef %0, ptr noundef nonnull %1, ptr noundef nonnull @.str.168, ptr noundef null, i32 noundef %3) #64
+  br label %735
 
-359:                                              ; preds = %355
-  %360 = getelementptr inbounds i8, ptr %2, i64 1
-  %361 = load i8, ptr %360, align 1, !tbaa !14
-  %362 = icmp eq i8 %361, 45
-  %363 = zext i1 %362 to i64
-  %364 = getelementptr inbounds i8, ptr %360, i64 %363
-  %365 = load i8, ptr %364, align 1, !tbaa !14
-  %366 = icmp eq i8 %365, 59
-  br i1 %366, label %378, label %367
-
-367:                                              ; preds = %359, %367
-  %368 = phi i8 [ %376, %367 ], [ %365, %359 ]
-  %369 = phi i64 [ %374, %367 ], [ 0, %359 ]
-  %370 = phi ptr [ %375, %367 ], [ %364, %359 ]
-  %371 = zext i8 %368 to i64
-  %372 = mul i64 %369, 10
-  %373 = add nsw i64 %371, -48
-  %374 = add i64 %373, %372
-  %375 = getelementptr inbounds i8, ptr %370, i64 1
-  %376 = load i8, ptr %375, align 1, !tbaa !14
-  %377 = icmp eq i8 %376, 59
-  br i1 %377, label %378, label %367, !llvm.loop !570
-
-378:                                              ; preds = %367, %359
-  %379 = phi ptr [ %364, %359 ], [ %375, %367 ]
-  %380 = phi i64 [ 0, %359 ], [ %374, %367 ]
-  %381 = sub i64 0, %380
-  %382 = select i1 %362, i64 %381, i64 %380
-  %383 = getelementptr inbounds %struct.JsonCheck, ptr %0, i64 0, i32 1
-  %384 = load i64, ptr %383, align 8, !tbaa !568
-  %385 = icmp slt i64 %382, 1
-  br i1 %385, label %443, label %386
-
-386:                                              ; preds = %378
-  %387 = getelementptr inbounds i8, ptr %379, i64 1
-  br label %388
-
-388:                                              ; preds = %386, %439
-  %389 = phi i1 [ %441, %439 ], [ false, %386 ]
-  %390 = phi i64 [ %440, %439 ], [ 0, %386 ]
-  %391 = phi ptr [ %417, %439 ], [ %387, %386 ]
+390:                                              ; preds = %386
+  %391 = getelementptr inbounds i8, ptr %2, i64 1
   %392 = load i8, ptr %391, align 1, !tbaa !14
   %393 = icmp eq i8 %392, 45
   %394 = zext i1 %393 to i64
@@ -40795,10 +40802,10 @@ define internal fastcc i32 @json_check(ptr noundef %0, ptr nocapture noundef rea
   %397 = icmp eq i8 %396, 59
   br i1 %397, label %409, label %398
 
-398:                                              ; preds = %388, %398
-  %399 = phi i8 [ %407, %398 ], [ %396, %388 ]
-  %400 = phi i64 [ %405, %398 ], [ 0, %388 ]
-  %401 = phi ptr [ %406, %398 ], [ %395, %388 ]
+398:                                              ; preds = %390, %398
+  %399 = phi i8 [ %407, %398 ], [ %396, %390 ]
+  %400 = phi i64 [ %405, %398 ], [ 0, %390 ]
+  %401 = phi ptr [ %406, %398 ], [ %395, %390 ]
   %402 = zext i8 %399 to i64
   %403 = mul i64 %400, 10
   %404 = add nsw i64 %402, -48
@@ -40808,227 +40815,224 @@ define internal fastcc i32 @json_check(ptr noundef %0, ptr nocapture noundef rea
   %408 = icmp eq i8 %407, 59
   br i1 %408, label %409, label %398, !llvm.loop !570
 
-409:                                              ; preds = %398, %388
-  %410 = phi ptr [ %395, %388 ], [ %406, %398 ]
-  %411 = phi i64 [ 0, %388 ], [ %405, %398 ]
-  %412 = getelementptr inbounds i8, ptr %410, i64 1
-  %413 = sub i64 0, %411
-  %414 = select i1 %393, i64 %413, i64 %411
-  %415 = getelementptr inbounds i8, ptr %412, i64 %414
-  %416 = getelementptr inbounds i8, ptr %415, i64 1
-  %417 = tail call fastcc ptr @json_skip(ptr noundef nonnull %416) #64
-  %418 = tail call ptr @fa_json_field(ptr noundef nonnull %1, ptr noundef nonnull %412, i64 noundef %414) #64
-  %419 = icmp eq ptr %418, null
-  br i1 %419, label %420, label %436
+409:                                              ; preds = %398, %390
+  %410 = phi ptr [ %395, %390 ], [ %406, %398 ]
+  %411 = phi i64 [ 0, %390 ], [ %405, %398 ]
+  %412 = sub i64 0, %411
+  %413 = select i1 %393, i64 %412, i64 %411
+  %414 = getelementptr inbounds %struct.JsonCheck, ptr %0, i64 0, i32 1
+  %415 = load i64, ptr %414, align 8, !tbaa !568
+  %416 = icmp slt i64 %413, 1
+  br i1 %416, label %474, label %417
 
-420:                                              ; preds = %409
-  %421 = load i8, ptr %415, align 1, !tbaa !14
-  %422 = icmp eq i8 %421, 49
-  br i1 %422, label %439, label %423
+417:                                              ; preds = %409
+  %418 = getelementptr inbounds i8, ptr %410, i64 1
+  br label %419
 
-423:                                              ; preds = %420
-  %424 = icmp eq i32 %3, 0
-  br i1 %424, label %443, label %425
+419:                                              ; preds = %417, %470
+  %420 = phi i1 [ %472, %470 ], [ false, %417 ]
+  %421 = phi i64 [ %471, %470 ], [ 0, %417 ]
+  %422 = phi ptr [ %448, %470 ], [ %418, %417 ]
+  %423 = load i8, ptr %422, align 1, !tbaa !14
+  %424 = icmp eq i8 %423, 45
+  %425 = zext i1 %424 to i64
+  %426 = getelementptr inbounds i8, ptr %422, i64 %425
+  %427 = load i8, ptr %426, align 1, !tbaa !14
+  %428 = icmp eq i8 %427, 59
+  br i1 %428, label %440, label %429
 
-425:                                              ; preds = %423
+429:                                              ; preds = %419, %429
+  %430 = phi i8 [ %438, %429 ], [ %427, %419 ]
+  %431 = phi i64 [ %436, %429 ], [ 0, %419 ]
+  %432 = phi ptr [ %437, %429 ], [ %426, %419 ]
+  %433 = zext i8 %430 to i64
+  %434 = mul i64 %431, 10
+  %435 = add nsw i64 %433, -48
+  %436 = add i64 %435, %434
+  %437 = getelementptr inbounds i8, ptr %432, i64 1
+  %438 = load i8, ptr %437, align 1, !tbaa !14
+  %439 = icmp eq i8 %438, 59
+  br i1 %439, label %440, label %429, !llvm.loop !570
+
+440:                                              ; preds = %429, %419
+  %441 = phi ptr [ %426, %419 ], [ %437, %429 ]
+  %442 = phi i64 [ 0, %419 ], [ %436, %429 ]
+  %443 = getelementptr inbounds i8, ptr %441, i64 1
+  %444 = sub i64 0, %442
+  %445 = select i1 %424, i64 %444, i64 %442
+  %446 = getelementptr inbounds i8, ptr %443, i64 %445
+  %447 = getelementptr inbounds i8, ptr %446, i64 1
+  %448 = tail call fastcc ptr @json_skip(ptr noundef nonnull %447) #64
+  %449 = tail call ptr @fa_json_field(ptr noundef nonnull %1, ptr noundef nonnull %443, i64 noundef %445) #64
+  %450 = icmp eq ptr %449, null
+  br i1 %450, label %451, label %467
+
+451:                                              ; preds = %440
+  %452 = load i8, ptr %446, align 1, !tbaa !14
+  %453 = icmp eq i8 %452, 49
+  br i1 %453, label %470, label %454
+
+454:                                              ; preds = %451
+  %455 = icmp eq i32 %3, 0
+  br i1 %455, label %474, label %456
+
+456:                                              ; preds = %454
   tail call fastcc void @json_error_start(ptr noundef %0) #64
-  tail call fastcc void @append_c(ptr noundef nonnull @.str.169) #64
-  tail call fastcc void @reserve(i64 noundef %414) #64
-  %426 = tail call align 8 ptr @llvm.threadlocal.address.p0(ptr align 8 @builder)
-  %427 = load ptr, ptr %426, align 8, !tbaa !10
-  %428 = tail call align 8 ptr @llvm.threadlocal.address.p0(ptr align 8 @builder_length)
-  %429 = load i64, ptr %428, align 8, !tbaa !11
-  %430 = getelementptr inbounds i8, ptr %427, i64 %429
-  tail call fastcc void @copy_bytes(ptr noundef %430, ptr noundef nonnull %412, i64 noundef %414) #64
-  %431 = load i64, ptr %428, align 8, !tbaa !11
-  %432 = add i64 %431, %414
-  store i64 %432, ptr %428, align 8, !tbaa !11
   tail call fastcc void @append_c(ptr noundef nonnull @.str.170) #64
-  %433 = tail call ptr @fa_alloc(i64 noundef 32, i64 noundef 8) #66
-  store i64 10, ptr %433, align 8, !tbaa !368
-  %434 = getelementptr inbounds %struct.MessageError, ptr %433, i64 0, i32 1
-  tail call void @fa_b_take(ptr noundef nonnull %434) #64
-  %435 = getelementptr inbounds %struct.JsonCheck, ptr %0, i64 0, i32 3
-  store ptr %433, ptr %435, align 8, !tbaa !554
-  br label %443
+  tail call fastcc void @reserve(i64 noundef %445) #64
+  %457 = tail call align 8 ptr @llvm.threadlocal.address.p0(ptr align 8 @builder)
+  %458 = load ptr, ptr %457, align 8, !tbaa !10
+  %459 = tail call align 8 ptr @llvm.threadlocal.address.p0(ptr align 8 @builder_length)
+  %460 = load i64, ptr %459, align 8, !tbaa !11
+  %461 = getelementptr inbounds i8, ptr %458, i64 %460
+  tail call fastcc void @copy_bytes(ptr noundef %461, ptr noundef nonnull %443, i64 noundef %445) #64
+  %462 = load i64, ptr %459, align 8, !tbaa !11
+  %463 = add i64 %462, %445
+  store i64 %463, ptr %459, align 8, !tbaa !11
+  tail call fastcc void @append_c(ptr noundef nonnull @.str.171) #64
+  %464 = tail call ptr @fa_alloc(i64 noundef 32, i64 noundef 8) #66
+  store i64 10, ptr %464, align 8, !tbaa !368
+  %465 = getelementptr inbounds %struct.MessageError, ptr %464, i64 0, i32 1
+  tail call void @fa_b_take(ptr noundef nonnull %465) #64
+  %466 = getelementptr inbounds %struct.JsonCheck, ptr %0, i64 0, i32 3
+  store ptr %464, ptr %466, align 8, !tbaa !554
+  br label %474
 
-436:                                              ; preds = %409
-  tail call fastcc void @json_path(ptr noundef %0, ptr noundef nonnull @.str.168, i64 noundef 1) #64
-  tail call fastcc void @json_path(ptr noundef %0, ptr noundef nonnull %412, i64 noundef %414) #64
-  %437 = tail call fastcc i32 @json_check(ptr noundef %0, ptr noundef nonnull %418, ptr noundef nonnull %416, i32 noundef %3) #64
-  store i64 %384, ptr %383, align 8, !tbaa !568
-  %438 = icmp eq i32 %437, 0
-  br i1 %438, label %443, label %439
+467:                                              ; preds = %440
+  tail call fastcc void @json_path(ptr noundef %0, ptr noundef nonnull @.str.169, i64 noundef 1) #64
+  tail call fastcc void @json_path(ptr noundef %0, ptr noundef nonnull %443, i64 noundef %445) #64
+  %468 = tail call fastcc i32 @json_check(ptr noundef %0, ptr noundef nonnull %449, ptr noundef nonnull %447, i32 noundef %3) #64
+  store i64 %415, ptr %414, align 8, !tbaa !568
+  %469 = icmp eq i32 %468, 0
+  br i1 %469, label %474, label %470
 
-439:                                              ; preds = %420, %436
-  %440 = add nuw nsw i64 %390, 1
-  %441 = icmp sge i64 %440, %382
-  %442 = icmp eq i64 %440, %382
-  br i1 %442, label %443, label %388, !llvm.loop !578
+470:                                              ; preds = %451, %467
+  %471 = add nuw nsw i64 %421, 1
+  %472 = icmp sge i64 %471, %413
+  %473 = icmp eq i64 %471, %413
+  br i1 %473, label %474, label %419, !llvm.loop !578
 
-443:                                              ; preds = %439, %436, %378, %423, %425
-  %444 = phi i1 [ %389, %423 ], [ %389, %425 ], [ true, %378 ], [ %441, %439 ], [ %389, %436 ]
-  %445 = zext i1 %444 to i32
-  br label %704
+474:                                              ; preds = %470, %467, %409, %454, %456
+  %475 = phi i1 [ %420, %454 ], [ %420, %456 ], [ true, %409 ], [ %472, %470 ], [ %420, %467 ]
+  %476 = zext i1 %475 to i32
+  br label %735
 
-446:                                              ; preds = %4
-  %447 = getelementptr inbounds i8, ptr %2, i64 1
-  %448 = load i8, ptr %447, align 1, !tbaa !14
-  %449 = icmp eq i8 %448, 45
-  %450 = zext i1 %449 to i64
-  %451 = getelementptr inbounds i8, ptr %447, i64 %450
-  %452 = load i8, ptr %451, align 1, !tbaa !14
-  %453 = icmp eq i8 %452, 59
-  br i1 %453, label %465, label %454
+477:                                              ; preds = %4
+  %478 = getelementptr inbounds i8, ptr %2, i64 1
+  %479 = load i8, ptr %478, align 1, !tbaa !14
+  %480 = icmp eq i8 %479, 45
+  %481 = zext i1 %480 to i64
+  %482 = getelementptr inbounds i8, ptr %478, i64 %481
+  %483 = load i8, ptr %482, align 1, !tbaa !14
+  %484 = icmp eq i8 %483, 59
+  br i1 %484, label %496, label %485
 
-454:                                              ; preds = %446, %454
-  %455 = phi i8 [ %463, %454 ], [ %452, %446 ]
-  %456 = phi i64 [ %461, %454 ], [ 0, %446 ]
-  %457 = phi ptr [ %462, %454 ], [ %451, %446 ]
-  %458 = zext i8 %455 to i64
-  %459 = mul i64 %456, 10
-  %460 = add nsw i64 %458, -48
-  %461 = add i64 %460, %459
-  %462 = getelementptr inbounds i8, ptr %457, i64 1
-  %463 = load i8, ptr %462, align 1, !tbaa !14
-  %464 = icmp eq i8 %463, 59
-  br i1 %464, label %465, label %454, !llvm.loop !570
-
-465:                                              ; preds = %454, %446
-  %466 = phi ptr [ %451, %446 ], [ %462, %454 ]
-  %467 = phi i64 [ 0, %446 ], [ %461, %454 ]
-  %468 = sub i64 0, %467
-  %469 = select i1 %449, i64 %468, i64 %467
-  %470 = icmp sgt i64 %469, 0
-  br i1 %470, label %471, label %482
-
-471:                                              ; preds = %465
-  %472 = getelementptr inbounds i8, ptr %466, i64 1
-  br label %473
-
-473:                                              ; preds = %471, %478
-  %474 = phi i64 [ %480, %478 ], [ 0, %471 ]
-  %475 = phi ptr [ %479, %478 ], [ %472, %471 ]
-  %476 = tail call fastcc i32 @json_check(ptr noundef %0, ptr noundef %1, ptr noundef nonnull %475, i32 noundef 0) #64
-  %477 = icmp eq i32 %476, 0
-  br i1 %477, label %478, label %704
-
-478:                                              ; preds = %473
-  %479 = tail call fastcc ptr @json_skip(ptr noundef nonnull %475) #64
-  %480 = add nuw nsw i64 %474, 1
-  %481 = icmp eq i64 %480, %469
-  br i1 %481, label %482, label %473, !llvm.loop !579
-
-482:                                              ; preds = %478, %465
-  tail call fastcc void @json_mismatch(ptr noundef %0, ptr noundef %1, ptr noundef nonnull @.str.171, ptr noundef null, i32 noundef %3) #64
-  br label %704
-
-483:                                              ; preds = %4
-  %484 = tail call fastcc i64 @json_enum_of(ptr noundef %1, ptr noundef nonnull %2) #64
-  %485 = icmp sgt i64 %484, -1
-  br i1 %485, label %704, label %486
-
-486:                                              ; preds = %483
-  %487 = icmp eq i32 %3, 0
-  br i1 %487, label %704, label %488
-
-488:                                              ; preds = %486
-  tail call fastcc void @json_error_start(ptr noundef %0) #64
-  tail call fastcc void @append_c(ptr noundef nonnull @.str.172) #64
-  %489 = getelementptr inbounds i8, ptr %2, i64 1
-  %490 = load i8, ptr %489, align 1, !tbaa !14
-  %491 = icmp eq i8 %490, 45
-  %492 = zext i1 %491 to i64
-  %493 = getelementptr inbounds i8, ptr %489, i64 %492
+485:                                              ; preds = %477, %485
+  %486 = phi i8 [ %494, %485 ], [ %483, %477 ]
+  %487 = phi i64 [ %492, %485 ], [ 0, %477 ]
+  %488 = phi ptr [ %493, %485 ], [ %482, %477 ]
+  %489 = zext i8 %486 to i64
+  %490 = mul i64 %487, 10
+  %491 = add nsw i64 %489, -48
+  %492 = add i64 %491, %490
+  %493 = getelementptr inbounds i8, ptr %488, i64 1
   %494 = load i8, ptr %493, align 1, !tbaa !14
   %495 = icmp eq i8 %494, 59
-  br i1 %495, label %507, label %496
+  br i1 %495, label %496, label %485, !llvm.loop !570
 
-496:                                              ; preds = %488, %496
-  %497 = phi i8 [ %505, %496 ], [ %494, %488 ]
-  %498 = phi i64 [ %503, %496 ], [ 0, %488 ]
-  %499 = phi ptr [ %504, %496 ], [ %493, %488 ]
-  %500 = zext i8 %497 to i64
-  %501 = mul i64 %498, 10
-  %502 = add nsw i64 %500, -48
-  %503 = add i64 %502, %501
-  %504 = getelementptr inbounds i8, ptr %499, i64 1
-  %505 = load i8, ptr %504, align 1, !tbaa !14
-  %506 = icmp eq i8 %505, 59
-  br i1 %506, label %507, label %496, !llvm.loop !570
+496:                                              ; preds = %485, %477
+  %497 = phi ptr [ %482, %477 ], [ %493, %485 ]
+  %498 = phi i64 [ 0, %477 ], [ %492, %485 ]
+  %499 = sub i64 0, %498
+  %500 = select i1 %480, i64 %499, i64 %498
+  %501 = icmp sgt i64 %500, 0
+  br i1 %501, label %502, label %513
 
-507:                                              ; preds = %496, %488
-  %508 = phi ptr [ %493, %488 ], [ %504, %496 ]
-  %509 = phi i64 [ 0, %488 ], [ %503, %496 ]
-  %510 = sub i64 0, %509
-  %511 = select i1 %491, i64 %510, i64 %509
-  %512 = icmp sgt i64 %511, 0
-  br i1 %512, label %522, label %513
+502:                                              ; preds = %496
+  %503 = getelementptr inbounds i8, ptr %497, i64 1
+  br label %504
 
-513:                                              ; preds = %583, %507
+504:                                              ; preds = %502, %509
+  %505 = phi i64 [ %511, %509 ], [ 0, %502 ]
+  %506 = phi ptr [ %510, %509 ], [ %503, %502 ]
+  %507 = tail call fastcc i32 @json_check(ptr noundef %0, ptr noundef %1, ptr noundef nonnull %506, i32 noundef 0) #64
+  %508 = icmp eq i32 %507, 0
+  br i1 %508, label %509, label %735
+
+509:                                              ; preds = %504
+  %510 = tail call fastcc ptr @json_skip(ptr noundef nonnull %506) #64
+  %511 = add nuw nsw i64 %505, 1
+  %512 = icmp eq i64 %511, %500
+  br i1 %512, label %513, label %504, !llvm.loop !579
+
+513:                                              ; preds = %509, %496
+  tail call fastcc void @json_mismatch(ptr noundef %0, ptr noundef %1, ptr noundef nonnull @.str.172, ptr noundef null, i32 noundef %3) #64
+  br label %735
+
+514:                                              ; preds = %4
+  %515 = tail call fastcc i64 @json_enum_of(ptr noundef %1, ptr noundef nonnull %2) #64
+  %516 = icmp sgt i64 %515, -1
+  br i1 %516, label %735, label %517
+
+517:                                              ; preds = %514
+  %518 = icmp eq i32 %3, 0
+  br i1 %518, label %735, label %519
+
+519:                                              ; preds = %517
+  tail call fastcc void @json_error_start(ptr noundef %0) #64
+  tail call fastcc void @append_c(ptr noundef nonnull @.str.173) #64
+  %520 = getelementptr inbounds i8, ptr %2, i64 1
+  %521 = load i8, ptr %520, align 1, !tbaa !14
+  %522 = icmp eq i8 %521, 45
+  %523 = zext i1 %522 to i64
+  %524 = getelementptr inbounds i8, ptr %520, i64 %523
+  %525 = load i8, ptr %524, align 1, !tbaa !14
+  %526 = icmp eq i8 %525, 59
+  br i1 %526, label %538, label %527
+
+527:                                              ; preds = %519, %527
+  %528 = phi i8 [ %536, %527 ], [ %525, %519 ]
+  %529 = phi i64 [ %534, %527 ], [ 0, %519 ]
+  %530 = phi ptr [ %535, %527 ], [ %524, %519 ]
+  %531 = zext i8 %528 to i64
+  %532 = mul i64 %529, 10
+  %533 = add nsw i64 %531, -48
+  %534 = add i64 %533, %532
+  %535 = getelementptr inbounds i8, ptr %530, i64 1
+  %536 = load i8, ptr %535, align 1, !tbaa !14
+  %537 = icmp eq i8 %536, 59
+  br i1 %537, label %538, label %527, !llvm.loop !570
+
+538:                                              ; preds = %527, %519
+  %539 = phi ptr [ %524, %519 ], [ %535, %527 ]
+  %540 = phi i64 [ 0, %519 ], [ %534, %527 ]
+  %541 = sub i64 0, %540
+  %542 = select i1 %522, i64 %541, i64 %540
+  %543 = icmp sgt i64 %542, 0
+  br i1 %543, label %553, label %544
+
+544:                                              ; preds = %614, %538
   tail call fastcc void @append_c(ptr noundef nonnull @.str.163) #64
-  %514 = load i32, ptr %1, align 8, !tbaa !556
-  %515 = icmp ult i32 %514, 5
-  br i1 %515, label %516, label %520
+  %545 = load i32, ptr %1, align 8, !tbaa !556
+  %546 = icmp ult i32 %545, 5
+  br i1 %546, label %547, label %551
 
-516:                                              ; preds = %513
-  %517 = zext nneg i32 %514 to i64
-  %518 = getelementptr inbounds [5 x ptr], ptr @switch.table.json_mismatch, i64 0, i64 %517
-  %519 = load ptr, ptr %518, align 8
-  br label %520
+547:                                              ; preds = %544
+  %548 = zext nneg i32 %545 to i64
+  %549 = getelementptr inbounds [5 x ptr], ptr @switch.table.json_mismatch, i64 0, i64 %548
+  %550 = load ptr, ptr %549, align 8
+  br label %551
 
-520:                                              ; preds = %513, %516
-  %521 = phi ptr [ %519, %516 ], [ @.str.182, %513 ]
-  tail call fastcc void @append_c(ptr noundef nonnull %521) #64
+551:                                              ; preds = %544, %547
+  %552 = phi ptr [ %550, %547 ], [ @.str.183, %544 ]
+  tail call fastcc void @append_c(ptr noundef nonnull %552) #64
   tail call fastcc void @json_error_end(ptr noundef %0) #64
-  br label %704
+  br label %735
 
-522:                                              ; preds = %507, %583
-  %523 = phi i64 [ %585, %583 ], [ 0, %507 ]
-  %524 = phi ptr [ %584, %583 ], [ %508, %507 ]
-  %525 = getelementptr inbounds i8, ptr %524, i64 1
-  %526 = load i8, ptr %525, align 1, !tbaa !14
-  %527 = icmp eq i8 %526, 45
-  %528 = zext i1 %527 to i64
-  %529 = getelementptr inbounds i8, ptr %525, i64 %528
-  %530 = load i8, ptr %529, align 1, !tbaa !14
-  %531 = icmp eq i8 %530, 59
-  br i1 %531, label %543, label %532
-
-532:                                              ; preds = %522, %532
-  %533 = phi i8 [ %541, %532 ], [ %530, %522 ]
-  %534 = phi i64 [ %539, %532 ], [ 0, %522 ]
-  %535 = phi ptr [ %540, %532 ], [ %529, %522 ]
-  %536 = zext i8 %533 to i64
-  %537 = mul i64 %534, 10
-  %538 = add nsw i64 %536, -48
-  %539 = add i64 %538, %537
-  %540 = getelementptr inbounds i8, ptr %535, i64 1
-  %541 = load i8, ptr %540, align 1, !tbaa !14
-  %542 = icmp eq i8 %541, 59
-  br i1 %542, label %543, label %532, !llvm.loop !570
-
-543:                                              ; preds = %532, %522
-  %544 = phi ptr [ %529, %522 ], [ %540, %532 ]
-  %545 = phi i64 [ 0, %522 ], [ %539, %532 ]
-  %546 = getelementptr inbounds i8, ptr %544, i64 1
-  %547 = sub i64 0, %545
-  %548 = select i1 %527, i64 %547, i64 %545
-  %549 = getelementptr inbounds i8, ptr %546, i64 %548
-  %550 = icmp eq i64 %523, 0
-  br i1 %550, label %552, label %551
-
-551:                                              ; preds = %543
-  tail call fastcc void @append_c(ptr noundef nonnull @.str.3) #64
-  br label %552
-
-552:                                              ; preds = %551, %543
-  %553 = load i8, ptr %549, align 1, !tbaa !14
-  %554 = icmp eq i8 %553, 112
-  br i1 %554, label %555, label %582
-
-555:                                              ; preds = %552
-  %556 = getelementptr inbounds i8, ptr %549, i64 1
+553:                                              ; preds = %538, %614
+  %554 = phi i64 [ %616, %614 ], [ 0, %538 ]
+  %555 = phi ptr [ %615, %614 ], [ %539, %538 ]
+  %556 = getelementptr inbounds i8, ptr %555, i64 1
   %557 = load i8, ptr %556, align 1, !tbaa !14
   %558 = icmp eq i8 %557, 45
   %559 = zext i1 %558 to i64
@@ -41037,10 +41041,10 @@ define internal fastcc i32 @json_check(ptr noundef %0, ptr nocapture noundef rea
   %562 = icmp eq i8 %561, 59
   br i1 %562, label %574, label %563
 
-563:                                              ; preds = %555, %563
-  %564 = phi i8 [ %572, %563 ], [ %561, %555 ]
-  %565 = phi i64 [ %570, %563 ], [ 0, %555 ]
-  %566 = phi ptr [ %571, %563 ], [ %560, %555 ]
+563:                                              ; preds = %553, %563
+  %564 = phi i8 [ %572, %563 ], [ %561, %553 ]
+  %565 = phi i64 [ %570, %563 ], [ 0, %553 ]
+  %566 = phi ptr [ %571, %563 ], [ %560, %553 ]
   %567 = zext i8 %564 to i64
   %568 = mul i64 %565, 10
   %569 = add nsw i64 %567, -48
@@ -41050,235 +41054,277 @@ define internal fastcc i32 @json_check(ptr noundef %0, ptr nocapture noundef rea
   %573 = icmp eq i8 %572, 59
   br i1 %573, label %574, label %563, !llvm.loop !570
 
-574:                                              ; preds = %563, %555
-  %575 = phi ptr [ %560, %555 ], [ %571, %563 ]
-  %576 = phi i64 [ 0, %555 ], [ %570, %563 ]
-  %577 = sub i64 0, %576
-  %578 = select i1 %558, i64 %577, i64 %576
-  %579 = tail call i64 @llvm.abs.i64(i64 %576, i1 false)
-  %580 = lshr i64 %578, 63
-  %581 = trunc i64 %580 to i32
-  tail call fastcc void @append_u64(i64 noundef %579, i32 noundef %581) #64
-  br label %583
+574:                                              ; preds = %563, %553
+  %575 = phi ptr [ %560, %553 ], [ %571, %563 ]
+  %576 = phi i64 [ 0, %553 ], [ %570, %563 ]
+  %577 = getelementptr inbounds i8, ptr %575, i64 1
+  %578 = sub i64 0, %576
+  %579 = select i1 %558, i64 %578, i64 %576
+  %580 = getelementptr inbounds i8, ptr %577, i64 %579
+  %581 = icmp eq i64 %554, 0
+  br i1 %581, label %583, label %582
 
-582:                                              ; preds = %552
-  tail call void @fa_b_json_string_flags(ptr noundef nonnull %546, i64 noundef %548, i64 noundef 4611686018427387904) #64
+582:                                              ; preds = %574
+  tail call fastcc void @append_c(ptr noundef nonnull @.str.3) #64
   br label %583
 
 583:                                              ; preds = %582, %574
-  %584 = phi ptr [ %575, %574 ], [ %549, %582 ]
-  %585 = add nuw nsw i64 %523, 1
-  %586 = icmp eq i64 %585, %511
-  br i1 %586, label %513, label %522, !llvm.loop !580
+  %584 = load i8, ptr %580, align 1, !tbaa !14
+  %585 = icmp eq i8 %584, 112
+  br i1 %585, label %586, label %613
 
-587:                                              ; preds = %4
+586:                                              ; preds = %583
+  %587 = getelementptr inbounds i8, ptr %580, i64 1
+  %588 = load i8, ptr %587, align 1, !tbaa !14
+  %589 = icmp eq i8 %588, 45
+  %590 = zext i1 %589 to i64
+  %591 = getelementptr inbounds i8, ptr %587, i64 %590
+  %592 = load i8, ptr %591, align 1, !tbaa !14
+  %593 = icmp eq i8 %592, 59
+  br i1 %593, label %605, label %594
+
+594:                                              ; preds = %586, %594
+  %595 = phi i8 [ %603, %594 ], [ %592, %586 ]
+  %596 = phi i64 [ %601, %594 ], [ 0, %586 ]
+  %597 = phi ptr [ %602, %594 ], [ %591, %586 ]
+  %598 = zext i8 %595 to i64
+  %599 = mul i64 %596, 10
+  %600 = add nsw i64 %598, -48
+  %601 = add i64 %600, %599
+  %602 = getelementptr inbounds i8, ptr %597, i64 1
+  %603 = load i8, ptr %602, align 1, !tbaa !14
+  %604 = icmp eq i8 %603, 59
+  br i1 %604, label %605, label %594, !llvm.loop !570
+
+605:                                              ; preds = %594, %586
+  %606 = phi ptr [ %591, %586 ], [ %602, %594 ]
+  %607 = phi i64 [ 0, %586 ], [ %601, %594 ]
+  %608 = sub i64 0, %607
+  %609 = select i1 %589, i64 %608, i64 %607
+  %610 = tail call i64 @llvm.abs.i64(i64 %607, i1 false)
+  %611 = lshr i64 %609, 63
+  %612 = trunc i64 %611 to i32
+  tail call fastcc void @append_u64(i64 noundef %610, i32 noundef %612) #64
+  br label %614
+
+613:                                              ; preds = %583
+  tail call void @fa_b_json_string_flags(ptr noundef nonnull %577, i64 noundef %579, i64 noundef 4611686018427387904) #64
+  br label %614
+
+614:                                              ; preds = %613, %605
+  %615 = phi ptr [ %606, %605 ], [ %580, %613 ]
+  %616 = add nuw nsw i64 %554, 1
+  %617 = icmp eq i64 %616, %542
+  br i1 %617, label %544, label %553, !llvm.loop !580
+
+618:                                              ; preds = %4
   call void @llvm.lifetime.start.p0(i64 8, ptr nonnull %6) #68
-  %588 = call fastcc i64 @json_member_of(ptr noundef %1, ptr noundef nonnull %2, ptr noundef nonnull %6) #64
-  %589 = icmp slt i64 %588, 0
-  br i1 %589, label %590, label %653
+  %619 = call fastcc i64 @json_member_of(ptr noundef %1, ptr noundef nonnull %2, ptr noundef nonnull %6) #64
+  %620 = icmp slt i64 %619, 0
+  br i1 %620, label %621, label %684
 
-590:                                              ; preds = %587
-  %591 = load ptr, ptr %6, align 8, !tbaa !10
-  %592 = icmp eq ptr %591, null
-  br i1 %592, label %596, label %593
+621:                                              ; preds = %618
+  %622 = load ptr, ptr %6, align 8, !tbaa !10
+  %623 = icmp eq ptr %622, null
+  br i1 %623, label %627, label %624
 
-593:                                              ; preds = %590
-  %594 = load i32, ptr %591, align 8, !tbaa !556
-  %595 = icmp eq i32 %594, 3
-  br i1 %595, label %597, label %596
+624:                                              ; preds = %621
+  %625 = load i32, ptr %622, align 8, !tbaa !556
+  %626 = icmp eq i32 %625, 3
+  br i1 %626, label %628, label %627
 
-596:                                              ; preds = %593, %590
-  tail call fastcc void @json_mismatch(ptr noundef %0, ptr noundef %1, ptr noundef nonnull @.str.171, ptr noundef null, i32 noundef %3) #64
-  br label %696
+627:                                              ; preds = %624, %621
+  tail call fastcc void @json_mismatch(ptr noundef %0, ptr noundef %1, ptr noundef nonnull @.str.172, ptr noundef null, i32 noundef %3) #64
+  br label %727
 
-597:                                              ; preds = %593
-  %598 = icmp eq i32 %3, 0
-  br i1 %598, label %696, label %599
+628:                                              ; preds = %624
+  %629 = icmp eq i32 %3, 0
+  br i1 %629, label %727, label %630
 
-599:                                              ; preds = %597
+630:                                              ; preds = %628
   tail call fastcc void @json_error_start(ptr noundef %0) #64
-  tail call fastcc void @append_c(ptr noundef nonnull @.str.173) #64
-  %600 = getelementptr inbounds i8, ptr %2, i64 1
-  %601 = load i8, ptr %600, align 1, !tbaa !14
-  %602 = icmp eq i8 %601, 45
-  %603 = zext i1 %602 to i64
-  %604 = getelementptr inbounds i8, ptr %600, i64 %603
-  %605 = load i8, ptr %604, align 1, !tbaa !14
-  %606 = icmp eq i8 %605, 59
-  br i1 %606, label %618, label %607
+  tail call fastcc void @append_c(ptr noundef nonnull @.str.174) #64
+  %631 = getelementptr inbounds i8, ptr %2, i64 1
+  %632 = load i8, ptr %631, align 1, !tbaa !14
+  %633 = icmp eq i8 %632, 45
+  %634 = zext i1 %633 to i64
+  %635 = getelementptr inbounds i8, ptr %631, i64 %634
+  %636 = load i8, ptr %635, align 1, !tbaa !14
+  %637 = icmp eq i8 %636, 59
+  br i1 %637, label %649, label %638
 
-607:                                              ; preds = %599, %607
-  %608 = phi i8 [ %616, %607 ], [ %605, %599 ]
-  %609 = phi i64 [ %614, %607 ], [ 0, %599 ]
-  %610 = phi ptr [ %615, %607 ], [ %604, %599 ]
-  %611 = zext i8 %608 to i64
-  %612 = mul i64 %609, 10
-  %613 = add nsw i64 %611, -48
-  %614 = add i64 %613, %612
-  %615 = getelementptr inbounds i8, ptr %610, i64 1
-  %616 = load i8, ptr %615, align 1, !tbaa !14
-  %617 = icmp eq i8 %616, 59
-  br i1 %617, label %618, label %607, !llvm.loop !570
+638:                                              ; preds = %630, %638
+  %639 = phi i8 [ %647, %638 ], [ %636, %630 ]
+  %640 = phi i64 [ %645, %638 ], [ 0, %630 ]
+  %641 = phi ptr [ %646, %638 ], [ %635, %630 ]
+  %642 = zext i8 %639 to i64
+  %643 = mul i64 %640, 10
+  %644 = add nsw i64 %642, -48
+  %645 = add i64 %644, %643
+  %646 = getelementptr inbounds i8, ptr %641, i64 1
+  %647 = load i8, ptr %646, align 1, !tbaa !14
+  %648 = icmp eq i8 %647, 59
+  br i1 %648, label %649, label %638, !llvm.loop !570
 
-618:                                              ; preds = %607, %599
-  %619 = phi ptr [ %604, %599 ], [ %615, %607 ]
-  %620 = phi i64 [ 0, %599 ], [ %614, %607 ]
-  %621 = sub i64 0, %620
-  %622 = select i1 %602, i64 %621, i64 %620
-  %623 = icmp sgt i64 %622, 0
-  br i1 %623, label %624, label %630
+649:                                              ; preds = %638, %630
+  %650 = phi ptr [ %635, %630 ], [ %646, %638 ]
+  %651 = phi i64 [ 0, %630 ], [ %645, %638 ]
+  %652 = sub i64 0, %651
+  %653 = select i1 %633, i64 %652, i64 %651
+  %654 = icmp sgt i64 %653, 0
+  br i1 %654, label %655, label %661
 
-624:                                              ; preds = %618
-  %625 = getelementptr inbounds i8, ptr %619, i64 1
-  %626 = getelementptr inbounds %struct.JsonMember, ptr %7, i64 0, i32 2
-  %627 = getelementptr inbounds %struct.JsonMember, ptr %7, i64 0, i32 1
-  br label %636
+655:                                              ; preds = %649
+  %656 = getelementptr inbounds i8, ptr %650, i64 1
+  %657 = getelementptr inbounds %struct.JsonMember, ptr %7, i64 0, i32 2
+  %658 = getelementptr inbounds %struct.JsonMember, ptr %7, i64 0, i32 1
+  br label %667
 
-628:                                              ; preds = %649
-  %629 = load ptr, ptr %6, align 8, !tbaa !10
-  br label %630
+659:                                              ; preds = %680
+  %660 = load ptr, ptr %6, align 8, !tbaa !10
+  br label %661
 
-630:                                              ; preds = %628, %618
-  %631 = phi ptr [ %629, %628 ], [ %591, %618 ]
+661:                                              ; preds = %659, %649
+  %662 = phi ptr [ %660, %659 ], [ %622, %649 ]
   tail call fastcc void @append_c(ptr noundef nonnull @.str.163) #64
-  %632 = getelementptr inbounds %struct.FaJson, ptr %631, i64 0, i32 4
-  %633 = load ptr, ptr %632, align 8, !tbaa !572
-  %634 = getelementptr inbounds %struct.FaJson, ptr %631, i64 0, i32 5
-  %635 = load i64, ptr %634, align 8, !tbaa !571
-  tail call void @fa_b_json_string_flags(ptr noundef %633, i64 noundef %635, i64 noundef 4611686018427387904) #64
+  %663 = getelementptr inbounds %struct.FaJson, ptr %662, i64 0, i32 4
+  %664 = load ptr, ptr %663, align 8, !tbaa !572
+  %665 = getelementptr inbounds %struct.FaJson, ptr %662, i64 0, i32 5
+  %666 = load i64, ptr %665, align 8, !tbaa !571
+  tail call void @fa_b_json_string_flags(ptr noundef %664, i64 noundef %666, i64 noundef 4611686018427387904) #64
   tail call fastcc void @json_error_end(ptr noundef %0) #64
-  br label %696
+  br label %727
 
-636:                                              ; preds = %624, %649
-  %637 = phi i64 [ 0, %624 ], [ %651, %649 ]
-  %638 = phi i32 [ 1, %624 ], [ %650, %649 ]
-  %639 = phi ptr [ %625, %624 ], [ %640, %649 ]
+667:                                              ; preds = %655, %680
+  %668 = phi i64 [ 0, %655 ], [ %682, %680 ]
+  %669 = phi i32 [ 1, %655 ], [ %681, %680 ]
+  %670 = phi ptr [ %656, %655 ], [ %671, %680 ]
   call void @llvm.lifetime.start.p0(i64 32, ptr nonnull %7) #68
-  %640 = call fastcc ptr @json_member_at(ptr noundef nonnull %639, ptr noundef nonnull %7) #64
-  %641 = load i8, ptr %626, align 8, !tbaa !581
-  %642 = icmp eq i8 %641, 108
-  br i1 %642, label %649, label %643
+  %671 = call fastcc ptr @json_member_at(ptr noundef nonnull %670, ptr noundef nonnull %7) #64
+  %672 = load i8, ptr %657, align 8, !tbaa !581
+  %673 = icmp eq i8 %672, 108
+  br i1 %673, label %680, label %674
 
-643:                                              ; preds = %636
-  %644 = icmp eq i32 %638, 0
-  br i1 %644, label %645, label %646
+674:                                              ; preds = %667
+  %675 = icmp eq i32 %669, 0
+  br i1 %675, label %676, label %677
 
-645:                                              ; preds = %643
+676:                                              ; preds = %674
   tail call fastcc void @append_c(ptr noundef nonnull @.str.3) #64
-  br label %646
+  br label %677
 
-646:                                              ; preds = %645, %643
-  %647 = load ptr, ptr %7, align 8, !tbaa !583
-  %648 = load i64, ptr %627, align 8, !tbaa !584
-  tail call void @fa_b_json_string_flags(ptr noundef %647, i64 noundef %648, i64 noundef 4611686018427387904) #64
-  br label %649
+677:                                              ; preds = %676, %674
+  %678 = load ptr, ptr %7, align 8, !tbaa !583
+  %679 = load i64, ptr %658, align 8, !tbaa !584
+  tail call void @fa_b_json_string_flags(ptr noundef %678, i64 noundef %679, i64 noundef 4611686018427387904) #64
+  br label %680
 
-649:                                              ; preds = %636, %646
-  %650 = phi i32 [ 0, %646 ], [ %638, %636 ]
+680:                                              ; preds = %667, %677
+  %681 = phi i32 [ 0, %677 ], [ %669, %667 ]
   call void @llvm.lifetime.end.p0(i64 32, ptr nonnull %7) #68
-  %651 = add nuw nsw i64 %637, 1
-  %652 = icmp eq i64 %651, %622
-  br i1 %652, label %628, label %636, !llvm.loop !585
+  %682 = add nuw nsw i64 %668, 1
+  %683 = icmp eq i64 %682, %653
+  br i1 %683, label %659, label %667, !llvm.loop !585
 
-653:                                              ; preds = %587
-  %654 = getelementptr inbounds i8, ptr %2, i64 1
-  %655 = load i8, ptr %654, align 1, !tbaa !14
-  %656 = icmp eq i8 %655, 45
-  %657 = zext i1 %656 to i64
-  %658 = getelementptr inbounds i8, ptr %654, i64 %657
-  %659 = load i8, ptr %658, align 1, !tbaa !14
-  %660 = icmp eq i8 %659, 59
-  br i1 %660, label %666, label %661
+684:                                              ; preds = %618
+  %685 = getelementptr inbounds i8, ptr %2, i64 1
+  %686 = load i8, ptr %685, align 1, !tbaa !14
+  %687 = icmp eq i8 %686, 45
+  %688 = zext i1 %687 to i64
+  %689 = getelementptr inbounds i8, ptr %685, i64 %688
+  %690 = load i8, ptr %689, align 1, !tbaa !14
+  %691 = icmp eq i8 %690, 59
+  br i1 %691, label %697, label %692
 
-661:                                              ; preds = %653, %661
-  %662 = phi ptr [ %663, %661 ], [ %658, %653 ]
-  %663 = getelementptr inbounds i8, ptr %662, i64 1
-  %664 = load i8, ptr %663, align 1, !tbaa !14
-  %665 = icmp eq i8 %664, 59
-  br i1 %665, label %666, label %661, !llvm.loop !570
+692:                                              ; preds = %684, %692
+  %693 = phi ptr [ %694, %692 ], [ %689, %684 ]
+  %694 = getelementptr inbounds i8, ptr %693, i64 1
+  %695 = load i8, ptr %694, align 1, !tbaa !14
+  %696 = icmp eq i8 %695, 59
+  br i1 %696, label %697, label %692, !llvm.loop !570
 
-666:                                              ; preds = %661, %653
-  %667 = phi ptr [ %658, %653 ], [ %663, %661 ]
+697:                                              ; preds = %692, %684
+  %698 = phi ptr [ %689, %684 ], [ %694, %692 ]
   call void @llvm.lifetime.start.p0(i64 32, ptr nonnull %8) #68
-  %668 = getelementptr inbounds i8, ptr %667, i64 1
-  br label %672
+  %699 = getelementptr inbounds i8, ptr %698, i64 1
+  br label %703
 
-669:                                              ; preds = %672
-  %670 = getelementptr inbounds %struct.JsonMember, ptr %8, i64 0, i32 2
-  %671 = load i8, ptr %670, align 8, !tbaa !581
-  switch i8 %671, label %682 [
-    i8 101, label %694
-    i8 108, label %694
-    i8 114, label %678
+700:                                              ; preds = %703
+  %701 = getelementptr inbounds %struct.JsonMember, ptr %8, i64 0, i32 2
+  %702 = load i8, ptr %701, align 8, !tbaa !581
+  switch i8 %702, label %713 [
+    i8 101, label %725
+    i8 108, label %725
+    i8 114, label %709
   ]
 
-672:                                              ; preds = %666, %672
-  %673 = phi i64 [ %676, %672 ], [ 0, %666 ]
-  %674 = phi ptr [ %675, %672 ], [ %668, %666 ]
-  %675 = call fastcc ptr @json_member_at(ptr noundef nonnull %674, ptr noundef nonnull %8) #64
-  %676 = add nuw i64 %673, 1
-  %677 = icmp eq i64 %673, %588
-  br i1 %677, label %669, label %672, !llvm.loop !586
+703:                                              ; preds = %697, %703
+  %704 = phi i64 [ %707, %703 ], [ 0, %697 ]
+  %705 = phi ptr [ %706, %703 ], [ %699, %697 ]
+  %706 = call fastcc ptr @json_member_at(ptr noundef nonnull %705, ptr noundef nonnull %8) #64
+  %707 = add nuw i64 %704, 1
+  %708 = icmp eq i64 %704, %619
+  br i1 %708, label %700, label %703, !llvm.loop !586
 
-678:                                              ; preds = %669
-  %679 = getelementptr inbounds %struct.JsonMember, ptr %8, i64 0, i32 3
-  %680 = load ptr, ptr %679, align 8, !tbaa !587
-  %681 = tail call fastcc i32 @json_check(ptr noundef %0, ptr noundef %1, ptr noundef %680, i32 noundef %3) #64
-  br label %694
+709:                                              ; preds = %700
+  %710 = getelementptr inbounds %struct.JsonMember, ptr %8, i64 0, i32 3
+  %711 = load ptr, ptr %710, align 8, !tbaa !587
+  %712 = tail call fastcc i32 @json_check(ptr noundef %0, ptr noundef %1, ptr noundef %711, i32 noundef %3) #64
+  br label %725
 
-682:                                              ; preds = %669
-  %683 = tail call ptr @fa_json_field(ptr noundef %1, ptr noundef nonnull @.str.174, i64 noundef 5) #64
-  %684 = icmp eq ptr %683, null
-  br i1 %684, label %685, label %688
+713:                                              ; preds = %700
+  %714 = tail call ptr @fa_json_field(ptr noundef %1, ptr noundef nonnull @.str.175, i64 noundef 5) #64
+  %715 = icmp eq ptr %714, null
+  br i1 %715, label %716, label %719
 
-685:                                              ; preds = %682
-  %686 = icmp eq i32 %3, 0
-  br i1 %686, label %694, label %687
+716:                                              ; preds = %713
+  %717 = icmp eq i32 %3, 0
+  br i1 %717, label %725, label %718
 
-687:                                              ; preds = %685
+718:                                              ; preds = %716
   tail call fastcc void @json_error_start(ptr noundef %0) #64
-  tail call fastcc void @append_c(ptr noundef nonnull @.str.175) #64
+  tail call fastcc void @append_c(ptr noundef nonnull @.str.176) #64
   tail call fastcc void @json_error_end(ptr noundef %0) #64
-  br label %694
+  br label %725
 
-688:                                              ; preds = %682
-  %689 = getelementptr inbounds %struct.JsonCheck, ptr %0, i64 0, i32 1
-  %690 = load i64, ptr %689, align 8, !tbaa !568
-  tail call fastcc void @json_path(ptr noundef %0, ptr noundef nonnull @.str.176, i64 noundef 6) #64
-  %691 = getelementptr inbounds %struct.JsonMember, ptr %8, i64 0, i32 3
-  %692 = load ptr, ptr %691, align 8, !tbaa !587
-  %693 = tail call fastcc i32 @json_check(ptr noundef %0, ptr noundef nonnull %683, ptr noundef %692, i32 noundef %3) #64
-  store i64 %690, ptr %689, align 8, !tbaa !568
-  br label %694
+719:                                              ; preds = %713
+  %720 = getelementptr inbounds %struct.JsonCheck, ptr %0, i64 0, i32 1
+  %721 = load i64, ptr %720, align 8, !tbaa !568
+  tail call fastcc void @json_path(ptr noundef %0, ptr noundef nonnull @.str.177, i64 noundef 6) #64
+  %722 = getelementptr inbounds %struct.JsonMember, ptr %8, i64 0, i32 3
+  %723 = load ptr, ptr %722, align 8, !tbaa !587
+  %724 = tail call fastcc i32 @json_check(ptr noundef %0, ptr noundef nonnull %714, ptr noundef %723, i32 noundef %3) #64
+  store i64 %721, ptr %720, align 8, !tbaa !568
+  br label %725
 
-694:                                              ; preds = %688, %687, %685, %669, %669, %678
-  %695 = phi i32 [ %681, %678 ], [ 1, %669 ], [ 1, %669 ], [ %693, %688 ], [ 0, %687 ], [ 0, %685 ]
+725:                                              ; preds = %719, %718, %716, %700, %700, %709
+  %726 = phi i32 [ %712, %709 ], [ 1, %700 ], [ 1, %700 ], [ %724, %719 ], [ 0, %718 ], [ 0, %716 ]
   call void @llvm.lifetime.end.p0(i64 32, ptr nonnull %8) #68
-  br label %696
+  br label %727
 
-696:                                              ; preds = %597, %630, %694, %596
-  %697 = phi i32 [ 0, %596 ], [ %695, %694 ], [ 0, %630 ], [ 0, %597 ]
+727:                                              ; preds = %628, %661, %725, %627
+  %728 = phi i32 [ 0, %627 ], [ %726, %725 ], [ 0, %661 ], [ 0, %628 ]
   call void @llvm.lifetime.end.p0(i64 8, ptr nonnull %6) #68
-  br label %704
+  br label %735
 
-698:                                              ; preds = %4
-  %699 = icmp eq i32 %3, 0
-  br i1 %699, label %704, label %700
+729:                                              ; preds = %4
+  %730 = icmp eq i32 %3, 0
+  br i1 %730, label %735, label %731
 
-700:                                              ; preds = %698
+731:                                              ; preds = %729
   tail call fastcc void @json_error_start(ptr noundef %0) #64
-  tail call fastcc void @append_c(ptr noundef nonnull @.str.177) #64
-  %701 = tail call ptr @fa_alloc(i64 noundef 32, i64 noundef 8) #66
-  store i64 10, ptr %701, align 8, !tbaa !368
-  %702 = getelementptr inbounds %struct.MessageError, ptr %701, i64 0, i32 1
-  tail call void @fa_b_take(ptr noundef nonnull %702) #64
-  %703 = getelementptr inbounds %struct.JsonCheck, ptr %0, i64 0, i32 3
-  store ptr %701, ptr %703, align 8, !tbaa !554
-  br label %704
+  tail call fastcc void @append_c(ptr noundef nonnull @.str.178) #64
+  %732 = tail call ptr @fa_alloc(i64 noundef 32, i64 noundef 8) #66
+  store i64 10, ptr %732, align 8, !tbaa !368
+  %733 = getelementptr inbounds %struct.MessageError, ptr %732, i64 0, i32 1
+  tail call void @fa_b_take(ptr noundef nonnull %733) #64
+  %734 = getelementptr inbounds %struct.JsonCheck, ptr %0, i64 0, i32 3
+  store ptr %732, ptr %734, align 8, !tbaa !554
+  br label %735
 
-704:                                              ; preds = %473, %158, %330, %353, %226, %324, %482, %217, %221, %176, %163, %87, %93, %91, %116, %104, %100, %99, %106, %698, %700, %486, %520, %483, %180, %186, %696, %443, %358, %329, %225, %32, %26, %20, %14
-  %705 = phi i32 [ %697, %696 ], [ 0, %358 ], [ %445, %443 ], [ 0, %329 ], [ 0, %225 ], [ %33, %32 ], [ %27, %26 ], [ %21, %20 ], [ %15, %14 ], [ 1, %180 ], [ 0, %186 ], [ 1, %483 ], [ 0, %520 ], [ 0, %486 ], [ 0, %700 ], [ 0, %698 ], [ 0, %87 ], [ 0, %93 ], [ 0, %91 ], [ 0, %116 ], [ 0, %104 ], [ 1, %100 ], [ 1, %99 ], [ 0, %106 ], [ 0, %176 ], [ 1, %163 ], [ 1, %217 ], [ 0, %221 ], [ 0, %482 ], [ 1, %226 ], [ %325, %324 ], [ 1, %330 ], [ %354, %353 ], [ 1, %158 ], [ 1, %473 ]
-  ret i32 %705
+735:                                              ; preds = %504, %158, %361, %384, %260, %355, %513, %254, %259, %217, %221, %176, %163, %87, %93, %91, %116, %104, %100, %99, %106, %729, %731, %517, %551, %514, %180, %186, %727, %474, %389, %360, %32, %26, %20, %14
+  %736 = phi i32 [ %728, %727 ], [ 0, %389 ], [ %476, %474 ], [ 0, %360 ], [ %33, %32 ], [ %27, %26 ], [ %21, %20 ], [ %15, %14 ], [ 1, %180 ], [ 0, %186 ], [ 1, %514 ], [ 0, %551 ], [ 0, %517 ], [ 0, %731 ], [ 0, %729 ], [ 0, %87 ], [ 0, %93 ], [ 0, %91 ], [ 0, %116 ], [ 0, %104 ], [ 1, %100 ], [ 1, %99 ], [ 0, %106 ], [ 0, %176 ], [ 1, %163 ], [ 1, %217 ], [ 0, %221 ], [ 0, %254 ], [ 0, %259 ], [ 0, %513 ], [ 1, %260 ], [ %356, %355 ], [ 1, %361 ], [ %385, %384 ], [ 1, %158 ], [ 1, %504 ]
+  ret i32 %736
 }
 
 ; Function Attrs: nounwind optsize
@@ -41539,7 +41585,7 @@ define internal fastcc i64 @json_member_of(ptr nocapture noundef readonly %0, pt
   br i1 %31, label %32, label %34
 
 32:                                               ; preds = %24
-  %33 = tail call ptr @fa_json_field(ptr noundef nonnull %0, ptr noundef nonnull @.str.183, i64 noundef 4) #64
+  %33 = tail call ptr @fa_json_field(ptr noundef nonnull %0, ptr noundef nonnull @.str.184, i64 noundef 4) #64
   br label %34
 
 34:                                               ; preds = %24, %32
@@ -41885,7 +41931,7 @@ define internal void @quote_json_surrogates(ptr nocapture noundef readonly %0, i
   %32 = zext nneg i8 %31 to i32
   %33 = or disjoint i32 %28, %32
   %34 = or disjoint i32 %33, 53248
-  tail call fastcc void @append_c(ptr noundef nonnull @.str.184) #64
+  tail call fastcc void @append_c(ptr noundef nonnull @.str.185) #64
   br label %37
 
 35:                                               ; preds = %37
@@ -41992,11 +42038,11 @@ define internal fastcc void @quote_json_bytes(ptr nocapture noundef readonly %0,
   br label %61
 
 37:                                               ; preds = %26
-  tail call fastcc void @append_c(ptr noundef nonnull @.str.185) #64
+  tail call fastcc void @append_c(ptr noundef nonnull @.str.186) #64
   br label %61
 
 38:                                               ; preds = %26
-  tail call fastcc void @append_c(ptr noundef nonnull @.str.186) #64
+  tail call fastcc void @append_c(ptr noundef nonnull @.str.187) #64
   br label %61
 
 39:                                               ; preds = %26
@@ -42012,7 +42058,7 @@ define internal fastcc void @quote_json_bytes(ptr nocapture noundef readonly %0,
   br label %61
 
 42:                                               ; preds = %26
-  tail call fastcc void @append_c(ptr noundef nonnull @.str.187) #64
+  tail call fastcc void @append_c(ptr noundef nonnull @.str.188) #64
   %43 = lshr i32 %21, 4
   %44 = zext nneg i32 %43 to i64
   %45 = getelementptr inbounds [17 x i8], ptr @quote_json_bytes.hex, i64 0, i64 %44
@@ -48772,7 +48818,7 @@ define internal fastcc void @json_mismatch(ptr nocapture noundef %0, ptr nocaptu
 
 7:                                                ; preds = %5
   tail call fastcc void @json_error_start(ptr noundef %0) #64
-  tail call fastcc void @append_c(ptr noundef nonnull @.str.178) #64
+  tail call fastcc void @append_c(ptr noundef nonnull @.str.179) #64
   %8 = icmp eq ptr %3, null
   br i1 %8, label %65, label %9
 
@@ -48871,7 +48917,7 @@ define internal fastcc void @json_mismatch(ptr nocapture noundef %0, ptr nocaptu
   br label %73
 
 73:                                               ; preds = %66, %69
-  %74 = phi ptr [ %72, %69 ], [ @.str.182, %66 ]
+  %74 = phi ptr [ %72, %69 ], [ @.str.183, %66 ]
   tail call fastcc void @append_c(ptr noundef nonnull %74) #64
   %75 = tail call ptr @fa_alloc(i64 noundef 32, i64 noundef 8) #66
   store i64 10, ptr %75, align 8, !tbaa !368
@@ -48921,19 +48967,20 @@ define internal fastcc void @json_error_end(ptr nocapture noundef writeonly %0) 
 define internal fastcc nonnull ptr @json_skip(ptr noundef readonly %0) unnamed_addr #59 {
   br label %2
 
-2:                                                ; preds = %77, %1
-  %3 = phi ptr [ %0, %1 ], [ %78, %77 ]
+2:                                                ; preds = %90, %1
+  %3 = phi ptr [ %0, %1 ], [ %92, %90 ]
   %4 = load i8, ptr %3, align 1, !tbaa !14
-  switch i8 %4, label %303 [
+  switch i8 %4, label %317 [
     i8 105, label %5
     i8 83, label %35
     i8 73, label %61
-    i8 97, label %77
-    i8 109, label %77
-    i8 111, label %79
-    i8 117, label %136
-    i8 78, label %168
-    i8 69, label %230
+    i8 65, label %77
+    i8 97, label %90
+    i8 109, label %90
+    i8 111, label %93
+    i8 117, label %150
+    i8 78, label %182
+    i8 69, label %244
   ]
 
 5:                                                ; preds = %2
@@ -48974,7 +49021,7 @@ define internal fastcc nonnull ptr @json_skip(ptr noundef readonly %0) unnamed_a
 32:                                               ; preds = %27, %18
   %33 = phi ptr [ %24, %18 ], [ %29, %27 ]
   %34 = getelementptr inbounds i8, ptr %33, i64 1
-  br label %305
+  br label %319
 
 35:                                               ; preds = %2
   %36 = getelementptr inbounds i8, ptr %3, i64 1
@@ -49006,7 +49053,7 @@ define internal fastcc nonnull ptr @json_skip(ptr noundef readonly %0) unnamed_a
   %58 = sub i64 0, %56
   %59 = select i1 %38, i64 %58, i64 %56
   %60 = getelementptr inbounds i8, ptr %57, i64 %59
-  br label %305
+  br label %319
 
 61:                                               ; preds = %2
   %62 = getelementptr inbounds i8, ptr %3, i64 1
@@ -49028,297 +49075,315 @@ define internal fastcc nonnull ptr @json_skip(ptr noundef readonly %0) unnamed_a
 74:                                               ; preds = %69, %61
   %75 = phi ptr [ %66, %61 ], [ %71, %69 ]
   %76 = getelementptr inbounds i8, ptr %75, i64 1
-  br label %305
+  br label %319
 
-77:                                               ; preds = %2, %2
+77:                                               ; preds = %2
   %78 = getelementptr inbounds i8, ptr %3, i64 1
+  %79 = load i8, ptr %78, align 1, !tbaa !14
+  %80 = icmp eq i8 %79, 45
+  %81 = zext i1 %80 to i64
+  %82 = getelementptr inbounds i8, ptr %78, i64 %81
+  %83 = load i8, ptr %82, align 1, !tbaa !14
+  %84 = icmp eq i8 %83, 59
+  br i1 %84, label %90, label %85
+
+85:                                               ; preds = %77, %85
+  %86 = phi ptr [ %87, %85 ], [ %82, %77 ]
+  %87 = getelementptr inbounds i8, ptr %86, i64 1
+  %88 = load i8, ptr %87, align 1, !tbaa !14
+  %89 = icmp eq i8 %88, 59
+  br i1 %89, label %90, label %85, !llvm.loop !570
+
+90:                                               ; preds = %85, %2, %2, %77
+  %91 = phi ptr [ %82, %77 ], [ %3, %2 ], [ %3, %2 ], [ %87, %85 ]
+  %92 = getelementptr inbounds i8, ptr %91, i64 1
   br label %2
 
-79:                                               ; preds = %2
-  %80 = getelementptr inbounds i8, ptr %3, i64 1
-  %81 = load i8, ptr %80, align 1, !tbaa !14
-  %82 = icmp eq i8 %81, 45
-  %83 = zext i1 %82 to i64
-  %84 = getelementptr inbounds i8, ptr %80, i64 %83
-  %85 = load i8, ptr %84, align 1, !tbaa !14
-  %86 = icmp eq i8 %85, 59
-  br i1 %86, label %98, label %87
+93:                                               ; preds = %2
+  %94 = getelementptr inbounds i8, ptr %3, i64 1
+  %95 = load i8, ptr %94, align 1, !tbaa !14
+  %96 = icmp eq i8 %95, 45
+  %97 = zext i1 %96 to i64
+  %98 = getelementptr inbounds i8, ptr %94, i64 %97
+  %99 = load i8, ptr %98, align 1, !tbaa !14
+  %100 = icmp eq i8 %99, 59
+  br i1 %100, label %112, label %101
 
-87:                                               ; preds = %79, %87
-  %88 = phi i8 [ %96, %87 ], [ %85, %79 ]
-  %89 = phi i64 [ %94, %87 ], [ 0, %79 ]
-  %90 = phi ptr [ %95, %87 ], [ %84, %79 ]
-  %91 = zext i8 %88 to i64
-  %92 = mul i64 %89, 10
-  %93 = add nsw i64 %91, -48
-  %94 = add i64 %93, %92
-  %95 = getelementptr inbounds i8, ptr %90, i64 1
-  %96 = load i8, ptr %95, align 1, !tbaa !14
-  %97 = icmp eq i8 %96, 59
-  br i1 %97, label %98, label %87, !llvm.loop !570
+101:                                              ; preds = %93, %101
+  %102 = phi i8 [ %110, %101 ], [ %99, %93 ]
+  %103 = phi i64 [ %108, %101 ], [ 0, %93 ]
+  %104 = phi ptr [ %109, %101 ], [ %98, %93 ]
+  %105 = zext i8 %102 to i64
+  %106 = mul i64 %103, 10
+  %107 = add nsw i64 %105, -48
+  %108 = add i64 %107, %106
+  %109 = getelementptr inbounds i8, ptr %104, i64 1
+  %110 = load i8, ptr %109, align 1, !tbaa !14
+  %111 = icmp eq i8 %110, 59
+  br i1 %111, label %112, label %101, !llvm.loop !570
 
-98:                                               ; preds = %87, %79
-  %99 = phi ptr [ %84, %79 ], [ %95, %87 ]
-  %100 = phi i64 [ 0, %79 ], [ %94, %87 ]
-  %101 = getelementptr inbounds i8, ptr %99, i64 1
-  %102 = sub i64 0, %100
-  %103 = select i1 %82, i64 %102, i64 %100
-  %104 = icmp sgt i64 %103, 0
-  br i1 %104, label %105, label %305
+112:                                              ; preds = %101, %93
+  %113 = phi ptr [ %98, %93 ], [ %109, %101 ]
+  %114 = phi i64 [ 0, %93 ], [ %108, %101 ]
+  %115 = getelementptr inbounds i8, ptr %113, i64 1
+  %116 = sub i64 0, %114
+  %117 = select i1 %96, i64 %116, i64 %114
+  %118 = icmp sgt i64 %117, 0
+  br i1 %118, label %119, label %319
 
-105:                                              ; preds = %98, %125
-  %106 = phi i64 [ %134, %125 ], [ 0, %98 ]
-  %107 = phi ptr [ %133, %125 ], [ %101, %98 ]
-  %108 = load i8, ptr %107, align 1, !tbaa !14
-  %109 = icmp eq i8 %108, 45
-  %110 = zext i1 %109 to i64
-  %111 = getelementptr inbounds i8, ptr %107, i64 %110
-  %112 = load i8, ptr %111, align 1, !tbaa !14
-  %113 = icmp eq i8 %112, 59
-  br i1 %113, label %125, label %114
+119:                                              ; preds = %112, %139
+  %120 = phi i64 [ %148, %139 ], [ 0, %112 ]
+  %121 = phi ptr [ %147, %139 ], [ %115, %112 ]
+  %122 = load i8, ptr %121, align 1, !tbaa !14
+  %123 = icmp eq i8 %122, 45
+  %124 = zext i1 %123 to i64
+  %125 = getelementptr inbounds i8, ptr %121, i64 %124
+  %126 = load i8, ptr %125, align 1, !tbaa !14
+  %127 = icmp eq i8 %126, 59
+  br i1 %127, label %139, label %128
 
-114:                                              ; preds = %105, %114
-  %115 = phi i8 [ %123, %114 ], [ %112, %105 ]
-  %116 = phi i64 [ %121, %114 ], [ 0, %105 ]
-  %117 = phi ptr [ %122, %114 ], [ %111, %105 ]
-  %118 = zext i8 %115 to i64
-  %119 = mul i64 %116, 10
-  %120 = add nsw i64 %118, -48
-  %121 = add i64 %120, %119
-  %122 = getelementptr inbounds i8, ptr %117, i64 1
-  %123 = load i8, ptr %122, align 1, !tbaa !14
-  %124 = icmp eq i8 %123, 59
-  br i1 %124, label %125, label %114, !llvm.loop !570
+128:                                              ; preds = %119, %128
+  %129 = phi i8 [ %137, %128 ], [ %126, %119 ]
+  %130 = phi i64 [ %135, %128 ], [ 0, %119 ]
+  %131 = phi ptr [ %136, %128 ], [ %125, %119 ]
+  %132 = zext i8 %129 to i64
+  %133 = mul i64 %130, 10
+  %134 = add nsw i64 %132, -48
+  %135 = add i64 %134, %133
+  %136 = getelementptr inbounds i8, ptr %131, i64 1
+  %137 = load i8, ptr %136, align 1, !tbaa !14
+  %138 = icmp eq i8 %137, 59
+  br i1 %138, label %139, label %128, !llvm.loop !570
 
-125:                                              ; preds = %114, %105
-  %126 = phi ptr [ %111, %105 ], [ %122, %114 ]
-  %127 = phi i64 [ 0, %105 ], [ %121, %114 ]
-  %128 = getelementptr inbounds i8, ptr %126, i64 1
-  %129 = sub i64 0, %127
-  %130 = select i1 %109, i64 %129, i64 %127
-  %131 = getelementptr inbounds i8, ptr %128, i64 %130
-  %132 = getelementptr inbounds i8, ptr %131, i64 1
-  %133 = tail call fastcc ptr @json_skip(ptr noundef nonnull %132) #64
-  %134 = add nuw nsw i64 %106, 1
-  %135 = icmp eq i64 %134, %103
-  br i1 %135, label %305, label %105, !llvm.loop !722
+139:                                              ; preds = %128, %119
+  %140 = phi ptr [ %125, %119 ], [ %136, %128 ]
+  %141 = phi i64 [ 0, %119 ], [ %135, %128 ]
+  %142 = getelementptr inbounds i8, ptr %140, i64 1
+  %143 = sub i64 0, %141
+  %144 = select i1 %123, i64 %143, i64 %141
+  %145 = getelementptr inbounds i8, ptr %142, i64 %144
+  %146 = getelementptr inbounds i8, ptr %145, i64 1
+  %147 = tail call fastcc ptr @json_skip(ptr noundef nonnull %146) #64
+  %148 = add nuw nsw i64 %120, 1
+  %149 = icmp eq i64 %148, %117
+  br i1 %149, label %319, label %119, !llvm.loop !722
 
-136:                                              ; preds = %2
-  %137 = getelementptr inbounds i8, ptr %3, i64 1
-  %138 = load i8, ptr %137, align 1, !tbaa !14
-  %139 = icmp eq i8 %138, 45
-  %140 = zext i1 %139 to i64
-  %141 = getelementptr inbounds i8, ptr %137, i64 %140
-  %142 = load i8, ptr %141, align 1, !tbaa !14
-  %143 = icmp eq i8 %142, 59
-  br i1 %143, label %155, label %144
+150:                                              ; preds = %2
+  %151 = getelementptr inbounds i8, ptr %3, i64 1
+  %152 = load i8, ptr %151, align 1, !tbaa !14
+  %153 = icmp eq i8 %152, 45
+  %154 = zext i1 %153 to i64
+  %155 = getelementptr inbounds i8, ptr %151, i64 %154
+  %156 = load i8, ptr %155, align 1, !tbaa !14
+  %157 = icmp eq i8 %156, 59
+  br i1 %157, label %169, label %158
 
-144:                                              ; preds = %136, %144
-  %145 = phi i8 [ %153, %144 ], [ %142, %136 ]
-  %146 = phi i64 [ %151, %144 ], [ 0, %136 ]
-  %147 = phi ptr [ %152, %144 ], [ %141, %136 ]
-  %148 = zext i8 %145 to i64
-  %149 = mul i64 %146, 10
-  %150 = add nsw i64 %148, -48
-  %151 = add i64 %150, %149
-  %152 = getelementptr inbounds i8, ptr %147, i64 1
-  %153 = load i8, ptr %152, align 1, !tbaa !14
-  %154 = icmp eq i8 %153, 59
-  br i1 %154, label %155, label %144, !llvm.loop !570
+158:                                              ; preds = %150, %158
+  %159 = phi i8 [ %167, %158 ], [ %156, %150 ]
+  %160 = phi i64 [ %165, %158 ], [ 0, %150 ]
+  %161 = phi ptr [ %166, %158 ], [ %155, %150 ]
+  %162 = zext i8 %159 to i64
+  %163 = mul i64 %160, 10
+  %164 = add nsw i64 %162, -48
+  %165 = add i64 %164, %163
+  %166 = getelementptr inbounds i8, ptr %161, i64 1
+  %167 = load i8, ptr %166, align 1, !tbaa !14
+  %168 = icmp eq i8 %167, 59
+  br i1 %168, label %169, label %158, !llvm.loop !570
 
-155:                                              ; preds = %144, %136
-  %156 = phi ptr [ %141, %136 ], [ %152, %144 ]
-  %157 = phi i64 [ 0, %136 ], [ %151, %144 ]
-  %158 = getelementptr inbounds i8, ptr %156, i64 1
-  %159 = sub i64 0, %157
-  %160 = select i1 %139, i64 %159, i64 %157
-  %161 = icmp sgt i64 %160, 0
-  br i1 %161, label %162, label %305
+169:                                              ; preds = %158, %150
+  %170 = phi ptr [ %155, %150 ], [ %166, %158 ]
+  %171 = phi i64 [ 0, %150 ], [ %165, %158 ]
+  %172 = getelementptr inbounds i8, ptr %170, i64 1
+  %173 = sub i64 0, %171
+  %174 = select i1 %153, i64 %173, i64 %171
+  %175 = icmp sgt i64 %174, 0
+  br i1 %175, label %176, label %319
 
-162:                                              ; preds = %155, %162
-  %163 = phi i64 [ %166, %162 ], [ 0, %155 ]
-  %164 = phi ptr [ %165, %162 ], [ %158, %155 ]
-  %165 = tail call fastcc ptr @json_skip(ptr noundef nonnull %164) #64
-  %166 = add nuw nsw i64 %163, 1
-  %167 = icmp eq i64 %166, %160
-  br i1 %167, label %305, label %162, !llvm.loop !723
+176:                                              ; preds = %169, %176
+  %177 = phi i64 [ %180, %176 ], [ 0, %169 ]
+  %178 = phi ptr [ %179, %176 ], [ %172, %169 ]
+  %179 = tail call fastcc ptr @json_skip(ptr noundef nonnull %178) #64
+  %180 = add nuw nsw i64 %177, 1
+  %181 = icmp eq i64 %180, %174
+  br i1 %181, label %319, label %176, !llvm.loop !723
 
-168:                                              ; preds = %2
-  %169 = getelementptr inbounds i8, ptr %3, i64 1
-  %170 = load i8, ptr %169, align 1, !tbaa !14
-  %171 = icmp eq i8 %170, 45
-  %172 = zext i1 %171 to i64
-  %173 = getelementptr inbounds i8, ptr %169, i64 %172
-  %174 = load i8, ptr %173, align 1, !tbaa !14
-  %175 = icmp eq i8 %174, 59
-  br i1 %175, label %187, label %176
+182:                                              ; preds = %2
+  %183 = getelementptr inbounds i8, ptr %3, i64 1
+  %184 = load i8, ptr %183, align 1, !tbaa !14
+  %185 = icmp eq i8 %184, 45
+  %186 = zext i1 %185 to i64
+  %187 = getelementptr inbounds i8, ptr %183, i64 %186
+  %188 = load i8, ptr %187, align 1, !tbaa !14
+  %189 = icmp eq i8 %188, 59
+  br i1 %189, label %201, label %190
 
-176:                                              ; preds = %168, %176
-  %177 = phi i8 [ %185, %176 ], [ %174, %168 ]
-  %178 = phi i64 [ %183, %176 ], [ 0, %168 ]
-  %179 = phi ptr [ %184, %176 ], [ %173, %168 ]
-  %180 = zext i8 %177 to i64
-  %181 = mul i64 %178, 10
-  %182 = add nsw i64 %180, -48
-  %183 = add i64 %182, %181
-  %184 = getelementptr inbounds i8, ptr %179, i64 1
-  %185 = load i8, ptr %184, align 1, !tbaa !14
-  %186 = icmp eq i8 %185, 59
-  br i1 %186, label %187, label %176, !llvm.loop !570
+190:                                              ; preds = %182, %190
+  %191 = phi i8 [ %199, %190 ], [ %188, %182 ]
+  %192 = phi i64 [ %197, %190 ], [ 0, %182 ]
+  %193 = phi ptr [ %198, %190 ], [ %187, %182 ]
+  %194 = zext i8 %191 to i64
+  %195 = mul i64 %192, 10
+  %196 = add nsw i64 %194, -48
+  %197 = add i64 %196, %195
+  %198 = getelementptr inbounds i8, ptr %193, i64 1
+  %199 = load i8, ptr %198, align 1, !tbaa !14
+  %200 = icmp eq i8 %199, 59
+  br i1 %200, label %201, label %190, !llvm.loop !570
 
-187:                                              ; preds = %176, %168
-  %188 = phi ptr [ %173, %168 ], [ %184, %176 ]
-  %189 = phi i64 [ 0, %168 ], [ %183, %176 ]
-  %190 = getelementptr inbounds i8, ptr %188, i64 1
-  %191 = sub i64 0, %189
-  %192 = select i1 %171, i64 %191, i64 %189
-  %193 = icmp sgt i64 %192, 0
-  br i1 %193, label %194, label %305
+201:                                              ; preds = %190, %182
+  %202 = phi ptr [ %187, %182 ], [ %198, %190 ]
+  %203 = phi i64 [ 0, %182 ], [ %197, %190 ]
+  %204 = getelementptr inbounds i8, ptr %202, i64 1
+  %205 = sub i64 0, %203
+  %206 = select i1 %185, i64 %205, i64 %203
+  %207 = icmp sgt i64 %206, 0
+  br i1 %207, label %208, label %319
 
-194:                                              ; preds = %187, %226
-  %195 = phi i64 [ %228, %226 ], [ 0, %187 ]
-  %196 = phi ptr [ %227, %226 ], [ %190, %187 ]
-  %197 = load i8, ptr %196, align 1, !tbaa !14
-  %198 = icmp eq i8 %197, 45
-  %199 = zext i1 %198 to i64
-  %200 = getelementptr inbounds i8, ptr %196, i64 %199
-  %201 = load i8, ptr %200, align 1, !tbaa !14
-  %202 = icmp eq i8 %201, 59
-  br i1 %202, label %214, label %203
+208:                                              ; preds = %201, %240
+  %209 = phi i64 [ %242, %240 ], [ 0, %201 ]
+  %210 = phi ptr [ %241, %240 ], [ %204, %201 ]
+  %211 = load i8, ptr %210, align 1, !tbaa !14
+  %212 = icmp eq i8 %211, 45
+  %213 = zext i1 %212 to i64
+  %214 = getelementptr inbounds i8, ptr %210, i64 %213
+  %215 = load i8, ptr %214, align 1, !tbaa !14
+  %216 = icmp eq i8 %215, 59
+  br i1 %216, label %228, label %217
 
-203:                                              ; preds = %194, %203
-  %204 = phi i8 [ %212, %203 ], [ %201, %194 ]
-  %205 = phi i64 [ %210, %203 ], [ 0, %194 ]
-  %206 = phi ptr [ %211, %203 ], [ %200, %194 ]
-  %207 = zext i8 %204 to i64
-  %208 = mul i64 %205, 10
-  %209 = add nsw i64 %207, -48
-  %210 = add i64 %209, %208
-  %211 = getelementptr inbounds i8, ptr %206, i64 1
-  %212 = load i8, ptr %211, align 1, !tbaa !14
-  %213 = icmp eq i8 %212, 59
-  br i1 %213, label %214, label %203, !llvm.loop !570
+217:                                              ; preds = %208, %217
+  %218 = phi i8 [ %226, %217 ], [ %215, %208 ]
+  %219 = phi i64 [ %224, %217 ], [ 0, %208 ]
+  %220 = phi ptr [ %225, %217 ], [ %214, %208 ]
+  %221 = zext i8 %218 to i64
+  %222 = mul i64 %219, 10
+  %223 = add nsw i64 %221, -48
+  %224 = add i64 %223, %222
+  %225 = getelementptr inbounds i8, ptr %220, i64 1
+  %226 = load i8, ptr %225, align 1, !tbaa !14
+  %227 = icmp eq i8 %226, 59
+  br i1 %227, label %228, label %217, !llvm.loop !570
 
-214:                                              ; preds = %203, %194
-  %215 = phi ptr [ %200, %194 ], [ %211, %203 ]
-  %216 = phi i64 [ 0, %194 ], [ %210, %203 ]
-  %217 = getelementptr inbounds i8, ptr %215, i64 1
-  %218 = sub i64 0, %216
-  %219 = select i1 %198, i64 %218, i64 %216
-  %220 = getelementptr inbounds i8, ptr %217, i64 %219
-  %221 = load i8, ptr %220, align 1, !tbaa !14
-  %222 = getelementptr i8, ptr %220, i64 1
-  %223 = icmp eq i8 %221, 101
-  br i1 %223, label %226, label %224
+228:                                              ; preds = %217, %208
+  %229 = phi ptr [ %214, %208 ], [ %225, %217 ]
+  %230 = phi i64 [ 0, %208 ], [ %224, %217 ]
+  %231 = getelementptr inbounds i8, ptr %229, i64 1
+  %232 = sub i64 0, %230
+  %233 = select i1 %212, i64 %232, i64 %230
+  %234 = getelementptr inbounds i8, ptr %231, i64 %233
+  %235 = load i8, ptr %234, align 1, !tbaa !14
+  %236 = getelementptr i8, ptr %234, i64 1
+  %237 = icmp eq i8 %235, 101
+  br i1 %237, label %240, label %238
 
-224:                                              ; preds = %214
-  %225 = tail call fastcc ptr @json_skip(ptr noundef %222) #64
-  br label %226
+238:                                              ; preds = %228
+  %239 = tail call fastcc ptr @json_skip(ptr noundef %236) #64
+  br label %240
 
-226:                                              ; preds = %224, %214
-  %227 = phi ptr [ %222, %214 ], [ %225, %224 ]
-  %228 = add nuw nsw i64 %195, 1
-  %229 = icmp eq i64 %228, %192
-  br i1 %229, label %305, label %194, !llvm.loop !724
+240:                                              ; preds = %238, %228
+  %241 = phi ptr [ %236, %228 ], [ %239, %238 ]
+  %242 = add nuw nsw i64 %209, 1
+  %243 = icmp eq i64 %242, %206
+  br i1 %243, label %319, label %208, !llvm.loop !724
 
-230:                                              ; preds = %2
-  %231 = getelementptr inbounds i8, ptr %3, i64 1
-  %232 = load i8, ptr %231, align 1, !tbaa !14
-  %233 = icmp eq i8 %232, 45
-  %234 = zext i1 %233 to i64
-  %235 = getelementptr inbounds i8, ptr %231, i64 %234
-  %236 = load i8, ptr %235, align 1, !tbaa !14
-  %237 = icmp eq i8 %236, 59
-  br i1 %237, label %249, label %238
+244:                                              ; preds = %2
+  %245 = getelementptr inbounds i8, ptr %3, i64 1
+  %246 = load i8, ptr %245, align 1, !tbaa !14
+  %247 = icmp eq i8 %246, 45
+  %248 = zext i1 %247 to i64
+  %249 = getelementptr inbounds i8, ptr %245, i64 %248
+  %250 = load i8, ptr %249, align 1, !tbaa !14
+  %251 = icmp eq i8 %250, 59
+  br i1 %251, label %263, label %252
 
-238:                                              ; preds = %230, %238
-  %239 = phi i8 [ %247, %238 ], [ %236, %230 ]
-  %240 = phi i64 [ %245, %238 ], [ 0, %230 ]
-  %241 = phi ptr [ %246, %238 ], [ %235, %230 ]
-  %242 = zext i8 %239 to i64
-  %243 = mul i64 %240, 10
-  %244 = add nsw i64 %242, -48
-  %245 = add i64 %244, %243
-  %246 = getelementptr inbounds i8, ptr %241, i64 1
-  %247 = load i8, ptr %246, align 1, !tbaa !14
-  %248 = icmp eq i8 %247, 59
-  br i1 %248, label %249, label %238, !llvm.loop !570
+252:                                              ; preds = %244, %252
+  %253 = phi i8 [ %261, %252 ], [ %250, %244 ]
+  %254 = phi i64 [ %259, %252 ], [ 0, %244 ]
+  %255 = phi ptr [ %260, %252 ], [ %249, %244 ]
+  %256 = zext i8 %253 to i64
+  %257 = mul i64 %254, 10
+  %258 = add nsw i64 %256, -48
+  %259 = add i64 %258, %257
+  %260 = getelementptr inbounds i8, ptr %255, i64 1
+  %261 = load i8, ptr %260, align 1, !tbaa !14
+  %262 = icmp eq i8 %261, 59
+  br i1 %262, label %263, label %252, !llvm.loop !570
 
-249:                                              ; preds = %238, %230
-  %250 = phi ptr [ %235, %230 ], [ %246, %238 ]
-  %251 = phi i64 [ 0, %230 ], [ %245, %238 ]
-  %252 = sub i64 0, %251
-  %253 = select i1 %233, i64 %252, i64 %251
-  %254 = getelementptr inbounds i8, ptr %250, i64 1
-  %255 = icmp sgt i64 %253, 0
-  br i1 %255, label %256, label %305
+263:                                              ; preds = %252, %244
+  %264 = phi ptr [ %249, %244 ], [ %260, %252 ]
+  %265 = phi i64 [ 0, %244 ], [ %259, %252 ]
+  %266 = sub i64 0, %265
+  %267 = select i1 %247, i64 %266, i64 %265
+  %268 = getelementptr inbounds i8, ptr %264, i64 1
+  %269 = icmp sgt i64 %267, 0
+  br i1 %269, label %270, label %319
 
-256:                                              ; preds = %249, %298
-  %257 = phi ptr [ %301, %298 ], [ %254, %249 ]
-  %258 = phi i64 [ %300, %298 ], [ 0, %249 ]
-  %259 = load i8, ptr %257, align 1, !tbaa !14
-  %260 = icmp eq i8 %259, 45
-  %261 = zext i1 %260 to i64
-  %262 = getelementptr inbounds i8, ptr %257, i64 %261
-  %263 = load i8, ptr %262, align 1, !tbaa !14
-  %264 = icmp eq i8 %263, 59
-  br i1 %264, label %276, label %265
+270:                                              ; preds = %263, %312
+  %271 = phi ptr [ %315, %312 ], [ %268, %263 ]
+  %272 = phi i64 [ %314, %312 ], [ 0, %263 ]
+  %273 = load i8, ptr %271, align 1, !tbaa !14
+  %274 = icmp eq i8 %273, 45
+  %275 = zext i1 %274 to i64
+  %276 = getelementptr inbounds i8, ptr %271, i64 %275
+  %277 = load i8, ptr %276, align 1, !tbaa !14
+  %278 = icmp eq i8 %277, 59
+  br i1 %278, label %290, label %279
 
-265:                                              ; preds = %256, %265
-  %266 = phi i8 [ %274, %265 ], [ %263, %256 ]
-  %267 = phi i64 [ %272, %265 ], [ 0, %256 ]
-  %268 = phi ptr [ %273, %265 ], [ %262, %256 ]
-  %269 = zext i8 %266 to i64
-  %270 = mul i64 %267, 10
-  %271 = add nsw i64 %269, -48
-  %272 = add i64 %271, %270
-  %273 = getelementptr inbounds i8, ptr %268, i64 1
-  %274 = load i8, ptr %273, align 1, !tbaa !14
-  %275 = icmp eq i8 %274, 59
-  br i1 %275, label %276, label %265, !llvm.loop !570
+279:                                              ; preds = %270, %279
+  %280 = phi i8 [ %288, %279 ], [ %277, %270 ]
+  %281 = phi i64 [ %286, %279 ], [ 0, %270 ]
+  %282 = phi ptr [ %287, %279 ], [ %276, %270 ]
+  %283 = zext i8 %280 to i64
+  %284 = mul i64 %281, 10
+  %285 = add nsw i64 %283, -48
+  %286 = add i64 %285, %284
+  %287 = getelementptr inbounds i8, ptr %282, i64 1
+  %288 = load i8, ptr %287, align 1, !tbaa !14
+  %289 = icmp eq i8 %288, 59
+  br i1 %289, label %290, label %279, !llvm.loop !570
 
-276:                                              ; preds = %265, %256
-  %277 = phi ptr [ %262, %256 ], [ %273, %265 ]
-  %278 = phi i64 [ 0, %256 ], [ %272, %265 ]
-  %279 = getelementptr inbounds i8, ptr %277, i64 1
-  %280 = sub i64 0, %278
-  %281 = select i1 %260, i64 %280, i64 %278
-  %282 = getelementptr inbounds i8, ptr %279, i64 %281
-  %283 = load i8, ptr %282, align 1, !tbaa !14
-  %284 = icmp eq i8 %283, 112
-  br i1 %284, label %285, label %298
+290:                                              ; preds = %279, %270
+  %291 = phi ptr [ %276, %270 ], [ %287, %279 ]
+  %292 = phi i64 [ 0, %270 ], [ %286, %279 ]
+  %293 = getelementptr inbounds i8, ptr %291, i64 1
+  %294 = sub i64 0, %292
+  %295 = select i1 %274, i64 %294, i64 %292
+  %296 = getelementptr inbounds i8, ptr %293, i64 %295
+  %297 = load i8, ptr %296, align 1, !tbaa !14
+  %298 = icmp eq i8 %297, 112
+  br i1 %298, label %299, label %312
 
-285:                                              ; preds = %276
-  %286 = getelementptr inbounds i8, ptr %282, i64 1
-  %287 = load i8, ptr %286, align 1, !tbaa !14
-  %288 = icmp eq i8 %287, 45
-  %289 = zext i1 %288 to i64
-  %290 = getelementptr inbounds i8, ptr %286, i64 %289
-  %291 = load i8, ptr %290, align 1, !tbaa !14
-  %292 = icmp eq i8 %291, 59
-  br i1 %292, label %298, label %293
+299:                                              ; preds = %290
+  %300 = getelementptr inbounds i8, ptr %296, i64 1
+  %301 = load i8, ptr %300, align 1, !tbaa !14
+  %302 = icmp eq i8 %301, 45
+  %303 = zext i1 %302 to i64
+  %304 = getelementptr inbounds i8, ptr %300, i64 %303
+  %305 = load i8, ptr %304, align 1, !tbaa !14
+  %306 = icmp eq i8 %305, 59
+  br i1 %306, label %312, label %307
 
-293:                                              ; preds = %285, %293
-  %294 = phi ptr [ %295, %293 ], [ %290, %285 ]
-  %295 = getelementptr inbounds i8, ptr %294, i64 1
-  %296 = load i8, ptr %295, align 1, !tbaa !14
-  %297 = icmp eq i8 %296, 59
-  br i1 %297, label %298, label %293, !llvm.loop !570
+307:                                              ; preds = %299, %307
+  %308 = phi ptr [ %309, %307 ], [ %304, %299 ]
+  %309 = getelementptr inbounds i8, ptr %308, i64 1
+  %310 = load i8, ptr %309, align 1, !tbaa !14
+  %311 = icmp eq i8 %310, 59
+  br i1 %311, label %312, label %307, !llvm.loop !570
 
-298:                                              ; preds = %293, %276, %285
-  %299 = phi ptr [ %290, %285 ], [ %282, %276 ], [ %295, %293 ]
-  %300 = add nuw nsw i64 %258, 1
-  %301 = getelementptr inbounds i8, ptr %299, i64 1
-  %302 = icmp eq i64 %300, %253
-  br i1 %302, label %305, label %256, !llvm.loop !725
+312:                                              ; preds = %307, %290, %299
+  %313 = phi ptr [ %304, %299 ], [ %296, %290 ], [ %309, %307 ]
+  %314 = add nuw nsw i64 %272, 1
+  %315 = getelementptr inbounds i8, ptr %313, i64 1
+  %316 = icmp eq i64 %314, %267
+  br i1 %316, label %319, label %270, !llvm.loop !725
 
-303:                                              ; preds = %2
-  %304 = getelementptr inbounds i8, ptr %3, i64 1
-  br label %305
+317:                                              ; preds = %2
+  %318 = getelementptr inbounds i8, ptr %3, i64 1
+  br label %319
 
-305:                                              ; preds = %298, %226, %162, %125, %249, %187, %155, %98, %303, %74, %54, %32
-  %306 = phi ptr [ %304, %303 ], [ %76, %74 ], [ %60, %54 ], [ %34, %32 ], [ %101, %98 ], [ %158, %155 ], [ %190, %187 ], [ %254, %249 ], [ %133, %125 ], [ %165, %162 ], [ %227, %226 ], [ %301, %298 ]
-  ret ptr %306
+319:                                              ; preds = %312, %240, %176, %139, %263, %201, %169, %112, %317, %74, %54, %32
+  %320 = phi ptr [ %318, %317 ], [ %76, %74 ], [ %60, %54 ], [ %34, %32 ], [ %115, %112 ], [ %172, %169 ], [ %204, %201 ], [ %268, %263 ], [ %147, %139 ], [ %179, %176 ], [ %241, %240 ], [ %315, %312 ]
+  ret ptr %320
 }
 
 ; Function Attrs: nofree nosync nounwind optsize memory(read, argmem: readwrite, inaccessiblemem: none)

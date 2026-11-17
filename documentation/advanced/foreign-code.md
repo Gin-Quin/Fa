@@ -322,6 +322,8 @@ To support several targets, branch with [`@if target`](/advanced/metaprogramming
 
 A fixed inline `CArray` inherits the ownership category of its items; inline scalar storage alone does not require `copy`. A `CArray<T, n>` is initialized with an array literal of exactly `n` items. It has `length`, supports indexing (negative indices count from the end), writes and iteration. Copying its `CStruct` copies the array.
 
+`CArray` is the fixed-count array, including for non-foreign code. For a bounded list with a changing initialized length, use [InlineArray](/collections/inline-arrays); it is a Fa collection rather than a C array layout.
+
 :::implementation
 ## Implementation details
 

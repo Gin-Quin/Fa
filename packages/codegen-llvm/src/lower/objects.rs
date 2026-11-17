@@ -314,8 +314,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The value of a box narrowed to a member type of its union.
 	pub(crate) fn unbox(&self, value: Val<'ctx>, repr: Repr) -> Result<Val<'ctx>, Error> {
+		if value.repr == repr || self.same_layout(value.repr, repr) {
+			return Ok(Val { repr, ..value });
+		}
 		if let Repr::InlineUnion(nominal) = repr {
-			return self.boxed_to_inline(value, nominal);
+			return self.boxed_to_inline(self.union_view(value)?, nominal);
 		}
 		let value = self.union_view(value)?;
 		if let Repr::Object(data) = repr
@@ -906,7 +909,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.types()
 			.fields_of(ty)
 			.iter()
-			.position(|field| field.name == name)
+			.position(|field| {
+				self.types().syms.resolve(field.name) == self.types().syms.resolve(name)
+			})
 			.map(|index| index as u32)
 	}
 
@@ -922,8 +927,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.types()
 			.fields_of(owner)
 			.get(index as usize)
-			.is_some_and(|field| field.name == name)
-		{
+			.is_some_and(|field| {
+				self.types().syms.resolve(field.name) == self.types().syms.resolve(name)
+			}) {
 			return Ok(u32::from(index));
 		}
 		self.field_index(owner, name)
@@ -979,15 +985,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let outer = self.pending_box.replace(early);
 			// a default of a generic type's field (`#items: Array<Item> = []`):
 			// under the literal's type arguments
-			let saved = match field {
-				FieldValue::Default(_) => {
-					self.generic_type_bindings(info.ty, node)?.map(|bindings| {
-						let mut merged = self.bindings.borrow().clone();
-						merged.extend(bindings);
-						self.bindings.replace(merged)
-					})
+			let saved = if let FieldValue::Default(default) = field {
+				if let Some((params, arguments)) = self.generic_type_arguments(info.ty, default) {
+					let mut representations = self.bindings.borrow().clone();
+					let mut types = self.type_bindings.borrow().clone();
+					for (param, argument) in params.into_iter().zip(arguments) {
+						representations.insert(param, self.repr_of(argument, node.index())?);
+						types.insert(param, argument);
+					}
+					Some((
+						self.bindings.replace(representations),
+						self.type_bindings.replace(types),
+					))
+				} else {
+					None
 				}
-				_ => None,
+			} else {
+				None
 			};
 			let field_destination = destination
 				.filter(|_| self.uses_return_slot(repr))
@@ -1033,8 +1047,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				other => other,
 			};
-			if let Some(saved) = saved {
-				self.bindings.replace(saved);
+			if let Some((representations, types)) = saved {
+				self.bindings.replace(representations);
+				self.type_bindings.replace(types);
 			}
 			// (a box of a pair lives in the arena: nothing to free)
 			if let Some((unused, _)) = self.pending_box.replace(outer)
@@ -1154,8 +1169,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.picked_copy(value, to_repr, node)?
 				}
 				_ if self.needs_drop(from_repr) => {
-					let copy = self.copy_function(from_repr)?;
-					let copied = self.call_value(copy, &[extracted.into()])?;
+					let copied = self.call_copy(&self.builder, from_repr, extracted)?;
 					self.convert(Val::new(from_repr, copied), to_repr, node.index())?
 				}
 				_ => self.convert(value, to_repr, node.index())?,
@@ -1170,53 +1184,46 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(Val::new(to, result))
 	}
 
-	/// The representations of the parameters of a generic type (declared in
-	/// this file) in an application of it, `Stack<Integer>`: `None` for any
-	/// other type.
-	pub(crate) fn generic_type_bindings(
+	/// The declaration owning this default and its arguments. Structural
+	/// instances may have no nominal identity; the default's source and the
+	/// recorded application still retain the declaration and phantom values.
+	fn generic_type_arguments(
 		&self,
 		ty: TypeId,
-		node: NodeId,
-	) -> Result<Option<rustc_hash::FxHashMap<fa_analyzer::ids::ParamId, Repr>>, Error> {
-		let Some((params, arguments)) = self.generic_type_arguments(ty) else {
-			return Ok(None);
-		};
-		let mut bindings = rustc_hash::FxHashMap::default();
-		for (param, argument) in params.into_iter().zip(arguments) {
-			bindings.insert(param, self.repr_of(argument, node.index())?);
-		}
-		Ok(Some(bindings))
-	}
-
-	/// The parameters of the generic type declaration (of this file) that
-	/// `ty` applies, and their arguments, in declaration order. The instances
-	/// of an object type keep the nominal identity of the declaration without
-	/// its arguments, so they are read from its fields, the declaration's
-	/// substituted.
-	pub(crate) fn generic_type_arguments(
-		&self,
-		ty: TypeId,
+		default: NodeId,
 	) -> Option<(Vec<fa_analyzer::ids::ParamId>, Vec<TypeId>)> {
-		use fa_analyzer::types::TypeKind;
 		let ty = self.concrete_type(ty);
-		let types = self.types();
-		let key_of = |ty: TypeId| match types.kind(ty) {
-			TypeKind::Object(shape) => types.shape(shape).nominal.map(|n| types.nominal(n).key),
-			_ => None,
-		};
-		let key = key_of(ty)?;
-		let decl = self
-			.analysis
-			.type_decls
-			.values()
-			.find(|decl| !decl.generics.is_empty() && key_of(decl.ty) == Some(key))?;
+		let span = self.tree.spans[default.index()];
+		let decl = self.analysis.type_decls.iter().find_map(|(node, decl)| {
+			let owner = self.tree.spans[node.index()];
+			(!decl.generics.is_empty()
+				&& owner.start <= span.start
+				&& span.end <= owner.end
+				&& decl
+					.fields
+					.iter()
+					.any(|field| field.default == Some(default)))
+			.then_some(decl)
+		})?;
+		if let Some((name, arguments)) = self.types().application(ty)
+			&& self.types().syms.resolve(name)
+				== self
+					.types()
+					.syms
+					.resolve(self.analysis.symbols.symbol(decl.symbol).name)
+		{
+			return Some((
+				decl.generics.clone(),
+				self.types().list_items(arguments).to_vec(),
+			));
+		}
 		let mut found = rustc_hash::FxHashMap::default();
 		self.match_params(decl.ty, ty, &mut found, 0);
 		let arguments = decl
 			.generics
 			.iter()
 			.map(|param| found.get(param).copied())
-			.collect::<Option<Vec<TypeId>>>()?;
+			.collect::<Option<Vec<_>>>()?;
 		Some((decl.generics.clone(), arguments))
 	}
 
@@ -1241,7 +1248,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			(TypeKind::Object(declared), TypeKind::Object(actual)) => {
 				let actual = types.shape_fields(actual);
 				for field in types.shape_fields(declared) {
-					if let Some(other) = actual.iter().find(|other| other.name == field.name) {
+					if let Some(other) = actual.iter().find(|other| {
+						types.syms.resolve(other.name) == types.syms.resolve(field.name)
+					}) {
 						self.match_params(field.ty, other.ty, found, depth + 1);
 					}
 				}
@@ -1479,7 +1488,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.iter()
 					.map(|field| field.name)
 					.collect::<Vec<_>>()
-			});
+			})
+			.filter(|fields| !fields.is_empty());
 		// an anonymous type: the order of the first literal that builds it
 		let literal = || {
 			let mut literals: Vec<_> = self
@@ -1508,7 +1518,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.filter(|&name| !types.syms.resolve(name).starts_with('#'))
 			.filter(|&name| self.side_repr(ty, name).is_none())
 			.filter_map(|name| {
-				let index = shape.iter().position(|field| field.name == name)?;
+				let index = shape.iter().position(|field| {
+					self.types().syms.resolve(field.name) == self.types().syms.resolve(name)
+				})?;
 				Some((
 					types.syms.resolve(name).to_string(),
 					index as u32,
@@ -1536,6 +1548,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: NodeId,
 	) -> Result<(), Error> {
 		let fields = self.printed_fields(ty);
+		self.append_ordered_fields(value, fields, node)
+	}
+
+	fn append_ordered_fields(
+		&mut self,
+		value: Val<'ctx>,
+		fields: Vec<(String, u32, TypeId)>,
+		node: NodeId,
+	) -> Result<(), Error> {
 		if fields.is_empty() {
 			let text = self.string_constant("{}");
 			return self.append_value(text, node);
@@ -2655,7 +2676,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.get(index as usize)
 				.map(|&sym| types.syms.resolve(sym).to_string())
 				.unwrap_or_default();
-			let name = if self.builtin_error_id(nominal).is_some() {
+			let name = if self.builtin_error_id(nominal).is_some() && type_name != "CapacityError" {
 				type_name
 			} else {
 				format!("{type_name}.{member_name}")
@@ -2707,7 +2728,30 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if let Repr::Object(object) = repr {
 					let space = self.string_constant(" ");
 					self.append_value(space, node)?;
-					self.append_object(loaded, object, node)?;
+					// Errors carry their declared field formatter; ordinary
+					// union payloads use their canonical value representation.
+					let fields = if self.types().nominal(nominal).kind
+						== fa_analyzer::types::NominalKind::Errors
+					{
+						self.printed_fields(object)
+					} else {
+						self.types()
+							.fields_of(object)
+							.iter()
+							.enumerate()
+							.filter(|(_, field)| {
+								!self.types().syms.resolve(field.name).starts_with('#')
+							})
+							.map(|(index, field)| {
+								(
+									self.types().syms.resolve(field.name).to_string(),
+									index as u32,
+									field.ty,
+								)
+							})
+							.collect()
+					};
+					self.append_ordered_fields(loaded, fields, node)?;
 				} else {
 					let open = self.string_constant("(");
 					self.append_value(open, node)?;

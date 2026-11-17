@@ -45,7 +45,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	fn json_parse(&mut self, node: NodeId, info: &CallInfo) -> Result<Val<'ctx>, Error> {
-		let ty = self.type_of(node);
+		let ty = self.concrete_type(self.type_of(node));
 		let mut schema = Vec::new();
 		if !self.json_schema(ty, 0, &mut schema) {
 			return Err(self.unsupported(node.index(), "`Json.parse` of this type"));
@@ -127,7 +127,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if value.repr == Repr::Never {
 			return Ok(value);
 		}
-		let ty = self.type_of(argument);
+		let ty = self.concrete_type(self.type_of(argument));
 		let repr = self.repr_of(ty, node.index())?;
 		let value = if value.repr == repr || !repr.has_value() {
 			value
@@ -187,6 +187,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					out.extend_from_slice(max.max(lowest).to_string().as_bytes());
 				}
 				out.push(b';');
+			}
+			TypeKind::Collection(CollKind::InlineArray, item, _) => {
+				let Some((_, capacity)) = self.inline_info(ty) else {
+					return false;
+				};
+				out.extend_from_slice(format!("A{capacity};").as_bytes());
+				return self.json_schema(item, depth + 1, out);
 			}
 			TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item, _) => {
 				out.push(b'a');
@@ -617,6 +624,27 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.call_runtime("fa_json_string", &[tree.into(), out.pointer.into()])?;
 				self.load(out)
 			}
+			TypeKind::Collection(CollKind::InlineArray, item_type, _) => {
+				let count = self
+					.call_value(self.runtime.function("fa_json_count")?, &[tree.into()])?
+					.into_int_value();
+				let slot = self.alloca(repr, "inline.json")?;
+				self.set_inline_length(slot, ty, self.context.i64_type().const_zero())?;
+				self.for_each_index(count, |this, index| {
+					let child = this
+						.call_value(
+							this.runtime.function("fa_json_item")?,
+							&[tree.into(), index.into()],
+						)?
+						.into_pointer_value();
+					let value = this.json_value(child, item_type, call)?;
+					let destination = this.inline_item(&this.builder, slot, ty, index)?;
+					let value = this.json_adapt(value, destination.repr, call)?;
+					this.store(destination, value, call)
+				})?;
+				self.set_inline_length(slot, ty, count)?;
+				self.load(slot)
+			}
 			TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item_type, _) => {
 				let item = self.item_repr(item_type, call)?;
 				if !item.has_value() {
@@ -955,7 +983,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| TypeKind::Member(..)
 			| TypeKind::Object(_)
 			| TypeKind::Collection(
-				CollKind::Array | CollKind::GrowingArray | CollKind::Map | CollKind::GrowingMap,
+				CollKind::Array
+				| CollKind::InlineArray
+				| CollKind::GrowingArray
+				| CollKind::Map
+				| CollKind::GrowingMap,
 				..,
 			) => {
 				let writer = self.json_writer(ty, value.repr, call)?;
@@ -1196,6 +1228,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.json_write_named(value, ty, call)
 			}
 			(TypeKind::Object(_), Repr::Object(_)) => self.json_write_object(value, ty, call),
+			(TypeKind::Collection(CollKind::InlineArray, item, _), Repr::Tuple(ty)) => {
+				let view = self.inline_view(value, ty)?;
+				self.json_write_array(view, item, call)
+			}
 			(TypeKind::Collection(_, item, _), Repr::Array(_)) => {
 				self.json_write_array(value, item, call)
 			}

@@ -268,6 +268,19 @@ fn describe(types: &TypeStore, ty: TypeId, depth: u32, named: bool) -> Value {
 				),
 			)],
 		),
+		TypeKind::Collection(CollKind::InlineArray, item, capacity) => member(
+			"InlineArray",
+			vec![
+				("item", next(item)),
+				(
+					"capacity",
+					types
+						.as_int(capacity)
+						.filter(|int| int.min == int.max)
+						.map_or(Value::None, |int| Value::Integer(int.min)),
+				),
+			],
+		),
 		TypeKind::Collection(kind, item, key) => {
 			let name = match kind {
 				CollKind::Array => "Array",

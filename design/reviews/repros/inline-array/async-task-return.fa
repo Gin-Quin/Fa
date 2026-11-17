@@ -1,0 +1,10 @@
+-- Inherited O12 Task return ownership: expected returns, after, child, exit 0.
+-- Current Bun: returns, after, error: Cancelled.
+async function spawn = (): Task<Void> => {
+	let child = start do { console.log("child") }
+	console.log("returns")
+	child
+}
+let child = await spawn()
+console.log("after")
+await child

@@ -725,6 +725,65 @@ impl TypeStore {
 		self.intern(TypeKind::Pointer(target))
 	}
 
+	/// Whether recovering a static value's shape would erase an inline bound.
+	pub fn contains_inline_array(&self, ty: TypeId) -> bool {
+		let mut stack = vec![ty];
+		let mut seen = rustc_hash::FxHashSet::default();
+		while let Some(ty) = stack.pop() {
+			if !seen.insert(ty) {
+				continue;
+			}
+			match self.kind(ty) {
+				TypeKind::Collection(crate::types::CollKind::InlineArray, ..) => return true,
+				TypeKind::Collection(_, item, key) => stack.extend([item, key]),
+				TypeKind::Object(_) => {
+					stack.extend(self.fields_of(ty).iter().map(|field| field.ty))
+				}
+				TypeKind::Tuple(list) | TypeKind::Union(list) => {
+					stack.extend(self.list_items(list))
+				}
+				TypeKind::Rec(_) => stack.extend(self.rec_target(ty)),
+				_ => {}
+			}
+		}
+		false
+	}
+
+	/// The item and capacity types, retaining symbolic value parameters.
+	pub fn inline_array_types(&self, ty: TypeId) -> Option<(TypeId, TypeId)> {
+		match self.kind(ty) {
+			TypeKind::Collection(crate::types::CollKind::InlineArray, item, capacity) => {
+				Some((item, capacity))
+			}
+			_ => None,
+		}
+	}
+
+	pub fn inline_capacity_range(&self, ty: TypeId) -> Option<Interval> {
+		let (_, mut capacity) = self.inline_array_types(ty)?;
+		if let TypeKind::Param(param) = self.kind(capacity) {
+			capacity = self.param(param).constraint;
+		}
+		self.interval_of(capacity)
+	}
+
+	/// Item type and capacity of a bounded inline list.
+	pub fn inline_array(&self, ty: TypeId) -> Option<(TypeId, u32)> {
+		let TypeKind::Collection(crate::types::CollKind::InlineArray, item, capacity) =
+			self.kind(ty)
+		else {
+			return None;
+		};
+		let capacity = self.as_int(capacity)?;
+		(capacity.min == capacity.max)
+			.then(|| {
+				u32::try_from(capacity.min)
+					.ok()
+					.map(|capacity| (item, capacity))
+			})
+			.flatten()
+	}
+
 	/// `CArray(item, count)`.
 	pub fn c_array(&mut self, item: TypeId, count: u32) -> TypeId {
 		self.intern(TypeKind::CArray(item, count))
@@ -784,6 +843,12 @@ impl TypeStore {
 		self.holds_move_only(ty, Holds::Resource, &mut Vec::new())
 	}
 
+	/// A Task-consuming parameter transfers a plain Task owner. Resources
+	/// and synchronization handles stop the traversal and always borrow.
+	pub fn consumes_parameter(&self, ty: TypeId) -> bool {
+		self.holds_move_only(ty, Holds::TaskParameter, &mut Vec::new())
+	}
+
 	/// Visits each type reachable from `ty` once (`seen`): linear in the
 	/// types, recursive ones included.
 	fn holds_move_only(&self, ty: TypeId, holds: Holds, seen: &mut Vec<TypeId>) -> bool {
@@ -798,6 +863,9 @@ impl TypeStore {
 			TypeKind::Task(..) => holds != Holds::Resource,
 			TypeKind::Sync(crate::types::SyncKind::Worker, _) => holds == Holds::MoveOnly,
 			TypeKind::Object(shape) => {
+				if self.is_resource(ty) && holds == Holds::TaskParameter {
+					return false;
+				}
 				self.is_resource(ty)
 					|| self
 						.shape_fields(shape)
@@ -1728,8 +1796,16 @@ impl TypeStore {
 			}
 			TypeKind::Collection(collection, item, key) => {
 				let inherited = self.aggregate([item, key].into_iter(), F::COMPARABLE);
-				(inherited - F::FLAT - F::TRIVIALLY_COPYABLE)
-					.with_runtime_kind(collection.runtime_kind())
+				if collection == crate::types::CollKind::InlineArray {
+					// Storage/category follows Item; the bound still participates
+					// in substitution. Scalar capabilities don't describe a list.
+					((self.flags(item) - F::ORDERED - F::JS_BIGINT)
+						| (inherited & (F::HAS_PARAM | F::HAS_UNKNOWN)))
+						.with_runtime_kind(collection.runtime_kind())
+				} else {
+					(inherited - F::FLAT - F::TRIVIALLY_COPYABLE)
+						.with_runtime_kind(collection.runtime_kind())
+				}
 			}
 			TypeKind::Function(sig) => {
 				let sig = self.sig(sig);
@@ -2401,6 +2477,8 @@ mod tests {
 /// What [`TypeStore::is_move_only`] and its variants look for.
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum Holds {
+	/// Tasks owned outside a resource or synchronization boundary.
+	TaskParameter,
 	/// Tasks, worker handles and resources.
 	MoveOnly,
 	/// Tasks and resources.

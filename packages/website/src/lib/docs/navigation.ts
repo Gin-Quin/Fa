@@ -45,6 +45,7 @@ export const navigation: Array<{ title: string; pages: string[] }> = [
 		title: "Collections",
 		pages: [
 			"collections/arrays",
+			"collections/inline-arrays",
 			"collections/sets",
 			"collections/maps",
 			"collections/pools",

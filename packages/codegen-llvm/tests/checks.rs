@@ -2795,6 +2795,34 @@ console.log(try read(T.One { child = T.Leaf { value = 7 } }, false))
 		);
 		assert!(!generic.contains("probe_cached"), "{generic}");
 	}
+	#[test]
+	fn inline_arrays_have_narrow_counters_and_no_heap_buffer() {
+		for target in [Target::Native, Target::Wasm, Target::NativeFreestanding] {
+			let ir = ir_at_target(
+				"inline-array-layout",
+				r#"
+function first = (values: InlineArray<Int32, 255>): Int32 throws IndexError => try values[0]
+function second = (values: InlineArray<Int32, 256>): Int32 throws IndexError => try values[0]
+mutable small: InlineArray<Int32, 255> = [7]
+mutable large: InlineArray<Int32, 256> = [8]
+small.push(9)
+large.push(10)
+console.log(try first(small), try second(large))
+"#,
+				true,
+				OptLevel::O0,
+				target,
+			);
+			assert!(ir.contains("[255 x i32], i8"), "{ir}");
+			assert!(ir.contains("[256 x i32], i16"), "{ir}");
+			for allocator in ["@fa_array_new(", "@fa_array_grow(", "@fa_alloc("] {
+				assert!(
+					!ir.contains(allocator),
+					"inline array allocates: {allocator}\n{ir}"
+				);
+			}
+		}
+	}
 }
 
 /// A resource moved on every path or on none has no drop flag left in the
@@ -2842,10 +2870,10 @@ mod drop_flags {
 		// `destroy` calls `usleep` with the descriptor: one call per drop
 		let head = "function release: (microseconds: UInt32) => Int32 = @extern(\"usleep\")\ntype Handle = {\n\tdescriptor: UInt32\n\tfunction destroy = (self) => {\n\t\trelease(self.descriptor)\n\t}\n}\nfunction close = (handle: Handle) => console.log(\"closing\")\n";
 		let cases = [
-			// moved on every path: destroyed by `close` only, no flag
+			// moved into an inner owner on every path, no flag
 			(
 				"moved",
-				"do {\n\tlet handle = Handle { descriptor = 1 }\n\tclose(handle)\n\tconsole.log(\"after\")\n}\n",
+				"do {\n\tlet handle = Handle { descriptor = 1 }\n\tdo { let moved = handle\n\tclose(moved) }\n\tconsole.log(\"after\")\n}\n",
 				1,
 				false,
 			),
@@ -2856,17 +2884,17 @@ mod drop_flags {
 				1,
 				false,
 			),
-			// moved on one path: destroyed by `close` or at the end, by its flag
+			// moved on one path: the inner owner or the outer flag drops it
 			(
 				"maybe",
-				"do {\n\tlet handle = Handle { descriptor = 3 }\n\tif arguments.length > 1 {\n\t\tclose(handle)\n\t}\n\tconsole.log(\"after\")\n}\n",
+				"do {\n\tlet handle = Handle { descriptor = 3 }\n\tif arguments.length > 1 {\n\t\tlet moved = handle\n\t\tclose(moved)\n\t}\n\tconsole.log(\"after\")\n}\n",
 				2,
 				true,
 			),
 			// a field moved out, then assigned again: no flag either
 			(
 				"field",
-				"type Holder = { label: String, handle: Handle }\ndo {\n\tmutable holder = Holder { label = \"h\", handle = Handle { descriptor = 4 } }\n\tclose(holder.handle)\n\tholder.handle = Handle { descriptor = 5 }\n\tconsole.log(holder.label)\n}\n",
+				"type Holder = { label: String, handle: Handle }\ndo {\n\tmutable holder = Holder { label = \"h\", handle = Handle { descriptor = 4 } }\n\tlet moved = holder.handle\n\tclose(moved)\n\tholder.handle = Handle { descriptor = 5 }\n\tconsole.log(holder.label)\n}\n",
 				2,
 				false,
 			),

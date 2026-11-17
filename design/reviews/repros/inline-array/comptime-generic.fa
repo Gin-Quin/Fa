@@ -1,0 +1,13 @@
+function append = <Item, capacity: UInt32>(
+	items: InlineArray<Item, capacity>
+	value: Item
+) throws CapacityError mutates items.length => { try items.push(value) }
+function build = (): InlineArray<Integer, 1> throws CapacityError => {
+	mutable values: InlineArray<Integer, 1> = []
+	try append<Integer, 1>(values, 7)
+	append<Integer, 1>(values, 8) catch _error => {}
+	values
+}
+console.log(try build()) -- expected: [7]
+static result = @build()
+console.log(result, result.length) -- expected: [7] 1

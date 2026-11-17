@@ -182,7 +182,10 @@ impl Walker<'_> {
 			return TypeId::NONE;
 		}
 		if let Some(kind) = collection_kind(text) {
-			let message = if matches!(kind, CollKind::Map | CollKind::GrowingMap) {
+			let message = if kind == CollKind::InlineArray {
+				"`InlineArray` needs its item type and capacity, ex: `InlineArray<Integer, 4>`"
+					.to_string()
+			} else if matches!(kind, CollKind::Map | CollKind::GrowingMap) {
 				format!(
 					"`{text}` needs the type of its keys and of its values, ex: `{text}(String, Integer)`"
 				)
@@ -218,6 +221,9 @@ impl Walker<'_> {
 		kind: CollKind,
 		arguments: NodeList<'_>,
 	) -> TypeId {
+		if kind == CollKind::InlineArray {
+			return self.inline_array_type(n, callee, arguments);
+		}
 		let is_map = matches!(kind, CollKind::Map | CollKind::GrowingMap);
 		let types: Vec<TypeId> = arguments
 			.iter()
@@ -876,6 +882,7 @@ pub(super) fn is_method_type(tree: &fa_parser::TypedSyntaxTree, annotation: Node
 pub(super) fn collection_kind(text: &str) -> Option<CollKind> {
 	Some(match text {
 		"Array" => CollKind::Array,
+		"InlineArray" => CollKind::InlineArray,
 		"GrowingArray" => CollKind::GrowingArray,
 		"Set" => CollKind::Set,
 		"GrowingSet" => CollKind::GrowingSet,

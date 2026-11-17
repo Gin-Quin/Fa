@@ -39,6 +39,7 @@ pub const MEMBERS: &[&str] = &[
 	"Tuple",
 	"Collection",
 	"Function",
+	"InlineArray",
 ];
 
 /// `Schema` and its companion object types.
@@ -99,6 +100,11 @@ pub fn schema(types: &mut TypeStore) -> TypeId {
 	let string = TypeId::STRING;
 	let schemas = types.array(ty);
 	let optional_schema = types.optional(ty);
+	let count = types.int_range(
+		ethnum::I256::ZERO,
+		ethnum::I256::from(i64::MAX),
+		crate::types::IntStorage::Default,
+	);
 	let optional_big = types.optional(TypeId::BIG_INT);
 	let property = property(types);
 	let properties = types.array(property);
@@ -142,6 +148,7 @@ pub fn schema(types: &mut TypeStore) -> TypeId {
 				"",
 				&[("kind", string), ("key", optional_schema), ("item", ty)],
 			),
+			"InlineArray" => object(types, "", &[("item", ty), ("capacity", count)]),
 			"Function" => {
 				let optional = optional_schema;
 				object(

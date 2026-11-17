@@ -1,0 +1,8 @@
+function build = (): Boolean => {
+	mutable values: InlineArray<none, 2> = []
+	values.push(none)
+	values.pop() is none
+}
+console.log(build()) -- expected: true
+static result = @build()
+console.log(result) -- expected: true

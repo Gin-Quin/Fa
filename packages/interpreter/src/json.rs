@@ -613,37 +613,47 @@ fn convert(
 			}
 			return Err(fail("one of the members of its union"));
 		}
-		"Collection" => match field("kind").as_str().unwrap_or("") {
-			"Array" | "GrowingArray" => {
-				let Value::Array(items) = value else {
-					return Err(fail("an array"));
-				};
-				Value::array(
-					items
-						.iter()
-						.enumerate()
-						.map(|(i, v)| convert(v, field("item"), &format!("{at}[{i}]")))
-						.collect::<Result<_, _>>()?,
-				)
+		"InlineArray" | "Collection" => {
+			match (kind(schema), field("kind").as_str().unwrap_or("")) {
+				("InlineArray", _) | ("Collection", "Array" | "GrowingArray") => {
+					let Value::Array(items) = value else {
+						return Err(fail("an array"));
+					};
+					if kind(schema) == "InlineArray" {
+						let capacity = field("capacity")
+							.as_int()
+							.ok_or_else(|| fail("an array with a resolved inline capacity"))?;
+						if I256::from(items.len() as u64) > capacity {
+							return Err(fail("an array within its inline capacity"));
+						}
+					}
+					Value::array(
+						items
+							.iter()
+							.enumerate()
+							.map(|(i, v)| convert(v, field("item"), &format!("{at}[{i}]")))
+							.collect::<Result<_, _>>()?,
+					)
+				}
+				("Collection", "Map" | "GrowingMap") => {
+					let Value::Map(entries) = value else {
+						return Err(fail("an object"));
+					};
+					Value::Map(Arc::new(
+						entries
+							.iter()
+							.map(|(k, v)| {
+								Ok((
+									k.clone(),
+									convert(v, field("item"), &format!("{at}.{}", k.to_text()))?,
+								))
+							})
+							.collect::<Result<_, Failure>>()?,
+					))
+				}
+				_ => return Err(fail("a JSON collection")),
 			}
-			"Map" | "GrowingMap" => {
-				let Value::Map(entries) = value else {
-					return Err(fail("an object"));
-				};
-				Value::Map(Arc::new(
-					entries
-						.iter()
-						.map(|(k, v)| {
-							Ok((
-								k.clone(),
-								convert(v, field("item"), &format!("{at}.{}", k.to_text()))?,
-							))
-						})
-						.collect::<Result<_, Failure>>()?,
-				))
-			}
-			_ => return Err(fail("a JSON collection")),
-		},
+		}
 		"Object" => {
 			if !matches!(value, Value::Map(_)) {
 				return Err(fail("an object"));

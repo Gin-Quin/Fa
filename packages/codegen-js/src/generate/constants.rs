@@ -123,7 +123,7 @@ impl Generator<'_> {
 					&& matches!(
 						types.kind(ty),
 						TypeKind::Collection(kind, ..)
-							if !matches!(kind, CollKind::Array | CollKind::GrowingArray)
+							if !matches!(kind, CollKind::Array | CollKind::InlineArray | CollKind::GrowingArray)
 					) =>
 			{
 				let class = match types.kind(ty) {

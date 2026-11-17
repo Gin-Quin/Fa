@@ -148,7 +148,11 @@ pub(crate) fn typescript(types: &TypeStore, ty: TypeId) -> String {
 			.map(|&member| typescript(types, member))
 			.collect::<Vec<_>>()
 			.join(" | "),
-		TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item, _) => {
+		TypeKind::Collection(
+			CollKind::Array | CollKind::InlineArray | CollKind::GrowingArray,
+			item,
+			_,
+		) => {
 			format!("Array<{}>", typescript(types, item))
 		}
 		TypeKind::Object(_) => {

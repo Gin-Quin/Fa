@@ -1,0 +1,44 @@
+-- require-split: true
+-- opt-level: 0
+-- file: library/tools.fa
+export namespace = {
+	function clear = (items: InlineArray<String, 3>) mutates items => { items.clear() }
+	function read = (items: InlineArray<String, 3>): String => "{items}"
+	async function append = (
+		items: InlineArray<String, 3>
+		text: String = "default"
+	) throws CapacityError mutates items.length => {
+		await Task.yield()
+		try items.push(text)
+	}
+}
+
+-- file: library/resource.foreign.fa
+export namespace = {
+	type Resource = {
+		name: String
+		function destroy = (self) => { console.log("drop {self.name}") }
+	}
+	function clear = (items: InlineArray<Resource, 2>) mutates items => { items.clear() }
+}
+
+-- file: application/main.fa
+use { read } = library.tools
+export async function = () throws CapacityError => {
+	mutable items: InlineArray<String, 3> = ["kept"]
+	let clear = library.tools.clear
+	clear(items)
+	console.log(items.length) -- prints: 0
+	let append = library.tools.append
+	try await append(items, "value")
+	try await library.tools.append(items)
+	let reader = read
+	console.log(reader(items)) -- prints: ["value", "default"]
+	let describe = library.tools.read then ((text: String) => text + "!")
+	console.log(describe(items)) -- prints: ["value", "default"]!
+	type Resource = library.resource.Resource
+	mutable owners: InlineArray<Resource, 2> = [{ name = "remote" }]
+	let clearOwners = library.resource.clear
+	clearOwners(owners)        -- prints: drop remote
+	console.log(owners.length) -- prints: 0
+}

@@ -442,6 +442,7 @@ impl Walker<'_> {
 				.annotation
 				.map(|annotation| self.check_type_expr(annotation));
 			let actual = self.check(field.value, declared);
+			self.escape(field.value, n);
 			if let Some(declared) = declared {
 				self.sink(field.value, actual, declared);
 			}
@@ -537,6 +538,7 @@ impl Walker<'_> {
 				.find(|declared| self.s.types.syms.resolve(declared.name) == text)
 				.map(|declared| declared.ty);
 			let actual = self.check(field.value, expected);
+			self.escape(field.value, n);
 			if let Some(expected) = expected {
 				self.sink(field.value, actual, expected);
 			}
@@ -1315,8 +1317,25 @@ impl Walker<'_> {
 			TypeKind::Collection(kind, ..) if text == "parallel" => {
 				self.parallel_view_member(member, receiver, kind)
 			}
-			TypeKind::Collection(kind @ (CollKind::Array | CollKind::GrowingArray), item, _) => {
-				self.array_member(member, kind, item, text)
+			TypeKind::Collection(
+				kind @ (CollKind::Array | CollKind::GrowingArray | CollKind::InlineArray),
+				item,
+				_,
+			) => {
+				if kind == CollKind::InlineArray
+					&& !matches!(
+						text,
+						"length"
+							| "capacity" | "get" | "push"
+							| "pop" | "delete" | "take"
+							| "clear"
+					) {
+					self.no_member(member, receiver, text);
+					return None;
+				}
+				let (ty, member_kind) = self.array_member(member, kind, item, text)?;
+				let ty = self.inline_member_type(receiver, text, ty);
+				Some((ty, member_kind))
 			}
 			TypeKind::Collection(..) => self.collection_member(member, receiver, text),
 			TypeKind::Iterator(item, _) => self.iterator_member(member, receiver, item, text),
@@ -1656,7 +1675,11 @@ impl Walker<'_> {
 			self.report(diagnostic);
 		}
 		match self.s.types.kind(target_ty) {
-			TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item, _) => item,
+			TypeKind::Collection(
+				CollKind::Array | CollKind::GrowingArray | CollKind::InlineArray,
+				item,
+				_,
+			) => item,
 			TypeKind::Bytes => TypeId::BYTE,
 			TypeKind::CArray(item, _) => item,
 			TypeKind::Collection(kind @ (CollKind::Set | CollKind::GrowingSet), ..) => {
@@ -1736,6 +1759,7 @@ impl Walker<'_> {
 				.find(|declared| self.s.types.syms.resolve(declared.name) == text)
 				.map(|declared| declared.ty);
 			let actual = self.check(field.value, expected);
+			self.escape(field.value, n);
 			if let Some(expected) = expected {
 				self.sink(field.value, actual, expected);
 			}

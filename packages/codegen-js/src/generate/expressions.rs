@@ -26,6 +26,26 @@ impl Generator<'_> {
 			return self.constant_value(n, &value, self.type_of(n));
 		}
 		let value = self.expr_value(n);
+		// A grouped value can own the contextual instantiation. Its child
+		// may own one instead: bind the capabilities exactly once.
+		let mut source = n;
+		while let View::Group(inner) = self.view(source) {
+			if self.analysis.instantiation(inner).is_some() {
+				source = inner;
+				break;
+			}
+			source = inner;
+		}
+		let value = if self.analysis.instantiation(n).is_some()
+			&& (source == n || self.analysis.instantiation(source).is_none())
+			&& matches!(
+				self.view(source),
+				View::Name(_) | View::Access { .. } | View::Lambda { .. }
+			) {
+			self.specialized_function_value(n, value)
+		} else {
+			value
+		};
 		// reads and writes of reactive places (reactivity.rs)
 		self.reactive_expr(n, value)
 	}
@@ -54,7 +74,9 @@ impl Generator<'_> {
 			// a tuple is a JavaScript array (printed by its type's formatter)
 			View::Array { items } => match self.collection_literal(n, items) {
 				Some(collection) => collection,
-				None => self.array_literal(items),
+				None => self
+					.inline_resource_literal(n, items)
+					.unwrap_or_else(|| self.array_literal(items)),
 			},
 			View::Tuple { items } => self.array_literal(items),
 			View::Range {
@@ -142,6 +164,7 @@ impl Generator<'_> {
 				let test = match self.types.kind(set_ty) {
 					fa_analyzer::types::TypeKind::Collection(
 						fa_analyzer::types::CollKind::Array
+						| fa_analyzer::types::CollKind::InlineArray
 						| fa_analyzer::types::CollKind::GrowingArray,
 						..,
 					) => {

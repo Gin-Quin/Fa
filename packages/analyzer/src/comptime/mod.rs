@@ -351,6 +351,13 @@ pub fn visit(expr: &Expr, f: &mut dyn FnMut(&Expr)) {
 fn visit_argument(argument: &fa_interpreter::ir::Arg, f: &mut dyn FnMut(&Expr)) {
 	match argument {
 		fa_interpreter::ir::Arg::Value(value) => visit(value, f),
+		fa_interpreter::ir::Arg::Borrow(place) => {
+			for step in &place.steps {
+				if let Step::Index(index) = step {
+					visit(index, f);
+				}
+			}
+		}
 		fa_interpreter::ir::Arg::Default => {}
 		fa_interpreter::ir::Arg::Variadic(items) => {
 			for item in items {

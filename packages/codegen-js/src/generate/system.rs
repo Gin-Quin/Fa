@@ -215,6 +215,14 @@ impl Generator<'_> {
 					format!("[\"{kind}\", {}, {}]", bound(min), bound(max))
 				}
 			}
+			TypeKind::Collection(CollKind::InlineArray, item, _) => {
+				let (_, capacity) = self.types.inline_array_types(ty)?;
+				let capacity = self.hidden_value(capacity)?;
+				format!(
+					"[\"a\", {}, {capacity}]",
+					self.json_schema(item, depth + 1)?
+				)
+			}
 			TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item, _) => {
 				format!("[\"a\", {}]", self.json_schema(item, depth + 1)?)
 			}

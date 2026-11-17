@@ -1,0 +1,27 @@
+-- asynchronous: false
+-- A real package: generic bodies are compiled separately from the callers.
+-- file: application/main.fa
+type Box = { number: Integer }
+export function = (): Integer => {
+	let fold = library.fold<Box>
+	for value in [-1_000_003, -8, -7, -1, 0, 1, 7, 8, 1_000_003] {
+		let expected = library.reference(value, 7) catch _error => 99
+		assert library.fold(value, (item) => item) == expected
+		assert fold(Box { number = value }, (item) => item.number) == expected
+	}
+	assert (library.reference(7, 0) catch _error => 99) == 99
+	console.log("constant remainder units ok")
+	0
+}
+-- file: library/fold.fa
+export function = <Item>(value: Item, read: (Item) => Integer): Integer => {
+	let divisor = 7
+	mutable result = read(value)
+	for 0..3 { result = result %% divisor }
+	result
+}
+-- file: library/reference.fa
+export function = (value: Integer, divisor: Integer): Integer throws DivisionByZero => try value %% divisor
+-- file: package.fa
+export = { name = "constantRemainderRegression" }
+-- prints: constant remainder units ok

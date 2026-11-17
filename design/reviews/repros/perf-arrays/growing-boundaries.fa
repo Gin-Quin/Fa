@@ -1,0 +1,41 @@
+function scan = <Item>(items: GrowingArray<Item>, value: (Item) => Integer): Integer => {
+	mutable total = 0
+	for item, index in items {
+		if index %% 7 == 0 { continue }
+		if index == 5000 { break }
+		total += value(item)
+	}
+	total
+}
+function exercise = (count: Integer, reserved: Integer<min = 0>) throws IndexError => {
+	mutable items = GrowingArray<Integer>.from([], capacity = reserved)
+	for i in 0..count {
+		items.push(i)
+		if i > 0 { assert (try items[-2]) == i - 1 }
+		assert items.length == i + 1
+	}
+	mutable expected = 0
+	for i in 0..count {
+		if i %% 7 == 0 { continue }
+		if i == 5000 { break }
+		expected += i
+	}
+	assert scan(items, (item) => item) == expected
+	for item, i in items { item += i }
+	for i in 0..count { assert (try items[i]) == i * 2 }
+	console.log(count, expected)
+}
+for n in [0, 1, 2, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256, 257, 511, 512, 513, 1023, 1024, 1025, 4095, 4096, 4097, 8193] {
+	try exercise(n, 0)
+	try exercise(n, 128)
+}
+-- Zero-sized and large managed items must keep their own stride.
+mutable empty: GrowingArray<{}> = []
+for 0..130 { empty.push({}) }
+mutable visited = 0
+for item in empty { visited += 1 }
+assert visited == 130
+mutable large: GrowingArray<{ a: String, b: (Integer, Integer, Integer, Integer, Integer, Integer, Integer, Integer) }> = []
+for i in 0..1025 { large.push({ a = "a payload with independently owned storage", b = (i, i, i, i, i, i, i, i) }) }
+assert scan(large, (item) => item.b[0]) == 449683
+console.log("boundaries ok")

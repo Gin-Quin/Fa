@@ -1,0 +1,80 @@
+-- Every power of two ±1 and the endpoints: exact interpreter/Bun/LLVM agreement.
+static inputs: Array<Byte> = [
+	0
+	1
+	2
+	3
+	4
+	5
+	7
+	8
+	9
+	15
+	16
+	17
+	31
+	32
+	33
+	63
+	64
+	65
+	127
+	128
+	129
+	255
+]
+static divisors: Array<Byte> = [1, 2, 7, 16, 255]
+function dynamic = (value: Byte, divisor: Byte): (Byte, Byte) throws DivisionByZero =>
+	((try value // divisor), (try value %% divisor))
+function literals = (value: Byte): (Byte, Byte, Byte, Byte, Byte, Byte, Byte, Byte) =>
+	(value // 1, value %% 1, value // 2, value %% 2, value // 7, value %% 7, value // 16, value
+		%% 16)
+function wide = (value: Byte): (UInt128, UInt128, UInt128, UInt128, UInt128, UInt128) =>
+	(value // 65535, value %% 65535, value // 65536, value %% 65536, value // 65537, value %% 65537)
+function rows = (): String throws DivisionByZero => {
+	mutable output = ""
+	for value in inputs {
+		for divisor in divisors {
+			let (quotient, rest) = try dynamic(value, divisor)
+			output += "{quotient},{rest};"
+		}
+	}
+	output
+}
+function literalRows = (): String => {
+	mutable output = ""
+	for value in inputs {
+		let actual = literals(value)
+		output += "{actual[0]},{actual[1]},{actual[2]},{actual[3]},{actual[4]},{actual[5]},{actual[6]},{actual[7]};"
+	}
+	output
+}
+function wideRows = (): String => {
+	mutable output = ""
+	for value in inputs {
+		let actual = wide(value)
+		output += "{actual[0]},{actual[1]},{actual[2]},{actual[3]},{actual[4]},{actual[5]};"
+	}
+	output
+}
+static expected = @rows()
+static literalExpected = @literalRows()
+static wideExpected = @wideRows()
+assert (try rows()) == expected
+assert literalRows() == literalExpected
+assert wideRows() == wideExpected
+function zeroDivision = (value: Byte, divisor: Byte): Boolean => {
+	let _result = value // divisor catch _error => return true
+	false
+}
+static zeroDivisionExpected = @zeroDivision(1, 0)
+assert zeroDivisionExpected
+assert zeroDivision(1, 0)
+function zeroRemainder = (value: Byte, divisor: Byte): Boolean => {
+	let _result = value %% divisor catch _error => return true
+	false
+}
+static zeroRemainderExpected = @zeroRemainder(1, 0)
+assert zeroRemainderExpected
+assert zeroRemainder(1, 0)
+console.log("division Byte ok") -- prints: division Byte ok

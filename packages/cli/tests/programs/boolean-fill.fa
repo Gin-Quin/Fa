@@ -1,0 +1,78 @@
+-- Constant Boolean fills, including empty ranges and nonempty destinations.
+function append = (items: Array<Boolean>, start: Integer, end: Integer) mutates items => {
+	for _ in start..end { items.push(true) }
+}
+function inclusive = (items: Array<Boolean>, start: Integer, end: Integer) mutates items => {
+	for _ in start..=end { items.push(false) }
+}
+function make = (count: Integer): Array<Boolean> => {
+	mutable items: Array<Boolean> = []
+	for 0..count { items.push(true) }
+	items
+}
+function apply = <Item>(value: Item, action: (Item) => Array<Boolean>): Array<Boolean> => action(value)
+function generic = <Item>(tag: Item, count: Integer<min = 0>): Boolean => {
+	mutable bucket = { tag = tag, flags = Array<Boolean>.from([], capacity = count) }
+	for 0..count { bucket.flags.push(true) }
+	for 0..count { bucket.flags.push(false) }
+	bucket.flags.length == count * 2 and bucket.flags.filter((flag) => flag).length == count
+}
+function captured = (count: Integer): Array<Boolean> => {
+	function build = (): Array<Boolean> => {
+		mutable items: Array<Boolean> = []
+		for 0..count { items.push(true) }
+		items
+	}
+	let closure = build
+	closure()
+}
+mutable flags: Array<Boolean> = [false]
+append(flags, -3, 2)
+inclusive(flags, 7, 7)
+append(flags, 9, 1)
+inclusive(flags, 4, 2)
+assert flags == [false, true, true, true, true, true, false]
+inclusive(flags, -2, -1)
+assert flags == [false, true, true, true, true, true, false, false, false]
+function bound = (state: { order: Integer }, value: Integer): Integer mutates state => {
+	state.order = state.order * 10 + value
+	value
+}
+mutable state = { order = 0 }
+for bound(state, 2)..bound(state, 5) { flags.push(false) }
+assert state.order == 25
+assert flags.length == 12
+let action = make
+for count in [0, 1, 9, 130, 2049] {
+	assert make(count).length == count
+	assert action(count).every((flag) => flag)
+	assert apply(count, action).length == count
+	assert captured(count).length == count
+	assert generic(count, count)
+	assert generic({ number = count }, count)
+}
+assert [0, 1, 9].map((count) => make(count).length) == [0, 1, 9]
+mutable stable: GrowingArray<Boolean> = [false]
+use first = stable[0]
+for 0..2049 { stable.push(true) }
+for 0..130 { stable.push(false) }
+assert first == false
+assert stable.length == 2180
+assert stable.filter((flag) => flag).length == 2049
+stable = []
+for 0..2049 { stable.push(false) }
+assert stable.every((flag) => not flag)
+mutable contiguous = GrowingArray<Boolean>.from([], capacity = 4096)
+for 0..2049 { contiguous.push(true) }
+assert contiguous.length == 2049
+assert contiguous.every((flag) => flag)
+-- Dynamic values and side effects keep their rounds.
+mutable calls = 0
+mutable dynamic: Array<Boolean> = []
+for index in 0..8 {
+	dynamic.push(index %% 2 == 0)
+	calls += 1
+}
+assert calls == 8
+assert dynamic == [true, false, true, false, true, false, true, false]
+console.log("boolean fill ok") -- prints: boolean fill ok

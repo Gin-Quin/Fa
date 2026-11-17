@@ -1,0 +1,49 @@
+-- Constant divisors through generics, callbacks, function values and captures.
+function reference = (value: Integer, divisor: Integer): Integer throws DivisionByZero => try value %% divisor
+function seven = (value: Integer): Integer => {
+	let divisor: Integer = 7
+	mutable result = value
+	for 0..3 { result = result %% divisor }
+	result
+}
+function generic = <Item>(value: Item, read: (Item) => Integer): Integer => {
+	let divisor = 7
+	mutable result = read(value)
+	for 0..3 { result = result %% divisor }
+	result
+}
+function apply = <Item>(value: Item, action: (Item) => Integer): Integer => action(value)
+function captured = (value: Integer): Integer => {
+	let divisor: Integer<min = 1> = 7
+	function calculate = (): Integer => {
+		mutable result = value
+		for 0..3 { result = result %% divisor }
+		result
+	}
+	let closure = calculate
+	closure()
+}
+let action = seven
+for value in [-1_000_003, -8, -7, -1, 0, 1, 6, 7, 8, 1_000_003] {
+	let expected = try reference(value, 7)
+	assert seven(value) == expected
+	assert action(value) == expected
+	assert apply(value, action) == expected
+	assert generic(value, (item) => item) == expected
+	assert generic({ number = value }, (item) => item.number) == expected
+	assert captured(value) == expected
+}
+assert seven(-8) == 6
+assert seven(8) == 1
+assert seven(-7) == 0
+let values: Array<Integer> = [-8, -7, -1, 0, 1, 7, 8]
+assert values.map(action) == [6, 0, 6, 0, 1, 0, 1]
+for divisor in [-7, -1, 0, 1, 7] {
+	let bound = divisor
+	for value in values {
+		let actual = (value %% bound) catch _error => 99
+		let expected = reference(value, bound) catch _error => 99
+		assert actual == expected
+	}
+}
+console.log("constant remainder ok") -- prints: constant remainder ok

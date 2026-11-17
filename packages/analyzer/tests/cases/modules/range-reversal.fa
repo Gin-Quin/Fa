@@ -1,0 +1,28 @@
+-- require-split: true
+-- file: library/reverse.fa
+export function = <Item>(items: Array<Item>, start: Integer, end: Integer) throws IndexError mutates items => {
+	mutable low = start
+	mutable high = end
+	while low < high {
+		let left = try items[low]
+		let right = try items[high]
+		try items[low] = right
+		try items[high] = left
+		low += 1
+		high -= 1
+	}
+}
+-- file: application/main.fa
+export function = () throws IndexError => {
+	let stored = library.reverse<Integer>
+	mutable integers = [1, 2, 3, 4, 5]
+	try stored(integers, 0, 4)
+	assert integers == [5, 4, 3, 2, 1]
+	mutable flags = [true, false, false]
+	try library.reverse(flags, 0, 2)
+	assert flags == [false, false, true]
+	mutable words: Array<String> = ["a long string exceeding inline storage", "other"]
+	try library.reverse(words, 0, 1)
+	assert words == ["other", "a long string exceeding inline storage"]
+	console.log("split range reversal ok") -- prints: split range reversal ok
+}

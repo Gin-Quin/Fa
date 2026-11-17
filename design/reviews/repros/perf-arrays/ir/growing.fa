@@ -1,0 +1,9 @@
+function identity = (value: Integer): Integer => value
+function run = (count: Integer): Integer throws IndexError => {
+	mutable items: GrowingArray<Integer> = []
+	for i in 0..count { items.push(identity(i)) }
+	mutable total = 0
+	for i in 0..count { total += try items[i] }
+	total
+}
+console.log(try run(arguments.length))

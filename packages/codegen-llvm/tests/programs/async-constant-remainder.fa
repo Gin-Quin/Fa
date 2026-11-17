@@ -1,0 +1,18 @@
+use { sleep } = std.time
+async function calculate = <Item>(value: Item, read: (Item) => Integer): Integer => {
+	let divisor: Integer<min = 1> = 7
+	await sleep(1)
+	mutable result = read(value)
+	for 0..3 { result = result %% divisor }
+	function captured = (): Integer => {
+		mutable inner = read(value)
+		for 0..3 { inner = inner %% divisor }
+		inner
+	}
+	let closure = captured
+	assert closure() == result
+	result
+}
+assert (await calculate(-8, (item) => item)) == 6
+assert (await calculate({ number = 8 }, (item) => item.number)) == 1
+console.log("async constant remainder ok") -- prints: async constant remainder ok

@@ -1,0 +1,9 @@
+export function = <Tag>(tag: Tag): Integer throws IndexError => {
+	mutable items: GrowingArray<{ value: Integer, tag: Tag }> = []
+	for i in 0..1025 { items.push({ value = i, tag = tag }) }
+	mutable total = 0
+	for item in items { total += item.value }
+	for i in 0..1025 { try items[i].value += 1 }
+	assert (try items[-1]).value == 1025
+	total
+}

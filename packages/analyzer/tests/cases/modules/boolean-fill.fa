@@ -1,0 +1,25 @@
+-- require-split: true
+-- file: library/fill.fa
+export function = <Item>(tag: Item, count: Integer<min = 0>): Array<Boolean> => {
+	mutable bucket = { tag = tag, flags = Array<Boolean>.from([], capacity = count) }
+	for 0..count { bucket.flags.push(true) }
+	for 0..count { bucket.flags.push(false) }
+	bucket.flags
+}
+-- file: library/stable.fa
+export function = (count: Integer): GrowingArray<Boolean> => {
+	mutable flags: GrowingArray<Boolean> = []
+	for 0..count { flags.push(true) }
+	flags
+}
+-- file: application/main.fa
+type Box = { value: Integer }
+export function = () => {
+	let action = library.fill<Box>
+	let flags = action(Box { value = 9 }, 2049)
+	assert flags.length == 4098
+	assert flags.filter((flag) => flag).length == 2049
+	assert library.fill(1, 9).length == 18
+	assert library.stable(2049).every((flag) => flag)
+	console.log("package boolean fill ok") -- prints: package boolean fill ok
+}

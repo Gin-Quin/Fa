@@ -1,0 +1,93 @@
+-- GrowingArray loops retain stable references, checks and live item values.
+type Entry<Tag> = { key: Int32, value: Int32, tag: Tag }
+function identity = (value: Integer): Integer => value
+function exercise = <Tag>(tag: Tag, count: Integer): Integer throws IndexError => {
+	mutable items: GrowingArray<Entry<Tag>> = []
+	for i in 0..count {
+		items.push({ key = Int32(identity(i) %% 10000), value = Int32(i %% 10000), tag = tag })
+		assert items.length == i + 1
+		assert items[-1].value == i
+	}
+	mutable total = 0
+	for item, index in items {
+		if index %% 3 == 0 { continue }
+		item.value += 1
+		total += item.key
+	}
+	mutable indexed = 0
+	for i in 0..count {
+		indexed += try items[i].key
+		try items[i].key += 1
+	}
+	assert indexed == count * (count - 1) // 2
+	mutable caught = 0
+	for offset in 0..2 {
+		let invalid = if offset == 0 { count } else { -count - 1 }
+		let _ignored = items[invalid] catch _error => {
+			caught += 1
+			{ key = Int32(0), value = Int32(0), tag = tag }
+		}
+	}
+	assert caught == 2
+	assert total == indexed - (count // 3) * ((count // 3) - 1) // 2 * 3
+	mutable visited = 0
+	for item, i in items {
+		if i == 9 { break }
+		visited += item.key
+	}
+	assert visited == (if count >= 9 { 45 } else { count * (count + 1) // 2 })
+	-- Reset/reservation/whole-owner replacement in a loop must keep live facts.
+	mutable replaced: GrowingArray<Integer> = []
+	for round in 0..3 {
+		replaced = []
+		replaced.reserve(1 + round * 100)
+		replaced.push(round)
+		assert replaced[-1] == round
+	}
+	count
+}
+function scan = <Item>(items: GrowingArray<Item>, value: (Item) => Integer): Integer => {
+	mutable total = 0
+	for item in items { total += value(item) }
+	total
+}
+function captured = (count: Integer): Integer throws IndexError => {
+	function run = (): Integer throws IndexError => try exercise(count, count)
+	let closure = run
+	try closure()
+}
+function callback = <Item>(input: Item, action: (Item) => Integer throws IndexError): Integer throws IndexError => try action(input)
+function run = (count: Integer): Integer throws IndexError => try exercise(count, count)
+let stored = run
+for count in [0, 3, 9, 129, 2049] {
+	assert (try exercise({ number = count }, count)) == count
+	assert (try stored(count)) == count
+	assert (try callback(count, stored)) == count
+	assert (try captured(count)) == count
+}
+-- Different concrete strides and an owning generic field use the same loops.
+assert (try exercise(true, 129)) == 129
+assert (try exercise("a growing tag that exceeds inline storage", 129)) == 129
+mutable stable: GrowingArray<Integer> = [1, 2, 3]
+use first = stable[0]
+for i in 3..10000 { stable.push(i + 1) }
+assert first == 1
+assert scan(stable, (item) => item) == 50005000
+mutable flat = GrowingArray<Integer>.from([], capacity = 4096)
+for i in 0..2049 { flat.push(i) }
+assert scan(flat, (item) => item) == 2098176
+mutable seen = 0
+for item in flat {
+	item += 1
+	seen += item
+}
+assert seen == 2100225
+-- A stored callback can replace the owner between rounds of a counted loop.
+mutable changing: GrowingArray<Integer> = [1]
+function change = () mutates changing => { changing = [4, 5] }
+let changeValue = change
+for 0..2 {
+	changeValue()
+	assert (try changing[-1]) == 5
+}
+console.log("growing loop facts ok") -- prints: growing loop facts ok

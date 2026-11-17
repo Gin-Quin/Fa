@@ -1,0 +1,94 @@
+type Body = { x: Float, v: Float, mass: Float }
+type Reference = { position: Float, speed: Float, weight: Float }
+
+function advance = (items: Array<Body>, step: Float) mutates items => {
+	for body, i in items {
+		for j in i + 1..items.length {
+			use other = items[j]
+			let dx = body.x - other.x
+			let scale = step / (1.0 + dx * dx)
+			body.v -= dx * other.mass * scale
+			other.v += dx * body.mass * scale
+		}
+	}
+	for body in items { body.x += step * body.v }
+}
+
+function referenceAdvance = (items: Array<Reference>, step: Float) mutates items => {
+	for body, i in items {
+		for j in i + 1..items.length {
+			use other = items[j]
+			let dx = body.position - other.position
+			let scale = step / (1.0 + dx * dx)
+			body.speed -= dx * other.weight * scale
+			other.speed += dx * body.weight * scale
+		}
+	}
+	for body in items { body.position += step * body.speed }
+}
+
+function compare = (actual: Array<Body>, expected: Array<Reference>) throws IndexError => {
+	assert actual.length == expected.length
+	for body, i in actual {
+		let other = try expected[i]
+		-- Keep exact equality while avoiding float formatting in a failed
+		-- assertion's diagnostic on the freestanding target.
+		let samePosition = body.x == other.position
+		let sameSpeed = body.v == other.speed
+		let sameMass = body.mass == other.weight
+		assert samePosition
+		assert sameSpeed
+		assert sameMass
+	}
+}
+
+-- Only this root and its directly called parameters have the Body array type.
+-- The stored reference function deliberately prevents its family proof.
+mutable bodies: Array<Body> = [
+	{ x = 1e16, v = 1.0, mass = 0.25 }
+	{ x = 1.0, v = -1e-16, mass = 0.5 }
+	{ x = -1e16, v = -1.0, mass = 0.75 }
+	{ x = 0.25, v = 1e-16, mass = 1.0 }
+	{ x = -0.5, v = 0.5, mass = 1.25 }
+]
+mutable expected: Array<Reference> = [
+	{ position = 1e16, speed = 1.0, weight = 0.25 }
+	{ position = 1.0, speed = -1e-16, weight = 0.5 }
+	{ position = -1e16, speed = -1.0, weight = 0.75 }
+	{ position = 0.25, speed = 1e-16, weight = 1.0 }
+	{ position = -0.5, speed = 0.5, weight = 1.25 }
+]
+bodies.reserve(100)
+let reference = referenceAdvance
+for 0..128 {
+	advance(bodies, 0.01)
+	reference(expected, 0.01)
+	try compare(bodies, expected)
+}
+
+function generic = <Tag>(tag: Tag) => {
+	mutable items: Array<{ x: Float, tag: Tag }> = [
+		{ x = 1.0, tag }, { x = 2.0, tag }, { x = 3.0, tag }
+		{ x = 4.0, tag }, { x = 5.0, tag }
+	]
+	function count = (values: Array<{ x: Float, tag: Tag }>) => values.length
+	let stored = count
+	function captured = () => items.length
+	function callback = (_index: Integer) => items.length
+	assert stored(items) == 5
+	assert captured() == 5
+	assert [0, 1].map(callback) == [5, 5]
+	for item in items { item.x *= 2.0 }
+	items.push({ x = 6.0, tag })
+	assert stored(items) == 6
+	assert captured() == 6
+	assert [0, 1].map(callback) == [6, 6]
+	items = []
+	assert stored(items) == 0
+	assert captured() == 0
+}
+generic(true)
+let storedGeneric = generic<Integer>
+storedGeneric(17)
+generic("an owned string well beyond the inline storage")
+console.log("array extents ok") -- prints: array extents ok

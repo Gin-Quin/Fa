@@ -52,6 +52,11 @@ fn narrow_repr(low: i128, high: i128) -> Option<IntRepr> {
 	})
 }
 
+struct ArithmeticBounds {
+	result: (i128, i128),
+	work: (i128, i128),
+}
+
 impl<'ctx> Lowering<'_, 'ctx> {
 	/// An integer constant of `bits` bits (two's complement of `value`).
 	pub(crate) fn const_int(&self, bits: u32, value: I256) -> IntValue<'ctx> {
@@ -144,9 +149,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				// a narrower type when the storage of the operands bounds every
 				// step (bytes summed in 16 bits vectorize as Rust's `u16`)
 				let narrow = (compute == IntRepr::I64)
-					.then(|| self.narrow_bounds(node))
+					.then(|| self.arithmetic_bounds(node))
 					.flatten()
-					.and_then(|(low, high)| narrow_repr(low, high));
+					.and_then(|bounds| narrow_repr(bounds.work.0, bounds.work.1));
 				let work = narrow.unwrap_or(compute);
 				let mut values = Vec::new();
 				for operand in operands.iter() {
@@ -201,11 +206,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 	}
 
-	/// Bounds of every step of an integer arithmetic node (`+`, `-`, `*`, and
+	/// Bounds of the result and of every value needed to compute it (`+`, `-`, `*`, and
 	/// `//`, `%%` of non-negative values by a positive divisor) without checks,
 	/// from the storage of its operands only (never from the analyzer's facts,
 	/// which a wrapping build may break): `None` when unknown.
-	fn narrow_bounds(&self, node: NodeId) -> Option<(i128, i128)> {
+	/// A small result does not permit truncating a dividend, divisor or earlier
+	/// intermediate. Keep the result bounds separate for enclosing expressions,
+	/// whose children are evaluated in their own independently proven widths.
+	fn arithmetic_bounds(&self, node: NodeId) -> Option<ArithmeticBounds> {
 		let View::Arithmetic { op, operands } = self.view(node) else {
 			return None;
 		};
@@ -220,6 +228,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.map(|operand| self.storage_bounds(operand))
 			.collect::<Option<_>>()?;
 		let (mut low, mut high) = *bounds.first()?;
+		let mut work = bounds.iter().fold((low, high), |(low, high), &(a, b)| {
+			(low.min(a), high.max(b))
+		});
 		for &(a, b) in &bounds[1..] {
 			(low, high) = match op {
 				ArithOp::Add => (low.checked_add(a)?, high.checked_add(b)?),
@@ -240,8 +251,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if low < -(1 << 31) || high >= 1 << 31 {
 				return None;
 			}
+			work = (work.0.min(low), work.1.max(high));
 		}
-		Some((low, high))
+		Some(ArithmeticBounds {
+			result: (low, high),
+			work,
+		})
 	}
 
 	/// The bounds of an integer operand: a literal, a narrowed arithmetic
@@ -253,7 +268,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let value = value.as_i128();
 				return Some((value, value));
 			}
-			View::Arithmetic { .. } => return self.narrow_bounds(node),
+			View::Arithmetic { .. } => return Some(self.arithmetic_bounds(node)?.result),
 			_ => {}
 		}
 		let Ok(Repr::Int(int)) = self.node_repr(node) else {

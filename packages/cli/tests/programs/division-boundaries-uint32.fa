@@ -1,0 +1,154 @@
+-- Every power of two ±1 and the endpoints: exact interpreter/Bun/LLVM agreement.
+static inputs: Array<UInt32> = [
+	0
+	1
+	2
+	3
+	4
+	5
+	7
+	8
+	9
+	15
+	16
+	17
+	31
+	32
+	33
+	63
+	64
+	65
+	127
+	128
+	129
+	255
+	256
+	257
+	511
+	512
+	513
+	1023
+	1024
+	1025
+	2047
+	2048
+	2049
+	4095
+	4096
+	4097
+	8191
+	8192
+	8193
+	16383
+	16384
+	16385
+	32767
+	32768
+	32769
+	65535
+	65536
+	65537
+	131071
+	131072
+	131073
+	262143
+	262144
+	262145
+	524287
+	524288
+	524289
+	1048575
+	1048576
+	1048577
+	2097151
+	2097152
+	2097153
+	4194303
+	4194304
+	4194305
+	8388607
+	8388608
+	8388609
+	16777215
+	16777216
+	16777217
+	33554431
+	33554432
+	33554433
+	67108863
+	67108864
+	67108865
+	134217727
+	134217728
+	134217729
+	268435455
+	268435456
+	268435457
+	536870911
+	536870912
+	536870913
+	1073741823
+	1073741824
+	1073741825
+	2147483647
+	2147483648
+	2147483649
+	4294967295
+]
+static divisors: Array<UInt32> = [1, 2, 7, 16, 4294967295]
+function dynamic = (value: UInt32, divisor: UInt32): (UInt32, UInt32) throws DivisionByZero =>
+	((try value // divisor), (try value %% divisor))
+function literals = (
+	value: UInt32
+): (UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32) =>
+	(value // 1, value %% 1, value // 2, value %% 2, value // 7, value %% 7, value // 16, value
+		%% 16)
+function wide = (value: UInt32): (UInt128, UInt128, UInt128, UInt128, UInt128, UInt128) =>
+	(value // 65535, value %% 65535, value // 65536, value %% 65536, value // 65537, value %% 65537)
+function rows = (): String throws DivisionByZero => {
+	mutable output = ""
+	for value in inputs {
+		for divisor in divisors {
+			let (quotient, rest) = try dynamic(value, divisor)
+			output += "{quotient},{rest};"
+		}
+	}
+	output
+}
+function literalRows = (): String => {
+	mutable output = ""
+	for value in inputs {
+		let actual = literals(value)
+		output += "{actual[0]},{actual[1]},{actual[2]},{actual[3]},{actual[4]},{actual[5]},{actual[6]},{actual[7]};"
+	}
+	output
+}
+function wideRows = (): String => {
+	mutable output = ""
+	for value in inputs {
+		let actual = wide(value)
+		output += "{actual[0]},{actual[1]},{actual[2]},{actual[3]},{actual[4]},{actual[5]};"
+	}
+	output
+}
+static expected = @rows()
+static literalExpected = @literalRows()
+static wideExpected = @wideRows()
+assert (try rows()) == expected
+assert literalRows() == literalExpected
+assert wideRows() == wideExpected
+function zeroDivision = (value: UInt32, divisor: UInt32): Boolean => {
+	let _result = value // divisor catch _error => return true
+	false
+}
+static zeroDivisionExpected = @zeroDivision(1, 0)
+assert zeroDivisionExpected
+assert zeroDivision(1, 0)
+function zeroRemainder = (value: UInt32, divisor: UInt32): Boolean => {
+	let _result = value %% divisor catch _error => return true
+	false
+}
+static zeroRemainderExpected = @zeroRemainder(1, 0)
+assert zeroRemainderExpected
+assert zeroRemainder(1, 0)
+console.log("division UInt32 ok") -- prints: division UInt32 ok

@@ -2551,3 +2551,10 @@ helpers on each arm, including nullable collection/union storage and errors.
 JavaScript module generation enumerates rest symbols along with a pattern's
 ordinary/nested symbols. The same enumeration declares module values and exports
 initializers, so the program's analyzed init order can import every rest binding.
+
+The InlineArray conformance matrix accepts the exact documented nonfatal long-turn
+warning only in dev/O0 builds. Its old empty-stderr oracle was incorrect: wasm
+JIT latency and host scheduling can exceed the 50 ms threshold without changing
+any Fa result. Exit status, all stdout lines, leaks and every other diagnostic
+remain strict, as do O3 diagnostics; a negative oracle test guards those cases.
+The dedicated async-long-turn runtime regression still requires the warning.

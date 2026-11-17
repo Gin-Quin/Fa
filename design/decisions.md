@@ -2798,3 +2798,11 @@ recursive C reader before reaching the valid 1000-container boundary. Native
 container parsing now uses explicit frames, with the same token reader,
 arena-backed values, error precedence and depth limit. A sanitizer regression
 checks the complete 1000-container tree and releases on deep malformed inputs.
+
+### JavaScript JSON depth check after the engine parse (2026-11-17, second review)
+
+The pre-parse scan of every String input of 2002 code units or more made `Json.parse`
+2–5 times slower on JavaScript (7.55 MB: 691 ms instead of 307 ms on Bun). The depth
+limit is now checked on the parsed value by an iterative container walk
+(`faJsonTooDeep`), and the Fa scanner runs only on the error path, where it names the
+error with the native wording; outcomes are unchanged.

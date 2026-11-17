@@ -7,6 +7,7 @@ import {
 	faJsonParse,
 	faJsonReadBytes,
 	faJsonStringify,
+	faJsonTooDeep,
 	faMonotonic,
 	faReadBytes,
 	faReadBytesAsync,
@@ -312,6 +313,25 @@ describe("JSON byte inputs", () => {
 			expect(() => faJsonReadBytes(encoder.encode(input))).toThrow("Exceeded the maximum depth");
 			expect(() => faJsonParse(input, ["i", null, null])).toThrow("Exceeded the maximum depth");
 		}
+		const objects = '{"a":'.repeat(1001) + "0" + "}".repeat(1001);
+		expect(() => faJsonParse(objects, "n")).toThrow("Exceeded the maximum depth");
+	});
+	test("accepted long String input never reaches the syntax scanner", () => {
+		// The scanner rejects this text, so it must not run when the engine's
+		// reader (here a stub) accepts it: only the parsed containers are walked.
+		const text = "x".repeat(10000);
+		const shallow = [[1, { a: [2] }]];
+		expect(faJsonParse(text, ["a", ["a", ["i", null, null]]], () => [[1], [2]])).toEqual([
+			[1],
+			[2],
+		]);
+		expect(faJsonTooDeep(shallow)).toBe(false);
+		/** @type {any} */
+		let deep = 0;
+		for (let depth = 0; depth < 1000; depth++) deep = [deep];
+		expect(faJsonTooDeep(deep)).toBe(false);
+		expect(faJsonTooDeep({ a: deep })).toBe(true);
+		expect(() => faJsonParse(text, "n", () => ({ a: deep }))).toThrow(JsonError);
 	});
 	test("malformed JSON and invalid UTF-8 are rejected", async () => {
 		const { faJsonReadBytes } = await import("./system.js");

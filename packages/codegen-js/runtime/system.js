@@ -242,7 +242,7 @@ export function faMonotonic() {
 
 // @fa-helper faJsonSyntaxError
 /** Scan rejected JSON using Fa's grammar and error precedence. Successful
- * String input still uses the engine parser; this scan only runs on errors.
+ * String input only uses the engine parser; this scan only runs on errors.
  * Container state is explicit so malformed deep input cannot exhaust the JS stack.
  * @param {string} text @returns {string | null}
  */
@@ -377,7 +377,30 @@ export function faJsonSyntaxError(text) {
 	return `JSON Parse error: ${error}`;
 }
 
-// @fa-helper faJsonParse deps: JsonError faJsonSyntaxError
+// @fa-helper faJsonTooDeep
+/** Whether parsed JSON nests more than 1000 containers, walked without
+ * recursion so that deep values cannot exhaust the JS stack.
+ * @param {any} data @returns {boolean}
+ */
+export function faJsonTooDeep(data) {
+	if (data === null || typeof data !== "object") return false;
+	const values = [data];
+	const depths = [1];
+	while (values.length > 0) {
+		const value = values.pop();
+		const depth = /** @type {number} */ (depths.pop());
+		if (depth > 1000) return true;
+		for (const item of Array.isArray(value) ? value : Object.values(value)) {
+			if (item !== null && typeof item === "object") {
+				values.push(item);
+				depths.push(depth + 1);
+			}
+		}
+	}
+	return false;
+}
+
+// @fa-helper faJsonParse deps: JsonError faJsonSyntaxError faJsonTooDeep
 /**
  * `Json.parse(text)`: the value of the expected type, described by `schema`:
  *
@@ -414,13 +437,13 @@ export function faJsonSyntaxError(text) {
 export function faJsonParse(text, schema, read = JSON.parse) {
 	let data;
 	try {
-		// A document with 1001 containers needs at least 2002 code units.
-		// Engines have no common nesting bound; enforce Fa's before reading it.
-		if (typeof text === "string" && text.length >= 2002) {
-			const error = faJsonSyntaxError(text);
-			if (error !== null) throw new SyntaxError(error);
-		}
 		data = read(text);
+		// Engines have no common nesting bound: check Fa's on the parsed
+		// containers, and only scan the text to name the error. A document
+		// with 1001 containers needs at least 2002 code units.
+		if (typeof text === "string" && text.length >= 2002 && faJsonTooDeep(data)) {
+			throw new SyntaxError("Exceeded the maximum depth");
+		}
 	} catch (error) {
 		throw new JsonError(
 			typeof text === "string"

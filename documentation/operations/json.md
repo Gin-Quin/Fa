@@ -36,9 +36,10 @@ uses byte-position markers for raw lone UTF-16 units, restored in token values
 and diagnostics; this never rewrites an invalid escape into a valid escape.
 Invalid-escape diagnostics retain the complete scalar or lone unit on every target.
 
-JavaScript retains the engine's JSON parser for successful String input. On a syntax error, an iterative Fa scanner reproduces the native parser's error grammar and precedence, including unfinished strings taking precedence over invalid escapes inside them. Failed byte input may decode the whole document for this error scan; successful byte input only decodes string tokens. Engine exception wording and offsets do not enter `JsonError`. String inputs
-long enough to exceed the depth limit are checked with the same iterative scanner
-before the engine parse; shorter successful inputs incur no scanner pass. The byte
+JavaScript retains the engine's JSON parser for successful String input. On a syntax error, an iterative Fa scanner reproduces the native parser's error grammar and precedence, including unfinished strings taking precedence over invalid escapes inside them. Failed byte input may decode the whole document for this error scan; successful byte input only decodes string tokens. Engine exception wording and offsets do not enter `JsonError`. Successful String inputs
+never go through the scanner: when the input is long enough to nest 1001 containers
+(2002 code units), an iterative walk of the parsed containers checks the depth limit,
+and only an input over it is scanned, to name the error. The byte
 token parser checks its explicit container stack against the same limit.
 
 The compile-time writer uses an explicit work stack for collections, objects and named unions, with the same declaration order, omitted optional fields, enumeration values and flag paths as runtime serialization. Recursive schema names are scoped to the current serialization subtree, including separate declarations with the same name. It escapes raw surrogate units before producing UTF-8 JSON and charges output storage and visits to the interpreter budgets. `Json.parse` dispatches an already evaluated `String | Bytes` input by its runtime member; the byte branch retains strict UTF-8 validation.

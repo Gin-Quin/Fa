@@ -2520,3 +2520,12 @@ Ordinary String arguments are immutable values; explicitly dependent String
 arguments still retain their place. Borrowing a compile-time constant gives it
 caller-lived temporary storage. JSON default closures capture their snapshot
 slots by value, matching their nonescaping parser lifetime.
+
+## Native completeness (2026-11-17)
+
+Enumeration integer conversions preserve the backend's declaration-index ABI.
+Unpinned members widen their unsigned index; pinned members read a private
+constant table built from nominal payload literals, in the destination integer
+representation. Every unit can construct that table from shared type metadata,
+without an exported runtime table or a second enum representation. Names,
+matching, parsing and iteration continue to use declaration indices.

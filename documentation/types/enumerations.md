@@ -93,6 +93,15 @@ type Direction = "north" | "south" | "east" | "west"
 :::implementation
 ## Implementation details
 
+### Native and WebAssembly
+
+- A member is a declaration index, stored as an `i32`. Names and iteration use
+  that index, independently of any pinned integer values.
+- An explicit integer conversion reads a private constant table of pinned
+  values. For an unpinned enumeration, it widens the unsigned declaration index
+  to the destination integer representation. Each compiled unit can emit its
+  own private table from the shared nominal type metadata.
+
 ### JavaScript
 
 - A member is a JavaScript number, its underlying value. `toString` and `parse` use a table of the member names generated per enumeration, and `members` is a constant array of the values in declaration order.

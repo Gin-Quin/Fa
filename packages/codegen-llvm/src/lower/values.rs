@@ -956,6 +956,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Err(self.unsupported(node, "a value of type `Void`"));
 		};
 		Ok(match (value.repr, to) {
+			(Repr::Enum(nominal), Repr::Int(int)) => self.enum_integer(value, nominal, int)?,
 			(Repr::Int(from), Repr::Int(int)) => {
 				Val::new(to, self.int_to(raw.into_int_value(), from, int)?)
 			}

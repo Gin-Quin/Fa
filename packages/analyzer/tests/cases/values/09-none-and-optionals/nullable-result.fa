@@ -1,0 +1,3 @@
+type Box = { function maybe = (self): String? => none }
+function bad = (value: Box?): String? => value?.maybe().trim() -- error: E-OPT-1
+function good = (value: Box?): String? => value?.maybe()?.trim()

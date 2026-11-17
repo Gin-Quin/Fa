@@ -93,7 +93,10 @@ impl Generator<'_> {
 				js::call(helper, &[receiver.text])
 			}
 			"TcpListener#accept" | "TcpStream.connect" | "TcpStream#read" | "TcpStream#write" => {
-				self.unsupported(n, "a blocking call of a socket (await it)")
+				self.internal_error(
+					n,
+					"a checked blocking socket call bypassed CONC010 on JavaScript",
+				)
 			}
 			_ => return None,
 		})

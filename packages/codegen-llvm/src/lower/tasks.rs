@@ -1907,12 +1907,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: NodeId,
 		operand: NodeId,
 	) -> Result<Val<'ctx>, Error> {
+		let call = self.ungrouped(operand);
+		if self.pending_receiver.is_none()
+			&& let View::Call { callee, .. } = self.view(call)
+			&& let View::OptionalAccess { target, members } = self.view(callee)
+		{
+			return self.optional_invocation(node, target, members, |this| {
+				this.start_expression(node, operand)
+			});
+		}
 		let Some(info) = self.analysis.starts.get(&node).cloned() else {
 			return Err(self.unsupported(node.index(), "this `start`"));
 		};
 		let immediate = self.tasks.immediate == Some(node);
 		self.tasks.immediate = None;
-		let task = self.type_of(node);
+		let task = self.without_none(self.type_of(node));
 		if let Some(block) = info.block {
 			return self.start_do(node, block, &info, immediate);
 		}
@@ -3066,17 +3075,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let View::Call { callee, .. } = self.view(node) else {
 			return Ok(None);
 		};
-		let View::Access { target, .. } = self.view(self.ungrouped(callee)) else {
-			return Ok(None);
+		let target = match self.view(self.ungrouped(callee)) {
+			View::Access { target, .. } | View::OptionalAccess { target, .. } => target,
+			_ => return Ok(None),
 		};
-		if !self.is_threaded_worker(self.type_of(target)) {
+		if !self.is_threaded_worker(self.without_none(self.type_of(target))) {
 			return Ok(None);
 		}
 		if function.lambda {
 			return Err(self.unsupported(node.index(), "this worker method"));
 		}
 		let mode = self.tasks.call_modes.remove(&node);
-		let worker = self.expr(target)?;
+		let worker = self.receiver(node)?;
 		if worker.repr == Repr::Never {
 			return Ok(Some(worker));
 		}

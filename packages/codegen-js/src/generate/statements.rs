@@ -191,7 +191,10 @@ impl Generator<'_> {
 				if matches!(kind, BindingKind::Let | BindingKind::Mutable) {
 					self.destructuring(pattern, value, kind == BindingKind::Mutable);
 				} else {
-					self.unsupported(n, &format!("`{}` with a pattern", kind.keyword()));
+					self.internal_error(
+						n,
+						"the checked destructuring declaration is neither let nor mutable",
+					);
 				}
 			}
 			View::Assignment {
@@ -464,7 +467,7 @@ impl Generator<'_> {
 			},
 		};
 		if has_index {
-			self.unsupported(n, "an index in a `for` loop over a range");
+			self.internal_error(n, "the checked range loop has an index despite E-LOOP-3");
 			return;
 		}
 		self.push_scope();
@@ -474,7 +477,7 @@ impl Generator<'_> {
 				None => self.temp(),
 			},
 			Some((pattern, _)) => {
-				self.unsupported(pattern, "a pattern in a `for` loop over a range");
+				self.internal_error(pattern, "the checked range loop variable is not a name");
 				self.temp()
 			}
 			None => self.temp(),
@@ -608,7 +611,10 @@ impl Generator<'_> {
 				None
 			}
 			Some((pattern, _)) => {
-				self.unsupported(pattern, "a pattern in a `for` loop");
+				self.internal_error(
+					pattern,
+					"the checked loop pattern has no destructuring metadata",
+				);
 				None
 			}
 			None => None,
@@ -887,7 +893,10 @@ impl Generator<'_> {
 			(kind, _) => kind,
 		};
 		if !matches!(kind, BindingKind::Let | BindingKind::Mutable) {
-			self.unsupported(n, &format!("`{}`", kind.keyword()));
+			self.internal_error(
+				n,
+				"the checked declaration has an invalid runtime binding kind",
+			);
 			return;
 		}
 		let Some(symbol) = self.analysis.symbols.symbol_of_decl(n) else {
@@ -1110,6 +1119,9 @@ impl Generator<'_> {
 	/// `do`, a `loop`, a `return`… (a syntactic test: it only chooses
 	/// between `let x; if (…) { x = … }` and `const x = c ? a : b`).
 	pub(crate) fn needs_statements(&self, n: NodeId) -> bool {
+		if self.chain_candidate(n) {
+			return true;
+		}
 		match self.view(n) {
 			View::Group(inner) | View::Try(inner) => self.needs_statements(inner),
 			View::If {

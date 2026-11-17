@@ -139,6 +139,7 @@ impl Walker<'_> {
 			return None;
 		}
 		self.require_foreign_file(target, "Pointer");
+		self.check_foreign_target(n, "`Pointer.allocate`");
 		let allocate = crate::builtins::by_path("Pointer.allocate")?;
 		self.set_flag(target, crate::analysis::NodeFlags::TYPE_EXPR);
 		let expected_target = expected.and_then(|expected| self.s.types.pointer_target(expected));
@@ -616,7 +617,6 @@ impl Walker<'_> {
 		if self.a.extern_calls.contains_key(&n) {
 			return true;
 		}
-		self.a.reads_target = true;
 		if !self.in_foreign_file() {
 			let diagnostic = self.diagnostic(
 				&FFI001,
@@ -625,16 +625,23 @@ impl Walker<'_> {
 			);
 			self.report(diagnostic);
 		}
+		self.check_foreign_target(n, "C functions");
+		self.a.extern_calls.insert(n, call);
+		true
+	}
+
+	/// Foreign operations require the target's C interface, including
+	/// allocation and freeing without a user-written `@extern` call.
+	pub(super) fn check_foreign_target(&mut self, n: NodeId, what: &str) {
+		self.a.reads_target = true;
 		let target = self.s.target().to_string();
 		if matches!(target.as_str(), "web" | "node") {
 			let message = format!(
-				"C functions can't be called on target `{target}`: branch with `@if target` around the code that uses the binding"
+				"{what} can't be called on target `{target}`: branch with `@if target` around the code that uses the binding"
 			);
 			let diagnostic = self.diagnostic(&FFI008, n, message);
 			self.report(diagnostic);
 		}
-		self.a.extern_calls.insert(n, call);
-		true
 	}
 
 	// ── passing values to C ──────────────────────────────────────────────

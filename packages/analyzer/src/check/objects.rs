@@ -807,7 +807,17 @@ impl Walker<'_> {
 		target: NodeId,
 		members: NodeList<'_>,
 	) -> TypeId {
-		if let Some(ty) = self.type_target(target) {
+		self.check_member_chain(n, target, members, false)
+	}
+
+	pub(super) fn check_member_chain(
+		&mut self,
+		n: NodeId,
+		target: NodeId,
+		members: NodeList<'_>,
+		optional: bool,
+	) -> TypeId {
+		if !optional && let Some(ty) = self.type_target(target) {
 			// `Permissions.read` (fields.rs)
 			if self.is_fields(ty) {
 				return self.memo(n, |w| w.fields_member_value(n, ty, members));
@@ -823,10 +833,15 @@ impl Walker<'_> {
 		self.access_roots.insert(self.strip_groups(target));
 		let receiver = self.check(target, None);
 		// `a?.b.c`: the chain short-circuits with its `?.`
-		let chained = self.is_optional_chain(target);
+		let chained = optional || self.is_optional_chain(target);
 		let ty = self.memo(n, |w| {
-			let mut current = if chained {
-				w.strip_none(receiver).0
+			let mut current = if optional {
+				w.optional_receiver(n, target, receiver)
+			} else if chained {
+				w.a.optional_results
+					.get(&target)
+					.copied()
+					.unwrap_or(receiver)
 			} else {
 				receiver
 			};
@@ -836,6 +851,13 @@ impl Walker<'_> {
 			let mut written = w.written_decl(target);
 			let mut origin = w.written_origin(target);
 			for member in members.iter() {
+				// Consecutive `?.` operators share one syntax node.
+				if optional {
+					current = w.strip_none(current).0;
+				}
+				if chained {
+					w.a.optional_receivers.insert(member, current);
+				}
 				w.receiver_decl = written.take();
 				let owner_origin = origin.clone();
 				let saved_origin = std::mem::replace(&mut w.receiver_origin, origin.take());
@@ -877,6 +899,7 @@ impl Walker<'_> {
 				w.a.written_types.insert(n, origin);
 			}
 			if chained {
+				w.a.optional_results.insert(n, current);
 				w.s.types.optional(current)
 			} else {
 				current

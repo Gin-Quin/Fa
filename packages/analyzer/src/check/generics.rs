@@ -876,6 +876,17 @@ impl Walker<'_> {
 			TypeKind::Param(param) if bindings.params.contains(&param) => {
 				bindings.origins.entry(param).or_insert(origin);
 			}
+			TypeKind::Union(list) => {
+				let members = self.s.types.list_items(list);
+				if members.len() == 2 && members.contains(&TypeId::NONE) {
+					let present = members
+						.iter()
+						.copied()
+						.find(|&ty| ty != TypeId::NONE)
+						.expect("an optional has a present member");
+					self.infer_type_origin(present, origin, bindings);
+				}
+			}
 			TypeKind::Object(shape) => {
 				let fields = self.s.types.shape_fields(shape).to_vec();
 				for field in fields {
@@ -1372,7 +1383,18 @@ impl Walker<'_> {
 			return self
 				.a
 				.function(declaration)
-				.map(|info| info.generics.clone())
+				.map(|info| {
+					if !info.generics.is_empty() {
+						return info.generics.clone();
+					}
+					// In its own body a generic function is the current
+					// instance, but its erased call still forwards its binders.
+					self.generic_params
+						.get(&info.lambda)
+						.or_else(|| self.generic_params.get(&declaration))
+						.cloned()
+						.unwrap_or_default()
+				})
 				.unwrap_or_default();
 		}
 		let named = match self.view(callee) {

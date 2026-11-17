@@ -9,6 +9,7 @@ import { FaStop } from "./stops.js";
 import {
 	Cancelled,
 	ChannelClosed,
+	faAsyncOnlyValue,
 	faAsyncValue,
 	faBindGenerics,
 	faCallValue,
@@ -35,6 +36,23 @@ import {
 function root() {
 	return new FaTask(null);
 }
+
+test("async-only method values retain independent task-first entries", async () => {
+	const task = root();
+	const first = faAsyncOnlyValue((received, value) => {
+		expect(received).toBe(task);
+		return value + 1;
+	});
+	const second = faAsyncOnlyValue((received, value) => {
+		expect(received).toBe(task);
+		return value + 2;
+	});
+	expect(first).not.toBe(second);
+	expect(await faCallValue(task, first, 10)).toBe(11);
+	expect(await faCallValue(task, second, 10)).toBe(12);
+	expect(await faCallValue(task, first, 20)).toBe(21);
+	expect(() => first()).toThrow(FaStop);
+});
 
 describe("start and await", () => {
 	test("a started task begins in a microtask, not at once", async () => {

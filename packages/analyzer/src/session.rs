@@ -1419,8 +1419,11 @@ fn merge_interface(
 			.map(|&(key, span)| (merger.decl_key(key), span))
 			.collect(),
 		complete: interface.complete,
-		// node keys and plain data: nothing to translate (check/tasks.rs)
-		async_summaries: interface.async_summaries.clone(),
+		async_summaries: interface
+			.async_summaries
+			.iter()
+			.map(|(&node, summary)| (node, summary.merged(merger)))
+			.collect(),
 		relations: interface
 			.relations
 			.iter()

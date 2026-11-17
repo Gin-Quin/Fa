@@ -1,0 +1,14 @@
+-- Optional started calls must not dereference an absent receiver.
+type Box = {
+	name: String
+	async function describe = (self): String => {
+		await std.time.sleep(1)
+		self.name
+	}
+}
+async function check = (box: Box?) => {
+	let task: Task<String?> = start box?.describe()
+	console.log(await task)
+}
+await check(none)
+await check(Box { name = "Ada" })

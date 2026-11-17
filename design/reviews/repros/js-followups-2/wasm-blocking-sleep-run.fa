@@ -1,0 +1,16 @@
+-- `fa run --target=wasm` prints both lines; `fa build --target=wasm` reports CONC010
+-- (sleep is async-only on wasm, so the blocking `describe(value)` must be refused).
+type Labeled<label: String> = {
+	name: String
+	async function describe = (self): String => {
+		await std.time.sleep(1)
+		return "{label}: {self.name}"
+	}
+}
+async function describe = <Item: { describe: async (self) => String }>(item: Item): String =>
+	await item.describe()
+let value = Labeled<"async"> { name = "Ada" }
+console.log(await describe(value))
+-- prints: async: Ada
+console.log(describe(value))
+-- prints: async: Ada

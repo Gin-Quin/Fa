@@ -76,7 +76,10 @@ impl Generator<'_> {
 				Expr::primary(format!("{}n", self.types.syms.resolve(name)))
 			}
 			ConstValue::EnumMember(nominal, index) => self.enum_value(nominal, index),
-			ConstValue::Binding(_) => self.unsupported(node, "a nonconstant reference key"),
+			ConstValue::Binding(_) => self.internal_error(
+				node,
+				"the checked static reference layout contains a nonconstant key",
+			),
 		}
 	}
 
@@ -249,7 +252,10 @@ impl Generator<'_> {
 
 	pub(crate) fn read_reference_call(&mut self, node: NodeId) -> Expr {
 		let View::Call { callee, .. } = self.view(node) else {
-			return self.unsupported(node, "this reference call");
+			return self.internal_error(
+				node,
+				"the reference-call reader received a node that is not a call",
+			);
 		};
 		let Some(parts) = self.call_reference_parts(node, callee) else {
 			return self.unsupported(node, "this reference call");
@@ -1131,7 +1137,10 @@ impl Generator<'_> {
 
 	pub(crate) fn reuse_statement(&mut self, node: NodeId, value: NodeId) {
 		let Resolution::Local(symbol) = self.analysis.resolution(node) else {
-			self.unsupported(node, "this reuse");
+			self.internal_error(
+				node,
+				"the checked reuse target has no local reference symbol",
+			);
 			return;
 		};
 		match self.references.get(&symbol).cloned() {
@@ -1573,18 +1582,10 @@ impl Generator<'_> {
 		}
 	}
 
-	pub(crate) fn reference_slot(&self, node: NodeId) -> Option<String> {
-		let Resolution::Local(symbol) = self.analysis.resolution(self.strip_reference(node)) else {
-			return None;
-		};
-		if let Some(Reference::Place(Parts {
-			key: Key::Index(key) | Key::Entry(key) | Key::Dynamic(key),
-			..
-		})) = self.references.get(&symbol)
-		{
-			return Some(key.text.clone());
-		}
-		self.map_aliases.get(&symbol).map(|(_, key)| key.clone())
+	/// The slot of an evaluated pool reference, including a direct call's
+	/// result. This uses the same locator lowering as reference arguments.
+	pub(crate) fn reference_slot(&mut self, node: NodeId) -> Option<Expr> {
+		self.reference_pair(node).map(|(_, key)| key)
 	}
 
 	/// The node of a place without its parentheses and `try`.

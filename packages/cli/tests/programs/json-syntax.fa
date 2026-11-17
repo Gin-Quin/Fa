@@ -1,0 +1,464 @@
+-- skip-target: native-freestanding
+-- Syntax diagnostics are Fa's, on every engine and for String or Bytes.
+use { Json } = std.json
+function message = (text: String | Bytes): String => {
+	let _value: Integer = Json.parse(text) catch error => {
+		return error.message
+	}
+	"unexpected success"
+}
+function attempt = (text: String | Bytes) => {
+	console.log(message(text))
+}
+attempt("")
+static result0 = message("")
+console.log(result0)
+-- prints: JSON Parse error: Unexpected EOF
+-- prints: JSON Parse error: Unexpected EOF
+attempt("".toUtf8())
+static result1 = message("".toUtf8())
+console.log(result1)
+-- prints: JSON Parse error: Unexpected EOF
+-- prints: JSON Parse error: Unexpected EOF
+attempt("{{")
+static result2 = message("{{")
+console.log(result2)
+-- prints: JSON Parse error: Expected '}'
+-- prints: JSON Parse error: Expected '}'
+attempt("{{".toUtf8())
+static result3 = message("{{".toUtf8())
+console.log(result3)
+-- prints: JSON Parse error: Expected '}'
+-- prints: JSON Parse error: Expected '}'
+attempt("{{\"a\"")
+static result4 = message("{{\"a\"")
+console.log(result4)
+-- prints: JSON Parse error: Expected ':' before value in object property definition
+-- prints: JSON Parse error: Expected ':' before value in object property definition
+attempt("{{\"a\"".toUtf8())
+static result5 = message("{{\"a\"".toUtf8())
+console.log(result5)
+-- prints: JSON Parse error: Expected ':' before value in object property definition
+-- prints: JSON Parse error: Expected ':' before value in object property definition
+attempt("{{\"a\":")
+static result6 = message("{{\"a\":")
+console.log(result6)
+-- prints: JSON Parse error: Unexpected EOF
+-- prints: JSON Parse error: Unexpected EOF
+attempt("{{\"a\":".toUtf8())
+static result7 = message("{{\"a\":".toUtf8())
+console.log(result7)
+-- prints: JSON Parse error: Unexpected EOF
+-- prints: JSON Parse error: Unexpected EOF
+attempt("{{\"a\":1")
+static result8 = message("{{\"a\":1")
+console.log(result8)
+-- prints: JSON Parse error: Expected '}'
+-- prints: JSON Parse error: Expected '}'
+attempt("{{\"a\":1".toUtf8())
+static result9 = message("{{\"a\":1".toUtf8())
+console.log(result9)
+-- prints: JSON Parse error: Expected '}'
+-- prints: JSON Parse error: Expected '}'
+attempt("{{\"a\":1,}}")
+static result10 = message("{{\"a\":1,}}")
+console.log(result10)
+-- prints: JSON Parse error: Property name must be a string literal
+-- prints: JSON Parse error: Property name must be a string literal
+attempt("{{\"a\":1,}}".toUtf8())
+static result11 = message("{{\"a\":1,}}".toUtf8())
+console.log(result11)
+-- prints: JSON Parse error: Property name must be a string literal
+-- prints: JSON Parse error: Property name must be a string literal
+attempt("[")
+static result12 = message("[")
+console.log(result12)
+-- prints: JSON Parse error: Unexpected EOF
+-- prints: JSON Parse error: Unexpected EOF
+attempt("[".toUtf8())
+static result13 = message("[".toUtf8())
+console.log(result13)
+-- prints: JSON Parse error: Unexpected EOF
+-- prints: JSON Parse error: Unexpected EOF
+attempt("[1")
+static result14 = message("[1")
+console.log(result14)
+-- prints: JSON Parse error: Expected ']'
+-- prints: JSON Parse error: Expected ']'
+attempt("[1".toUtf8())
+static result15 = message("[1".toUtf8())
+console.log(result15)
+-- prints: JSON Parse error: Expected ']'
+-- prints: JSON Parse error: Expected ']'
+attempt("[1,]")
+static result16 = message("[1,]")
+console.log(result16)
+-- prints: JSON Parse error: Unexpected comma at the end of array expression
+-- prints: JSON Parse error: Unexpected comma at the end of array expression
+attempt("[1,]".toUtf8())
+static result17 = message("[1,]".toUtf8())
+console.log(result17)
+-- prints: JSON Parse error: Unexpected comma at the end of array expression
+-- prints: JSON Parse error: Unexpected comma at the end of array expression
+attempt("[1,")
+static result18 = message("[1,")
+console.log(result18)
+-- prints: JSON Parse error: Unexpected EOF
+-- prints: JSON Parse error: Unexpected EOF
+attempt("[1,".toUtf8())
+static result19 = message("[1,".toUtf8())
+console.log(result19)
+-- prints: JSON Parse error: Unexpected EOF
+-- prints: JSON Parse error: Unexpected EOF
+attempt("[1 2]")
+static result20 = message("[1 2]")
+console.log(result20)
+-- prints: JSON Parse error: Expected ']'
+-- prints: JSON Parse error: Expected ']'
+attempt("[1 2]".toUtf8())
+static result21 = message("[1 2]".toUtf8())
+console.log(result21)
+-- prints: JSON Parse error: Expected ']'
+-- prints: JSON Parse error: Expected ']'
+attempt("null true")
+static result22 = message("null true")
+console.log(result22)
+-- prints: JSON Parse error: Unable to parse JSON string
+-- prints: JSON Parse error: Unable to parse JSON string
+attempt("null true".toUtf8())
+static result23 = message("null true".toUtf8())
+console.log(result23)
+-- prints: JSON Parse error: Unable to parse JSON string
+-- prints: JSON Parse error: Unable to parse JSON string
+attempt("01")
+static result24 = message("01")
+console.log(result24)
+-- prints: JSON Parse error: Unable to parse JSON string
+-- prints: JSON Parse error: Unable to parse JSON string
+attempt("01".toUtf8())
+static result25 = message("01".toUtf8())
+console.log(result25)
+-- prints: JSON Parse error: Unable to parse JSON string
+-- prints: JSON Parse error: Unable to parse JSON string
+attempt("-")
+static result26 = message("-")
+console.log(result26)
+-- prints: JSON Parse error: Invalid number
+-- prints: JSON Parse error: Invalid number
+attempt("-".toUtf8())
+static result27 = message("-".toUtf8())
+console.log(result27)
+-- prints: JSON Parse error: Invalid number
+-- prints: JSON Parse error: Invalid number
+attempt("1.")
+static result28 = message("1.")
+console.log(result28)
+-- prints: JSON Parse error: Invalid digits after decimal point
+-- prints: JSON Parse error: Invalid digits after decimal point
+attempt("1.".toUtf8())
+static result29 = message("1.".toUtf8())
+console.log(result29)
+-- prints: JSON Parse error: Invalid digits after decimal point
+-- prints: JSON Parse error: Invalid digits after decimal point
+attempt("1e+")
+static result30 = message("1e+")
+console.log(result30)
+-- prints: JSON Parse error: Unable to parse JSON string
+-- prints: JSON Parse error: Unable to parse JSON string
+attempt("1e+".toUtf8())
+static result31 = message("1e+".toUtf8())
+console.log(result31)
+-- prints: JSON Parse error: Unable to parse JSON string
+-- prints: JSON Parse error: Unable to parse JSON string
+attempt("tru")
+static result32 = message("tru")
+console.log(result32)
+-- prints: JSON Parse error: Unexpected identifier "tru"
+-- prints: JSON Parse error: Unexpected identifier "tru"
+attempt("tru".toUtf8())
+static result33 = message("tru".toUtf8())
+console.log(result33)
+-- prints: JSON Parse error: Unexpected identifier "tru"
+-- prints: JSON Parse error: Unexpected identifier "tru"
+attempt("true_")
+static result34 = message("true_")
+console.log(result34)
+-- prints: JSON Parse error: Unexpected identifier "true_"
+-- prints: JSON Parse error: Unexpected identifier "true_"
+attempt("true_".toUtf8())
+static result35 = message("true_".toUtf8())
+console.log(result35)
+-- prints: JSON Parse error: Unexpected identifier "true_"
+-- prints: JSON Parse error: Unexpected identifier "true_"
+attempt(".")
+static result36 = message(".")
+console.log(result36)
+-- prints: JSON Parse error: Unexpected token '.'
+-- prints: JSON Parse error: Unexpected token '.'
+attempt(".".toUtf8())
+static result37 = message(".".toUtf8())
+console.log(result37)
+-- prints: JSON Parse error: Unexpected token '.'
+-- prints: JSON Parse error: Unexpected token '.'
+attempt("]")
+static result38 = message("]")
+console.log(result38)
+-- prints: JSON Parse error: Unexpected token ']'
+-- prints: JSON Parse error: Unexpected token ']'
+attempt("]".toUtf8())
+static result39 = message("]".toUtf8())
+console.log(result39)
+-- prints: JSON Parse error: Unexpected token ']'
+-- prints: JSON Parse error: Unexpected token ']'
+attempt("@")
+static result40 = message("@")
+console.log(result40)
+-- prints: JSON Parse error: Unrecognized token '@'
+-- prints: JSON Parse error: Unrecognized token '@'
+attempt("@".toUtf8())
+static result41 = message("@".toUtf8())
+console.log(result41)
+-- prints: JSON Parse error: Unrecognized token '@'
+-- prints: JSON Parse error: Unrecognized token '@'
+attempt("😀")
+static result42 = message("😀")
+console.log(result42)
+-- prints: JSON Parse error: Unrecognized token '😀'
+-- prints: JSON Parse error: Unrecognized token '😀'
+attempt("😀".toUtf8())
+static result43 = message("😀".toUtf8())
+console.log(result43)
+-- prints: JSON Parse error: Unrecognized token '😀'
+-- prints: JSON Parse error: Unrecognized token '😀'
+attempt("\"unfinished")
+static result44 = message("\"unfinished")
+console.log(result44)
+-- prints: JSON Parse error: Unterminated string
+-- prints: JSON Parse error: Unterminated string
+attempt("\"unfinished".toUtf8())
+static result45 = message("\"unfinished".toUtf8())
+console.log(result45)
+-- prints: JSON Parse error: Unterminated string
+-- prints: JSON Parse error: Unterminated string
+attempt("\"\\q")
+static result46 = message("\"\\q")
+console.log(result46)
+-- prints: JSON Parse error: Unterminated string
+-- prints: JSON Parse error: Unterminated string
+attempt("\"\\q".toUtf8())
+static result47 = message("\"\\q".toUtf8())
+console.log(result47)
+-- prints: JSON Parse error: Unterminated string
+-- prints: JSON Parse error: Unterminated string
+attempt("\"\\q\"")
+static result48 = message("\"\\q\"")
+console.log(result48)
+-- prints: JSON Parse error: Invalid escape character q
+-- prints: JSON Parse error: Invalid escape character q
+attempt("\"\\q\"".toUtf8())
+static result49 = message("\"\\q\"".toUtf8())
+console.log(result49)
+-- prints: JSON Parse error: Invalid escape character q
+-- prints: JSON Parse error: Invalid escape character q
+attempt("\"\\u12z4\"")
+static result50 = message("\"\\u12z4\"")
+console.log(result50)
+-- prints: JSON Parse error: \u must be followed by 4 hex digits
+-- prints: JSON Parse error: \u must be followed by 4 hex digits
+attempt("\"\\u12z4\"".toUtf8())
+static result51 = message("\"\\u12z4\"".toUtf8())
+console.log(result51)
+-- prints: JSON Parse error: \u must be followed by 4 hex digits
+-- prints: JSON Parse error: \u must be followed by 4 hex digits
+attempt("\"\\u123\"")
+static result52 = message("\"\\u123\"")
+console.log(result52)
+-- prints: JSON Parse error: \u must be followed by 4 hex digits
+-- prints: JSON Parse error: \u must be followed by 4 hex digits
+attempt("\"\\u123\"".toUtf8())
+static result53 = message("\"\\u123\"".toUtf8())
+console.log(result53)
+-- prints: JSON Parse error: \u must be followed by 4 hex digits
+-- prints: JSON Parse error: \u must be followed by 4 hex digits
+attempt("\"\n\"")
+static result54 = message("\"\n\"")
+console.log(result54)
+-- prints: JSON Parse error: Unterminated string
+-- prints: JSON Parse error: Unterminated string
+attempt("\"\n\"".toUtf8())
+static result55 = message("\"\n\"".toUtf8())
+console.log(result55)
+-- prints: JSON Parse error: Unterminated string
+-- prints: JSON Parse error: Unterminated string
+
+-- Strict UTF-8 validation precedes JSON grammar, including quoted input.
+attempt(Bytes.from([255]))
+-- prints: invalid UTF-8 in JSON input
+static result56 = message(Bytes.from([255]))
+console.log(result56)
+-- prints: invalid UTF-8 in JSON input
+attempt(Bytes.from([34, 255, 34]))
+-- prints: invalid UTF-8 in JSON input
+static result57 = message(Bytes.from([34, 255, 34]))
+console.log(result57)
+-- prints: invalid UTF-8 in JSON input
+attempt(Bytes.from([128]))
+-- prints: invalid UTF-8 in JSON input
+static result58 = message(Bytes.from([128]))
+console.log(result58)
+-- prints: invalid UTF-8 in JSON input
+attempt(Bytes.from([192, 128]))
+-- prints: invalid UTF-8 in JSON input
+static result59 = message(Bytes.from([192, 128]))
+console.log(result59)
+-- prints: invalid UTF-8 in JSON input
+attempt(Bytes.from([224, 128, 128]))
+-- prints: invalid UTF-8 in JSON input
+static result60 = message(Bytes.from([224, 128, 128]))
+console.log(result60)
+-- prints: invalid UTF-8 in JSON input
+attempt(Bytes.from([237, 160, 128]))
+-- prints: invalid UTF-8 in JSON input
+static result61 = message(Bytes.from([237, 160, 128]))
+console.log(result61)
+-- prints: invalid UTF-8 in JSON input
+attempt(Bytes.from([244, 144, 128, 128]))
+-- prints: invalid UTF-8 in JSON input
+static result62 = message(Bytes.from([244, 144, 128, 128]))
+console.log(result62)
+-- prints: invalid UTF-8 in JSON input
+attempt(Bytes.from([226, 130]))
+-- prints: invalid UTF-8 in JSON input
+static result63 = message(Bytes.from([226, 130]))
+console.log(result63)
+-- prints: invalid UTF-8 in JSON input
+attempt(Bytes.from([34, 97, 34, 255]))
+-- prints: invalid UTF-8 in JSON input
+static result64 = message(Bytes.from([34, 97, 34, 255]))
+console.log(result64)
+-- prints: invalid UTF-8 in JSON input
+attempt(Bytes.from([239, 187, 191, 49]))
+-- prints: JSON Parse error: Unrecognized token '﻿'
+static result65 = message(Bytes.from([239, 187, 191, 49]))
+console.log(result65)
+-- prints: JSON Parse error: Unrecognized token '﻿'
+
+-- Native's 1000-container boundary also applies to successful parsing.
+-- The extra field is ignored by conversion, after syntax validation.
+function depthMessage = (text: String | Bytes): String => {
+	let _value: { marker: Integer? } = Json.parse(text) catch error => { return error.message }
+	"ok"
+}
+static deep999Text = depthMessage("{{\"data\":" + "[".repeat(999) + "0" + "]".repeat(999) + "}}")
+console.log(deep999Text)                                                                  -- prints: ok
+console.log(depthMessage("{{\"data\":" + "[".repeat(999) + "0" + "]".repeat(999) + "}}")) -- prints: ok
+static deep999Bytes = depthMessage(
+	("{{\"data\":" + "[".repeat(999) + "0" + "]".repeat(999) + "}}").toUtf8()
+)
+console.log(deep999Bytes) -- prints: ok
+console.log(
+	depthMessage(("{{\"data\":" + "[".repeat(999) + "0" + "]".repeat(999) + "}}").toUtf8())
+) -- prints: ok
+static deep1000Text = depthMessage("{{\"data\":" + "[".repeat(1000) + "0" + "]".repeat(1000) + "}}")
+console.log(deep1000Text)                                                                   -- prints: JSON Parse error: Exceeded the maximum depth
+console.log(depthMessage("{{\"data\":" + "[".repeat(1000) + "0" + "]".repeat(1000) + "}}")) -- prints: JSON Parse error: Exceeded the maximum depth
+static deep1000Bytes = depthMessage(
+	("{{\"data\":" + "[".repeat(1000) + "0" + "]".repeat(1000) + "}}").toUtf8()
+)
+console.log(deep1000Bytes) -- prints: JSON Parse error: Exceeded the maximum depth
+console.log(
+	depthMessage(("{{\"data\":" + "[".repeat(1000) + "0" + "]".repeat(1000) + "}}").toUtf8())
+) -- prints: JSON Parse error: Exceeded the maximum depth
+static deep1001Text = depthMessage("{{\"data\":" + "[".repeat(1001) + "0" + "]".repeat(1001) + "}}")
+console.log(deep1001Text)                                                                   -- prints: JSON Parse error: Exceeded the maximum depth
+console.log(depthMessage("{{\"data\":" + "[".repeat(1001) + "0" + "]".repeat(1001) + "}}")) -- prints: JSON Parse error: Exceeded the maximum depth
+static deep1001Bytes = depthMessage(
+	("{{\"data\":" + "[".repeat(1001) + "0" + "]".repeat(1001) + "}}").toUtf8()
+)
+console.log(deep1001Bytes) -- prints: JSON Parse error: Exceeded the maximum depth
+console.log(
+	depthMessage(("{{\"data\":" + "[".repeat(1001) + "0" + "]".repeat(1001) + "}}").toUtf8())
+) -- prints: JSON Parse error: Exceeded the maximum depth
+
+-- Remaining UTF-8 prefix/continuation widths and line-independent diagnostics.
+attempt(Bytes.from([194])) -- prints: invalid UTF-8 in JSON input
+static utf8Extra0 = message(Bytes.from([194]))
+console.log(utf8Extra0)              -- prints: invalid UTF-8 in JSON input
+attempt(Bytes.from([240, 159, 146])) -- prints: invalid UTF-8 in JSON input
+static utf8Extra1 = message(Bytes.from([240, 159, 146]))
+console.log(utf8Extra1)             -- prints: invalid UTF-8 in JSON input
+attempt(Bytes.from([226, 40, 161])) -- prints: invalid UTF-8 in JSON input
+static utf8Extra2 = message(Bytes.from([226, 40, 161]))
+console.log(utf8Extra2)                   -- prints: invalid UTF-8 in JSON input
+attempt(Bytes.from([240, 128, 128, 128])) -- prints: invalid UTF-8 in JSON input
+static utf8Extra3 = message(Bytes.from([240, 128, 128, 128]))
+console.log(utf8Extra3)                   -- prints: invalid UTF-8 in JSON input
+attempt(Bytes.from([245, 128, 128, 128])) -- prints: invalid UTF-8 in JSON input
+static utf8Extra4 = message(Bytes.from([245, 128, 128, 128]))
+console.log(utf8Extra4)        -- prints: invalid UTF-8 in JSON input
+attempt(Bytes.from([194, 32])) -- prints: invalid UTF-8 in JSON input
+static utf8Extra5 = message(Bytes.from([194, 32]))
+console.log(utf8Extra5)         -- prints: invalid UTF-8 in JSON input
+attempt(Bytes.from([224, 160])) -- prints: invalid UTF-8 in JSON input
+static utf8Extra6 = message(Bytes.from([224, 160]))
+console.log(utf8Extra6) -- prints: invalid UTF-8 in JSON input
+attempt("\n[1,]")       -- prints: JSON Parse error: Unexpected comma at the end of array expression
+static multiline = message("\n[1,]")
+console.log(multiline) -- prints: JSON Parse error: Unexpected comma at the end of array expression
+
+-- Diagnostic text preserves complete scalars and lone UTF-16 units.
+function quotedMessage = (text: String | Bytes): String =>
+	"quoted: " + Json.stringify(message(text))
+static high = "\u{10000}"[0]
+static low = "\u{10000}"[1]
+static invalidEscapeScalarText0 = quotedMessage("\"\\é\"")
+console.log(invalidEscapeScalarText0) -- prints: quoted: "JSON Parse error: Invalid escape character é"
+console.log(quotedMessage("\"\\é\"")) -- prints: quoted: "JSON Parse error: Invalid escape character é"
+static invalidEscapeScalarBytes0 = quotedMessage(("\"\\é\"").toUtf8())
+console.log(invalidEscapeScalarBytes0)           -- prints: quoted: "JSON Parse error: Invalid escape character é"
+console.log(quotedMessage(("\"\\é\"").toUtf8())) -- prints: quoted: "JSON Parse error: Invalid escape character é"
+static invalidEscapeScalarText1 = quotedMessage("\"\\😀\"")
+console.log(invalidEscapeScalarText1) -- prints: quoted: "JSON Parse error: Invalid escape character 😀"
+console.log(quotedMessage("\"\\😀\"")) -- prints: quoted: "JSON Parse error: Invalid escape character 😀"
+static invalidEscapeScalarBytes1 = quotedMessage(("\"\\😀\"").toUtf8())
+console.log(invalidEscapeScalarBytes1)           -- prints: quoted: "JSON Parse error: Invalid escape character 😀"
+console.log(quotedMessage(("\"\\😀\"").toUtf8())) -- prints: quoted: "JSON Parse error: Invalid escape character 😀"
+static errorUnit0 = quotedMessage(high)
+console.log(errorUnit0)          -- prints: quoted: "JSON Parse error: Unrecognized token '\ud800'"
+console.log(quotedMessage(high)) -- prints: quoted: "JSON Parse error: Unrecognized token '\ud800'"
+static errorUnit1 = quotedMessage(low)
+console.log(errorUnit1)         -- prints: quoted: "JSON Parse error: Unrecognized token '\udc00'"
+console.log(quotedMessage(low)) -- prints: quoted: "JSON Parse error: Unrecognized token '\udc00'"
+static errorUnit2 = quotedMessage("\"\\" + high + "\"")
+console.log(errorUnit2)                          -- prints: quoted: "JSON Parse error: Invalid escape character \ud800"
+console.log(quotedMessage("\"\\" + high + "\"")) -- prints: quoted: "JSON Parse error: Invalid escape character \ud800"
+static errorUnit3 = quotedMessage("\"\\" + low + "\"")
+console.log(errorUnit3)                         -- prints: quoted: "JSON Parse error: Invalid escape character \udc00"
+console.log(quotedMessage("\"\\" + low + "\"")) -- prints: quoted: "JSON Parse error: Invalid escape character \udc00"
+static errorUnit4 = quotedMessage("[" + high)
+console.log(errorUnit4)                -- prints: quoted: "JSON Parse error: Unrecognized token '\ud800'"
+console.log(quotedMessage("[" + high)) -- prints: quoted: "JSON Parse error: Unrecognized token '\ud800'"
+static errorUnit5 = quotedMessage("{{" + high)
+console.log(errorUnit5)                 -- prints: quoted: "JSON Parse error: Expected '}'"
+console.log(quotedMessage("{{" + high)) -- prints: quoted: "JSON Parse error: Expected '}'"
+static errorUnit6 = quotedMessage("null " + high)
+console.log(errorUnit6)                    -- prints: quoted: "JSON Parse error: Unable to parse JSON string"
+console.log(quotedMessage("null " + high)) -- prints: quoted: "JSON Parse error: Unable to parse JSON string"
+static errorUnit7 = quotedMessage("\"\\q" + high)
+console.log(errorUnit7)                    -- prints: quoted: "JSON Parse error: Unterminated string"
+console.log(quotedMessage("\"\\q" + high)) -- prints: quoted: "JSON Parse error: Unterminated string"
+
+-- Obtain lone units through a runtime call as well as a static constant.
+function inputUnit = (text: String, index: Integer): String throws IndexError => try text[index]
+static dynamicUnitError0 = quotedMessage(inputUnit("\u{10000}", 0))
+console.log(dynamicUnitError0)                            -- prints: quoted: "JSON Parse error: Unrecognized token '\ud800'"
+console.log(quotedMessage(try inputUnit("\u{10000}", 0))) -- prints: quoted: "JSON Parse error: Unrecognized token '\ud800'"
+static dynamicUnitError1 = quotedMessage(inputUnit("\u{10000}", 1))
+console.log(dynamicUnitError1)                            -- prints: quoted: "JSON Parse error: Unrecognized token '\udc00'"
+console.log(quotedMessage(try inputUnit("\u{10000}", 1))) -- prints: quoted: "JSON Parse error: Unrecognized token '\udc00'"
+static dynamicUnitError2 = quotedMessage("\"\\" + (inputUnit("\u{10000}", 0)) + "\"")
+console.log(dynamicUnitError2)                                              -- prints: quoted: "JSON Parse error: Invalid escape character \ud800"
+console.log(quotedMessage("\"\\" + (try inputUnit("\u{10000}", 0)) + "\"")) -- prints: quoted: "JSON Parse error: Invalid escape character \ud800"
+static dynamicUnitError3 = quotedMessage("\"\\" + (inputUnit("\u{10000}", 1)) + "\"")
+console.log(dynamicUnitError3)                                              -- prints: quoted: "JSON Parse error: Invalid escape character \udc00"
+console.log(quotedMessage("\"\\" + (try inputUnit("\u{10000}", 1)) + "\"")) -- prints: quoted: "JSON Parse error: Invalid escape character \udc00"

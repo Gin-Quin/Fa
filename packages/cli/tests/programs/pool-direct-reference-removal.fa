@@ -1,0 +1,22 @@
+-- A removal selects the returned slot, even when another element is equal.
+mutable values: Pool<Integer> = [1, 1]
+values.delete(values.add(1))
+console.log(values.size) -- prints: 2
+
+function append = (values: Pool<Integer>, value: Integer): Integer in values mutates values.size =>
+	values.add(value)
+console.log(values.take(append(values, 7)), values.size) -- prints: 7 2
+
+use first = values.find((value) => value == 1)
+if first is not none {
+	values.delete(first)
+}
+console.log(values.size) -- prints: 1
+
+mutable columns: Columnar<{ value: Integer }> = [{ value = 2 }, { value = 2 }]
+console.log(columns.take(columns.add({ value = 2 })).value, columns.size) -- prints: 2 2
+
+type Entry = Integer | { code: Integer }
+mutable mixed: Pool<Entry> = [1, { code = 1 }]
+mixed.delete(mixed.add({ code = 1 }))
+console.log(mixed.size) -- prints: 2

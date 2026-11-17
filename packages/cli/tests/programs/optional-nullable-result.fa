@@ -1,0 +1,12 @@
+-- A method's own absence is guarded separately from the receiver's absence.
+type Box = {
+	name: String?
+	function maybe = (self): String? => self.name
+}
+function good = (value: Box?): String? => value?.maybe()?.trim()
+console.log(good(none), good(Box { name = none }), good(Box { name = " Ada " }))
+-- prints: none none Ada
+static absent = good(none)
+static nullable = good(Box { name = none })
+static present = good(Box { name = " Ada " })
+console.log(absent, nullable, present) -- prints: none none Ada

@@ -660,6 +660,10 @@ pub struct Analysis {
 	pub method_instantiations: FxHashMap<NodeId, WrittenType>,
 	/// Every call node: its callee and its arguments in parameter order.
 	pub calls: FxHashMap<NodeId, CallInfo>,
+	/// Receiver types on the present path of an optional chain, keyed by member.
+	pub optional_receivers: FxHashMap<NodeId, TypeId>,
+	/// Present-path results before the chain adds absence (including nullable results).
+	pub optional_results: FxHashMap<NodeId, TypeId>,
 	/// Throwing callbacks given to a non-storing user function: each given
 	/// argument node and the function parameter's type widened with its
 	/// callback errors. Native instances use precisely these signatures.
@@ -922,6 +926,9 @@ pub struct AsyncSummary {
 	pub starts: bool,
 	/// The targets where its synchronous instance can exist.
 	pub blocking: TargetSet,
+	/// Methods actually called through generic constraints. Their blocking
+	/// restrictions are substituted at each application, not at declaration.
+	pub methods: Vec<AsyncMethod>,
 	/// Why targets are missing from `blocking`: the targets removed, and
 	/// the call chain down to the primitive (`load → lock (…)`). Not part
 	/// of the interface hash.
@@ -937,6 +944,7 @@ impl Default for AsyncSummary {
 			suspends: false,
 			starts: false,
 			blocking: TargetSet::all(),
+			methods: Vec::new(),
 			blocked_by: Vec::new(),
 			reason: None,
 		}
@@ -944,12 +952,80 @@ impl Default for AsyncSummary {
 }
 
 impl AsyncSummary {
+	/// Merge the synchronous-entry requirements, retaining conditional methods.
+	pub(crate) fn merge_blocking(&mut self, dep: &Self, name: &str) {
+		for method in &dep.methods {
+			if !self.methods.contains(method) {
+				self.methods.push(*method);
+			}
+		}
+		self.methods.sort_unstable();
+		let removed = self.blocking - dep.blocking;
+		if removed.is_empty() {
+			return;
+		}
+		self.blocking -= removed;
+		for (targets, chain) in &dep.blocked_by {
+			let lost = *targets & removed;
+			if !lost.is_empty() {
+				self.blocked_by.push((lost, format!("{name} → {chain}")));
+			}
+		}
+		let explained = dep
+			.blocked_by
+			.iter()
+			.fold(TargetSet::empty(), |all, (targets, _)| all | *targets);
+		let unexplained = removed - explained;
+		if !unexplained.is_empty() {
+			self.blocked_by.push((unexplained, name.to_string()));
+		}
+	}
+
+	pub(crate) fn merged(&self, merger: &mut crate::types::merge::Merger<'_>) -> Self {
+		Self {
+			methods: self
+				.methods
+				.iter()
+				.map(|method| AsyncMethod {
+					owner: merger.decl_key(method.owner),
+					parameter: method.parameter,
+					name: merger.sym(method.name),
+				})
+				.collect(),
+			..self.clone()
+		}
+	}
+
 	/// The chain that makes a blocking call impossible on `target`.
 	pub fn chain(&self, target: TargetSet) -> Option<&str> {
 		self.blocked_by
 			.iter()
 			.find(|(targets, _)| targets.intersects(target))
 			.map(|(_, chain)| chain.as_str())
+	}
+}
+
+/// A method requirement uses declaration identity rather than a structural
+/// type, so equal layouts and renamed generic parameters cannot mix owners.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct AsyncMethod {
+	pub owner: crate::ids::DeclKey,
+	pub parameter: u16,
+	pub name: crate::ids::Sym,
+}
+
+impl AsyncMethod {
+	pub(crate) fn new(
+		types: &crate::types::TypeStore,
+		param: ParamId,
+		name: crate::ids::Sym,
+	) -> Self {
+		let info = types.param(param);
+		Self {
+			owner: info.owner,
+			parameter: info.index,
+			name,
+		}
 	}
 }
 
@@ -1662,6 +1738,8 @@ impl Analysis {
 			function_owners: FxHashMap::default(),
 			method_instantiations: FxHashMap::default(),
 			calls: FxHashMap::default(),
+			optional_receivers: FxHashMap::default(),
+			optional_results: FxHashMap::default(),
 			callback_types: FxHashMap::default(),
 			escapes: rustc_hash::FxHashSet::default(),
 			non_escaping: rustc_hash::FxHashSet::default(),
@@ -1848,6 +1926,95 @@ impl Analysis {
 	/// The type arguments of a generic call or literal (M2).
 	pub fn instantiation(&self, node: NodeId) -> Option<ListId> {
 		self.instantiations.get(&node).copied()
+	}
+
+	/// The explicit application carrying a call's inferred/written arguments.
+	pub fn generic_application_site(
+		&self,
+		tree: &fa_parser::TypedSyntaxTree,
+		call: NodeId,
+	) -> NodeId {
+		use crate::syntax::{self, View};
+		if let View::Call { callee, .. } = syntax::view(tree, call) {
+			let callee = Self::ungroup(tree, callee);
+			if self.has_flags(callee, NodeFlags::GENERIC_APPLICATION) {
+				return callee;
+			}
+		}
+		call
+	}
+
+	fn ungroup(tree: &fa_parser::TypedSyntaxTree, mut node: NodeId) -> NodeId {
+		while let crate::syntax::View::Group(inner) = crate::syntax::view(tree, node) {
+			node = inner;
+		}
+		node
+	}
+
+	/// The written owner supplying the hidden arguments of a method call.
+	pub fn call_method_owner(
+		&self,
+		tree: &fa_parser::TypedSyntaxTree,
+		call: NodeId,
+	) -> Option<&WrittenType> {
+		use crate::syntax::{self, View};
+		let mut callee = match syntax::view(tree, call) {
+			View::Call { callee, .. } => callee,
+			View::Access { .. } | View::OptionalAccess { .. } => call,
+			_ => return None,
+		};
+		loop {
+			callee = Self::ungroup(tree, callee);
+			match syntax::view(tree, callee) {
+				View::Call { callee: inner, .. }
+					if self.has_flags(callee, NodeFlags::GENERIC_APPLICATION) =>
+				{
+					callee = inner
+				}
+				View::Access { members, .. } | View::OptionalAccess { members, .. } => {
+					return self.method_instantiations.get(&members.last()?);
+				}
+				_ => return None,
+			}
+		}
+	}
+
+	/// Runtime generic arguments and selected methods, owner parameters first.
+	/// Shared by effect checking and backend dictionary emission.
+	pub fn generic_call_bindings(
+		&self,
+		tree: &fa_parser::TypedSyntaxTree,
+		types: &crate::types::TypeStore,
+		call: NodeId,
+		generic_count: usize,
+	) -> (Vec<TypeId>, Vec<GenericMethod>) {
+		let call = if self.instantiation(call).is_some() {
+			call
+		} else {
+			self.generic_application_site(tree, call)
+		};
+		let mut bindings = self
+			.instantiation(call)
+			.map(|list| types.list_items(list).to_vec())
+			.unwrap_or_default();
+		let mut methods = self
+			.instantiated_methods
+			.get(&call)
+			.cloned()
+			.unwrap_or_default();
+		if let Some(owner) = self.call_method_owner(tree, call) {
+			let prefix = types.list_items(owner.arguments).to_vec();
+			let own = generic_count.saturating_sub(prefix.len());
+			if bindings.len() > own {
+				bindings = bindings[bindings.len() - own..].to_vec();
+			}
+			for method in &mut methods {
+				method.parameter += prefix.len() as u16;
+			}
+			methods.extend(owner.methods.iter().cloned());
+			bindings.splice(0..0, prefix);
+		}
+		(bindings, methods)
 	}
 
 	/// The information of a function declaration or lambda node.

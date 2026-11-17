@@ -1,0 +1,114 @@
+-- Absence skips the whole continuation, including lifted arguments.
+type Offset = (Integer) => Integer
+type Person = {
+	name: String
+	function greet = (self, suffix: String): String => self.name + suffix
+	function maybe = (self, present: Boolean): String? => if present { self.name } else { none }
+	function offset = (self): Offset => (value) => value + self.name.length
+	async function delayed = (self, suffix: String): String => {
+		await std.time.sleep(1)
+		return self.name + suffix
+	}
+}
+mutable visits = 0
+mutable argumentsRun = 0
+function person = (present: Boolean): Person? mutates visits => {
+	visits += 1
+	if present { Person { name = "Ada" } } else { none }
+}
+function greet = (present: Boolean): String? mutates visits, argumentsRun => person(present)?.greet(
+	if present {
+		argumentsRun += 1
+		"!"
+	} else {
+		argumentsRun += 100
+		"?"
+	}
+)
+console.log(greet(false), visits, argumentsRun) -- prints: none 1 0
+console.log(greet(true), visits, argumentsRun)  -- prints: Ada! 2 1
+function nested = (value: { child: Person }?): String? => value?.child.greet("!")
+console.log(nested(none), nested({ child = Person { name = "Bo" } })) -- prints: none Bo!
+function chained = (value: Person?, present: Boolean): String? => value?.maybe(present)?.trim()
+console.log(
+	chained(none, true)
+	chained(Person { name = " Ada " }, false)
+	chained(Person { name = " Ada " }, true)
+) -- prints: none none Ada
+function factory = (value: Person?): Integer? => value?.offset()(2)
+console.log(factory(none), factory(Person { name = "Ada" })) -- prints: none 5
+function callback = (value: { apply: (Integer) => Integer }?): Integer? => value?.apply(3)
+console.log(callback(none), callback({ apply = (value) => value + 1 })) -- prints: none 4
+
+function text = (value: String?): String? => value?.trim().toUpperCase()
+function number = (value: Integer?): String? => value?.toString()
+function wide = (value: Int64?): String? => value?.abs().toString()
+function byteLength = (value: Bytes?): Integer? => value?.length
+function sum = (value: Set<Int64>?): Int64? => value?.sum()
+type Color = Enum { red, blue }
+function color = (value: Color?): String? => value?.toString()
+console.log(text(none), text("  ada  "), text(""), number(none), number(0)) -- prints: none ADA  none 0
+let wideValue: Int64 = -2
+let values: Set<Int64> = [2, 3]
+console.log(wide(none), wide(wideValue), sum(none), sum(values))                      -- prints: none 2 none 5
+console.log(byteLength(none), byteLength("".toUtf8()), color(none), color(Color.red)) -- prints: none 0 none red
+
+async function delayed = (value: Person?): String? mutates argumentsRun => await value?.delayed(
+	if value is not none {
+		argumentsRun += 1
+		"!"
+	} else { "?" }
+)
+console.log(await delayed(none), argumentsRun)                   -- prints: none 1
+console.log(await delayed(Person { name = "Cy" }), argumentsRun) -- prints: Cy! 2
+
+async function suffix = (): String mutates argumentsRun => {
+	await std.time.sleep(1)
+	argumentsRun += 1
+	"!"
+}
+async function awaiting = (value: Person?): String? mutates argumentsRun =>
+	value?.greet(await suffix())
+console.log(await awaiting(none), argumentsRun)                   -- prints: none 2
+console.log(await awaiting(Person { name = "Di" }), argumentsRun) -- prints: Di! 3
+
+type ArgumentError = Errors { Unexpected }
+function fail = (): String throws ArgumentError => throw ArgumentError.Unexpected
+function throwing = (value: Person?): String? throws ArgumentError => value?.greet(try fail())
+console.log(try throwing(none))                                   -- prints: none
+console.log(throwing(Person { name = "Er" }) catch _ => "caught") -- prints: caught
+
+type Box = {
+	values: Array<Integer>
+	function first = (self): Integer in self.values throws IndexError => try self.values[0]
+	function echo = <Item>(self, value: Item): Item => value
+}
+function first = (box: Box?): Integer? throws IndexError => try box?.first()
+function inferred = (box: Box?): Integer? => box?.echo(9)
+let box = Box { values = [7] }
+console.log(try first(none), try first(box), inferred(none), inferred(box)) -- prints: none 7 none 9
+
+-- These present-result facts are also consumed by compile-time lowering.
+static absentResult = chained(none, true)
+static nullableResult = chained(Person { name = " Ada " }, false)
+static presentResult = chained(Person { name = " Ada " }, true)
+console.log(absentResult, nullableResult, presentResult) -- prints: none none Ada
+
+type Counter = {
+	value: Integer
+	function increment = (self, by: Integer) mutates self.value => { self.value += by }
+}
+function optionalMutation = (present: Boolean): Integer => {
+	mutable counter: Counter? = if present { Counter { value = 1 } } else { none }
+	mutable arguments = 0
+	counter?.increment(
+		if present { 2 } else {
+			arguments += 100
+			0
+		}
+	)
+	if counter is none { arguments } else { counter.value + arguments }
+}
+static absentMutation = optionalMutation(false)
+static presentMutation = optionalMutation(true)
+console.log(absentMutation, presentMutation, optionalMutation(false), optionalMutation(true)) -- prints: 0 3 0 3

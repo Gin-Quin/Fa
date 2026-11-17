@@ -1,0 +1,3 @@
+mutable values: Pool<Integer> = [1]
+values.delete(values.add(1))
+console.log(values.take(values.add(7)), values.size)

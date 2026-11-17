@@ -233,6 +233,8 @@ The current LLVM backend stores a set like a [map](/collections/maps) without va
 
 ### JavaScript
 
+- Compile-time table values choose the same primitive or structural table class as runtime literals, including nested constants.
+
 - A set of primitives (`Integer`, `Float`, `String`, `Boolean`, a union of literals) is a JavaScript `Set`: the engine's `includes` (`has`) is as fast as anything written by hand.
 - Other item types use the runtime `FaSet`, backed by `FaHashMap`. The current runtime hashes the complete value structurally into 32 bits, then probes an open-addressing table and compares candidates with structural SameValueZero equality. Tuples, objects, optionals, unions and collection-valued items compare by content; a hash collision never merges unequal items. Nested sets and maps hash independently of insertion order. `size` is the number of live entries.
 - A reference to an object value is the object itself. The table stores complete items and has no custom key callback. Filtering, set operations and copying preserve the representation and its standard hash/equality operations.

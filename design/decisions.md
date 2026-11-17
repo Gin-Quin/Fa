@@ -2850,3 +2850,85 @@ Values and control-flow brief, branch `analyzer/pending-a`.
 - **E-OBJ-14** is reported alone only where the block can't be meant as a block: the comma form, or a function whose return type is an object type (named in the fix). A block assigning undeclared names otherwise keeps `E-DECL-1` on each name, with the object hint in its message. The field values are always checked.
 - **An invalid `break`/`continue`** ends its path, vacuously (`FlowState::impossible`): the narrowing after it holds, and the code after it is not reported unreachable.
 
+## JavaScript follow-ups (2026-11-17)
+
+`Pointer.allocate` and `Pointer#free` use the same analyzer target check as C calls, report FFI008 on Node/web, and mark the analysis target-dependent so conditional compilation and interface caching retain the restriction.
+
+Successful JavaScript String JSON parsing stays on the engine parser. On rejection, an iterative error-only scanner follows the native parser's grammar, wording and error precedence; no engine wording or offset enters JsonError. Successful Bytes parsing still decodes individual string tokens; only its error path may decode the whole document, first diagnosing invalid UTF-8. The scanner does not construct values or apply schemas. Shared runtime helper extraction keeps it absent from programs without JSON parsing.
+
+Dense numeric `when` decisions use the existing switch emitter from sixteen arms when their signed-32-bit constants fill at least half the span and no arm contains a loop break. Smaller, sparse, BigInt and nonnumeric matches keep their current lowering. Five fresh-process samples per variant on CPU 5: the 16-arm chain/switch medians are 149.514/121.959 ms on Bun 1.4.4 (-18.4%) and 127.113/109.362 ms on Node v26.13.1 (-14.0%), for ten million randomized dispatches. Peak RSS is essentially unchanged (24,320/23,808 KiB Bun; 55,508/55,380 KiB Node). Sources, exact checksums and samples are in benchmarks/js-followups; the experiment also preserves the separate 64-bit RNG study requested for a later representation project.
+
+A checked destructuring pattern, codeUnitAt argument list, or when decision list missing its required analysis data is an internal compiler fault, not an unsupported language feature. These three defensive paths now emit an internal JavaScript compiler diagnostic under AN001 without panicking. Other refusal sites retain their existing meaning until individually audited.
+
+### Generic async method follow-up (2026-11-17)
+
+Preserve conditional blocking requirements as (generic owner declaration, parameter position, method name), recording only invoked methods. Generic applications are vertices in the existing async-effect fixpoint; selected written methods contribute their synchronous target requirements, forwarding unresolved parameter requirements and walking selected generic-owner dependencies iteratively with visited selections. Ordinary nongeneric calls retain their existing path. Conditional requirements participate in interface merging and hashing, including retarget/incremental reuse. Generic argument normalization is shared by the checker and JavaScript dictionary emission.
+
+On a target with no synchronous method entry, its dictionary holds a per-value unreachable blocking stub plus the real async entry. The checker reports CONC010 at a forbidden blocking application, so the stub is never the language's target-refusal mechanism. This prevents both task/receiver argument shifts and imports of absent $sync exports; stubs must not share mutable $async properties.
+
+Recursive generic calls inside a definition retain the existing current-instance type: explicit self type arguments remain GN007. Their lowered calls record an identity application of the rigid binders for erased dictionaries; publishing a generic recursive signature would incorrectly change this language rule.
+
+### Compile-time composite tables (2026-11-17)
+
+JavaScript constants share the runtime literal class selection: primitive Set/Map keys use engine tables, composite keys use FaSet/FaHashMap. Choose by the checked key type, including empty tables and nested constants, rather than refusing nonprimitive interpreter values. Preserve duplicate replacement and structural equality through the existing constructors.
+
+### Direct pool-reference removal (2026-11-17)
+
+JavaScript value-pool delete/take obtains its slot through the common reference-pair lowering, including direct builtin and user-function results. Evaluate the receiver before any emitted argument statements, and never recover a slot by value equality: equal live elements remain distinct. The same path keeps named references and columnar slots.
+
+### Defensive JavaScript lowering contracts (2026-11-17)
+
+Thirty-nine additional audited fallbacks report an internal compiler diagnostic under AN001: missing mandatory analysis data, checked call arity or numeric-dispatch inconsistencies, invalid range/destructuring/when shapes, static reference layouts containing dynamic bindings, and blocking socket calls that bypassed CONC010. Reachable optional/numeric-generic/JSON/builtin-value and unresolved metadata families retain ordinary refusal diagnostics until fixed. Internal diagnostics remain recoverable and do not panic on user input.
+
+The general function-declaration fallback remains a feature refusal: the checker also accepts indexing an ordinary array of callables, which is neither a name alias nor a composed-chain slice. The specification requires a compile-time-known function, and static callable containers are separately rejected by the frontend. Resolve this unchecked boundary before calling its generator fallback unreachable.
+
+### JavaScript optional-chain continuations (2026-11-17)
+
+Retain checked receiver types per optional-chain member and the exact result before a call adds absence. A present result can itself be nullable; reconstructing it by removing None loses that distinction. JavaScript lowers the whole chain continuation under its guard, including lifted argument statements, builtin helpers, local/imported methods and awaited calls. Scoped evaluated receiver/callee bindings preserve single evaluation and the existing reference-call ABI; no runtime wrapper or closure is introduced. Async capability lookup uses the present callable signature and selected optional constraint method, preserving CONC010 on a forbidden blocking call.
+
+Optional member resolution shares the ordinary resolver, including written field origins and generic owner instantiations. Inference passes a written origin through an optional parameter. The generator records present receiver/callee overlays only while lowering that invocation, then restores the outer context. Builtin fields and methods use the same present-member path; the former partial local-method guard and raw optional-member emitter were removed.
+
+## JavaScript follow-up review fixes (2026-11-17)
+
+Optional chaining adds absence to the operation it guards. In particular,
+`start receiver?.method()` gives `Task<Result>?`, not `Task<Result?>`: no task is
+created on the absent path. The concurrency page did not explicitly settle that
+combination; the lead authorized this reading in the review-fix assignment.
+Direct `await receiver?.method()` gives `Result?`. Started arguments, defaults
+and detachment stay inside the guard. The analyzer's present-result table keeps
+chain-added absence separate from an optional declared result, including a
+returned optional function pointer; ordinary continuation never strips the latter.
+
+The JSON diagnostic contract is native's grammar and error precedence, shared by
+an annotated String/Bytes fixture used by ordinary and generated tests. The
+interpreter reads containers iteratively, matching native's 1000-container bound
+without depending on the Rust call stack. No host-specific line/column/byte text
+is added to syntax errors; invalid UTF-8 has the native message. JavaScript keeps
+engine parsing for short successful String input. A potentially over-deep valid
+document needs at least 2002 code units, so only inputs at least that long need
+the iterative Fa check before engine parsing. Bytes check their existing explicit
+container stack. Syntax failures continue to use the native-compatible scan.
+
+Invalid-escape diagnostics retain a complete scalar or lone UTF-16 unit, rather
+than a UTF-8 byte or half of an astral scalar. Malformed interpreter String
+input uses byte-position markers, restored in values and error text, without
+rewriting invalid escapes into valid ones. JSON-quoted diagnostic fixtures make
+lone-unit preservation observable through static and runtime calls.
+
+Native optional imported/constraint calls use the analyzed present receiver;
+worker calls reuse the value retained by the guard. Native capture discovery
+visits a named argument's value and excludes its navigation-only parameter label.
+
+The full JSON corpus exposed wasm O0 exhausting its host call stack inside the
+recursive C reader before reaching the valid 1000-container boundary. Native
+container parsing now uses explicit frames, with the same token reader,
+arena-backed values, error precedence and depth limit. A sanitizer regression
+checks the complete 1000-container tree and releases on deep malformed inputs.
+
+### JavaScript JSON depth check after the engine parse (2026-11-17, second review)
+
+The pre-parse scan of every String input of 2002 code units or more made `Json.parse`
+2–5 times slower on JavaScript (7.55 MB: 691 ms instead of 307 ms on Bun). The depth
+limit is now checked on the parsed value by an iterative container walk
+(`faJsonTooDeep`), and the Fa scanner runs only on the error path, where it names the
+error with the native wording; outcomes are unchanged.

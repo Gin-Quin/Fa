@@ -28,6 +28,7 @@ pub(crate) mod modules;
 mod number_api;
 mod numbers;
 mod objects;
+mod optionals;
 mod patterns;
 mod reactivity;
 mod reference_variants;
@@ -135,6 +136,9 @@ struct FnCx {
 	callback_error: Option<String>,
 	reference_layout: fa_analyzer::analysis::ReferenceLayout,
 	reference_result: Option<(String, String, String)>,
+	chain_values: Vec<(NodeId, Expr, TypeId)>,
+	chain_calls: Vec<optionals::ChainCall>,
+	chain_active: Vec<NodeId>,
 }
 
 /// The generator of one file.
@@ -851,7 +855,14 @@ impl<'s> Generator<'s> {
 
 	/// The view of a node.
 	pub(crate) fn view(&self, n: NodeId) -> View<'s> {
-		syntax::view(self.tree, n)
+		match syntax::view(self.tree, n) {
+			View::OptionalAccess { target, members }
+				if self.fcx.chain_calls.iter().any(|call| call.callee == n) =>
+			{
+				View::Access { target, members }
+			}
+			view => view,
+		}
 	}
 
 	/// The node with its parentheses removed.
@@ -865,6 +876,38 @@ impl<'s> Generator<'s> {
 
 	/// The type of a node.
 	pub(crate) fn type_of(&self, n: NodeId) -> TypeId {
+		if let Some((_, _, ty)) = self
+			.fcx
+			.chain_values
+			.iter()
+			.rev()
+			.find(|(node, ..)| *node == n)
+		{
+			return *ty;
+		}
+		if let Some(call) = self
+			.fcx
+			.chain_calls
+			.iter()
+			.rev()
+			.find(|call| call.call == n || call.root == n)
+		{
+			return call.result;
+		}
+		if let Some(call) = self
+			.fcx
+			.chain_calls
+			.iter()
+			.rev()
+			.find(|call| call.callee == n)
+		{
+			return self
+				.analysis
+				.optional_results
+				.get(&n)
+				.copied()
+				.unwrap_or(call.receiver_type);
+		}
 		self.analysis.type_of(n)
 	}
 
@@ -1068,6 +1111,19 @@ impl<'s> Generator<'s> {
 			&AN001,
 			n,
 			format!("{what} is not supported by the JavaScript backend yet"),
+		);
+		Expr::constant("undefined", crate::js::Prec::Primary)
+	}
+
+	/// An analyzed program violated the generator's input contract. Report
+	/// the compiler fault without panicking or calling it a language gap.
+	pub(crate) fn internal_error(&mut self, n: NodeId, missing: &str) -> Expr {
+		self.error(
+			&AN001,
+			n,
+			format!(
+				"internal JavaScript compiler error: {missing}; please report this compiler bug"
+			),
 		);
 		Expr::constant("undefined", crate::js::Prec::Primary)
 	}

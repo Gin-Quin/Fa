@@ -1,0 +1,4 @@
+-- Accepted by the analyzer; the JavaScript backend currently refuses this.
+function twice = <Item: Int64>(value: Item) => value + value
+let value: Int64 = 2
+console.log(twice(value))

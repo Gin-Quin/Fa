@@ -1,0 +1,30 @@
+-- Receiver/callee/arguments keep source order, including returned callables.
+type Fn = (Integer) => Integer
+mutable trace = ""
+function mark = (label: String, value: Integer): Integer mutates trace => {
+	trace += label
+	value
+}
+type Box = {
+	value: Integer
+	function build = (self): Fn mutates trace => {
+		trace += "F"
+		(value) => value + self.value
+	}
+	function combine = (self, left: Integer, right: Integer): Integer => self.value + left + right
+}
+function box = (present: Boolean): Box? mutates trace => {
+	trace += "R"
+	if present { Box { value = 10 } } else { none }
+}
+function check = (present: Boolean): Integer? mutates trace =>
+	box(present)?.combine(mark("A", 1), if true { mark("B", 2) } else { 0 })
+function factory = (present: Boolean): Integer? mutates trace =>
+	box(present)?.build()(if true { mark("A", 1) } else { 0 })
+console.log(check(false), trace)
+trace = ""
+console.log(check(true), trace)
+trace = ""
+console.log(factory(false), trace)
+trace = ""
+console.log(factory(true), trace)

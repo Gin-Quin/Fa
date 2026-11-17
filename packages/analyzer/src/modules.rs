@@ -1106,17 +1106,38 @@ impl Interface {
 		}
 		// the async summaries: whether a function suspends, starts tasks,
 		// and where it can be called blocking (design/async.md §2.1)
-		let mut summaries: Vec<(u128, u8)> = self
+		let mut summaries: Vec<_> = self
 			.async_summaries
 			.iter()
 			.map(|(&decl, summary)| {
 				let bits = u8::from(summary.suspends) | (u8::from(summary.starts) << 1);
-				(key_hash(decl), bits | (summary.blocking.bits() << 2))
+				let mut methods: Vec<_> = summary
+					.methods
+					.iter()
+					.map(|method| {
+						(
+							types.decl_hash(method.owner),
+							method.parameter,
+							rustc_hash::FxBuildHasher.hash_one(types.syms.resolve(method.name))
+								as u128,
+						)
+					})
+					.collect();
+				methods.sort_unstable();
+				(
+					key_hash(decl),
+					bits | (summary.blocking.bits() << 2),
+					methods,
+				)
 			})
 			.collect();
 		summaries.sort_unstable();
-		for (decl, bits) in summaries {
+		for (decl, bits, methods) in summaries {
 			hasher.hash(decl).hash(u128::from(bits));
+			hasher.hash(methods.len() as u128);
+			for (owner, parameter, method) in methods {
+				hasher.hash(owner).hash(u128::from(parameter)).hash(method);
+			}
 		}
 		hasher.finish()
 	}

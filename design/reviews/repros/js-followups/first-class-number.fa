@@ -1,0 +1,3 @@
+-- Accepted by the analyzer; the JavaScript backend currently refuses this.
+let greatest = Math.max
+console.log(greatest(3, 5))

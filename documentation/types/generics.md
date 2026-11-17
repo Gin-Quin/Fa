@@ -463,6 +463,8 @@ Generic types, generic functions, structural constraints, compile-time value par
 - Operations that depend on the actual type of another parameter (static methods, copies, `==`, hashing, formatting) receive hidden dictionaries of functions.
 - Imported calls use the same published generic order and runtime requirements as local calls. Each erased type parameter also receives an object-versus-slot flag for references; primitive and mixed-union slots keep their cached carrier even when the current value is an object.
 - Explicit applications and implicit conversions to a concrete function type bind hidden arguments once when the function value is created. A written generic owner binds its own arguments while preserving a method's remaining generic list. The bound function preserves an asynchronous entry's task-first convention.
+- The checker and the JavaScript emitter share normalization of owner and function arguments for method dictionaries. A selected async-only method has a fresh unreachable blocking stub and its task-first async entry; it never imports a synchronous export absent on the target. Blocking capability is checked from the methods actually invoked by the generic body, through imported and forwarded applications.
+
 - A parameter of a generic function type receives the JavaScript function itself: the function that receives it is erased too, and needs one instance per argument only when the argument needs one of the instances or dictionaries above.
 
 ### Native

@@ -1,0 +1,12 @@
+type Person = {
+	name: String
+	function greet = (self, suffix: String): String => self.name + suffix
+}
+function text = (value: String?): String? => value?.trim().toUpperCase()
+function greet = (value: Person?): String? => value?.greet(
+	if value is not none {
+		console.log("argument")
+		"!"
+	} else { "?" }
+)
+console.log(text(none), text(" Ada "), greet(none), greet(Person { name = "Bo" }))

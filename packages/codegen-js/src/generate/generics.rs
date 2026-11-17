@@ -160,16 +160,7 @@ impl Generator<'_> {
 	}
 
 	pub(super) fn generic_application_site(&self, call: NodeId) -> NodeId {
-		if let View::Call { callee, .. } = self.view(call) {
-			let callee = self.strip_groups(callee);
-			if self.has(
-				callee,
-				fa_analyzer::analysis::NodeFlags::GENERIC_APPLICATION,
-			) {
-				return callee;
-			}
-		}
-		call
+		self.analysis.generic_application_site(self.tree, call)
 	}
 
 	pub(super) fn generic_call_bindings(
@@ -177,36 +168,8 @@ impl Generator<'_> {
 		call: NodeId,
 		generics: &[ParamId],
 	) -> (Vec<TypeId>, Vec<fa_analyzer::analysis::GenericMethod>) {
-		let call = if self.analysis.instantiation(call).is_some() {
-			call
-		} else {
-			self.generic_application_site(call)
-		};
-		let mut bindings: Vec<TypeId> = self
-			.analysis
-			.instantiation(call)
-			.map(|list| self.types.list_items(list).to_vec())
-			.unwrap_or_default();
-		let mut methods = self
-			.analysis
-			.instantiated_methods
-			.get(&call)
-			.cloned()
-			.unwrap_or_default();
-		if let Some(owner) = self.call_method_owner(call) {
-			let prefix = self.types.list_items(owner.arguments).to_vec();
-			let own = generics.len().saturating_sub(prefix.len());
-			if bindings.len() > own {
-				bindings = bindings[bindings.len() - own..].to_vec();
-			}
-
-			for method in &mut methods {
-				method.parameter += prefix.len() as u16;
-			}
-			methods.extend(owner.methods.iter().cloned());
-			bindings.splice(0..0, prefix);
-		}
-		(bindings, methods)
+		self.analysis
+			.generic_call_bindings(self.tree, self.types, call, generics.len())
 	}
 
 	fn hidden_arguments_bound(
@@ -278,28 +241,7 @@ impl Generator<'_> {
 	}
 
 	fn call_method_owner(&self, call: NodeId) -> Option<&fa_analyzer::analysis::WrittenType> {
-		let mut callee = match self.view(call) {
-			View::Call { callee, .. } => callee,
-			View::Access { .. } | View::OptionalAccess { .. } => call,
-			_ => return None,
-		};
-		loop {
-			callee = self.strip_groups(callee);
-			match self.view(callee) {
-				View::Call { callee: inner, .. }
-					if self.analysis.has_flags(
-						callee,
-						fa_analyzer::analysis::NodeFlags::GENERIC_APPLICATION,
-					) =>
-				{
-					callee = inner
-				}
-				View::Access { members, .. } | View::OptionalAccess { members, .. } => {
-					return self.analysis.method_instantiations.get(&members.last()?);
-				}
-				_ => return None,
-			}
-		}
+		self.analysis.call_method_owner(self.tree, call)
 	}
 
 	/// Capabilities of a generic function value come from its original
@@ -429,28 +371,39 @@ impl Generator<'_> {
 				.cloned()
 				.unwrap_or_default();
 			(
-				instances.sync_name.unwrap_or_else(|| self.name_of(symbol)),
+				instances
+					.sync_name
+					.or_else(|| instances.async_name.is_none().then(|| self.name_of(symbol))),
 				instances.async_name,
 				self.owner_parameters(keyed.node),
 			)
 		} else {
+			let summary = self
+				.session
+				.interface(module)?
+				.async_summaries
+				.get(&keyed.node)
+				.cloned();
 			let suspends = self.tasks.asynchronous
 				&& self.program.is_some()
-				&& self
-					.session
-					.interface(module)?
-					.async_summaries
-					.get(&keyed.node)
-					.is_some_and(|summary| summary.suspends);
+				&& summary.as_ref().is_some_and(|summary| summary.suspends);
+			let blocking = summary.as_ref().is_none_or(|summary| {
+				summary
+					.blocking
+					.intersects(fa_analyzer::analysis::TargetSet::named(
+						self.options.target.name(),
+					))
+			});
 			let generics = self.external_owner_parameters(key);
 			let external = self.external(Resolution::External(key))?;
 			let (name, asynchronous) = if suspends {
 				(
-					self.import(&external.path, &format!("{}$sync", external.export)),
+					blocking
+						.then(|| self.import(&external.path, &format!("{}$sync", external.export))),
 					Some(self.import(&external.path, &format!("{}$async", external.export))),
 				)
 			} else {
-				(self.import(&external.path, &external.export), None)
+				(Some(self.import(&external.path, &external.export)), None)
 			};
 			(name, asynchronous, generics)
 		};
@@ -470,15 +423,20 @@ impl Generator<'_> {
 				format!("((...$a) => {name}({}, ...$a))", values.join(", "))
 			}
 		};
-		let name = bind(name, false);
-		Some(match asynchronous {
-			Some(asynchronous) => {
+		let name = name.map(|name| bind(name, false));
+		match (name, asynchronous) {
+			(Some(name), Some(asynchronous)) => {
 				let asynchronous = bind(asynchronous, true);
 				let helper = self.helper("faAsyncValue");
-				format!("{helper}({name}, {asynchronous})")
+				Some(format!("{helper}({name}, {asynchronous})"))
 			}
-			None => name,
-		})
+			(None, Some(asynchronous)) => {
+				let asynchronous = bind(asynchronous, true);
+				let helper = self.helper("faAsyncOnlyValue");
+				Some(format!("{helper}({asynchronous})"))
+			}
+			(name, None) => name,
+		}
 	}
 
 	pub(super) fn external_owner_parameters(&self, key: fa_analyzer::ids::DeclKey) -> Vec<ParamId> {

@@ -71,7 +71,10 @@ impl Generator<'_> {
 					js::call(helper, &[receiver.text])
 				}
 				"abs" => js::call("Math.abs", &[receiver.text]),
-				_ => self.unsupported(n, &format!("`{path}`")),
+				_ => self.internal_error(
+					n,
+					"the checked Percentage method is absent from the number API",
+				),
 			},
 			_ => self.unsupported(n, &format!("`{path}`")),
 		}
@@ -142,7 +145,10 @@ impl Generator<'_> {
 				let helper = self.helper("faParseFloat");
 				js::call(helper, std::slice::from_ref(&text.text))
 			}
-			_ => self.unsupported(n, &format!("`{path}`")),
+			_ => self.internal_error(
+				n,
+				"the checked numeric function has an unknown operation or invalid arity",
+			),
 		}
 	}
 
@@ -184,7 +190,10 @@ impl Generator<'_> {
 			{
 				self.arithmetic_method(n, name, storage, receiver, other)
 			}
-			_ => self.unsupported(n, &format!("`Integer#{name}`")),
+			_ => self.internal_error(
+				n,
+				"the checked integer bitwise method has an unknown operation or invalid arity",
+			),
 		}
 	}
 
@@ -299,7 +308,10 @@ impl Generator<'_> {
 				let helper = self.helper(helper);
 				js::call(helper, &arguments)
 			}
-			_ => self.unsupported(n, &format!("`Integer#{name}`")),
+			_ => self.internal_error(
+				n,
+				"the checked integer method has an unknown operation or invalid arity",
+			),
 		}
 	}
 
@@ -342,7 +354,12 @@ impl Generator<'_> {
 			"checkedSub" => "faCheckedSub",
 			"checkedMul" => "faCheckedMul",
 			"checkedPow" => "faCheckedPow",
-			_ => return self.unsupported(n, &format!("`Integer#{name}`")),
+			_ => {
+				return self.internal_error(
+					n,
+					"the checked integer arithmetic method has an unknown operation",
+				);
+			}
 		};
 		// a bigint power takes a bigint exponent
 		let other = if name.ends_with("Pow") && bigint {
@@ -415,7 +432,10 @@ impl Generator<'_> {
 					&[text, values[0].text.clone(), values[1].text.clone()],
 				)
 			}
-			_ => self.unsupported(n, &format!("`Float#{name}`")),
+			_ => self.internal_error(
+				n,
+				"the checked Float method has an unknown operation or invalid arity",
+			),
 		}
 	}
 
@@ -424,7 +444,7 @@ impl Generator<'_> {
 		match name {
 			"toString" => js::call("String", &[receiver.text]),
 			"abs" => self.abs_of(n, receiver),
-			_ => self.unsupported(n, &format!("`BigInt#{name}`")),
+			_ => self.internal_error(n, "the checked BigInt method is absent from the number API"),
 		}
 	}
 

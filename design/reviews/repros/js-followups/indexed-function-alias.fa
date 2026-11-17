@@ -1,0 +1,4 @@
+-- The analyzer accepts this; audit the compile-time-known function rule before lowering.
+let handlers: Array<(Integer) => Integer> = [(value) => value + 1]
+function next = handlers[0]
+console.log(next(4))

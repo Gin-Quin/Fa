@@ -406,6 +406,10 @@ function buffer = (data: Bytes): String throws IndexError => {
 
 
 def json_cases(output,bun):
+    # One diagnostic contract fixture feeds both the ordinary harness and
+    # every generated tier (compile time, String/Bytes, UTF-8 and depth).
+    syntax = Path(__file__).resolve().parents[1] / "programs" / "json-syntax.fa"
+    (output / "json-syntax.fa").write_text(syntax.read_text())
     values=subjects()
     oracle=r'''
 const values=JSON.parse(await Bun.stdin.text());

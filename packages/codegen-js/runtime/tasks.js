@@ -474,6 +474,18 @@ export function faAsyncValue(sync, instance) {
 	return sync;
 }
 
+// @fa-helper faAsyncOnlyValue deps: faAsyncValue faStop
+/** An async function whose blocking entry the target cannot provide.
+ * The checker rejects calls of this entry; keep the dictionary's ABI valid
+ * without importing a nonexistent synchronous export or sharing mutable stubs.
+ * @param {Function} instance @returns {Function}
+ */
+export function faAsyncOnlyValue(instance) {
+	return faAsyncValue(() => {
+		faStop("internal error: an async-only function was called blocking");
+	}, instance);
+}
+
 // @fa-helper faBindGenerics deps: faAsyncValue
 /**
  * Bind an instantiated function's erased capabilities once at conversion.

@@ -474,6 +474,10 @@ let grade = when score is {
 :::implementation
 ## Implementation details
 
+### JavaScript
+
+Dense numeric matches with at least sixteen arms and signed-32-bit integer constants use a `switch` when no arm breaks out of a surrounding loop. The constants occupy at least half their numeric span. The subject is evaluated once, and the exhaustive last arm becomes the default. Smaller or sparse matches retain readable `if` chains; very long decisions use the existing flat form to bound JavaScript parser nesting.
+
 ### Native
 
 A `when` selecting equal-length string literals for `0` through `n - 1` and an `else` indexes one constant containing them all, at `start + length × index`. Other integers select the `else` literal. This uses neither branches nor a pointer table.

@@ -15,6 +15,12 @@ impl Generator<'_> {
 	/// The JavaScript of an expression, converted for its sink when the
 	/// analyzer recorded a conversion or a range check there.
 	pub(crate) fn expr(&mut self, n: NodeId) -> Expr {
+		if let Some(value) = self.chain_read(n) {
+			return value;
+		}
+		if self.chain_candidate(n) && self.comptime_value(n).is_none() {
+			return self.optional_chain(n, false);
+		}
 		let value = if self.call_returns_reference(n) && !self.is_object_reference(self.type_of(n))
 		{
 			self.read_reference_call(n)
@@ -56,7 +62,9 @@ impl Generator<'_> {
 			View::None => Expr::constant("undefined", Prec::Primary),
 			View::Name(_) => self.name(n),
 			View::Access { target, members } => self.member_access(n, target, members),
-			View::OptionalAccess { target, members } => self.optional_access(n, target, members),
+			View::OptionalAccess { .. } => {
+				self.internal_error(n, "an optional read bypassed its guarded continuation")
+			}
 			View::Object { .. } | View::TypedObject { .. } => self.object_literal(n),
 			// a tuple is a JavaScript array (printed by its type's formatter)
 			View::Array { items } => match self.collection_literal(n, items) {
@@ -78,7 +86,9 @@ impl Generator<'_> {
 			}
 			View::ImplicitMember(_) => match self.analysis.resolution(n) {
 				Resolution::Member(nominal, index) => self.nominal_member_value(n, nominal, index),
-				_ => self.unsupported(n, "this member"),
+				_ => {
+					self.internal_error(n, "the checked implicit member has no nominal resolution")
+				}
 			},
 			View::Call { callee, arguments } => self.call(n, callee, arguments),
 			View::Arithmetic { op, operands } => self.arithmetic(n, op, operands),
@@ -310,7 +320,7 @@ impl Generator<'_> {
 				Some(value) => value,
 				None => self.unsupported(n, "this name of another file"),
 			},
-			_ => self.unsupported(n, "this name"),
+			_ => self.internal_error(n, "the checked runtime name has no value resolution"),
 		}
 	}
 

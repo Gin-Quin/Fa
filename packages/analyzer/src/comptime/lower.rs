@@ -95,6 +95,9 @@ pub struct Lowerer<'a> {
 	slots: FxHashMap<SymbolId, Slot>,
 	aliases: FxHashMap<SymbolId, Place>,
 	borrowed_values: FxHashSet<NodeId>,
+	chain_active: Vec<NodeId>,
+	chain_values: Vec<(NodeId, Slot)>,
+	chain_prefixes: Vec<(NodeId, usize, Slot)>,
 	value_slots: FxHashMap<ParamId, Slot>,
 	next: Slot,
 	/// Lowering a compile-time expression: no enclosing function's frame.
@@ -128,6 +131,9 @@ impl<'a> Lowerer<'a> {
 			slots: FxHashMap::default(),
 			aliases: FxHashMap::default(),
 			borrowed_values: FxHashSet::default(),
+			chain_active: Vec::new(),
+			chain_values: Vec::new(),
+			chain_prefixes: Vec::new(),
 			value_slots: FxHashMap::default(),
 			next: 0,
 			compile_time: true,
@@ -719,6 +725,12 @@ impl<'a> Lowerer<'a> {
 
 	/// Lowers an expression or a statement.
 	pub fn expr(&mut self, n: NodeId) -> Expr {
+		if let Some(&(_, slot)) = self.chain_values.iter().rev().find(|&&(node, _)| node == n) {
+			return Expr::Local(slot);
+		}
+		if self.a.optional_results.contains_key(&n) && !self.chain_active.contains(&n) {
+			return self.optional_expression(n);
+		}
 		if self.borrowed_values.contains(&n) {
 			return self.borrow_value(n);
 		}
@@ -1247,9 +1259,23 @@ impl<'a> Lowerer<'a> {
 	}
 
 	fn receiver_place(&mut self, callee: NodeId) -> Option<Place> {
-		let View::Access { target, members } = syntax::view(self.tree, callee) else {
-			return None;
+		let (target, members) = match syntax::view(self.tree, callee) {
+			View::Access { target, members } | View::OptionalAccess { target, members } => {
+				(target, members)
+			}
+			_ => return None,
 		};
+		if let Some(&(_, _, slot)) = self
+			.chain_prefixes
+			.iter()
+			.rev()
+			.find(|&&(node, prefix, _)| node == callee && prefix + 1 == members.len())
+		{
+			return Some(Place {
+				slot,
+				steps: Vec::new(),
+			});
+		}
 		let mut place = self.place(target)?;
 		for member in members.iter().take(members.len().saturating_sub(1)) {
 			let View::Name(name) = syntax::view(self.tree, member) else {
@@ -1665,6 +1691,12 @@ impl<'a> Lowerer<'a> {
 
 	/// An assignable place: a local and the fields and items below it.
 	fn place(&mut self, n: NodeId) -> Option<Place> {
+		if let Some(&(_, slot)) = self.chain_values.iter().rev().find(|&&(node, _)| node == n) {
+			return Some(Place {
+				slot,
+				steps: Vec::new(),
+			});
+		}
 		match syntax::view(self.tree, n) {
 			View::Group(inner) | View::Try(inner) => self.place(inner),
 			View::Name(_) => match self.a.resolution(n) {
@@ -1710,6 +1742,75 @@ impl<'a> Lowerer<'a> {
 			node = inner;
 		}
 		node
+	}
+
+	/// Keep every optional receiver once, with the complete continuation in
+	/// its present branch. Arguments use ordinary lowering inside the guards.
+	fn optional_expression(&mut self, root: NodeId) -> Expr {
+		let mut spine = Vec::new();
+		let mut node = root;
+		loop {
+			spine.push(node);
+			node = match syntax::view(self.tree, node) {
+				View::Access { target, .. }
+				| View::OptionalAccess { target, .. }
+				| View::Index { target, .. } => target,
+				View::Call { callee, .. } => callee,
+				_ => break,
+			};
+		}
+		spine.reverse();
+		let guards: Vec<_> = spine
+			.iter()
+			.flat_map(|&node| match syntax::view(self.tree, node) {
+				View::OptionalAccess { members, .. } => {
+					(0..members.len()).map(|index| (node, index)).collect()
+				}
+				_ => Vec::new(),
+			})
+			.collect();
+		let saved = self.chain_active.len();
+		self.chain_active.extend(spine);
+		let result = self.optional_guards(root, &guards);
+		self.chain_active.truncate(saved);
+		result
+	}
+
+	fn optional_guards(&mut self, root: NodeId, guards: &[(NodeId, usize)]) -> Expr {
+		let Some((&(node, prefix), rest)) = guards.split_first() else {
+			return self.expr(root);
+		};
+		let View::OptionalAccess { target, members } = syntax::view(self.tree, node) else {
+			unreachable!("an optional guard")
+		};
+		let receiver = if prefix == 0 {
+			self.borrow_value(target)
+		} else if let Some(mut place) = self.place(target) {
+			for member in members.iter().take(prefix) {
+				place.steps.push(Step::Field(Arc::from(self.text(member))));
+			}
+			Expr::Borrow(place, true)
+		} else {
+			self.access(node, target, members.take(prefix), true)
+		};
+		let slot = self.temp();
+		self.chain_prefixes.push((node, prefix, slot));
+		if prefix == 0 {
+			self.chain_values.push((target, slot));
+		}
+		let present = self.optional_guards(root, rest);
+		if prefix == 0 {
+			self.chain_values.pop();
+		}
+		self.chain_prefixes.pop();
+		Expr::Block(vec![
+			Expr::Let(slot, receiver.boxed()),
+			Expr::If(
+				Expr::Is(Expr::Local(slot).boxed(), TypeTest::None, false).boxed(),
+				Expr::none().boxed(),
+				Some(present.boxed()),
+			),
+		])
 	}
 
 	/// The receiver prefix, including flattened field chains and grouped
@@ -1784,14 +1885,23 @@ impl<'a> Lowerer<'a> {
 					}),
 				_ => false,
 			};
-		let mut current = if let Some(count) = count {
+		let prefix = self
+			.chain_prefixes
+			.iter()
+			.rev()
+			.find(|&&(node, prefix, _)| node == n && prefix <= members.len())
+			.copied();
+		let mut current = if let Some((_, _, slot)) = prefix {
+			Some(Expr::Local(slot))
+		} else if let Some(count) = count {
 			Some(count)
 		} else if static_target {
 			None
 		} else {
 			Some(self.expr(target))
 		};
-		for (index, member) in members.iter().enumerate().skip(usize::from(counted)) {
+		let skip = prefix.map_or(usize::from(counted), |(_, prefix, _)| prefix);
+		for (index, member) in members.iter().enumerate().skip(skip) {
 			let resolution = self.a.resolution(member);
 			let name: Arc<str> = match syntax::view(self.tree, member) {
 				View::Name(name) => Arc::from(self.tree.name(name)),

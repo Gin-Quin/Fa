@@ -1,0 +1,5 @@
+-- Accepted by the analyzer; the JavaScript backend currently refuses this.
+use { Json } = std.json
+type Tree = { value: Integer, children: Array<Tree> }
+let tree: Tree = try Json.parse("{{\"value\":1,\"children\":[]}}")
+console.log(tree.value)

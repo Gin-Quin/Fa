@@ -603,9 +603,17 @@ impl Walker<'_> {
 		if some == TypeId::NEVER || !self.s.types.satisfies(some, target) {
 			return false;
 		}
-		let text = self.tree.text(self.strip_groups(n).index()).to_string();
+		let inner = self.strip_groups(n);
+		let text = self.tree.text(inner.index()).to_string();
+		// testing a call (or `start`, `await`…) again would evaluate it again
+		let test = match syntax::view(&self.tree, inner) {
+			View::Name(_) | View::Access { .. } | View::OptionalAccess { .. } => {
+				format!("test it with `if {text} is not none` first")
+			}
+			_ => format!("bind it first (`let value = {text}`), then test `if value is not none`"),
+		};
 		let message = format!(
-			"`{text}` may be `none`, and a `{}` is expected: test it with `if {text} is not none` first, or use `??`",
+			"`{text}` may be `none`, and a `{}` is expected: {test}, or use `??`",
 			self.display(target)
 		);
 		let diagnostic = self.diagnostic(&E_OPT_1, n, message);

@@ -1,0 +1,3 @@
+-- Fixed by the guarded optional-chain lowering; kept as the original census probe.
+function describe = (value: Integer?): String? => value?.toString()
+console.log(describe(1), describe(none))

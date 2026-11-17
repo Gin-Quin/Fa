@@ -230,6 +230,10 @@ impl Walker<'_> {
 	) -> TypeId {
 		self.check_std_target(n, builtin);
 		match builtins::get(builtin).path {
+			"Pointer#free" => {
+				self.check_foreign_target(n, "`Pointer.free`");
+				ret
+			}
 			"Json.parse" => self.json_parse_type(n, expected),
 			"Json.stringify" => {
 				let value = self

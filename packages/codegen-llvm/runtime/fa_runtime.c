@@ -11832,7 +11832,6 @@ typedef struct {
 	FaJson *stack;
 	size_t stack_length;
 	size_t stack_room;
-	int depth;
 	/// The error: its text, then a detail (quoted by `quote`, unless 0).
 	const char *error;
 	const uint8_t *detail;
@@ -12028,8 +12027,14 @@ static int json_string(JsonReader *reader, const uint8_t **bytes, size_t *length
 			written += json_utf8(code, out + written);
 			break;
 		}
-		default:
-			return json_fail(reader, "Invalid escape character ", reader->text + index - 1, 1, 0);
+		default: {
+			// The invalid escape can be a scalar or a lone WTF-8 unit.
+			// Keep it whole so the diagnostic itself remains valid Fa text.
+			size_t start = index - 1;
+			size_t end = start;
+			(void)decode(reader->text, at, &end);
+			return json_fail(reader, "Invalid escape character ", reader->text + start, end - start, 0);
+		}
 		}
 	}
 	*bytes = out;
@@ -12211,107 +12216,13 @@ static void json_order(JsonReader *reader, FaJson *object) {
 	object->items = ordered;
 }
 
-static int json_array(JsonReader *reader, FaJson *out) {
-	reader->at += 1;
-	out->kind = JSON_ARRAY;
-	size_t base = reader->stack_length;
-	json_space(reader);
-	if (reader->at < reader->length && reader->text[reader->at] == ']') {
-		reader->at += 1;
-		json_collect(reader, base, out);
-		return 1;
-	}
-	for (;;) {
-		FaJson item = {0};
-		if (!json_value(reader, &item)) {
-			return 0;
-		}
-		json_push(reader, &item);
-		json_space(reader);
-		if (reader->at < reader->length && reader->text[reader->at] == ',') {
-			reader->at += 1;
-			json_space(reader);
-			if (reader->at < reader->length && reader->text[reader->at] == ']') {
-				return json_fail(reader, "Unexpected comma at the end of array expression", 0, 0, 0);
-			}
-			continue;
-		}
-		if (reader->at < reader->length && reader->text[reader->at] == ']') {
-			reader->at += 1;
-			json_collect(reader, base, out);
-			return 1;
-		}
-		return json_fail(reader, "Expected ']'", 0, 0, 0);
-	}
-}
-
-static int json_object(JsonReader *reader, FaJson *out) {
-	reader->at += 1;
-	out->kind = JSON_OBJECT;
-	size_t base = reader->stack_length;
-	json_space(reader);
-	if (reader->at < reader->length && reader->text[reader->at] == '}') {
-		reader->at += 1;
-		json_collect(reader, base, out);
-		return 1;
-	}
-	if (reader->at >= reader->length || reader->text[reader->at] != '"') {
-		return json_fail(reader, "Expected '}'", 0, 0, 0);
-	}
-	for (;;) {
-		FaJson member = {0};
-		if (!json_string(reader, &member.key, &member.key_length)) {
-			return 0;
-		}
-		json_space(reader);
-		if (reader->at >= reader->length || reader->text[reader->at] != ':') {
-			return json_fail(reader, "Expected ':' before value in object property definition", 0, 0,
-			                 0);
-		}
-		reader->at += 1;
-		const uint8_t *key = member.key;
-		size_t key_length = member.key_length;
-		if (!json_value(reader, &member)) {
-			return 0;
-		}
-		member.key = key;
-		member.key_length = key_length;
-		json_push(reader, &member);
-		json_space(reader);
-		if (reader->at < reader->length && reader->text[reader->at] == ',') {
-			reader->at += 1;
-			json_space(reader);
-			if (reader->at >= reader->length || reader->text[reader->at] != '"') {
-				return json_fail(reader, "Property name must be a string literal", 0, 0, 0);
-			}
-			continue;
-		}
-		if (reader->at < reader->length && reader->text[reader->at] == '}') {
-			reader->at += 1;
-			json_collect(reader, base, out);
-			json_order(reader, out);
-			return 1;
-		}
-		return json_fail(reader, "Expected '}'", 0, 0, 0);
-	}
-}
-
-static int json_value(JsonReader *reader, FaJson *out) {
+static int json_atom(JsonReader *reader, FaJson *out) {
 	json_space(reader);
 	if (reader->at >= reader->length) {
 		return json_fail(reader, "Unexpected EOF", 0, 0, 0);
 	}
 	const uint8_t *text = reader->text;
 	uint8_t byte = text[reader->at];
-	if (byte == '{' || byte == '[') {
-		if (reader->depth >= JSON_MAX_DEPTH) {
-			return json_fail(reader, "Exceeded the maximum depth", 0, 0, 0);
-		}
-		reader->depth += 1;
-		int done = byte == '{' ? json_object(reader, out) : json_array(reader, out);
-		reader->depth -= 1;
-		return done;
-	}
 	if (byte == '"') {
 		out->kind = JSON_STRING;
 		return json_string(reader, &out->bytes, &out->length);
@@ -12354,6 +12265,125 @@ static int json_value(JsonReader *reader, FaJson *out) {
 		length = reader->length - reader->at;
 	}
 	return json_fail(reader, "Unrecognized token ", text + reader->at, length, '\'');
+}
+
+// Container frames are heap data: wasm's host call stack can be smaller
+// than 1000 recursive reader calls at O0, independently of its linear stack.
+typedef struct {
+	FaJson node;
+	size_t base;
+	const uint8_t *key;
+	size_t key_length;
+	// 0: first item/key, 1: after comma, 3: separator.
+	uint8_t state;
+} JsonFrame;
+
+static int json_value(JsonReader *reader, FaJson *out) {
+	JsonFrame *frames = 0;
+	size_t depth = 0;
+	size_t room = 0;
+	int parsed = 0;
+	for (;;) {
+		json_space(reader);
+		FaJson value = {0};
+		int closed = 0;
+		if (depth > 0) {
+			JsonFrame *frame = frames + depth - 1;
+			int object = frame->node.kind == JSON_OBJECT;
+			uint8_t close = object ? '}' : ']';
+			if ((frame->state == 0 || frame->state == 3) && reader->at < reader->length &&
+			    reader->text[reader->at] == close) {
+				reader->at += 1;
+				value = frame->node;
+				json_collect(reader, frame->base, &value);
+				if (object) {
+					json_order(reader, &value);
+				}
+				depth -= 1;
+				closed = 1;
+			} else {
+				if (frame->state == 3) {
+					if (reader->at >= reader->length || reader->text[reader->at] != ',') {
+						json_fail(reader, object ? "Expected '}'" : "Expected ']'", 0, 0, 0);
+						break;
+					}
+					reader->at += 1;
+					frame->state = 1;
+					json_space(reader);
+				}
+				if (object) {
+					if (reader->at >= reader->length || reader->text[reader->at] != '"') {
+						json_fail(reader, frame->state == 0 ? "Expected '}'" :
+						          "Property name must be a string literal", 0, 0, 0);
+						break;
+					}
+					if (!json_string(reader, &frame->key, &frame->key_length)) {
+						break;
+					}
+					json_space(reader);
+					if (reader->at >= reader->length || reader->text[reader->at] != ':') {
+						json_fail(reader, "Expected ':' before value in object property definition",
+						          0, 0, 0);
+						break;
+					}
+					reader->at += 1;
+					json_space(reader);
+				} else if (frame->state == 1 && reader->at < reader->length &&
+				           reader->text[reader->at] == ']') {
+					json_fail(reader, "Unexpected comma at the end of array expression", 0, 0, 0);
+					break;
+				}
+				frame->state = 3;
+			}
+		}
+		if (!closed) {
+			if (reader->at < reader->length &&
+			    (reader->text[reader->at] == '{' || reader->text[reader->at] == '[')) {
+				if (depth >= JSON_MAX_DEPTH) {
+					json_fail(reader, "Exceeded the maximum depth", 0, 0, 0);
+					break;
+				}
+				if (depth == room) {
+					size_t grown = room == 0 ? 16 : room * 2;
+					if (grown > JSON_MAX_DEPTH) {
+						grown = JSON_MAX_DEPTH;
+					}
+					JsonFrame *next = fa_alloc(grown * sizeof(JsonFrame), 16);
+					if (room > 0) {
+						copy_bytes((uint8_t *)next, (const uint8_t *)frames,
+						           depth * sizeof(JsonFrame));
+						fa_free(frames, room * sizeof(JsonFrame), 16);
+					}
+					frames = next;
+					room = grown;
+				}
+				JsonFrame fresh = {0};
+				fresh.node.kind = reader->text[reader->at] == '{' ? JSON_OBJECT : JSON_ARRAY;
+				fresh.base = reader->stack_length;
+				frames[depth++] = fresh;
+				reader->at += 1;
+				continue;
+			}
+			if (!json_atom(reader, &value)) {
+				break;
+			}
+		}
+		if (depth == 0) {
+			*out = value;
+			parsed = 1;
+			break;
+		}
+		JsonFrame *parent = frames + depth - 1;
+		if (parent->node.kind == JSON_OBJECT) {
+			value.key = parent->key;
+			value.key_length = parent->key_length;
+		}
+		json_push(reader, &value);
+	}
+	if (room > 0) {
+		fa_free(frames, room * sizeof(JsonFrame), 16);
+	}
+	return parsed;
 }
 
 // ── checking a value against a schema

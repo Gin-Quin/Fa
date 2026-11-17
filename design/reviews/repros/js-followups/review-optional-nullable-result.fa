@@ -1,0 +1,8 @@
+-- A nullable result requires its own ?. per values/optionals.md.
+type Box = {
+	function maybe = (self): String? => none
+}
+function bad = (value: Box?): String? => value?.maybe().trim()
+function good = (value: Box?): String? => value?.maybe()?.trim()
+console.log(good(none), good(Box {}))
+console.log(bad(Box {}))

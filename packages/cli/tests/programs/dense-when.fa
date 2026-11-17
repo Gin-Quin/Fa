@@ -1,0 +1,58 @@
+-- Dense integer dispatch uses a switch; the subject is evaluated once.
+mutable visits = 0
+function subject = (value: Integer): Integer mutates visits => {
+	visits += 1
+	value
+}
+
+function choose = (value: Integer): Integer => when subject(value) is {
+	0 => 31
+	1 => 71
+	2 => 11
+	3 => 53
+	4 => 97
+	5 => 19
+	6 => 43
+	7 => 83
+	8 => 47
+	9 => 23
+	10 => 89
+	11 => 37
+	12 => 67
+	13 => 17
+	14 => 59
+	else => 29
+}
+
+mutable total = 0
+for value in -1..17 {
+	total += choose(value)
+}
+console.log(total, visits)
+-- prints: 834 18
+
+-- A break in an arm still leaves its surrounding loop.
+mutable seen = 0
+for value in 0..20 {
+	when value is {
+		0 => { seen += 1 }
+		1 => { seen += 1 }
+		2 => { seen += 1 }
+		3 => { seen += 1 }
+		4 => { seen += 1 }
+		5 => { seen += 1 }
+		6 => { seen += 1 }
+		7 => { seen += 1 }
+		8 => { seen += 1 }
+		9 => { seen += 1 }
+		10 => { seen += 1 }
+		11 => { seen += 1 }
+		12 => { seen += 1 }
+		13 => { seen += 1 }
+		14 => { seen += 1 }
+		else => { break }
+	}
+	seen += 10
+}
+console.log(seen)
+-- prints: 165

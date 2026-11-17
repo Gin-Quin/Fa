@@ -77,11 +77,15 @@ impl Generator<'_> {
 		info: &CallInfo,
 		arguments: fa_analyzer::syntax::NodeList<'_>,
 	) -> Option<Expr> {
-		let View::Access { target, members } = self.view(self.strip_groups(callee)) else {
+		let View::Access { members, .. } = self.view(self.strip_groups(callee)) else {
 			return None;
 		};
 		// `stop()` is a built-in (`worker_builtin`)
-		if !self.is_worker(target) || matches!(info.callee, Callee::Builtin(_)) {
+		if !matches!(
+			self.types.kind(self.receiver_type(callee)),
+			TypeKind::Sync(SyncKind::Worker, _)
+		) || matches!(info.callee, Callee::Builtin(_))
+		{
 			return None;
 		}
 		let member = members.last()?;

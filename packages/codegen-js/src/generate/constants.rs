@@ -128,18 +128,10 @@ impl Generator<'_> {
 			{
 				let class = match types.kind(ty) {
 					TypeKind::Collection(CollKind::Set | CollKind::GrowingSet, item, _) => {
-						if self.is_primitive(item) {
-							"Set".to_string()
-						} else {
-							self.helper("FaSet").to_string()
-						}
+						self.set_class(item)
 					}
 					TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, _, key) => {
-						if self.is_primitive(key) {
-							"Map".to_string()
-						} else {
-							self.helper("FaHashMap").to_string()
-						}
+						self.map_class(key)
 					}
 					TypeKind::Collection(kind, ..) if super::collections::is_pool(kind) => {
 						if self.is_value_pool(ty) {
@@ -189,14 +181,12 @@ impl Generator<'_> {
 					TypeKind::Collection(CollKind::Set | CollKind::GrowingSet, item, _) => item,
 					_ => TypeId::UNKNOWN,
 				};
-				if !items.iter().all(is_primitive) {
-					return None;
-				}
 				let parts = items
 					.iter()
 					.map(|value| self.comptime_text(value, item).map(|expr| expr.text))
 					.collect::<Option<Vec<_>>>()?;
-				Expr::constant(format!("new Set([{}])", parts.join(", ")), Prec::Primary)
+				let class = self.set_class(item);
+				Expr::primary(format!("new {class}([{}])", parts.join(", ")))
 			}
 			Value::Map(entries) => {
 				let (key, item) = match types.kind(ty) {
@@ -205,9 +195,6 @@ impl Generator<'_> {
 					}
 					_ => (TypeId::UNKNOWN, TypeId::UNKNOWN),
 				};
-				if !entries.iter().all(|(key, _)| is_primitive(key)) {
-					return None;
-				}
 				let parts = entries
 					.iter()
 					.map(|(k, v)| {
@@ -218,7 +205,8 @@ impl Generator<'_> {
 						))
 					})
 					.collect::<Option<Vec<_>>>()?;
-				Expr::constant(format!("new Map([{}])", parts.join(", ")), Prec::Primary)
+				let class = self.map_class(key);
+				Expr::primary(format!("new {class}([{}])", parts.join(", ")))
 			}
 			Value::Object(object) => {
 				let fields = types.fields_of(ty).to_vec();
@@ -392,13 +380,6 @@ impl Generator<'_> {
 			.find_map(|results| results.constants.get(&n).cloned())
 			.or_else(|| self.analysis.constant(n).cloned())
 	}
-}
-
-fn is_primitive(value: &Value) -> bool {
-	matches!(
-		value,
-		Value::None | Value::Boolean(_) | Value::Integer(_) | Value::Float(_) | Value::String(_)
-	)
 }
 
 fn is_identifier(name: &str) -> bool {

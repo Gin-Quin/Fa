@@ -226,7 +226,7 @@ impl Generator<'_> {
 	/// A lambda: an arrow function.
 	pub(crate) fn lambda(&mut self, n: NodeId) -> Expr {
 		let Some(info) = self.analysis.function(n).cloned() else {
-			return self.unsupported(n, "this function");
+			return self.internal_error(n, "the checked lambda has no function metadata");
 		};
 		let indent = self.out.indentation();
 		let saved = self.copy_captures(&info);
@@ -586,6 +586,9 @@ impl Generator<'_> {
 
 	/// A call.
 	pub(crate) fn call(&mut self, n: NodeId, callee: NodeId, arguments: NodeList<'_>) -> Expr {
+		if self.chain_candidate(n) {
+			return self.optional_chain(n, true);
+		}
 		// On success the statement retains borrowed temporaries. On error
 		// release them before an enclosing catch, including argument errors.
 		self.guard_frames.push(Vec::new());
@@ -662,7 +665,7 @@ impl Generator<'_> {
 			{
 				return self.abs(n, target);
 			}
-			return self.unsupported(n, "this call");
+			return self.internal_error(n, "the checked call has no call or application metadata");
 		};
 		// a C function (foreign.rs)
 		if self.analysis.extern_calls.contains_key(&n) {
@@ -675,12 +678,15 @@ impl Generator<'_> {
 		match info.callee {
 			Callee::Conversion(target) => match info.arguments.first() {
 				Some(Argument::Given(value)) => self.conversion(n, target, *value),
-				_ => self.unsupported(n, "this conversion"),
+				_ => self.internal_error(n, "the checked conversion has no value argument"),
 			},
 			Callee::Builtin(builtin) => self.builtin_call(n, callee, builtin, &info.arguments),
 			Callee::Member(member) => match info.arguments.first() {
 				Some(Argument::Given(value)) => self.member_with_data(member, *value),
-				_ => self.unsupported(n, "this member"),
+				_ => self.internal_error(
+					n,
+					"the checked union member construction has no data argument",
+				),
 			},
 			Callee::Function(declaration)
 				if info
@@ -690,7 +696,7 @@ impl Generator<'_> {
 			{
 				// a method: `Type$method(receiver, …)`
 				let Some(symbol) = self.analysis.symbols.symbol_of_decl(declaration) else {
-					return self.unsupported(n, "this method");
+					return self.internal_error(n, "the checked method declaration has no symbol");
 				};
 				let function = self.name_of(symbol);
 				let receiver = self.receiver(callee);
@@ -700,12 +706,7 @@ impl Generator<'_> {
 					.filter(|argument| !matches!(argument, Argument::Receiver(_)))
 					.cloned()
 					.collect();
-				let optional = matches!(self.view(callee), View::OptionalAccess { .. });
-				let (receiver, drop) = if optional {
-					(self.keep_value(receiver), None)
-				} else {
-					self.temporary_receiver(callee, receiver)
-				};
+				let (receiver, drop) = self.temporary_receiver(callee, receiver);
 				let function = self
 					.select_reference_call(n, callee, Expr::name(function, true))
 					.text;
@@ -720,13 +721,7 @@ impl Generator<'_> {
 				let hidden = self.hidden_arguments(declaration, n);
 				values.splice(0..0, hidden);
 				let result = self.finish_call(n, Some(declaration), function, values);
-				if !optional {
-					return self.after_call_drop(n, result, drop);
-				}
-				// `receiver?.method()`: `none` when the receiver is `none`
-				let none = Expr::constant("undefined", Prec::Primary);
-				let test = js::binary(&receiver, "===", &none, Prec::Equality);
-				js::conditional(&test, &none, &result)
+				self.after_call_drop(n, result, drop)
 			}
 			Callee::Value
 				if info
@@ -766,7 +761,8 @@ impl Generator<'_> {
 					.insert(0, Some(receiver.text.clone()));
 				let hidden = self.signature_hidden_arguments(callee, n);
 				values.splice(0..0, hidden);
-				let result = self.finish_call(n, None, function.text, values);
+				let external = self.external_suspending(callee);
+				let result = self.finish_call_of(n, None, external, function.text, values);
 				self.after_call_drop(n, result, drop)
 			}
 			Callee::Value if self.constraint_method_call(callee).is_some() => {
@@ -1480,6 +1476,15 @@ impl Generator<'_> {
 	/// The receiver of a method call whose callee is `receiver.method` (or
 	/// `receiver?.method`: the receiver before `?.`).
 	pub(crate) fn receiver(&mut self, callee: NodeId) -> Expr {
+		if let Some(call) = self
+			.fcx
+			.chain_calls
+			.iter()
+			.rev()
+			.find(|call| call.callee == callee)
+		{
+			return call.receiver.clone();
+		}
 		let callee = self.strip_groups(callee);
 		match self.view(callee) {
 			View::Access { target, members } => self.access_prefix(callee, target, members),
@@ -1490,6 +1495,15 @@ impl Generator<'_> {
 
 	/// The type of the receiver of a method call.
 	pub(crate) fn receiver_type(&self, callee: NodeId) -> TypeId {
+		if let Some(call) = self
+			.fcx
+			.chain_calls
+			.iter()
+			.rev()
+			.find(|call| call.callee == callee)
+		{
+			return call.receiver_type;
+		}
 		match self.view(self.strip_groups(callee)) {
 			View::Access { target, members } | View::OptionalAccess { target, members } => {
 				match members.len() {

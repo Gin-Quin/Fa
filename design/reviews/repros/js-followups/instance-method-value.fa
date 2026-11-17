@@ -1,0 +1,12 @@
+-- The specification forbids reading a method through an instance without
+-- calling it (functions/defining-functions.md, Methods and function pointers).
+-- The checker still accepts these two forms; the generator refuses them.
+-- This is a missing frontend rejection, not a request for implicit capture.
+type Person = {
+	name: String
+	function describe = (self): String => self.name
+}
+function optional = (person: Person?) => person?.describe
+let person = Person { name = "Ada" }
+let method = person.describe
+console.log(method(), optional(person) is not none)

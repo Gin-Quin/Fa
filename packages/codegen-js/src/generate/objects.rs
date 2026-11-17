@@ -111,7 +111,7 @@ impl Generator<'_> {
 	/// with braces): the fields in declaration order.
 	pub(crate) fn object_literal(&mut self, n: NodeId) -> Expr {
 		let Some(info) = self.analysis.object(n).cloned() else {
-			return self.unsupported(n, "this object literal");
+			return self.internal_error(n, "the checked object literal has no object metadata");
 		};
 		// `AtomicInteger { value = 0 }`, `Mutex(T) { … }`, `Channel(T) { … }`
 		if let TypeKind::Sync(kind, _) = self.types.kind(info.ty) {
@@ -389,7 +389,7 @@ impl Generator<'_> {
 			.unwrap_or(n);
 		if let Some(mut count) = self.code_point_count(fact, target) {
 			for &member in members.iter().skip(1) {
-				count = self.apply_member(count, member, false);
+				count = self.apply_member(count, member);
 			}
 			return count;
 		}
@@ -406,7 +406,7 @@ impl Generator<'_> {
 		// `library.math.add`, `counter.count`: through namespaces (modules.rs)
 		if let Some((mut value, used)) = self.namespace_prefix(target, members) {
 			for &member in &members[used..] {
-				value = self.apply_member(value, member, false);
+				value = self.apply_member(value, member);
 			}
 			return value;
 		}
@@ -438,7 +438,7 @@ impl Generator<'_> {
 				members.next();
 				let mut value = value;
 				for member in members {
-					value = self.apply_member(value, member, false);
+					value = self.apply_member(value, member);
 				}
 				return value;
 			}
@@ -455,7 +455,7 @@ impl Generator<'_> {
 				members.next();
 				let mut value = self.nominal_member_value(n, nominal, index);
 				for member in members {
-					value = self.apply_member(value, member, false);
+					value = self.apply_member(value, member);
 				}
 				return value;
 			}
@@ -467,7 +467,7 @@ impl Generator<'_> {
 			self.expr(target)
 		};
 		for member in members {
-			value = self.apply_member(value, member, false);
+			value = self.apply_member(value, member);
 		}
 		value
 	}
@@ -510,25 +510,27 @@ impl Generator<'_> {
 						let name = self.enum_members(nominal);
 						Expr::name(name, true)
 					}
-					_ => self.unsupported(member, "`members`"),
+					_ => self.internal_error(
+						member,
+						"the checked Enum.members receiver is not an enumeration",
+					),
 				}
 			}
 			_ => self.unsupported(member, "this member of a type"),
 		}
 	}
 
-	/// `value.member` for one member (`optional`: after `?.`).
-	pub(crate) fn apply_member(&mut self, value: Expr, member: NodeId, optional: bool) -> Expr {
-		let dot = if optional { "?." } else { "." };
+	/// `value.member` for one checked, present receiver.
+	pub(crate) fn apply_member(&mut self, value: Expr, member: NodeId) -> Expr {
 		match self.analysis.resolution(member) {
 			Resolution::Field(shape, index) => {
 				let field = self.types.shape_fields(shape)[index as usize];
 				let property = Self::property(self.types.syms.resolve(field.name));
-				Expr::primary(format!("{}{dot}{property}", value.primary_text()))
+				Expr::primary(format!("{}.{property}", value.primary_text()))
 					.with_purity(value.pure, false)
 			}
 			Resolution::Builtin(builtin) => match builtins::get(builtin).path {
-				"String#codeUnitAt" if !optional => {
+				"String#codeUnitAt" => {
 					let receiver = self.keep(value);
 					let index = self.temp();
 					let normalize = self.helper("faNormalizeIndex");
@@ -550,10 +552,10 @@ impl Generator<'_> {
 				| "Bytes#length"
 				| "Array#length"
 				| "OrderedColumnar#length"
-				| "CArray#length" => Expr::primary(format!("{}{dot}length", value.primary_text()))
+				| "CArray#length" => Expr::primary(format!("{}.length", value.primary_text()))
 					.with_purity(value.pure, false),
 				"Set#size" | "Map#size" | "Pool#size" | "Columnar#size" | "RelationPool#size" => {
-					Expr::primary(format!("{}{dot}size", value.primary_text()))
+					Expr::primary(format!("{}.size", value.primary_text()))
 						.with_purity(value.pure, false)
 				}
 				// the engine manages the memory: the capacity is the length or size
@@ -577,23 +579,23 @@ impl Generator<'_> {
 						}
 						return Expr::constant(constant, Prec::Primary);
 					}
-					Expr::primary(format!("{}{dot}length", value.primary_text()))
+					Expr::primary(format!("{}.length", value.primary_text()))
 						.with_purity(value.pure, false)
 				}
 				"Set#capacity" | "Map#capacity" | "Pool#capacity" | "Columnar#capacity" => {
-					Expr::primary(format!("{}{dot}size", value.primary_text()))
+					Expr::primary(format!("{}.size", value.primary_text()))
 						.with_purity(value.pure, false)
 				}
 
 				// the value protected by a mutex (concurrency.js)
-				"Guard#value" => Expr::primary(format!("{}{dot}value", value.primary_text()))
+				"Guard#value" => Expr::primary(format!("{}.value", value.primary_text()))
 					.with_purity(value.pure, false),
 				// the port a listener of `std.net` listens on (net.js)
-				"TcpListener#port" => Expr::primary(format!("{}{dot}port", value.primary_text()))
+				"TcpListener#port" => Expr::primary(format!("{}.port", value.primary_text()))
 					.with_purity(value.pure, false),
 				path @ ("Range#start" | "Range#end" | "Range#includesEnd") => {
 					let field = path.trim_start_matches("Range#");
-					Expr::primary(format!("{}{dot}{field}", value.primary_text()))
+					Expr::primary(format!("{}.{field}", value.primary_text()))
 						.with_purity(value.pure, false)
 				}
 				path => self.unsupported(member, &format!("`{path}` as a value")),
@@ -601,7 +603,7 @@ impl Generator<'_> {
 			// a field common to the members of an anonymous union
 			Resolution::Unresolved if matches!(self.view(member), View::Name(_)) => {
 				let property = Self::property(self.text(member));
-				Expr::primary(format!("{}{dot}{property}", value.primary_text()))
+				Expr::primary(format!("{}.{property}", value.primary_text()))
 					.with_purity(value.pure, false)
 			}
 			_ => self.unsupported(member, "this member"),
@@ -630,14 +632,17 @@ impl Generator<'_> {
 				}
 			}
 			NominalKind::Errors => self.new_error(nominal, index, Vec::new()),
-			_ => self.unsupported(n, "this member"),
+			_ => self.internal_error(
+				n,
+				"the checked nominal member is neither an enumeration, union nor error",
+			),
 		}
 	}
 
 	/// `Shape.Labelled("north")`: `{ $t: "Shape.Labelled", v: "north" }`.
 	pub(crate) fn member_with_data(&mut self, member: TypeId, data: NodeId) -> Expr {
 		let TypeKind::Member(nominal, index) = self.types.kind(member) else {
-			return self.unsupported(data, "this member");
+			return self.internal_error(data, "the checked member construction has no member type");
 		};
 		let value = self.expr(data);
 		let value = self.copy_stored(data, value);
@@ -1043,23 +1048,6 @@ impl Generator<'_> {
 
 	// ── optionals ────────────────────────────────────────────────────────
 
-	/// `target?.a?.b`: JavaScript's optional chain. The parser keeps the
-	/// members of a chain in one node, without saying which ones follow a
-	/// `?.`: every member is read with `?.`, which is the same where a
-	/// member is never `none` (the chain stops at its first `none`).
-	pub(crate) fn optional_access(
-		&mut self,
-		_n: NodeId,
-		target: NodeId,
-		members: NodeList<'_>,
-	) -> Expr {
-		let mut value = self.expr(target);
-		for member in members.iter() {
-			value = self.apply_member(value, member, true);
-		}
-		value
-	}
-
 	/// `a ?? b ?? c`: an operand is evaluated only when the ones before are
 	/// `none`.
 	pub(crate) fn fallback(&mut self, operands: &[NodeId]) -> Expr {
@@ -1217,7 +1205,7 @@ impl Generator<'_> {
 				let mut value = self.stable_value(container);
 				let count = members.len();
 				for member in members.iter().take(count - 1) {
-					value = self.apply_member(value, member, false);
+					value = self.apply_member(value, member);
 				}
 				let (shape, index) = match self.analysis.resolution(last) {
 					Resolution::Field(shape, index) => (shape, index),
@@ -1343,7 +1331,7 @@ impl Generator<'_> {
 	/// `target .= { field = value, … }`: every value first, then the writes.
 	pub(crate) fn update_fields(&mut self, target: NodeId, value: NodeId) {
 		let View::Object { items } = self.view(value) else {
-			self.unsupported(value, "this `.=`");
+			self.internal_error(value, "the checked field update has no object literal");
 			return;
 		};
 		let container = self.stable_value(target);
@@ -1357,7 +1345,10 @@ impl Generator<'_> {
 				} => fields.push((self.text(name).to_string(), value)),
 				View::Name(_) => fields.push((self.text(item).to_string(), item)),
 				_ => {
-					self.unsupported(item, "this field of `.=`");
+					self.internal_error(
+						item,
+						"the checked field update has an invalid object item",
+					);
 					return;
 				}
 			}

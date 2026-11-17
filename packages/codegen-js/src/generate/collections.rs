@@ -75,7 +75,7 @@ impl Generator<'_> {
 	}
 
 	/// The class of the sets of an element type.
-	fn set_class(&mut self, item: TypeId) -> String {
+	pub(crate) fn set_class(&mut self, item: TypeId) -> String {
 		if self.is_primitive(item) {
 			"Set".to_string()
 		} else {
@@ -84,7 +84,7 @@ impl Generator<'_> {
 	}
 
 	/// The class of the maps of a key type.
-	fn map_class(&mut self, key: TypeId) -> String {
+	pub(crate) fn map_class(&mut self, key: TypeId) -> String {
 		if self.is_primitive(key) {
 			"Map".to_string()
 		} else {
@@ -183,7 +183,10 @@ impl Generator<'_> {
 		arguments: &[Argument],
 	) -> Expr {
 		let Some(Argument::Given(source)) = arguments.first() else {
-			return self.unsupported(n, &format!("`{path}` without a source"));
+			return self.internal_error(
+				n,
+				"the checked collection constructor has no source argument",
+			);
 		};
 		let source = *source;
 		let capacity = match arguments.get(1) {
@@ -496,14 +499,13 @@ impl Generator<'_> {
 			})
 			.collect();
 		if let ("delete" | "take", Some(&element)) = (name, nodes.first()) {
-			// the slot of the reference (`use element = pool.find(…)`)
-			let Some(slot) = self.reference_slot(element) else {
-				return self.unsupported(
-					n,
-					"removing an element of a pool of values that is not a `use` reference to it",
-				);
+			let (lines, slot) = self.capture(|g| g.reference_slot(element));
+			let receiver = self.keep_before(receiver, &lines);
+			self.out.append(lines);
+			let Some(slot) = slot else {
+				return self.unsupported(n, "removing this element without a retained pool slot");
 			};
-			return Expr::primary(format!("{}.{name}({slot})", receiver.primary_text()));
+			return Expr::primary(format!("{}.{name}({})", receiver.primary_text(), slot.text));
 		}
 		let (lines, values) = self.capture(|g| g.in_order(&nodes, |g, node| g.expr(node)));
 		let receiver = self.keep_before(receiver, &lines);

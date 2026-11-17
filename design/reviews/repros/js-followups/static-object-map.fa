@@ -1,0 +1,3 @@
+-- Regression: compile-time composite keys use the ordinary structural table.
+static values: Map<{ code: Integer }, String> = [({ code = 1 }, "one"), ({ code = 2 }, "two")]
+console.log(values.size)

@@ -66,7 +66,6 @@ cli/tests/programs/js-million-copy.fa: runtime: recursive deep copy/equality exh
 cli/tests/programs/number-api.fa: line 47: this name is not supported by the native backend yet
 cli/tests/programs/percentages.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
 cli/tests/programs/printing.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-cli/tests/programs/references.fa: line 42: a `use` of this value is not supported by the native backend yet
 cli/tests/programs/special-names.fa: line 27: error[AN004]: `Json.stringify` doesn't exist without a C library (`native-freestanding`): build for `native`
 cli/tests/programs/tuples-ranges-patterns.fa: line 27: this place is not supported by the native backend yet
 cli/tests/programs/unions-and-enums.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
@@ -82,3 +81,9 @@ codegen-llvm/tests/programs/memory.fa: floats (`snprintf` of the C library) on t
 codegen-llvm/tests/programs/packed-arrays.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
 codegen-llvm/tests/programs/recursive-container-layout.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
 codegen-llvm/tests/programs/units-generic-values.fa: application/main.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
+
+# js/followups LLVM audit: remaining optional continuation lowering.
+cli/tests/programs/optional-calls.fa: native continuation after an optional call lacks present-result lowering (Optional<Object> to Object); requires the full chain normalizer
+
+# Builtin-produced pool references do not yet reach the native removal slot path.
+cli/tests/programs/pool-direct-reference-removal.fa: line 3: delete/take accepts stored places; direct Pool/Columnar add results need producer-slot forwarding with control-flow and failure handling

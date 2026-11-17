@@ -140,6 +140,11 @@ let task = start greet() -- binds the default now; runs the body on its first tu
 console.log(await task)
 ```
 
+An optional call stays optional when started: `start receiver?.method()` gives
+`Task<Result>?`, with no task when the receiver is absent. Narrow it or supply a
+fallback before awaiting the task. An awaited optional call, `await receiver?.method()`,
+gives `Result?`. Both forms skip arguments and defaults when absent.
+
 A `Task` is the handle of a computation started with `start`. Its type declares its result and its errors, like a function type: starting `fetchData` gives a `Task<Response> throws HttpError`.
 
 ```fa
@@ -690,10 +695,11 @@ Requirements do **not** cross worker boundaries. A worker only receives copies o
 | --- | --- | --- | --- |
 | `async` / `await` / `start` | yes | yes | yes |
 | Blocking calls | see [the primitives](#blocking-calls-and-targets) | see [the primitives](#blocking-calls-and-targets) | see [the primitives](#blocking-calls-and-targets) |
-| Workers, channels | yes | yes | yes (Web Workers) |
+| Workers, worker pools | yes | no (`CONC010`) until wasm threads are implemented | yes (Web Workers) |
+| Channels between tasks | yes | yes | yes |
 | `for parallel`, `parallel()` | yes | no | no |
 | `Mutex`, atomics between tasks | yes | yes | yes |
-| `Mutex`, atomics, channels shared with a worker | yes | with shared memory, flat values only | with `SharedArrayBuffer`, flat values only |
+| `Mutex`, atomics, channels shared with a worker | yes | no workers yet; with shared memory, flat values only | with `SharedArrayBuffer`, flat values only |
 
 A flat value contains no collection, string or recursive union: on JavaScript and WebAssembly, only such a value can live in memory shared between threads.
 
@@ -748,6 +754,9 @@ All links must point inside the received owner before it becomes available to yo
 ### Instances of an `async` function
 
 The checker requests, for each `async` function, a synchronous instance, an asynchronous instance, or both, depending on how it is called; each instance is generated only if requested, and cached separately. A non-async function has one instance. The checker computes, per target, whether the synchronous instance can exist (its call chain reaches no async-only primitive, and on JavaScript no channel, lock, worker call or `await` of an outside task); this set of targets is part of the function's interface and of its interface hash.
+
+A generic function's blocking interface also records the constraint methods its body actually calls, identified by the parameter's declaring owner, position and method name. Applications resolve these conditional requirements against the selected written methods, including phantom generic-owner arguments and forwarded parameters. Local and imported generic calls participate in the same summary fixpoint; the conditional requirements are merged into shared interfaces and hashed for incremental invalidation. Unused constraints do not restrict callers.
+
 
 - **Synchronous instance**: `await f()` becomes a call of `f`'s synchronous instance; `await task` returns the stored result of a task started in the same blocking call; `start f()` runs `f`'s synchronous instance immediately and builds a finished task (result or error). On native, waiting on a channel, a mutex or a worker parks the thread.
 - **Blocking mode** is dynamic: a non-async function called during a blocking call may contain `start`. A thread-local "blocking depth" counter, incremented around each blocking call of an `async` function, makes `start` run eagerly. The checker requires, for a non-async function that contains `start f()` and can be reached during a blocking call on a target, that `f` can be called blocking on that target.

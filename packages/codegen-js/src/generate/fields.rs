@@ -52,7 +52,7 @@ impl<'s> Generator<'s> {
 		let values = self.in_order(nodes, |g, operand| g.expr(operand));
 		let mut values = values.into_iter();
 		let Some(mut result) = values.next() else {
-			return self.unsupported(n, "this operation");
+			return self.internal_error(n, "the checked field-set operation has no operands");
 		};
 		for value in values {
 			result = self.fields_step(ty, op, &result, &value);

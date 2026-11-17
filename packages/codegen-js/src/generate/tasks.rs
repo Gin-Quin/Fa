@@ -1058,6 +1058,12 @@ impl Generator<'_> {
 
 	/// `start f(…)` or `start do { … }`: the task.
 	pub(crate) fn start_expr(&mut self, n: NodeId, operand: NodeId) -> Expr {
+		let call = self.strip_groups(operand);
+		if self.chain_candidate(call)
+			&& let View::Call { callee, .. } = self.view(call)
+		{
+			return self.optional_start(n, call, callee);
+		}
 		let info = self.analysis.starts.get(&n).cloned();
 		let detached = info.as_ref().is_some_and(|info| info.detached);
 		let task = match info.as_ref().and_then(|info| info.block) {

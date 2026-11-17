@@ -511,14 +511,13 @@ impl Generator<'_> {
 			})
 			.collect();
 		if let ("delete" | "take", Some(&element)) = (name, nodes.first()) {
-			// the slot of the reference (`use element = pool.find(…)`)
-			let Some(slot) = self.reference_slot(element) else {
-				return self.unsupported(
-					n,
-					"removing an element of a pool of values that is not a `use` reference to it",
-				);
+			let (lines, slot) = self.capture(|g| g.reference_slot(element));
+			let receiver = self.keep_before(receiver, &lines);
+			self.out.append(lines);
+			let Some(slot) = slot else {
+				return self.unsupported(n, "removing this element without a retained pool slot");
 			};
-			return Expr::primary(format!("{}.{name}({slot})", receiver.primary_text()));
+			return Expr::primary(format!("{}.{name}({})", receiver.primary_text(), slot.text));
 		}
 		let (lines, values) = self.capture(|g| g.in_order(&nodes, |g, node| g.expr(node)));
 		let receiver = self.keep_before(receiver, &lines);

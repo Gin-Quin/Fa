@@ -1573,18 +1573,10 @@ impl Generator<'_> {
 		}
 	}
 
-	pub(crate) fn reference_slot(&self, node: NodeId) -> Option<String> {
-		let Resolution::Local(symbol) = self.analysis.resolution(self.strip_reference(node)) else {
-			return None;
-		};
-		if let Some(Reference::Place(Parts {
-			key: Key::Index(key) | Key::Entry(key) | Key::Dynamic(key),
-			..
-		})) = self.references.get(&symbol)
-		{
-			return Some(key.text.clone());
-		}
-		self.map_aliases.get(&symbol).map(|(_, key)| key.clone())
+	/// The slot of an evaluated pool reference, including a direct call's
+	/// result. This uses the same locator lowering as reference arguments.
+	pub(crate) fn reference_slot(&mut self, node: NodeId) -> Option<Expr> {
+		self.reference_pair(node).map(|(_, key)| key)
 	}
 
 	/// The node of a place without its parentheses and `try`.

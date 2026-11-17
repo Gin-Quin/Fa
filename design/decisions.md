@@ -2543,3 +2543,6 @@ Recursive generic calls inside a definition retain the existing current-instance
 
 JavaScript constants share the runtime literal class selection: primitive Set/Map keys use engine tables, composite keys use FaSet/FaHashMap. Choose by the checked key type, including empty tables and nested constants, rather than refusing nonprimitive interpreter values. Preserve duplicate replacement and structural equality through the existing constructors.
 
+### Direct pool-reference removal (2026-11-17)
+
+JavaScript value-pool delete/take obtains its slot through the common reference-pair lowering, including direct builtin and user-function results. Evaluate the receiver before any emitted argument statements, and never recover a slot by value equality: equal live elements remain distinct. The same path keeps named references and columnar slots.

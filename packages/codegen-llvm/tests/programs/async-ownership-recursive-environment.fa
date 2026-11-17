@@ -1,0 +1,31 @@
+-- prints: 7 11
+-- prints: 7
+
+type Reader = async (Integer) => Integer
+
+function direct = (seed: Integer): Reader => {
+	async function recur = (remaining: Integer): Integer => {
+		if remaining == 0 { return seed }
+		await Task.yield()
+		await recur(remaining - 1)
+	}
+	recur
+}
+
+function indirect = (seed: Integer): Reader => {
+	async function throughHandle = (remaining: Integer): Integer => {
+		if remaining == 0 { return seed }
+		let again = throughHandle
+		await Task.yield()
+		await again(remaining - 1)
+	}
+	throughHandle
+}
+
+let first = direct(7)
+let second = indirect(11)
+let running = start first(3)
+console.log(await running, await second(3))
+
+let temporary = start direct(7)(2)
+console.log(await temporary)

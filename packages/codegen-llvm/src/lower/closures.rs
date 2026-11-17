@@ -265,13 +265,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		&self,
 		function: &super::Function<'ctx>,
 	) -> Option<PointerValue<'ctx>> {
-		(function.lambda && self.frame().function == function.value).then(|| {
-			function
-				.value
-				.get_nth_param(0)
-				.expect("a closure environment")
-				.into_pointer_value()
-		})
+		let (entry, environment) = self.frame().self_environment?;
+		(function.lambda && (entry == function.value || self.frame().function == function.value))
+			.then_some(environment)
 	}
 
 	/// The drop and the copy of an environment in a frame: nothing to free,

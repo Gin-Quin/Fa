@@ -1,5 +1,6 @@
 -- prints: 7 11
 -- prints: 7 11
+-- prints: 4 4
 
 type Reader = (Integer) => Integer
 
@@ -24,3 +25,15 @@ let first = direct(7)
 let second = indirect(11)
 console.log(first(3), second(3))
 console.log(compiled - second(3), summary() - first(3))
+
+function borrowed = (limit: Integer): Integer => {
+	mutable total = 0
+	function tick = (remaining: Integer): Integer => {
+		total += 1
+		if remaining == 0 { total } else { tick(remaining - 1) }
+	}
+	tick(limit)
+}
+
+static compiledBorrowed = @borrowed(3)
+console.log(compiledBorrowed, borrowed(3))

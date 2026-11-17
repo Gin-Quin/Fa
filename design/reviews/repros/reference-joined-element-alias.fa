@@ -1,0 +1,16 @@
+-- Expected: REF001 at `item`, because selected may still designate a.
+-- Current checker accepts this. Removing the conditional reuse reports
+-- REF001 after a.push, as expected. Coordinate with links/spec-references.
+
+function observe = (choose: Boolean): Integer => {
+	mutable a = [1]
+	let b = [2]
+	mutable use selected = a
+	if choose { reuse selected = b }
+	if selected.length == 0 { return 0 }
+	use item = selected[0]
+	a.push(2)
+	item
+}
+
+console.log(observe(true))

@@ -198,6 +198,9 @@ struct Frame<'ctx> {
 	readonly_strings: rustc_hash::FxHashSet<PointerValue<'ctx>>,
 	collection_locals: rustc_hash::FxHashSet<(FileId, SymbolId)>,
 	function: FunctionValue<'ctx>,
+	/// The original concrete entry and the environment shared by its
+	/// synchronous/async forms. Absent for functions without an environment.
+	self_environment: Option<(FunctionValue<'ctx>, PointerValue<'ctx>)>,
 	/// Buffers owned by this frame; their pointers never move between locals.
 	frame_strings: FxHashMap<(FileId, SymbolId), frame_strings::FrameString<'ctx>>,
 	/// Recursive nodes allocated by this function belong to the caller's region.
@@ -1727,6 +1730,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			readonly_strings: rustc_hash::FxHashSet::default(),
 			collection_locals: rustc_hash::FxHashSet::default(),
 			function,
+			self_environment: None,
 			frame_strings: FxHashMap::default(),
 			arena: false,
 			same_value_zero: false,
@@ -1804,6 +1808,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let by_reference = function.by_reference;
 		let captures = function.captures.clone();
 		self.begin_function(value, ret, Some(declaration));
+		if lambda {
+			let environment = value
+				.get_nth_param(0)
+				.expect("a closure environment")
+				.into_pointer_value();
+			self.frame_mut().self_environment = Some((self.functions[&key].value, environment));
+		}
 		self.frame_mut().arena = function.arena_body.is_some();
 		self.frame_mut().throws = throws;
 		self.begin_function_task(&function)?;

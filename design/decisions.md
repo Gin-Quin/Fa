@@ -1985,3 +1985,8 @@ The Walker and SessionHost share one function cache. Stamp each lowering with a 
 ### Ownership enforcement: named callable dependency facts (2026-11-17)
 
 Publish named callable bindings separately from data captures; a caller retains a callee handle rather than taking another snapshot of its data. Discover body and default uses, transport nonlocal bindings through intervening environments, and compute capture state with reverse worklists. Preserve raw dependency edges independently of `Empty`, `Capturing` or `Pending` state: per-key analysis can snapshot an enclosing body before its captures are complete. Pending facts must settle against that context before target environment selection. Captureless chains and empty cycles stay empty. This publication changes no target layout or capture ownership.
+
+
+### Ownership enforcement: async self environment identity (2026-11-17)
+
+A lowering frame records the original concrete entry and its incoming environment. Its synchronous and coroutine forms reuse that environment for self calls; self handles retain it. Coroutine leases and existing return/error/cancellation cleanup remain responsible for lifetime. The canonical concrete entry still distinguishes generic instances. The runtime guard covers ramp/resume/destroy/cleanup, and a borrowed recursive callback must preserve writes to its enclosing mutable local.

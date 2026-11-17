@@ -159,10 +159,28 @@ mod with_llvm {
 			("recursive-environment-wasm", Target::Wasm),
 		] {
 			let ir = ir_at_target(name, source, true, OptLevel::O0, target);
-			for name in ["fa.recur", "fa.throughHandle"] {
+			for name in ["fa.recur", "fa.throughHandle", "fa.tick"] {
 				let body = function(&ir, name);
 				assert!(!body.contains("@fa_alloc("), "{body}");
 				assert!(!body.contains("@fa.environment.drop"), "{body}");
+				assert!(!body.contains("store ptr @fa.keep_environment"), "{body}");
+			}
+		}
+	}
+
+	#[test]
+	fn async_recursive_calls_reuse_the_running_environment() {
+		let source = include_str!("programs/async-ownership-recursive-environment.fa");
+		for (name, target) in [
+			("async-recursive-environment-native", Target::Native),
+			("async-recursive-environment-wasm", Target::Wasm),
+		] {
+			let ir = ir_at_target(name, source, true, OptLevel::O0, target);
+			for name in ["fa.recur.async", "fa.throughHandle.async"] {
+				for suffix in ["", ".resume", ".destroy", ".cleanup"] {
+					let body = function(&ir, &format!("{name}{suffix}"));
+					assert!(!body.contains("store ptr @fa.environment.drop"), "{body}");
+				}
 			}
 		}
 	}

@@ -1,5 +1,3 @@
 # Known failures on node; every entry is executed.
 # An unlisted failure, listed success or stale entry fails tests/programs.rs.
-cli/tests/programs/json.fa: JSON.parse error messages are V8-specific; annotations expect Bun JavaScriptCore wording.
-cli/tests/programs/pointer-allocate.foreign.fa: Pointer.allocate compiles but enters the Bun-only FFI runtime; missing target rejection.
-codegen-llvm/tests/programs/async-net.fa: Node listen binds asynchronously: listener.port is 0 immediately after construction; clients fail and accept waits forever.
+codegen-llvm/tests/programs/async-net.fa: Deferred to the std.net decision: node:net binds asynchronously, so listener.port is 0 immediately after construction; preserve the explicit host while deciding synchronous port discovery.

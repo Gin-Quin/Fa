@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import {
 	faJsonParse,
+	faJsonReadBytes,
 	faJsonStringify,
 	faMonotonic,
 	faReadBytes,
@@ -84,6 +85,52 @@ describe("faMonotonic", () => {
 });
 
 describe("faJsonParse", () => {
+	test("syntax errors use Fa's grammar for strings and bytes", () => {
+		const cases = [
+			["", "Unexpected EOF"],
+			["{", "Expected '}'"],
+			['{"a"', "Expected ':' before value in object property definition"],
+			['{"a":', "Unexpected EOF"],
+			['{"a":1', "Expected '}'"],
+			['{"a":1,}', "Property name must be a string literal"],
+			["[", "Unexpected EOF"],
+			["[1", "Expected ']'"],
+			["[1,]", "Unexpected comma at the end of array expression"],
+			["[1,", "Unexpected EOF"],
+			["[1 2]", "Expected ']'"],
+			["null true", "Unable to parse JSON string"],
+			["01", "Unable to parse JSON string"],
+			["-", "Invalid number"],
+			["1.", "Invalid digits after decimal point"],
+			["1e+", "Unable to parse JSON string"],
+			["tru", 'Unexpected identifier "tru"'],
+			["true_", 'Unexpected identifier "true_"'],
+			[".", "Unexpected token '.'"],
+			["]", "Unexpected token ']'"],
+			["@", "Unrecognized token '@'"],
+			["😀", "Unrecognized token '😀'"],
+			['"unfinished', "Unterminated string"],
+			['"\\q', "Unterminated string"],
+			['"\\q"', "Invalid escape character q"],
+			['"\\u12z4"', "\\u must be followed by 4 hex digits"],
+			['"\\u123"', "\\u must be followed by 4 hex digits"],
+			['"\n"', "Unterminated string"],
+			["[".repeat(1001), "Exceeded the maximum depth"],
+		];
+		for (const [text, message] of cases) {
+			for (const input of [text, new TextEncoder().encode(text)]) {
+				expect(() => faJsonParse(input, "n", faJsonReadBytes)).toThrow(
+					`JSON Parse error: ${message}`,
+				);
+			}
+		}
+		for (const bytes of [[255], [34, 237, 160, 128, 34]]) {
+			expect(() => faJsonParse(new Uint8Array(bytes), "s", faJsonReadBytes)).toThrow(
+				"invalid UTF-8 in JSON input",
+			);
+		}
+	});
+
 	const user = [
 		"o",
 		[

@@ -240,7 +240,142 @@ export function faMonotonic() {
 	return Math.round(performance.now() * 1e6);
 }
 
-// @fa-helper faJsonParse deps: JsonError
+// @fa-helper faJsonSyntaxError
+/** Scan rejected JSON using Fa's grammar and error precedence. Successful
+ * String input still uses the engine parser; this scan only runs on errors.
+ * Container state is explicit so malformed deep input cannot exhaust the JS stack.
+ * @param {string} text @returns {string}
+ */
+export function faJsonSyntaxError(text) {
+	let index = 0;
+	const space = () => {
+		while (" \t\r\n".includes(text[index] ?? "\0")) index++;
+	};
+	/** @param {string | undefined} char */
+	const digit = (char) => char !== undefined && char >= "0" && char <= "9";
+	/** @param {string | undefined} char */
+	const identifier = (char) => char !== undefined && /[a-zA-Z0-9_$]/.test(char);
+	const string = () => {
+		const start = ++index;
+		// Find the closing quote first, as in the native parser. An unfinished
+		// string takes precedence over a bad escape inside it.
+		while (index < text.length && text[index] !== '"') {
+			if (text.charCodeAt(index) < 32) return "Unterminated string";
+			index += text[index] === "\\" ? 2 : 1;
+		}
+		if (index >= text.length) return "Unterminated string";
+		const end = index++;
+		for (let at = start; at < end; at++) {
+			if (text[at] !== "\\") continue;
+			const escaped = text[++at];
+			if (escaped === "u") {
+				if (!/^[0-9a-fA-F]{4}$/.test(text.slice(at + 1, at + 5)) || at + 4 >= end)
+					return "\\u must be followed by 4 hex digits";
+				at += 4;
+			} else if (!'"\\/bfnrt'.includes(escaped)) return `Invalid escape character ${escaped}`;
+		}
+		return null;
+	};
+	/** Each frame waits for a value, a key, or a separator. */
+	/** @type {{object: boolean, state: number}[]} */
+	const stack = [];
+	let hasRoot = false;
+	let error = null;
+	while (error === null) {
+		space();
+		const frame = stack[stack.length - 1];
+		if (frame === undefined && hasRoot) {
+			error = "Unable to parse JSON string";
+			break;
+		}
+		if (frame !== undefined) {
+			const close = frame.object ? "}" : "]";
+			if ((frame.state === 0 || frame.state === 3) && text[index] === close) {
+				index++;
+				stack.pop();
+				continue;
+			}
+			if (frame.state === 3) {
+				if (text[index] !== ",") {
+					error = `Expected '${close}'`;
+					break;
+				}
+				index++;
+				frame.state = 1;
+				space();
+			}
+			if (frame.object && frame.state !== 2) {
+				if (text[index] !== '"') {
+					error = frame.state === 0 ? "Expected '}'" : "Property name must be a string literal";
+					break;
+				}
+				error = string();
+				if (error !== null) break;
+				space();
+				if (text[index++] !== ":") {
+					error = "Expected ':' before value in object property definition";
+					break;
+				}
+				frame.state = 2;
+				space();
+			} else if (!frame.object && frame.state === 1 && text[index] === "]") {
+				error = "Unexpected comma at the end of array expression";
+				break;
+			}
+		}
+		const char = text[index];
+		if (char === undefined) {
+			error = "Unexpected EOF";
+			break;
+		}
+		if (frame !== undefined) frame.state = 3;
+		else hasRoot = true;
+		if (char === "{" || char === "[") {
+			if (stack.length >= 1000) {
+				error = "Exceeded the maximum depth";
+				break;
+			}
+			stack.push({ object: char === "{", state: 0 });
+			index++;
+		} else if (char === '"') error = string();
+		else if (char === "-" || digit(char)) {
+			if (char === "-") index++;
+			if (!digit(text[index])) {
+				error = "Invalid number";
+				break;
+			}
+			if (text[index] === "0") index++;
+			else while (digit(text[index])) index++;
+			if (text[index] === ".") {
+				index++;
+				if (!digit(text[index])) {
+					error = "Invalid digits after decimal point";
+					break;
+				}
+				while (digit(text[index])) index++;
+			}
+			if (text[index] === "e" || text[index] === "E") {
+				index++;
+				if (text[index] === "+" || text[index] === "-") index++;
+				if (!digit(text[index])) {
+					error = "Unable to parse JSON string";
+					break;
+				}
+				while (digit(text[index])) index++;
+			}
+		} else if ("}],:.".includes(char)) error = `Unexpected token '${char}'`;
+		else if (identifier(char)) {
+			const start = index++;
+			while (identifier(text[index])) index++;
+			const word = text.slice(start, index);
+			if (word !== "true" && word !== "false" && word !== "null")
+				error = `Unexpected identifier "${word}"`;
+		} else error = `Unrecognized token '${String.fromCodePoint(text.codePointAt(index) ?? 0)}'`;
+	}
+	return `JSON Parse error: ${error}`;
+}
+
+// @fa-helper faJsonParse deps: JsonError faJsonSyntaxError
 /**
  * `Json.parse(text)`: the value of the expected type, described by `schema`:
  *
@@ -279,7 +414,11 @@ export function faJsonParse(text, schema, read = JSON.parse) {
 	try {
 		data = read(text);
 	} catch (error) {
-		throw new JsonError(String(/** @type {any} */ (error)?.message ?? error));
+		throw new JsonError(
+			typeof text === "string"
+				? faJsonSyntaxError(text)
+				: String(/** @type {any} */ (error)?.message ?? error),
+		);
 	}
 	return faJsonConvert(data, schema, "the value");
 }
@@ -715,7 +854,7 @@ export function faWriteBytesAsync(task, path, bytes) {
 	return faFileAwait(task, path, (fs) => fs.writeFile(path, bytes));
 }
 
-// @fa-helper faJsonReadBytes deps: faUtf8Decoder
+// @fa-helper faJsonReadBytes deps: faUtf8Decoder faJsonSyntaxError
 /** Parse bytes directly. Decode only JSON string tokens, never the input
  * document. JSON.parse validates escapes and scalar spelling.
  * An explicit container stack also accepts deeply nested documents.
@@ -723,6 +862,21 @@ export function faWriteBytesAsync(task, path, bytes) {
  */
 export function faJsonReadBytes(bytes) {
 	if (typeof bytes === "string") return JSON.parse(bytes);
+	try {
+		return faJsonReadByteTokens(bytes);
+	} catch {
+		let text;
+		try {
+			text = faUtf8Decoder.decode(bytes);
+		} catch {
+			throw new SyntaxError("invalid UTF-8 in JSON input");
+		}
+		throw new SyntaxError(faJsonSyntaxError(text));
+	}
+}
+
+/** @param {Uint8Array} bytes @returns {any} */
+function faJsonReadByteTokens(bytes) {
 	let index = 0;
 	const fail = () => {
 		throw new SyntaxError(`Invalid JSON at byte ${index}`);

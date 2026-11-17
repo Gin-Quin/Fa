@@ -1,0 +1,121 @@
+-- Syntax diagnostics are Fa's, on every engine and for String or Bytes.
+use { Json } = std.json
+function attempt = (text: String | Bytes) => {
+	let value: Integer = Json.parse(text) catch error => {
+		console.log(error.message)
+		return
+	}
+	console.log("unexpected success", value)
+}
+attempt("")
+-- prints: JSON Parse error: Unexpected EOF
+attempt("".toUtf8())
+-- prints: JSON Parse error: Unexpected EOF
+attempt("{{")
+-- prints: JSON Parse error: Expected '}'
+attempt("{{".toUtf8())
+-- prints: JSON Parse error: Expected '}'
+attempt("{{\"a\"")
+-- prints: JSON Parse error: Expected ':' before value in object property definition
+attempt("{{\"a\"".toUtf8())
+-- prints: JSON Parse error: Expected ':' before value in object property definition
+attempt("{{\"a\":")
+-- prints: JSON Parse error: Unexpected EOF
+attempt("{{\"a\":".toUtf8())
+-- prints: JSON Parse error: Unexpected EOF
+attempt("{{\"a\":1")
+-- prints: JSON Parse error: Expected '}'
+attempt("{{\"a\":1".toUtf8())
+-- prints: JSON Parse error: Expected '}'
+attempt("{{\"a\":1,}}")
+-- prints: JSON Parse error: Property name must be a string literal
+attempt("{{\"a\":1,}}".toUtf8())
+-- prints: JSON Parse error: Property name must be a string literal
+attempt("[")
+-- prints: JSON Parse error: Unexpected EOF
+attempt("[".toUtf8())
+-- prints: JSON Parse error: Unexpected EOF
+attempt("[1")
+-- prints: JSON Parse error: Expected ']'
+attempt("[1".toUtf8())
+-- prints: JSON Parse error: Expected ']'
+attempt("[1,]")
+-- prints: JSON Parse error: Unexpected comma at the end of array expression
+attempt("[1,]".toUtf8())
+-- prints: JSON Parse error: Unexpected comma at the end of array expression
+attempt("[1,")
+-- prints: JSON Parse error: Unexpected EOF
+attempt("[1,".toUtf8())
+-- prints: JSON Parse error: Unexpected EOF
+attempt("[1 2]")
+-- prints: JSON Parse error: Expected ']'
+attempt("[1 2]".toUtf8())
+-- prints: JSON Parse error: Expected ']'
+attempt("null true")
+-- prints: JSON Parse error: Unable to parse JSON string
+attempt("null true".toUtf8())
+-- prints: JSON Parse error: Unable to parse JSON string
+attempt("01")
+-- prints: JSON Parse error: Unable to parse JSON string
+attempt("01".toUtf8())
+-- prints: JSON Parse error: Unable to parse JSON string
+attempt("-")
+-- prints: JSON Parse error: Invalid number
+attempt("-".toUtf8())
+-- prints: JSON Parse error: Invalid number
+attempt("1.")
+-- prints: JSON Parse error: Invalid digits after decimal point
+attempt("1.".toUtf8())
+-- prints: JSON Parse error: Invalid digits after decimal point
+attempt("1e+")
+-- prints: JSON Parse error: Unable to parse JSON string
+attempt("1e+".toUtf8())
+-- prints: JSON Parse error: Unable to parse JSON string
+attempt("tru")
+-- prints: JSON Parse error: Unexpected identifier "tru"
+attempt("tru".toUtf8())
+-- prints: JSON Parse error: Unexpected identifier "tru"
+attempt("true_")
+-- prints: JSON Parse error: Unexpected identifier "true_"
+attempt("true_".toUtf8())
+-- prints: JSON Parse error: Unexpected identifier "true_"
+attempt(".")
+-- prints: JSON Parse error: Unexpected token '.'
+attempt(".".toUtf8())
+-- prints: JSON Parse error: Unexpected token '.'
+attempt("]")
+-- prints: JSON Parse error: Unexpected token ']'
+attempt("]".toUtf8())
+-- prints: JSON Parse error: Unexpected token ']'
+attempt("@")
+-- prints: JSON Parse error: Unrecognized token '@'
+attempt("@".toUtf8())
+-- prints: JSON Parse error: Unrecognized token '@'
+attempt("😀")
+-- prints: JSON Parse error: Unrecognized token '😀'
+attempt("😀".toUtf8())
+-- prints: JSON Parse error: Unrecognized token '😀'
+attempt("\"unfinished")
+-- prints: JSON Parse error: Unterminated string
+attempt("\"unfinished".toUtf8())
+-- prints: JSON Parse error: Unterminated string
+attempt("\"\\q")
+-- prints: JSON Parse error: Unterminated string
+attempt("\"\\q".toUtf8())
+-- prints: JSON Parse error: Unterminated string
+attempt("\"\\q\"")
+-- prints: JSON Parse error: Invalid escape character q
+attempt("\"\\q\"".toUtf8())
+-- prints: JSON Parse error: Invalid escape character q
+attempt("\"\\u12z4\"")
+-- prints: JSON Parse error: \u must be followed by 4 hex digits
+attempt("\"\\u12z4\"".toUtf8())
+-- prints: JSON Parse error: \u must be followed by 4 hex digits
+attempt("\"\\u123\"")
+-- prints: JSON Parse error: \u must be followed by 4 hex digits
+attempt("\"\\u123\"".toUtf8())
+-- prints: JSON Parse error: \u must be followed by 4 hex digits
+attempt("\"\n\"")
+-- prints: JSON Parse error: Unterminated string
+attempt("\"\n\"".toUtf8())
+-- prints: JSON Parse error: Unterminated string

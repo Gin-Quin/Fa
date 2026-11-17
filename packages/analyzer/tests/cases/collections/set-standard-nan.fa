@@ -19,8 +19,8 @@ function check = (): Boolean => {
 	assert arrays.delete([nan])
 	let a: Set<Float> = [nan, -0.0]
 	let b: Set<Float> = [0.0, nan]
-	assert a == b
-	assert a.intersection(b) == a
+	assert (a == b) == true
+	assert (a.intersection(b) == a) == true
 	assert a.difference(b).isEmpty()
 	assert a.union(b).size == 2
 	assert a.isSubsetOf(b)

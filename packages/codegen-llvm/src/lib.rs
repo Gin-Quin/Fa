@@ -277,17 +277,6 @@ pub fn compile_package(
 
 /// Without LLVM: always [`Error::Unavailable`].
 #[cfg(not(fa_llvm))]
-pub fn compile_file(
-	_path: &std::path::Path,
-	_target: Target,
-	_options: &Options,
-	_output: &std::path::Path,
-) -> Result<Artifact, Error> {
-	Err(Error::Unavailable)
-}
-
-/// Without LLVM: always [`Error::Unavailable`].
-#[cfg(not(fa_llvm))]
 pub fn compile_unit(
 	_session: &fa_analyzer::Session,
 	_files: &[fa_analyzer::ids::FileId],

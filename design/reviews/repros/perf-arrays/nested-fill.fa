@@ -1,0 +1,12 @@
+-- An inner block fill must update an outer counted loop's push cache.
+function run = () => {
+	mutable items: GrowingArray<Boolean> = []
+	for round in 0..2 {
+		for 0..3 { items.push(true) }
+		console.log(items.length)
+		items.push(false)
+		console.log(items.length)
+	}
+	for item in items { console.log(item) }
+}
+run()

@@ -1569,6 +1569,7 @@ impl Walker<'_> {
 			None => {}
 		}
 		if let Some(value) = value {
+			self.task_returned(value);
 			self.escape(value, value);
 		}
 		let state = self.body.flow.fork();

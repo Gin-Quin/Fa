@@ -26,6 +26,15 @@ pub struct ClosureOrigin {
 	pub callable: CallableOrigin,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TaskOrigin {
+	pub projection: Vec<Step>,
+	pub start: NodeId,
+	/// Several runtime tasks from one start site can occur below a common
+	/// prefix. Keeping that prefix bounds recursive/loop provenance.
+	pub descendants: bool,
+}
+
 /// An unknown returned place is somewhere below this owner. A formal root
 /// preserves the identity of an explicitly borrowed parameter inside its body.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -45,6 +54,7 @@ pub struct ValueOrigins {
 	/// A user-call result whose physical projection is not known here.
 	pub opaque: bool,
 	pub closures: Vec<ClosureOrigin>,
+	pub tasks: Vec<TaskOrigin>,
 }
 
 impl ValueOrigins {
@@ -61,6 +71,33 @@ impl ValueOrigins {
 		self.closures.extend_from_slice(&other.closures);
 		self.closures.sort_unstable();
 		self.closures.dedup();
+		self.tasks.extend_from_slice(&other.tasks);
+		self.normalize_tasks();
+	}
+
+	pub fn normalize_tasks(&mut self) {
+		self.tasks.sort_unstable_by_key(|task| task.start);
+		let mut normalized: Vec<TaskOrigin> = Vec::new();
+		for task in std::mem::take(&mut self.tasks) {
+			if let Some(prior) = normalized
+				.last_mut()
+				.filter(|prior| prior.start == task.start)
+			{
+				let common = prior
+					.projection
+					.iter()
+					.zip(&task.projection)
+					.take_while(|(a, b)| a == b)
+					.count();
+				prior.descendants |= task.descendants
+					|| common < prior.projection.len()
+					|| common < task.projection.len();
+				prior.projection.truncate(common);
+			} else {
+				normalized.push(task);
+			}
+		}
+		self.tasks = normalized;
 	}
 	pub fn copied(&self) -> Self {
 		Self {
@@ -70,6 +107,7 @@ impl ValueOrigins {
 			owned: true,
 			opaque: false,
 			closures: self.closures.clone(),
+			tasks: self.tasks.clone(),
 		}
 	}
 }

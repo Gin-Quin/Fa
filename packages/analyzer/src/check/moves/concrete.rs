@@ -771,6 +771,55 @@ mod tests {
 	}
 
 	#[test]
+	fn awaiting_a_replacement_task_keeps_the_moved_task_borrow_live() {
+		let source = "async function read = (items: Array<Integer>): Integer => { await Task.yield()\nitems.length }\nlet first = [1]\nlet second = [2]\nmutable task = start read(first)\nlet old = task\ntask = start read(second)\nconsole.log(await task)\nmutable moved = first\nmoved.push(3)\nconsole.log(await old, moved.length)\n";
+		assert_eq!(crate::check::test_support::codes(source), ["MEM004"]);
+	}
+
+	#[test]
+	fn awaiting_the_current_mutable_task_ends_its_current_borrow() {
+		let source = "async function read = (items: Array<Integer>): Integer => { await Task.yield()\nitems.length }\nlet first = [1]\nlet second = [2]\nmutable task = start read(first)\nconsole.log(await task)\ntask = start read(second)\nconsole.log(await task)\nmutable moved = second\nmoved.push(3)\nconsole.log(moved.length)\n";
+		crate::check::test_support::analyzed(source);
+	}
+
+	#[test]
+	fn task_field_transfers_preserve_their_borrow_endpoints() {
+		let source = "async function read = (items: Array<Integer>): Integer => { await Task.yield()\nitems.length }\nlet items = [1]\nlet held = { task = start read(items), other = 2 }\nlet task = held.task\nconsole.log(held.other, await task)\nmutable moved = items\nmoved.push(3)\nconsole.log(moved.length)\n";
+		crate::check::test_support::analyzed(source);
+	}
+
+	#[test]
+	fn a_task_in_a_returned_composite_cannot_borrow_a_local_owner() {
+		for returned in [
+			"{ task = start read(items) }",
+			"return { task = start read(items) }",
+		] {
+			let source = format!(
+				"async function read = (items: Array<Integer>): Integer => {{ await Task.yield()\nitems.length }}\nfunction make = (): {{ task: Task<Integer> }} => {{ let items = [1]\n{returned} }}\n"
+			);
+			assert_eq!(crate::check::test_support::codes(&source), ["CONC018"]);
+		}
+	}
+
+	#[test]
+	fn a_task_leaving_a_block_cannot_borrow_that_blocks_local_owner() {
+		let source = "async function read = (items: Array<Integer>): Integer => { await Task.yield()\nitems.length }\nlet held = do { let items = [1]\n{ task = start read(items) } }\nconsole.log(await held.task catch _error => 0)\n";
+		assert_eq!(crate::check::test_support::codes(source), ["CONC018"]);
+	}
+
+	#[test]
+	fn awaiting_tasks_stored_by_push_ends_their_borrows() {
+		let source = "async function read = (items: Array<Integer>): Integer => { await Task.yield()\nitems.length }\nlet items = [1]\nmutable tasks: Array<Task<Integer>> = []\ntasks.push(start read(items))\nconsole.log(await Task.all(tasks))\nmutable moved = items\nmoved.push(3)\nconsole.log(moved.length)\n";
+		crate::check::test_support::analyzed(source);
+	}
+
+	#[test]
+	fn recursive_task_owner_provenance_converges_at_a_loop_head() {
+		let source = "type Pending = { task: Task<Integer>, next: Pending? }\nasync function read = (items: Array<Integer>): Integer => { await Task.yield()\nitems.length }\nfunction collect = (items: Array<Integer>, count: Integer<min = 0>): Pending? => { mutable list: Pending? = none\nfor index in 0..count { list = Pending { task = start read(items), next = list } }\nlist }\n";
+		crate::check::test_support::analyzed(source);
+	}
+
+	#[test]
 	fn an_exported_reader_keeps_its_module_owner_live_after_initialization() {
 		let source = "let original = [1, 2]\nmutable target = original\ntarget.push(3)\nexport function = () => console.log(original.length, target.length)\n";
 		assert_eq!(crate::check::test_support::codes(source), ["MEM004"]);

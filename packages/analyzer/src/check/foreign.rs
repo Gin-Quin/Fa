@@ -1010,6 +1010,7 @@ impl Walker<'_> {
 			return;
 		}
 		if root == value {
+			self.forget_transferred_task_origins(value);
 			self.a.moved_reads.insert(value);
 			if owned
 				&& !self
@@ -1046,6 +1047,7 @@ impl Walker<'_> {
 			self.report_borrowed_move(value, symbol);
 			return;
 		}
+		self.forget_transferred_task_origins(value);
 		self.a.moved_reads.insert(value);
 		for place in self.places_of(value) {
 			if !self

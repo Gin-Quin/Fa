@@ -95,7 +95,9 @@ impl Walker<'_> {
 						}
 					} else {
 						for place in origins.places.clone() {
-							origins.closures.extend(self.stored_origins(place).closures);
+							let stored = self.stored_origins(place);
+							origins.closures.extend(stored.closures);
+							origins.tasks.extend(stored.tasks);
 						}
 					}
 				}
@@ -113,7 +115,9 @@ impl Walker<'_> {
 				origins.places = self.places_of(node);
 				origins.opaque = false;
 				for place in origins.places.clone() {
-					origins.closures.extend(self.stored_origins(place).closures);
+					let stored = self.stored_origins(place);
+					origins.closures.extend(stored.closures);
+					origins.tasks.extend(stored.tasks);
 				}
 				origins.owned = origins.places.is_empty();
 			}
@@ -124,7 +128,9 @@ impl Walker<'_> {
 				origins.places = self.places_of(node);
 				origins.opaque = false;
 				for place in origins.places.clone() {
-					origins.closures.extend(self.stored_origins(place).closures);
+					let stored = self.stored_origins(place);
+					origins.closures.extend(stored.closures);
+					origins.tasks.extend(stored.tasks);
 				}
 				origins.owned = origins.places.is_empty();
 			}
@@ -139,14 +145,21 @@ impl Walker<'_> {
 				for (name, field) in fields {
 					match field {
 						FieldValue::Given(value) | FieldValue::Default(value) => {
-							for mut closure in self.evaluated_origins(value).closures {
+							let child = self.evaluated_origins(value);
+							for mut task in child.tasks {
+								task.projection.insert(0, Step::Field(name));
+								origins.tasks.push(task);
+							}
+							for mut closure in child.closures {
 								closure.projection.insert(0, Step::Field(name));
 								origins.closures.push(closure);
 							}
 						}
-						FieldValue::Spread(value) => origins
-							.closures
-							.extend(self.evaluated_origins(value).closures),
+						FieldValue::Spread(value) => {
+							let child = self.evaluated_origins(value);
+							origins.closures.extend(child.closures);
+							origins.tasks.extend(child.tasks);
+						}
 						_ => {}
 					}
 				}
@@ -156,23 +169,13 @@ impl Walker<'_> {
 				let mut shifted = false;
 				for (index, value) in items.iter().enumerate() {
 					let spread = matches!(self.view(value), View::Spread(_));
-					for mut closure in self.evaluated_origins(value).closures {
-						if spread {
-							if matches!(closure.projection.first(), Some(Step::Index(_))) {
-								closure.projection[0] = Step::Index(Identity::Unknown);
-							} else {
-								closure.projection.insert(0, Step::Index(Identity::Unknown));
-							}
-						} else {
-							closure.projection.insert(
-								0,
-								Step::Index(if shifted {
-									Identity::Unknown
-								} else {
-									Identity::Exact(index as i64)
-								}),
-							);
-						}
+					let child = self.evaluated_origins(value);
+					for mut task in child.tasks {
+						prefix_item_projection(&mut task.projection, index, shifted, spread);
+						origins.tasks.push(task);
+					}
+					for mut closure in child.closures {
+						prefix_item_projection(&mut closure.projection, index, shifted, spread);
 						origins.closures.push(closure);
 					}
 					shifted |= spread;
@@ -206,6 +209,7 @@ impl Walker<'_> {
 				},
 			});
 		}
+		self.record_produced_task_origins(node, &mut origins);
 		if self.type_of(node) == TypeId::NEVER {
 			origins = ValueOrigins::default();
 		}
@@ -217,10 +221,21 @@ impl Walker<'_> {
 		origins.places.dedup();
 		origins.closures.sort_unstable();
 		origins.closures.dedup();
+		origins.normalize_tasks();
 		self.value_origins.insert(node, origins);
 	}
 
 	fn project_origins(&self, mut origins: ValueOrigins, step: Step) -> ValueOrigins {
+		origins.tasks.retain_mut(|task| {
+			let Some(first) = task.projection.first() else {
+				return task.descendants;
+			};
+			let matches = !self.steps_distinct(*first, step);
+			if matches {
+				task.projection.remove(0);
+			}
+			matches
+		});
 		origins.closures.retain_mut(|closure| {
 			let Some(first) = closure.projection.first() else {
 				return false;
@@ -255,6 +270,10 @@ impl Walker<'_> {
 				result.join(&value);
 			} else if overlap && stored_steps.len() > steps.len() {
 				let mut value = self.facts.origins.get(id).clone();
+				for task in &mut value.tasks {
+					task.projection
+						.splice(0..0, stored_steps[steps.len()..].iter().copied());
+				}
 				for closure in &mut value.closures {
 					closure
 						.projection
@@ -270,7 +289,16 @@ impl Walker<'_> {
 		if !self.body.flow.reachable {
 			return;
 		}
-		let origins = self.evaluated_origins(value).copied();
+		let mut origins = self.evaluated_origins(value).copied();
+		// A narrower ordinary projection does not retain omitted Task fields.
+		if self
+			.s
+			.types
+			.is_ordinary(self.a.coercion(value).unwrap_or(self.type_of(value)))
+		{
+			origins.tasks.clear();
+		}
+		let mut replaced_tasks = Vec::new();
 		let strong = places.len() == 1
 			&& self.place_steps(places[0]).iter().all(|step| {
 				matches!(
@@ -280,6 +308,12 @@ impl Walker<'_> {
 			});
 		for place in places {
 			if strong {
+				replaced_tasks.extend(
+					self.stored_origins(place)
+						.tasks
+						.into_iter()
+						.map(|task| task.start),
+				);
 				// Replace projected provenance as well as the complete local.
 				let steps = self.place_steps(place);
 				let root = self.places.get(place).root;
@@ -313,6 +347,9 @@ impl Walker<'_> {
 					let suffix = &steps[self.place_steps(stored).len()..];
 					let mut prior = self.facts.origins.get(id).clone();
 					prior
+						.tasks
+						.retain(|task| !task.projection.starts_with(suffix));
+					prior
 						.closures
 						.retain(|closure| !closure.projection.starts_with(suffix));
 					let id = self.facts.origins.intern(prior);
@@ -326,7 +363,7 @@ impl Walker<'_> {
 					}
 				}
 			}
-			if origins.closures.is_empty() {
+			if origins.closures.is_empty() && origins.tasks.is_empty() {
 				continue;
 			}
 			let origins = if strong {
@@ -347,6 +384,70 @@ impl Walker<'_> {
 				Err(index) => self.body.flow.values.insert(index, (place, id)),
 			}
 		}
+		self.end_unowned_tasks(&replaced_tasks, &[]);
+	}
+
+	/// Removing an owning path transfers its Task payloads, without ending
+	/// their borrows. The receiving store uses the value's frozen snapshot.
+	pub(crate) fn forget_transferred_task_origins(&mut self, value: NodeId) {
+		let places = self.places_of(value);
+		self.forget_task_place_origins(&places);
+	}
+
+	pub(super) fn forget_task_place_origins(&mut self, places: &[PlaceId]) {
+		let rows = std::mem::take(&mut self.body.flow.values);
+		for (stored, id) in rows {
+			let mut origins = self.facts.origins.get(id).clone();
+			let stored_steps = self.place_steps(stored);
+			for &place in places {
+				if self.places.get(place).root != self.places.get(stored).root {
+					continue;
+				}
+				let steps = self.place_steps(place);
+				if stored_steps.starts_with(&steps) {
+					origins.tasks.clear();
+				} else if steps.starts_with(&stored_steps) {
+					let suffix = &steps[stored_steps.len()..];
+					origins
+						.tasks
+						.retain(|task| !task.projection.starts_with(suffix));
+				}
+			}
+			if !origins.closures.is_empty() || !origins.tasks.is_empty() {
+				let id = self.facts.origins.intern(origins);
+				self.body.flow.values.push((stored, id));
+			}
+		}
+	}
+
+	pub(super) fn stored_task_starts(&self, symbol: SymbolId) -> Vec<NodeId> {
+		let mut starts = Vec::new();
+		for &(place, id) in &self.body.flow.values {
+			if self.places.get(place).root == crate::flow::PlaceRoot::Symbol(symbol) {
+				starts.extend(
+					self.facts
+						.origins
+						.get(id)
+						.tasks
+						.iter()
+						.map(|task| task.start),
+				);
+			}
+		}
+		starts.sort_unstable();
+		starts.dedup();
+		starts
+	}
+
+	pub(super) fn task_has_stored_owner(&self, start: NodeId) -> bool {
+		self.body.flow.values.iter().any(|&(_, id)| {
+			self.facts
+				.origins
+				.get(id)
+				.tasks
+				.iter()
+				.any(|task| task.start == start)
+		})
 	}
 
 	pub(super) fn record_capture_origins(&mut self, lambda: NodeId) {
@@ -386,5 +487,20 @@ impl Walker<'_> {
 	pub(super) fn bind_value_origins(&mut self, symbol: SymbolId, value: NodeId) {
 		let place = self.places.symbol(symbol);
 		self.store_value_origins(vec![place], value);
+	}
+}
+
+fn prefix_item_projection(projection: &mut Vec<Step>, index: usize, shifted: bool, spread: bool) {
+	if spread && matches!(projection.first(), Some(Step::Index(_))) {
+		projection[0] = Step::Index(Identity::Unknown);
+	} else {
+		projection.insert(
+			0,
+			Step::Index(if shifted || spread {
+				Identity::Unknown
+			} else {
+				Identity::Exact(index as i64)
+			}),
+		);
 	}
 }

@@ -1351,6 +1351,7 @@ impl Walker<'_> {
 					.iter()
 					.any(|&(other, _)| other == symbol)
 			{
+				self.forget_transferred_task_origins(name);
 				self.body.flow.consumed.push((symbol, name));
 			}
 		}
@@ -1976,116 +1977,96 @@ impl Walker<'_> {
 		}
 	}
 
-	/// The `start` nodes of the tasks an expression designates: `start`s in
-	/// it, the tasks of the locals it names, of the combinators it calls.
+	/// Task identities are frozen when their value is evaluated. Looking up
+	/// a declaration again would confuse a moved handle with its replacement.
 	fn task_starts(&self, n: NodeId) -> Vec<NodeId> {
-		let mut found = Vec::new();
-		let mut stack = vec![n];
-		let mut seen = FxHashSet::default();
-		while let Some(node) = stack.pop() {
-			if !seen.insert(node) {
-				continue;
-			}
-			match self.view(node) {
-				View::Start(_) => {
-					found.push(node);
-					continue;
-				}
-				View::Name(_) => {
-					if let Resolution::Local(symbol) = self.a.resolution(node) {
-						if self.a.symbols.symbol(symbol).kind == SymbolKind::Let {
-							if let Some(value) = self.task_initializer(symbol) {
-								stack.push(value);
-							}
-						} else {
-							found.extend(self.starts_of_symbol(symbol));
-						}
-					}
-					continue;
-				}
-				_ => {}
-			}
-			if let Some(group) = self.tasks.groups.get(&node) {
-				found.extend(group.iter().copied());
-			}
-			stack.extend(crate::syntax::children(&self.tree, node));
-		}
+		let mut found: Vec<_> = self
+			.evaluated_origins(n)
+			.tasks
+			.into_iter()
+			.map(|task| task.start)
+			.collect();
 		found.sort_unstable();
 		found.dedup();
 		found
 	}
 
-	fn task_initializer(&self, symbol: SymbolId) -> Option<NodeId> {
-		let data = self.a.symbols.symbol(symbol);
-		if !matches!(data.kind, SymbolKind::Let | SymbolKind::Mutable)
-			|| !matches!(self.s.types.kind(data.ty), TypeKind::Task(..))
-		{
-			return None;
+	pub(super) fn record_produced_task_origins(
+		&self,
+		node: NodeId,
+		origins: &mut crate::flow::values::ValueOrigins,
+	) {
+		if !matches!(self.s.types.kind(self.type_of(node)), TypeKind::Task(..)) {
+			return;
 		}
-		let View::Declaration {
-			value: Some(value), ..
-		} = self.view(data.decl_node)
-		else {
-			return None;
+		let starts = if matches!(self.view(node), View::Start(_)) {
+			vec![node]
+		} else {
+			self.tasks.groups.get(&node).cloned().unwrap_or_default()
 		};
-		Some(self.strip_groups(value))
+		origins.tasks.extend(
+			starts
+				.into_iter()
+				.map(|start| crate::flow::values::TaskOrigin {
+					projection: Vec::new(),
+					start,
+					descendants: false,
+				}),
+		);
 	}
 
-	/// Immutable task transfers preserve their start identity. Resolve the
-	/// chain iteratively, so awaiting a moved handle ends the same borrow.
-	fn starts_of_symbol(&self, symbol: SymbolId) -> Vec<NodeId> {
-		let Some(value) = self.task_initializer(symbol) else {
-			return Vec::new();
-		};
-		if self.a.symbols.symbol(symbol).kind == SymbolKind::Let {
-			return self.task_starts(value);
-		}
-		match self.view(value) {
-			View::Start(_) => vec![value],
-			_ => self.tasks.groups.get(&value).cloned().unwrap_or_default(),
-		}
+	/// A joined task value can designate several starts. Only release a
+	/// start when no other possible owning place retains it on any path.
+	pub(super) fn end_unowned_tasks(&mut self, starts: &[NodeId], returned: &[NodeId]) {
+		let ended: Vec<_> = starts
+			.iter()
+			.copied()
+			.filter(|start| !returned.contains(start) && !self.task_has_stored_owner(*start))
+			.collect();
+		self.body.flow.tasks.retain(|task| !ended.contains(task));
 	}
 
 	/// The tasks an awaited expression designates end: their borrows too.
 	fn end_tasks_of(&mut self, operand: NodeId) {
 		let starts = self.task_starts(operand);
-		self.body.flow.tasks.retain(|task| !starts.contains(task));
+		self.end_unowned_tasks(&starts, &[]);
 	}
 
 	/// The end of a block (decision of the second analyzer review): the
 	/// tasks bound in it are cancelled and waited for, so their borrows end
 	/// (structured tasks). A task that is the block's value leaves it.
 	pub(super) fn end_block_tasks(&mut self, scope: crate::ids::ScopeId, value: Option<NodeId>) {
+		if let Some(value) = value {
+			let function_exit = self
+				.body
+				.functions
+				.last()
+				.is_some_and(|cx| cx.scope == scope);
+			self.check_task_scope_escape(value, scope, function_exit);
+		}
 		if self.body.flow.tasks.is_empty() {
 			return;
 		}
 		let kept = value
-			.map(|value| self.strip_groups(value))
-			.and_then(|value| match self.a.resolution(value) {
-				Resolution::Local(symbol) => Some(symbol),
-				_ => None,
-			});
+			.map(|value| self.task_starts(value))
+			.unwrap_or_default();
 		let symbols = self.a.symbols.scope(scope).symbols.clone();
+		let mut starts = Vec::new();
+		let mut places = Vec::new();
 		for symbol in symbols {
-			// A moved-from binding owns no task to cancel. The transferred
-			// handle keeps its borrow until its actual owner awaits or drops it.
-			if Some(symbol) != kept
-				&& !self
-					.body
-					.flow
-					.consumed
-					.iter()
-					.any(|&(moved, _)| moved == symbol)
-			{
-				self.end_task_borrow(symbol);
-			}
+			starts.extend(self.stored_task_starts(symbol));
+			places.push(self.places.symbol(symbol));
 		}
+		self.forget_task_place_origins(&places);
+		self.end_unowned_tasks(&starts, &kept);
 	}
 
 	/// A task that ends (awaited, cancelled): its borrows end.
 	fn end_task_borrow(&mut self, task: SymbolId) {
-		let starts = self.starts_of_symbol(task);
-		self.body.flow.tasks.retain(|start| !starts.contains(start));
+		let starts = self.stored_task_starts(task);
+		let place = self.places.symbol(task);
+		self.forget_task_place_origins(&[place]);
+		self.end_unowned_tasks(&starts, &[]);
 	}
 
 	/// The name of the task started at `start`, for messages.
@@ -2167,12 +2148,21 @@ impl Walker<'_> {
 	/// The value of a function: a task it returns can't use the function's
 	/// locals, which are destroyed when it returns (`CONC018`).
 	pub(super) fn task_returned(&mut self, value: NodeId) {
-		if !matches!(self.s.types.kind(self.type_of(value)), TypeKind::Task(..)) {
-			return;
-		}
 		let Some(scope) = self.body.functions.last().map(|cx| cx.scope) else {
 			return;
 		};
+		self.check_task_scope_escape(value, scope, true);
+	}
+
+	fn check_task_scope_escape(
+		&mut self,
+		value: NodeId,
+		scope: crate::ids::ScopeId,
+		function_exit: bool,
+	) {
+		if self.store_ownership(value) != crate::types::Ownership::Unique {
+			return;
+		}
 		for start in self.task_starts(value) {
 			let Some(borrow) = self.tasks.borrows.get(&start) else {
 				continue;
@@ -2191,9 +2181,14 @@ impl Walker<'_> {
 						.syms
 						.resolve(self.a.symbols.symbol(symbol).name)
 						.to_string();
-					format!("`{name}`, which is destroyed when the function returns")
+					let end = if function_exit {
+						"the function returns"
+					} else {
+						"this block ends"
+					};
+					format!("`{name}`, which is destroyed when {end}")
 				}
-				None if borrow.provided => {
+				None if function_exit && borrow.provided => {
 					"a provided requirement, which ends with its block".to_string()
 				}
 				None => continue,

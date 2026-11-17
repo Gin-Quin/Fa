@@ -1697,6 +1697,22 @@ impl Walker<'_> {
 								self.task_stored(*value);
 							}
 							self.escape(*value, n);
+							// Task ownership follows the same evaluated projection
+							// facts as local/field stores. Unknown item identity is
+							// a weak update, so existing task owners stay possible.
+							if !self.evaluated_origins(*value).tasks.is_empty() {
+								let destinations = self
+									.callee_receiver_places(callee)
+									.into_iter()
+									.map(|place| {
+										self.places.child(
+											place,
+											Step::Index(crate::flow::Identity::Unknown),
+										)
+									})
+									.collect();
+								self.store_value_origins(destinations, *value);
+							}
 							// an item stored is a copy, maybe a move (moves.rs)
 							self.note_copy_site(*value);
 						}

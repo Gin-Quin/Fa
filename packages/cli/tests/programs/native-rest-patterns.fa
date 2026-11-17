@@ -10,7 +10,7 @@ console.log(empty)
 -- prints: {}
 
 function tail = <Item>(items: Array<Item>): Array<Item> throws IndexError => {
-	try let [_first, ...rest] = items
+	try let [_first, ...rest] = copy items
 	rest
 }
 console.log(tail(["one", "two", "three"]) catch _error => [])
@@ -20,7 +20,7 @@ console.log(tail<Integer>([]) catch _error => [-1])
 -- prints: []
 -- prints: [-1]
 mutable words = ["a", "b", "c"]
-mutable [head, ...tailWords] = words
+mutable [head, ...tailWords] = copy words
 try tailWords[0] = "changed"
 words[2] = "source"
 console.log(head, tailWords, words)
@@ -38,7 +38,7 @@ console.log(x, other, outer)
 -- prints: 1 { y = "yes" } { flag = true }
 
 async function delayed = (items: Array<String>): Array<String> throws IndexError => {
-	try let [_first, ...rest] = items
+	try let [_first, ...rest] = copy items
 	await std.time.sleep(1)
 	rest
 }

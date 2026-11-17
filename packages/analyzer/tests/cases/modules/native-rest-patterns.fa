@@ -5,7 +5,7 @@ let [first, ...words] = ["one", "two", "three"]
 export namespace = {
 	function describe = (): String => "{label} {dimensions.width}x{dimensions.height} {first} {words}"
 	function tail = <Item>(items: Array<Item>): Array<Item> throws IndexError => {
-		try let [_first, ...rest] = items
+		try let [_first, ...rest] = copy items
 		rest
 	}
 }

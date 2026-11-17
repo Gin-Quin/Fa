@@ -612,3 +612,20 @@ fn strings_are_ordinary_and_bytes_are_structures() {
 	}
 	assert_eq!(types.ownership(TypeId::STRING), Ownership::Ordinary);
 }
+
+#[test]
+fn optional_recursive_references_and_their_unfolded_values_need_no_conversion_copy() {
+	let mut types = TypeStore::new();
+	let module = types.module("ownership");
+	let key = types.decl_key(module, &["List"], 0);
+	let rec = types.recursive_reference(key, "List", &[], true);
+	let next = types.optional(rec);
+	let value = field(&mut types, "value", TypeId::INTEGER);
+	let next = field(&mut types, "next", next);
+	let list = types.object(&[value, next], None);
+	types.set_rec_target(rec, list);
+	let source = types.optional(rec);
+	let target = types.optional(list);
+	assert_eq!(types.structure_conversion(source, target), None);
+	assert_eq!(types.structure_conversion(target, source), None);
+}

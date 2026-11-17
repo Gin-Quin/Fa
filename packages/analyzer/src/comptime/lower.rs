@@ -1761,7 +1761,7 @@ impl<'a> Lowerer<'a> {
 		match info.callee {
 			Callee::Function(declaration) => {
 				let mut args = self.arguments(&info.arguments, Some(callee), arguments);
-				self.prepend_generic_arguments(n, callee, self.file, declaration, &mut args);
+				self.prepend_generic_arguments(n, application, self.file, declaration, &mut args);
 				let symbol = self.a.symbols.symbol_of_decl(declaration);
 				let captures = self.a.environment_captures(declaration);
 				if captures.is_empty() {
@@ -1908,7 +1908,7 @@ impl<'a> Lowerer<'a> {
 			Callee::Value => {
 				let mut args = self.arguments(&info.arguments, Some(callee), arguments);
 				if let Some((file, node)) = self.callee_function(callee) {
-					self.prepend_generic_arguments(n, callee, file, node, &mut args);
+					self.prepend_generic_arguments(n, application, file, node, &mut args);
 					return Expr::CallFunction(fn_key(file, node), args);
 				}
 				let callee = self.expr(callee);

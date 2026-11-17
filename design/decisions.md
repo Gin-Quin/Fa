@@ -2604,3 +2604,16 @@ without retaining a collection snapshot. Array reversal and both sort paths muta
 the selected items directly. Owning materialization and copy-on-write writes are
 budgeted before allocation. This changes execution machinery, not the language's
 slice, error or ownership rules; user-function reference results remain separate.
+
+
+### Ownership enforcement: checker integration corrections (implementation, 2026-11-17)
+
+A field assignment remains an ownership-CFG event even when it has no value read
+or whole-binding definition: replacing an extracted Task field restores exactly
+that path. A containing method-access/call observation does not repeat an already
+reported moved receiver. Optional conversion checking selects union alternatives
+before deciding whether a recursive part changes, so a recursive reference and
+its own unfolded value are the same view. Compile-time calls retain the original
+generic application node while resolving the callee; hidden value/key-set arguments
+then keep their declaration order, including imported calls. These corrections
+preserve the settled rules and existing supported unique-field moves.

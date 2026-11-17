@@ -73,6 +73,20 @@ impl TypeStore {
 			match (self.kind(actual), self.kind(target)) {
 				(TypeKind::Param(_) | TypeKind::ImplicitParam(..) | TypeKind::Unknown, _)
 				| (_, TypeKind::Param(_) | TypeKind::ImplicitParam(..) | TypeKind::Unknown) => continue,
+				(TypeKind::Union(source), _) => pending.extend(
+					self.list_items(source)
+						.iter()
+						.map(|&actual| (actual, target)),
+				),
+				(_, TypeKind::Union(destination)) => {
+					let targets = self.list_items(destination).to_vec();
+					if let Some(target) = targets.into_iter().find(|&target| {
+						self.assignable(actual, target, super::super::Mode::Copy)
+							.is_ok()
+					}) {
+						pending.push((actual, target));
+					}
+				}
 				(TypeKind::Rec(_), _) | (_, TypeKind::Rec(_)) => {
 					if !self
 						.flags(actual)
@@ -126,20 +140,6 @@ impl TypeStore {
 						.copied()
 						.zip(self.list_items(destination).iter().copied()),
 				),
-				(TypeKind::Union(source), _) => pending.extend(
-					self.list_items(source)
-						.iter()
-						.map(|&actual| (actual, target)),
-				),
-				(_, TypeKind::Union(destination)) => {
-					let targets = self.list_items(destination).to_vec();
-					if let Some(target) = targets.into_iter().find(|&target| {
-						self.assignable(actual, target, super::super::Mode::Copy)
-							.is_ok()
-					}) {
-						pending.push((actual, target));
-					}
-				}
 				(TypeKind::CArray(source, size), TypeKind::CArray(destination, other))
 					if size == other =>
 				{

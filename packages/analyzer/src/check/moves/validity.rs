@@ -91,11 +91,6 @@ impl Walker<'_> {
 	}
 
 	fn report_moved_read(&mut self, node: NodeId, moved: NodeId) {
-		if self.output.iter().any(|diagnostic| {
-			diagnostic.code.id == MEM002.id && diagnostic.location.span == self.span(node)
-		}) {
-			return;
-		}
 		let text = if let crate::syntax::View::Call { callee, .. } = self.view(moved) {
 			let callee = self.tree.text(callee.index());
 			callee
@@ -104,6 +99,20 @@ impl Walker<'_> {
 		} else {
 			self.tree.text(moved.index())
 		};
+		let span = self.span(node);
+		let subject = format!("`{text}`");
+		if self.output.iter().any(|diagnostic| {
+			let previous = diagnostic.location.span;
+			diagnostic.code.id == MEM002.id
+				&& diagnostic.location.file == self.file
+				&& ((previous == span)
+					|| (span.start <= previous.start
+						&& previous.end <= span.end
+						&& diagnostic.message.contains(&subject)))
+		}) {
+			return;
+		}
+
 		let line = self.line_of(moved);
 		let diagnostic = self.diagnostic(&MEM002, node,
 			format!("`{text}` was moved or its lifetime ended on line {line} and may no longer be used here; use its new owner, or assign the place before using it again"))
@@ -147,6 +156,33 @@ mod tests {
 		analyzed(&format!(
 			"{WORK}async function run = (count: Integer): Integer => {{ mutable task = start work()\nfor index in 0..count {{ await task\ntask = start work() }}\nawait task }}\n"
 		));
+	}
+
+	#[test]
+	fn replacing_a_moved_task_field_restores_that_field() {
+		analyzed(&format!(
+			"{WORK}async function run = (): Integer => {{ mutable holder = {{ task = start work(), count = 2 }}\nlet first = holder.task\nholder.task = start work()\nlet a = await first\nlet b = await holder.task catch _error => 0\na + b }}\n"
+		));
+	}
+
+	#[test]
+	fn replacing_a_sibling_does_not_restore_a_moved_task_field() {
+		assert_eq!(
+			codes(&format!(
+				"{WORK}async function run = (): Integer => {{ mutable holder = {{ task = start work(), count = 2 }}\nlet first = holder.task\nholder.count = 3\nlet a = await first\nlet b = await holder.task catch _error => 0\na + b }}\n"
+			)),
+			["MEM002"]
+		);
+	}
+
+	#[test]
+	fn a_closed_receiver_is_reported_once_for_its_name_access_and_call() {
+		assert_eq!(
+			codes(
+				"reactive count = 0\nlet subscription = watch { console.log(count) }\nsubscription.stop()\nsubscription.stop()\n"
+			),
+			["MEM002"]
+		);
 	}
 
 	#[test]

@@ -218,7 +218,11 @@ impl Builder<'_, '_> {
 						| View::Assert(_) | View::Copy(_)
 				);
 		let checked = self.walker.a.has_flags(node, NodeFlags::SINK_CHECK);
-		if reads.is_empty() && defines.is_empty() && !fails && !checked {
+		if reads.is_empty()
+			&& defines.is_empty()
+			&& !fails && !checked
+			&& !self.walker.move_writes.contains_key(&node)
+		{
 			return tail;
 		}
 		let mut next = smallvec![tail];

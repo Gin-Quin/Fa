@@ -1258,6 +1258,9 @@ fn merge_interface(
 						crate::modules::GenericRequirement::Value(param) => {
 							crate::modules::GenericRequirement::Value(merger.param(param))
 						}
+						crate::modules::GenericRequirement::Drop(param) => {
+							crate::modules::GenericRequirement::Drop(merger.param(param))
+						}
 						crate::modules::GenericRequirement::Method(param, name) => {
 							crate::modules::GenericRequirement::Method(
 								merger.param(param),

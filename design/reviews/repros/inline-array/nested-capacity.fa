@@ -1,0 +1,5 @@
+type Box = { values: InlineArray<Integer, 1> = [1] }
+mutable boxes: InlineArray<Box, 3> = []
+boxes.push({})
+boxes[0].values.push(2) catch _error => console.log("full")
+console.log(boxes[0].values) -- expected: [1]

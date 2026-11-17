@@ -1,0 +1,13 @@
+-- A closure captures the capacity used by its inline receiver.
+function make = <capacity: UInt32>(): InlineArray<Integer, capacity> throws CapacityError => {
+	mutable values: InlineArray<Integer, capacity> = []
+	function append = (items: InlineArray<Integer, capacity>, item: Integer) throws CapacityError mutates items.length => {
+		try items.push(item)
+	}
+	try append(values, 7)
+	append(values, 8) catch _error => {}
+	values
+}
+console.log(try make<1>()) -- prints: [7]
+static result = @make<1>()
+console.log(result) -- prints: [7]

@@ -576,3 +576,25 @@ fn task_parameters_transfer_but_resources_and_other_lifetimes_borrow() {
 		assert!(!types.contains_resource(handle));
 	}
 }
+
+#[test]
+fn inline_arrays_inherit_owned_item_categories_without_becoming_heap_collections() {
+	let mut types = TypeStore::new();
+	let capacity = types.int_literal(I256::from(4));
+	let ordinary = types.collection(CollKind::InlineArray, TypeId::STRING, capacity);
+	let heap = types.array(TypeId::INTEGER);
+	let structure = types.collection(CollKind::InlineArray, heap, capacity);
+	let task = task(&mut types);
+	let unique = types.collection(CollKind::InlineArray, task, capacity);
+	let mutex = types.intern(TypeKind::Sync(SyncKind::Mutex, TypeId::INTEGER));
+	let handles = types.collection(CollKind::InlineArray, mutex, capacity);
+	assert_eq!(types.ownership(ordinary), Ownership::Ordinary);
+	assert_eq!(types.ownership(structure), Ownership::Structure);
+	assert_eq!(types.ownership(unique), Ownership::Unique);
+	assert_eq!(types.ownership(handles), Ownership::Ordinary);
+	assert!(types.parameter_can_be_consumed(unique));
+	assert!(!types.parameter_can_be_consumed(structure));
+	let owner = field(&mut types, "items", structure);
+	let object = types.object(&[owner], None);
+	assert_eq!(types.ownership(object), Ownership::Structure);
+}

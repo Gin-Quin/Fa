@@ -48,8 +48,10 @@ impl Walker<'_> {
 					};
 					let actual = self.check(key_node, Some(key));
 					self.sink(key_node, actual, key);
+					self.escape(key_node, n);
 					let actual = self.check(value_node, Some(value));
 					self.sink(value_node, actual, value);
+					self.escape(value_node, n);
 					self.memo(inner, |_| pair);
 					self.memo(item, |_| pair);
 					keys.push(key_node);

@@ -18,6 +18,9 @@ import {
 	FaHashMap,
 	faIndex,
 	faIndexSet,
+	faInlineClear,
+	faInlineDelete,
+	faInlinePush,
 	faMapGetOrInsert,
 	faMapIndex,
 	faMapTake,
@@ -41,7 +44,7 @@ import {
 } from "./collections.js";
 import { faCopy } from "./copy.js";
 import { faDeepEquals } from "./equality.js";
-import { IndexError, KeyNotFound } from "./errors.js";
+import { CapacityError, IndexError, KeyNotFound } from "./errors.js";
 import { faFormat } from "./format.js";
 import { FaStop } from "./stops.js";
 
@@ -94,6 +97,20 @@ describe("indexing", () => {
 		expect(errorOf(() => faIndexSet(xs, 5, 0))).toBeInstanceOf(IndexError);
 		faIndexSet(xs, -2, 7);
 		expect(xs).toEqual([7, 0]);
+	});
+
+	test("checked writes destroy the replaced or rejected owner once", () => {
+		const first = { id: 1 };
+		const next = { id: 2 };
+		const rejected = { id: 3 };
+		const items = [first];
+		const destroyed = [];
+		const drop = (value) => destroyed.push(value.id);
+		faIndexSet(items, -1, next, drop);
+		expect(items).toEqual([next]);
+		expect(errorOf(() => faIndexSet(items, 9, rejected, drop))).toBeInstanceOf(IndexError);
+		expect(items).toEqual([next]);
+		expect(destroyed).toEqual([1, 3]);
 	});
 
 	test("get returns none (undefined)", () => {
@@ -661,5 +678,30 @@ describe("FaValuePool", () => {
 		expect(pool.size).toBe(2);
 		expect(faDeepEquals(copy, pool)).toBe(false);
 		expect([...pool.filter((value) => value === "b")]).toEqual(["b"]);
+	});
+});
+
+describe("inline arrays", () => {
+	test("append preserves identities, order and duplicates; overflow leaves the prefix unchanged", () => {
+		const first = { value: 1 };
+		const values = [first];
+		faInlinePush(values, 3, first);
+		faInlinePush(values, 3, { value: 2 });
+		expect(values[0]).toBe(first);
+		expect(values[1]).toBe(first);
+		expect(errorOf(() => faInlinePush(values, 3, { value: 3 }))).toBeInstanceOf(CapacityError);
+		expect(values).toEqual([first, first, { value: 2 }]);
+		expect(errorOf(() => faInlinePush([], 0, first))).toBeInstanceOf(CapacityError);
+	});
+
+	test("failed append and removal destroy only the owners they remove", () => {
+		const dropped = [];
+		const drop = (item) => dropped.push(item);
+		const values = ["kept", "deleted"];
+		expect(errorOf(() => faInlinePush(values, 2, "overflow", drop))).toBeInstanceOf(CapacityError);
+		faInlineDelete(values, 1, drop);
+		faInlineClear(values, drop);
+		expect(values).toEqual([]);
+		expect(dropped).toEqual(["overflow", "deleted", "kept"]);
 	});
 });

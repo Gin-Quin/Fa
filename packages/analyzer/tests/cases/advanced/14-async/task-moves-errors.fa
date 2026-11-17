@@ -12,8 +12,18 @@ async function main = (flag: Boolean) => {
 	let holder = Holder { task = c }
 	console.log(await c)                 -- error: MEM002
 	let d = start compute(3)
-	console.log(run(() => d))
+	let stored = [() => d]
+	console.log(run(stored[0]))
 	console.log(await d)                 -- error: MEM002
+	let tupleTask = start compute(6)
+	let pair = ((() => tupleTask), 0)
+	console.log(await tupleTask)         -- error: MEM002
+	let objectTask = start compute(7)
+	let callbacks = { work = () => objectTask }
+	console.log(await objectTask)        -- error: MEM002
+	let inlineTask = start compute(8)
+	let inlineCallbacks: InlineArray<() => Task<Integer>, 1> = [() => inlineTask]
+	console.log(await inlineTask)        -- error: MEM002
 	let e = start compute(4)
 	if flag {
 		let moved = same(e)

@@ -1062,7 +1062,8 @@ impl Walker<'_> {
 							let positioned = matches!(
 								kind,
 								CollKind::Array
-									| CollKind::GrowingArray | CollKind::OrderedColumnar
+									| CollKind::InlineArray | CollKind::GrowingArray
+									| CollKind::OrderedColumnar
 							);
 							let (has, step) = if positioned {
 								("length", PathStep::Length)
@@ -2395,9 +2396,21 @@ impl Walker<'_> {
 	/// `take` (which fail on an empty array), 0 after `clear`.
 	fn track_length(&mut self, place: PlaceId, path: &str, before: crate::types::Interval) {
 		let one = I256::ONE;
+		let capacity = self.place_symbol(place).and_then(|symbol| {
+			self.s
+				.types
+				.inline_array(self.a.symbols.symbol(symbol).ty)
+				.map(|(_, capacity)| I256::from(capacity))
+		});
+		if path == "Array#push" && capacity.is_some_and(|capacity| before.lo >= capacity) {
+			return;
+		}
 		let after = match path {
 			"Array#push" | "Array#insert" | "OrderedColumnar#add" => {
-				crate::types::Interval::new(before.lo + one, before.hi.saturating_add(one))
+				let hi = capacity.map_or(before.hi, |capacity| {
+					before.hi.min((capacity - one).max(I256::ZERO))
+				});
+				crate::types::Interval::new(before.lo + one, hi.saturating_add(one))
 			}
 			"Array#pop" | "OrderedColumnar#pop" => crate::types::Interval::new(
 				(before.lo - one).max(I256::ZERO),

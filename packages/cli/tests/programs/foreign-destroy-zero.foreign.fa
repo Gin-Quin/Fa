@@ -26,8 +26,8 @@ do {
 	console.log(zero.descriptor) -- prints: 0
 } -- prints: closed 0
 pick(true) -- prints: closing 0
--- prints: closed 0
 -- prints: picked true
+-- prints: closed 0
 pick(false) -- prints: picked false
 -- prints: closed 0
 do {

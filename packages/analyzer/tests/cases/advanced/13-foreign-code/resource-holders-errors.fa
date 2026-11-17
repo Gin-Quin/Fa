@@ -5,11 +5,12 @@
 type Holder = { label: String, handle: Handle }
 
 function close = (handle: Handle) => console.log(handle.descriptor)
+function extract = (holder: Holder): Handle => holder.handle -- error: MEM002
 
 export function = () => {
 	mutable handles: Array<Handle> = [Handle { descriptor = 1 }]
 	let first = handles[0]                          -- error: MEM002
-	close(handles[0])                               -- error: MEM002
+	close(handles[0]) -- a parameter borrows the collection element
 	let taken = handles.take(0)
 	mutable holder = Holder { label = "h", handle = Handle { descriptor = 2 } }
 	let moved = holder.handle

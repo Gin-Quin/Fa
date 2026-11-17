@@ -1,0 +1,17 @@
+type Buffer<capacity: UInt32> = {
+	items: InlineArray<Integer, capacity> = []
+	function resize = <other: UInt32>(self): InlineArray<Integer, other> throws CapacityError => {
+		mutable result: InlineArray<Integer, other> = []
+		assert self.items.capacity == capacity
+		assert result.capacity == other
+		for item in self.items { try result.push(item) }
+		result
+	}
+}
+function run = (): InlineArray<Integer, 1> throws CapacityError => {
+	let buffer: Buffer<3> = { items = [7] }
+	try buffer.resize<1>()
+}
+console.log(try run()) -- prints: [7]
+static result = @run()
+console.log(result) -- prints: [7]

@@ -1,0 +1,6 @@
+function append = <capacity: UInt32>(
+	values: InlineArray<Integer, capacity>
+) throws CapacityError mutates values.length => { try values.push(9) }
+mutable values: InlineArray<Integer, 2> = []
+try append<2>(values)
+console.log(values) -- prints: [9]

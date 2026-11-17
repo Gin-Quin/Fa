@@ -255,6 +255,7 @@ impl OwnedGraph {
 					}
 				}
 			}
+			TypeKind::Collection(crate::types::CollKind::InlineArray, item, _) => self.push(item),
 			TypeKind::Collection(_, item, key) => {
 				self.structure = true;
 				self.push(item);

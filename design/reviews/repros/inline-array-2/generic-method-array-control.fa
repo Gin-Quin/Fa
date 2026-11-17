@@ -1,0 +1,15 @@
+type Buffer<capacity: UInt32> = {
+	items: Array<Integer> = []
+	function resize = <other: UInt32>(self): Array<Integer> => {
+		mutable result: Array<Integer> = []
+		for item in self.items { result.push(item) }
+		result
+	}
+}
+function run = (): Array<Integer> => {
+	let buffer: Buffer<3> = { items = [7] }
+	buffer.resize<1>()
+}
+console.log(run()) -- prints: [7]
+static result = @run()
+console.log(result) -- prints: [7]

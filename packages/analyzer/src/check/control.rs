@@ -894,7 +894,7 @@ impl Walker<'_> {
 			let positional = matches!(
 				w.s.types.kind(iterable_ty),
 				TypeKind::Collection(
-					CollKind::Array | CollKind::GrowingArray | CollKind::OrderedColumnar,
+					CollKind::Array | CollKind::InlineArray | CollKind::GrowingArray | CollKind::OrderedColumnar,
 					..
 				) | TypeKind::String
 					| TypeKind::StringLit(_)

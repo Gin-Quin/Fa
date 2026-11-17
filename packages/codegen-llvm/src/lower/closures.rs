@@ -367,6 +367,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		declaration: NodeId,
 		node: NodeId,
 	) -> Result<Val<'ctx>, Error> {
+		let node = self.function_value_site(node);
 		// `function f = g then h` (compose.rs)
 		if let fa_analyzer::syntax::View::Function { value, .. } = self.view(declaration)
 			&& self.analysis.compositions.contains_key(&value)
@@ -392,6 +393,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let key = self.instance(declaration, node)?;
 					let function = self.functions[&key].clone();
 					let thunk = self.thunk_of(&function)?;
+					let entry = self.async_value_entry(
+						&function,
+						thunk.as_global_value().as_pointer_value(),
+						true,
+					)?;
 					// the type of the instance
 					let list = self.analysis.instantiation(node).expect("an instantiation");
 					let arguments: Vec<TypeId> = self
@@ -402,11 +408,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						.collect();
 					let generics = self.generic_functions[&declaration].generics.clone();
 					let ty = self.substitute_params(self.type_of(node), &generics, &arguments);
-					return self.make_closure_of(
-						thunk.as_global_value().as_pointer_value(),
-						self.pointer_type().const_null(),
-						ty,
-					);
+					return self.make_closure_of(entry, self.pointer_type().const_null(), ty);
 				}
 				return self.generic_declaration_value(declaration, node);
 			}
@@ -581,13 +583,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let environment_type = self.environment_layout(&[closure_type.into()]);
 		let size = environment_type.size_of().expect("a sized environment");
 		let key = format!("{from:?}.{to:?}");
-		// only the value of an `async` function type may be a tagged table
-		let is_async = matches!(
-			self.types().kind(from),
-			TypeKind::Function(sig) if self.types().sig(sig).is_async
-		);
 		let adapter =
-			self.function_errors_adapter(&key, &from_params, from_ret, is_async, environment_type)?;
+			self.function_errors_adapter(&key, &from_params, from_ret, environment_type)?;
 		let (drop, copy) = self.adapter_environment_functions(&key, from, environment_type)?;
 		// the environment: its drop, its copy, a copy of the value
 		let environment = self.allocate(size)?;
@@ -600,7 +597,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.build_store(field, copied.value.expect("a closure"))?;
 		let pair = self.builder.build_insert_value(
 			closure_type.get_undef(),
-			adapter.as_global_value().as_pointer_value(),
+			self.value_entries(
+				adapter.as_global_value().as_pointer_value(),
+				self.pointer_type().const_null(),
+			),
 			0,
 			"",
 		)?;
@@ -615,7 +615,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		key: &str,
 		params: &[Repr],
 		ret: Repr,
-		is_async: bool,
 		environment_type: StructType<'ctx>,
 	) -> Result<FunctionValue<'ctx>, Error> {
 		let name = format!("fa.adapt_errors.{key}");
@@ -633,8 +632,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.runtime.add_attributes(function, &["nounwind"]);
 		let builder = self.context.create_builder();
 		let entry_block = self.context.append_basic_block(function, "entry");
-		let tagged_block = self.context.append_basic_block(function, "tagged");
-		let call_block = self.context.append_basic_block(function, "call");
 		builder.position_at_end(entry_block);
 		let environment = function
 			.get_nth_param(0)
@@ -649,44 +646,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.build_extract_value(closure, 0, "")?
 			.into_pointer_value();
 		let inner_environment = builder.build_extract_value(closure, 1, "")?;
-		// an async function's value: its synchronous entry is in its table
-		let address = builder.build_ptr_to_int(entry, self.usize, "")?;
-		let tag = builder.build_and(address, self.usize.const_int(1, false), "")?;
-		let tagged = if is_async {
-			builder.build_int_compare(
-				inkwell::IntPredicate::NE,
-				tag,
-				self.usize.const_zero(),
-				"",
-			)?
-		} else {
-			self.context.bool_type().const_zero()
-		};
-		builder.build_conditional_branch(tagged, tagged_block, call_block)?;
-		builder.position_at_end(tagged_block);
-		let table = unsafe {
-			builder.build_gep(
-				self.context.i8_type(),
-				entry,
-				&[self.context.i64_type().const_all_ones()],
-				"",
-			)?
-		};
-		let sync_entry = builder.build_load(pointer, table, "")?.into_pointer_value();
-		builder.build_unconditional_branch(call_block)?;
-		builder.position_at_end(call_block);
-		let target = builder.build_phi(pointer, "entry")?;
-		target.add_incoming(&[(&entry, entry_block), (&sync_entry, tagged_block)]);
+		let target = self.synchronous_entry(&builder, entry)?;
 		let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> = vec![inner_environment.into()];
 		for index in 1..function.count_params() {
 			arguments.push(function.get_nth_param(index).expect("a parameter").into());
 		}
-		let call = builder.build_indirect_call(
-			inner_type,
-			target.as_basic_value().into_pointer_value(),
-			&arguments,
-			"",
-		)?;
+		let call = builder.build_indirect_call(inner_type, target, &arguments, "")?;
 		call.set_call_convention(FAST_CALLING_CONVENTION);
 		// a result built in the caller's slot: the same slot for both, and
 		// only the error is returned (`return_destinations.rs`)
@@ -911,10 +876,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		places: &[Option<PointerValue<'ctx>>],
 		node: NodeId,
 	) -> Result<Val<'ctx>, Error> {
-		// a value of an `async` function type (tasks.rs)
-		if let Some(value) = self.async_value_call(closure, ty, arguments, node)? {
-			return Ok(value);
-		}
 		// a value of a generic function type: its instance for the call (`generic_values.rs`)
 		let (closure, ty) = if self.is_generic_function_type(ty) {
 			let instance = self.generic_instance_value(closure, node)?;
@@ -925,6 +886,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else {
 			(closure, ty)
 		};
+		// a value of an `async` function type (tasks.rs)
+		if let Some(value) = self.async_value_call(closure, ty, arguments, places, node)? {
+			return Ok(value);
+		}
 		let (mut params, ret, throws) = self.value_signature(ty, node)?;
 		// a lambda or a function may declare fewer parameters than its type
 		// (the `index` of a callback): it gets the ones it declares
@@ -936,6 +901,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.builder
 			.build_extract_value(pair, 0, "")?
 			.into_pointer_value();
+		let function = self.synchronous_entry(&self.builder, function)?;
 		let environment = self.builder.build_extract_value(pair, 1, "")?;
 		let mut lowered: Vec<BasicMetadataValueEnum<'ctx>> = vec![environment.into()];
 		// Argument conversions can allocate (an inline collection item passed
@@ -1045,6 +1011,27 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.map(|function| function.info.params.len());
 		}
 		None
+	}
+
+	/// Contextual specialization can belong to the parentheses around a name.
+	fn function_value_site(&self, node: NodeId) -> NodeId {
+		let mut current = node;
+		loop {
+			if self.analysis.instantiation(current).is_some() {
+				return current;
+			}
+			let Some(&parent) = self.parents().get(current.index()) else {
+				return node;
+			};
+			if parent == usize::MAX
+				|| !matches!(
+					self.view(NodeId::new(parent)),
+					fa_analyzer::syntax::View::Group(_)
+				) {
+				return node;
+			}
+			current = NodeId::new(parent);
+		}
 	}
 
 	/// The function value of a name: a lambda's, or a declaration's thunk.

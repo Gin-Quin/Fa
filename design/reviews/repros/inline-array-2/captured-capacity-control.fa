@@ -1,0 +1,8 @@
+-- Control: capture an ordinary compile-time value, with no InlineArray.
+function make = <capacity: UInt32>(): Integer => {
+	function count = (): Integer => capacity
+	count()
+}
+console.log(make<1>()) -- prints: 1
+static result = @make<1>()
+console.log(result) -- prints: 1

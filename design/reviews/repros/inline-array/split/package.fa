@@ -1,0 +1,6 @@
+export = {
+	name = "inlineReview"
+	version = "1.0.0"
+	targets = ["bun", "node", "web", "native", "wasm"]
+	build = { minify = false }
+}

@@ -1,0 +1,7 @@
+function last = (): Integer? => {
+	let items: InlineArray<Integer, 2> = [1, 2]
+	items.get(-1)
+}
+console.log(last()) -- prints: 2
+static result = @last()
+console.log(result) -- prints: 2

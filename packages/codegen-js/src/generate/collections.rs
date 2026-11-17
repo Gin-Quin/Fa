@@ -205,7 +205,10 @@ impl Generator<'_> {
 		// the items read from a place are copied (values are never shared)
 		let shared = self.place_root(source).is_some() && self.is_composite(item);
 		let items = match self.types.kind(source_ty) {
-			TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, ..)
+			TypeKind::Collection(
+				CollKind::Array | CollKind::InlineArray | CollKind::GrowingArray,
+				..,
+			)
 			| TypeKind::Collection(CollKind::Set | CollKind::GrowingSet, ..)
 			| TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, ..) => values[0].clone(),
 			_ => {
@@ -226,7 +229,10 @@ impl Generator<'_> {
 					View::Array { .. } | View::Tuple { .. }
 				) && matches!(
 					self.types.kind(source_ty),
-					TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, ..)
+					TypeKind::Collection(
+						CollKind::Array | CollKind::InlineArray | CollKind::GrowingArray,
+						..
+					)
 				);
 				if fresh || shared {
 					items

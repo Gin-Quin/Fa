@@ -1,0 +1,4 @@
+-- Only one initialized item; capacity must not become function arity.
+mutable entries: Map<InlineArray<Integer, 1024>, Integer> = []
+entries[[7]] = 9
+console.log(try entries[[7]]) -- prints: 9

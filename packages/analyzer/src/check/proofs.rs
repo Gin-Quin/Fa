@@ -117,13 +117,24 @@ impl Walker<'_> {
 			}
 			return None;
 		}
-		self.literal_length(n)
+		self.literal_length(n).or_else(|| {
+			self.s
+				.types
+				.inline_array(self.type_of(n))
+				.map(|(_, capacity)| Interval::new(I256::ZERO, I256::from(capacity)))
+		})
 	}
 
 	/// The length of a local collection or string here, when known.
 	pub(crate) fn length_of(&mut self, symbol: SymbolId) -> Option<Interval> {
-		let fact = self.symbol_fact(symbol)?;
-		(fact.length != IntervalId::NONE).then(|| self.facts.interval_value(fact.length))
+		let fact = self.symbol_fact(symbol).unwrap_or(crate::flow::Fact::TOP);
+		if fact.length != IntervalId::NONE {
+			return Some(self.facts.interval_value(fact.length));
+		}
+		self.s
+			.types
+			.inline_array(self.a.symbols.symbol(symbol).ty)
+			.map(|(_, capacity)| Interval::new(I256::ZERO, I256::from(capacity)))
 	}
 
 	/// Narrows the length fact of a local collection here (`if c.length >= 2`).
@@ -338,11 +349,24 @@ impl Walker<'_> {
 	/// `expr.rs` and `objects.rs`): `INDEX_CHECK` and the error path unless
 	/// the facts prove the index; `E-NUM-17` when it is certainly out.
 	pub(crate) fn check_index_bounds(&mut self, n: NodeId, target: NodeId, index: NodeId) {
-		self.clear_flag(n, NodeFlags::INDEX_CHECK | NodeFlags::CAN_FAIL);
 		let target_ty = self.type_of(self.strip_groups(target));
+		self.check_index_bounds_of(n, target, index, target_ty);
+	}
+
+	pub(super) fn check_index_bounds_of(
+		&mut self,
+		n: NodeId,
+		target: NodeId,
+		index: NodeId,
+		target_ty: TypeId,
+	) {
+		self.clear_flag(n, NodeFlags::INDEX_CHECK | NodeFlags::CAN_FAIL);
 		let error = match self.s.types.kind(target_ty) {
 			TypeKind::Collection(
-				CollKind::Array | CollKind::GrowingArray | CollKind::OrderedColumnar,
+				CollKind::Array
+				| CollKind::InlineArray
+				| CollKind::GrowingArray
+				| CollKind::OrderedColumnar,
 				..,
 			)
 			| TypeKind::String

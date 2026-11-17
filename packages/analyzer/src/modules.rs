@@ -583,6 +583,8 @@ pub struct KeyedDecl {
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum GenericRequirement {
 	Value(ParamId),
+	/// Destruction of an erased type argument (a no-op for ordinary data).
+	Drop(ParamId),
 	Method(ParamId, Sym),
 }
 
@@ -620,6 +622,7 @@ pub fn generic_requirements(types: &TypeStore, generics: &[ParamId]) -> Vec<Gene
 			requirements.push(GenericRequirement::Value(param));
 			continue;
 		}
+		requirements.push(GenericRequirement::Drop(param));
 		for field in types.fields_of(info.constraint) {
 			if field.flags.contains(FieldFlags::METHOD) {
 				requirements.push(GenericRequirement::Method(param, field.name));
@@ -941,6 +944,7 @@ impl Interface {
 			for (index, requirement) in function.requirements.iter().enumerate() {
 				let (kind, value) = match *requirement {
 					GenericRequirement::Value(param) => (1, param_hash(param)),
+					GenericRequirement::Drop(param) => (3, param_hash(param)),
 					GenericRequirement::Method(param, name) => (
 						2,
 						param_hash(param)

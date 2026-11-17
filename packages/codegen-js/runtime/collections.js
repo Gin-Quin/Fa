@@ -10,11 +10,50 @@
 // - A `Range` value is a `FaRange`.
 
 import { faCompare, faEquals, faHash, faKeyEquals } from "./equality.js";
-import { IndexError, KeyNotFound } from "./errors.js";
+import { CapacityError, IndexError, KeyNotFound } from "./errors.js";
 import { faFormat } from "./format.js";
 import { faCheckInteger, faRangeOverflow } from "./integers.js";
 import { faStop } from "./stops.js";
 import { faCharacters, faStringCompare } from "./strings.js";
+
+// @fa-helper faInlinePush deps: CapacityError
+/**
+ * Appends only when the bounded initialized prefix has room.
+ * @template T
+ * @param {T[]} array
+ * @param {number} capacity
+ * @param {T} value
+ * @param {((value: T) => void) | undefined} [drop]
+ */
+export function faInlinePush(array, capacity, value, drop) {
+	if (array.length >= capacity) {
+		drop?.(value);
+		throw new CapacityError();
+	}
+	array.push(value);
+}
+
+// @fa-helper faInlineClear
+/**
+ * @template T
+ * @param {T[]} array
+ * @param {(value: T) => void} drop
+ */
+export function faInlineClear(array, drop) {
+	for (const item of array) drop(item);
+	array.length = 0;
+}
+
+// @fa-helper faInlineDelete deps: faArrayTake
+/**
+ * @template T
+ * @param {T[]} array
+ * @param {number} index
+ * @param {(value: T) => void} drop
+ */
+export function faInlineDelete(array, index, drop) {
+	drop(faArrayTake(array, index));
+}
 
 // @fa-helper faNormalizeIndex deps: IndexError
 /**
@@ -81,10 +120,19 @@ export function faIndex(array, index) {
  * @param {T[]} array
  * @param {number} index
  * @param {T} value
+ * @param {((value: T) => void) | undefined} [drop]
  * @returns {void}
  */
-export function faIndexSet(array, index, value) {
-	array[faNormalizeIndex(array.length, index)] = value;
+export function faIndexSet(array, index, value, drop) {
+	let position;
+	try {
+		position = faNormalizeIndex(array.length, index);
+	} catch (error) {
+		drop?.(value);
+		throw error;
+	}
+	drop?.(array[position]);
+	array[position] = value;
 }
 
 // @fa-helper faArrayGet

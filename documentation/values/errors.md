@@ -70,6 +70,7 @@ Fa also provides built-in error types for operations that can fail:
 | Error | Data | Thrown by |
 | --- | --- | --- |
 | `IndexError` | `index: Integer`, `length: Integer` | indexing or slicing a collection with an index the compiler cannot prove in bounds (`items[index]`) |
+| `CapacityError` | none (`InlineFull`) | appending to an [InlineArray](/collections/inline-arrays) when room is not proven |
 | `KeyNotFound` | `key: String`, the `toString()` of the key | reading a map with a key the compiler cannot prove present (`scores["ana"]`) |
 | `DivisionByZero` | — | integer `//` and `%%` when the divisor is not provably non-zero (`/` never throws) |
 | `ArithmeticError` | `message: String` | `checked*` arithmetic methods, like `checkedAdd`, when the result does not fit; a conversion to a smaller integer type (`Int8(value)`, `Integer(bigInteger)`) or from a float (`Integer.round(value)`) that is not proven to fit; an integer `**` with an exponent not proven non-negative; a shift by an unproven amount |
@@ -77,7 +78,7 @@ Fa also provides built-in error types for operations that can fail:
 | `Utf8Error` | `position: Integer`, the index of the first invalid byte | decoding bytes that are not valid UTF-8 with [`String.fromUtf8(bytes)`](/values/bytes#text-and-bytes) |
 | `Cancelled` | — | awaiting a [cancelled task](/advanced/concurrency#cancelling-a-task) |
 
-Each of them is an `Errors` type with a single member of the same name, so `IndexError` is both the type to declare (`throws IndexError`) and the pattern to match (`when error is { IndexError => ... }`).
+Each of them is an `Errors` type with a single member (`CapacityError.InlineFull`; the same name as the type for the others), so `IndexError` is both the type to declare (`throws IndexError`) and the pattern to match (`when error is { IndexError => ... }`).
 
 What the compiler can prove is defined by the rules of [range analysis](/values/numbers#range-analysis).
 

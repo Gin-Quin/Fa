@@ -1,0 +1,11 @@
+-- prints: 12 12
+
+function summary = (): Integer => {
+	mutable original: InlineArray<Integer, 2> = [1]
+	mutable duplicate = original
+	if duplicate.length > 0 { duplicate[0] = 2 }
+	(original.get(0) ?? 0) * 10 + (duplicate.get(0) ?? 0)
+}
+
+static compiled = @summary()
+console.log(compiled, summary())

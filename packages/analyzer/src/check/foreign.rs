@@ -206,6 +206,7 @@ impl Walker<'_> {
 			}
 			let ty = self.check(value, Some(item));
 			self.sink(value, ty, item);
+			self.escape(value, n);
 			given += 1;
 		}
 		if given != count && !spreads {

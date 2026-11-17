@@ -1,0 +1,9 @@
+type Point = { x: Integer }
+mutable values: InlineArray<Point, 2> = [{ x = 1 }]
+use first = values.get(0)
+if first is not none {
+	first.x = 2
+	values.push({ x = 3 })
+	console.log(first.x)
+}
+console.log(values) -- expected: [{ x = 2 }, { x = 3 }]

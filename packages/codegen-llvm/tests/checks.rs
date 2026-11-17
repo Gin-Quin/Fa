@@ -62,7 +62,8 @@ mod with_llvm {
 		let mut keep = false;
 		for line in ir.lines() {
 			if line.starts_with("define ") {
-				keep = line.contains("@main(") || line.contains("@fa.");
+				keep =
+					line.contains("@main(") || line.contains("@_start(") || line.contains("@fa.");
 			}
 			if keep {
 				kept.push_str(line);
@@ -2566,6 +2567,34 @@ console.log(try read(T.One { child = T.Leaf { value = 7 } }, false))
 			&source("function identity = <T>(value: T): T => value\nconsole.log(identity(1))"),
 		);
 		assert!(!generic.contains("probe_cached"), "{generic}");
+	}
+	#[test]
+	fn inline_arrays_have_narrow_counters_and_no_heap_buffer() {
+		for target in [Target::Native, Target::Wasm, Target::NativeFreestanding] {
+			let ir = ir_at_target(
+				"inline-array-layout",
+				r#"
+function first = (values: InlineArray<Int32, 255>): Int32 throws IndexError => try values[0]
+function second = (values: InlineArray<Int32, 256>): Int32 throws IndexError => try values[0]
+mutable small: InlineArray<Int32, 255> = [7]
+mutable large: InlineArray<Int32, 256> = [8]
+small.push(9)
+large.push(10)
+console.log(try first(small), try second(large))
+"#,
+				true,
+				OptLevel::O0,
+				target,
+			);
+			assert!(ir.contains("[255 x i32], i8"), "{ir}");
+			assert!(ir.contains("[256 x i32], i16"), "{ir}");
+			for allocator in ["@fa_array_new(", "@fa_array_grow(", "@fa_alloc("] {
+				assert!(
+					!ir.contains(allocator),
+					"inline array allocates: {allocator}\n{ir}"
+				);
+			}
+		}
 	}
 }
 

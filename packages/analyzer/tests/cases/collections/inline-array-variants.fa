@@ -1,0 +1,26 @@
+mutable optional: InlineArray<Integer?, 3> = [none, 4]
+console.log(optional.get(0), optional.get(1), optional.pop()) -- prints: none 4 4
+optional.clear()
+mutable emptyItems: InlineArray<none, 2> = [none]
+emptyItems.push(none)
+console.log(emptyItems.pop(), emptyItems.length) -- prints: none 1
+emptyItems.delete(0)
+emptyItems.clear()
+console.log(emptyItems) -- prints: []
+emptyItems.push(none)
+console.log("{emptyItems.pop()} {emptyItems.length}") -- prints: none 0
+
+function double = (value: Integer): Integer => value * 2
+mutable callbacks: InlineArray<(Integer) => Integer, 2> = [double]
+let callback = callbacks.pop()
+if callback is not none { console.log(callback(3)) } -- prints: 6
+
+mutable pools: InlineArray<GrowingPool<Integer>, 1> = [[]]
+mutable first = pools.pop()
+if first is not none {
+	use item = first.add(9)
+	console.log(item) -- prints: 9
+}
+mutable nested: InlineArray<InlineArray<Integer, 1>, 2> = [[5]]
+let row = nested.pop()
+if row is not none { console.log(row) } -- prints: [5]

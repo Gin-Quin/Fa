@@ -89,7 +89,7 @@ impl Walker<'_> {
 		// `pool.submit(…)` of a pool without `timeout` (concurrency.rs)
 		let ty = self.submit_without_timeout(n, callee, ty);
 		// `@add(2, 4)`: evaluated while compiling (comptime.rs)
-		if comptime {
+		if comptime && !self.a.has_flags(n, NodeFlags::GENERIC_APPLICATION) {
 			self.evaluate_call(n);
 		}
 		ty
@@ -368,6 +368,7 @@ impl Walker<'_> {
 		let throws = substitute(self, sig.throws);
 		// `Integer.round(2.7)`, `a.shiftLeft(2)`: proven, they can't fail (math.rs)
 		let throws = self.number_api_throws(n, callee, kind, &binding.arguments, throws);
+		let throws = self.inline_push_throws(n, callee, kind, throws);
 		if !callback_errors.is_empty() && !matches!(kind, Callee::Builtin(_)) {
 			self.set_flag(n, NodeFlags::PASSES_ERRORS);
 			self.a.callback_types.insert(n, callback_types);

@@ -1,0 +1,13 @@
+type Held = {
+	name: String
+	function destroy = (self) => { console.log("drop {self.name}") }
+}
+type Item = Held
+mutable items: InlineArray<Item, 2> = [{ name = "first" }]
+try items[0] = { name = "second" } -- prints: drop first
+let text = "{items.pop()}" -- prints: drop second
+console.log(text) -- prints: { name = "second" }
+items.push({ name = "taken" })
+console.log(try items.take(0)) -- prints: { name = "taken" }
+-- prints: drop taken
+console.log(items.length) -- prints: 0

@@ -1,0 +1,3 @@
+let first: InlineArray<Integer, 1> = [2]
+let second: InlineArray<Integer, 1> = [10]
+console.log(first < second) -- expected: diagnostic; collections are not ordered

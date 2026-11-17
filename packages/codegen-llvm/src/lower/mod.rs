@@ -48,6 +48,7 @@ pub(crate) mod generic_values;
 mod growing;
 mod hoisting;
 mod index_proofs;
+mod inline_arrays;
 mod inline_unions;
 mod inlining;
 mod io;
@@ -1037,10 +1038,32 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				self.freeze_union_padding(&self.builder, Repr::Object(element), value.into());
 			return Ok(Val::new(Repr::Object(element), value));
 		}
+		// A wide value remains a snapshot of this evaluation even if a later
+		// argument changes its source. Keep that snapshot in memory: feeding
+		// capacity-sized SSA values to several helpers defeats LLVM's SROA
+		// limits and can promote them back into thousands of wasm arguments.
+		let snapshot = self.wide_aggregate(slot.repr);
+		let pointer = if snapshot {
+			let target = self.alloca(slot.repr, "aggregate_snapshot")?;
+			self.builder.build_memcpy(
+				target.pointer,
+				1,
+				slot.pointer,
+				1,
+				self.usize
+					.const_int(self.collection_data_size(self.llvm_type(slot.repr)), false),
+			)?;
+			target.pointer
+		} else {
+			slot.pointer
+		};
 		let value = self
 			.builder
-			.build_load(self.llvm_type(slot.repr), slot.pointer, "")?;
+			.build_load(self.llvm_type(slot.repr), pointer, "")?;
 		if let Some(instruction) = inkwell::values::BasicValue::as_instruction_value(&value) {
+			if snapshot {
+				crate::optimize::mark_aggregate_snapshot(value)?;
+			}
 			self.tag(instruction, false)?;
 			// a module `let` read by a function: initialized before any call
 			if self
@@ -1383,14 +1406,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// Whether a parameter of this representation is passed as a pointer to
 	/// the caller's value (never copied): every aggregate but a function
-	/// value, outside of asynchronous programs (whose tasks may outlive the
-	/// caller's places). The same for direct and indirect calls.
+	/// value. Direct calls, thunks and indirect calls share this convention.
+	/// A detached coroutine snapshots borrowed arguments into its own frame.
 	pub(crate) fn borrows_parameter(&self, repr: Repr) -> bool {
-		// a move-only value moves into its function: by value
-		let moved = matches!(repr, Repr::Object(ty) | Repr::Tuple(ty) if self.types().parameter_can_be_consumed(self.concrete_type(ty)));
-		!self.tasks.asynchronous
-			&& !moved && !matches!(repr, Repr::Function(_))
-			&& self.llvm_type(repr).is_struct_type()
+		let consumes = matches!(repr, Repr::Object(ty) | Repr::Tuple(ty) if self.types().parameter_can_be_consumed(self.concrete_type(ty)));
+		!consumes && !matches!(repr, Repr::Function(_)) && self.llvm_type(repr).is_struct_type()
 	}
 
 	/// Declares a function (or an instance of a generic one, under the
@@ -1566,7 +1586,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				}
 				self.tree.nodes[at].for_each_child(|child| leaf.push(child));
 			}
-			if !self.tasks.asynchronous {
+			let wide = self.wide_aggregate(ret)
+				|| params.iter().any(|(repr, _)| self.wide_aggregate(*repr));
+			if wide {
+				self.runtime.add_attributes(value, &["noinline"]);
+			} else if !self.tasks.asynchronous {
 				if !calls && (count <= 24 || (count <= 64 && loops <= 1)) {
 					self.runtime.add_attributes(value, &["alwaysinline"]);
 				} else if count <= 96 {
@@ -3268,6 +3292,21 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				}
 				let bytes = self.is_bytes_call(code_points);
 				return self.for_code_points(node, pattern, has_index, text, body, bytes);
+			}
+			if let Repr::Tuple(ty) = self.node_repr(iterable)?
+				&& self.inline_info(ty).is_some()
+			{
+				let view = if self.is_place(iterable) {
+					let slot = self.place(iterable)?;
+					self.inline_view_at(slot, ty)?
+				} else {
+					let value = self.expr(iterable)?;
+					if value.repr == Repr::Never {
+						return Ok(value);
+					}
+					self.inline_view(value, ty)?
+				};
+				return self.for_items(node, pattern, has_index, iterable, view, body);
 			}
 			let value = self.expr(iterable)?;
 			return match value.repr {

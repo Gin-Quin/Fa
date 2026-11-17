@@ -11081,6 +11081,10 @@ static const uint8_t *json_skip(const uint8_t *schema) {
 		schema += 1;
 		json_schema_number(&schema, &present);
 		return schema;
+	case 'A':
+		schema += 1;
+		json_schema_number(&schema, &present);
+		return json_skip(schema);
 	case 'a':
 	case 'm':
 		return json_skip(schema + 1);
@@ -11358,9 +11362,15 @@ static int json_check(JsonCheck *check, const FaJson *node, const uint8_t *schem
 		return (node->kind == JSON_NUMBER && (node->flags & JSON_FITS) && node->integer == value) ||
 		       json_mismatch(check, node, 0, schema, report);
 	}
+	case 'A':
 	case 'a': {
+		const uint8_t *item_schema = schema + 1;
+		int64_t capacity = *schema == 'A' ? json_schema_number(&item_schema, &present) : INT64_MAX;
 		if (node->kind != JSON_ARRAY) {
 			return json_mismatch(check, node, "an array", 0, report);
+		}
+		if (node->count > (uint64_t)capacity) {
+			return json_mismatch(check, node, "an array within its inline capacity", 0, report);
 		}
 		size_t length = check->length;
 		for (size_t index = 0; index < node->count; index += 1) {
@@ -11369,7 +11379,7 @@ static int json_check(JsonCheck *check, const FaJson *node, const uint8_t *schem
 			json_path(check, (const uint8_t *)"[", 1);
 			json_path(check, digits + start, sizeof digits - start);
 			json_path(check, (const uint8_t *)"]", 1);
-			int fits = json_check(check, &node->items[index], schema + 1, report);
+			int fits = json_check(check, &node->items[index], item_schema, report);
 			check->length = length;
 			if (!fits) {
 				return 0;

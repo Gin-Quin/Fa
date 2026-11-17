@@ -953,18 +953,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if !self.types().is_resource(ty) {
 			return None;
 		}
-		let Some(declaration) = self.analysis.type_decls.values().find(|decl| decl.ty == ty) else {
-			return self
-				.destroy_in_other_files(ty)
-				.or_else(|| self.remote_destroy(ty));
-		};
-		let symbols = &self.analysis.symbols;
-		declaration
-			.functions
-			.iter()
-			.map(|&function| symbols.symbol(function))
+		self.analysis
+			.type_decls
+			.values()
+			.filter(|decl| self.same_type(decl.ty, ty))
+			.flat_map(|decl| &decl.functions)
+			.map(|&function| self.analysis.symbols.symbol(function))
 			.find(|symbol| self.session.types().syms.resolve(symbol.name) == "destroy")
 			.and_then(|symbol| self.functions.get(&symbol.decl_node))
 			.map(|function| function.value)
+			.or_else(|| self.destroy_in_other_files(ty))
+			.or_else(|| self.remote_destroy(ty))
 	}
 }

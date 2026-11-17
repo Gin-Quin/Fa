@@ -222,6 +222,8 @@ pub enum FloatBits {
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum CollKind {
 	Array,
+	/// A bounded inline list; its second argument is its constant capacity.
+	InlineArray,
 	GrowingArray,
 	Set,
 	GrowingSet,
@@ -241,6 +243,7 @@ impl CollKind {
 	pub fn name(self) -> &'static str {
 		match self {
 			CollKind::Array => "Array",
+			CollKind::InlineArray => "InlineArray",
 			CollKind::GrowingArray => "GrowingArray",
 			CollKind::Set => "Set",
 			CollKind::GrowingSet => "GrowingSet",
@@ -258,6 +261,7 @@ impl CollKind {
 	pub fn stable_index(self) -> u32 {
 		match self {
 			CollKind::Array => 0,
+			CollKind::InlineArray => 11,
 			CollKind::GrowingArray => 1,
 			CollKind::Set => 2,
 			CollKind::GrowingSet => 3,
@@ -275,9 +279,10 @@ impl CollKind {
 	/// The runtime kind of its values, for union discrimination (types brief §3.4.2).
 	pub fn runtime_kind(self) -> RuntimeKind {
 		match self {
-			CollKind::Array | CollKind::GrowingArray | CollKind::OrderedColumnar => {
-				RuntimeKind::Array
-			}
+			CollKind::Array
+			| CollKind::InlineArray
+			| CollKind::GrowingArray
+			| CollKind::OrderedColumnar => RuntimeKind::Array,
 			CollKind::Set | CollKind::GrowingSet => RuntimeKind::Set,
 			CollKind::Map | CollKind::GrowingMap => RuntimeKind::Map,
 			CollKind::Pool | CollKind::GrowingPool | CollKind::RelationPool(_) => RuntimeKind::Pool,

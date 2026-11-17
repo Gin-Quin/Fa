@@ -82,6 +82,15 @@ impl Generator<'_> {
 					self.hidden_names.insert(entry, name.clone());
 					names.push(name);
 				}
+				Hidden::Drop(param) => {
+					let wanted = format!(
+						"${}$drop",
+						self.types.syms.resolve(self.types.param(param).name)
+					);
+					let name = self.declare_hidden_name(&wanted);
+					self.hidden_names.insert(entry, name.clone());
+					names.push(name);
+				}
 				Hidden::Method(param, method) => {
 					let info = self.types.param(param);
 					let wanted = format!(
@@ -212,6 +221,7 @@ impl Generator<'_> {
 						}
 						None => None,
 					},
+					Hidden::Drop(param) => binding(param).map(|ty| self.drop_argument(ty)),
 					Hidden::Method(param, method) => {
 						let parameter = generics
 							.iter()
@@ -278,6 +288,9 @@ impl Generator<'_> {
 				fa_analyzer::analysis::NodeFlags::GENERIC_APPLICATION,
 			) {
 			return self.signature_hidden_arguments(inner, call);
+		}
+		if matches!(self.view(callee), View::Lambda { .. }) {
+			return self.hidden_arguments(callee, call);
 		}
 		let named = match self.view(callee) {
 			View::Access { members, .. } | View::OptionalAccess { members, .. } => {
@@ -352,7 +365,7 @@ impl Generator<'_> {
 
 	/// The value a value parameter is bound to: a literal type, or the
 	/// enclosing function's own value parameter.
-	fn hidden_value(&mut self, ty: TypeId) -> Option<String> {
+	pub(crate) fn hidden_value(&mut self, ty: TypeId) -> Option<String> {
 		if let TypeKind::Param(param) = self.types.kind(ty) {
 			return self.hidden_names.get(&Hidden::Value(param)).cloned();
 		}
@@ -498,6 +511,31 @@ impl Generator<'_> {
 		Some(name)
 	}
 
+	/// A declaration inferred for a concrete function value needs the same
+	/// capabilities as an explicit application. Keep both async instances.
+	pub(crate) fn specialized_function_value(&mut self, n: NodeId, value: Expr) -> Expr {
+		let hidden = self.signature_hidden_arguments(n, n);
+		if hidden.is_empty() {
+			return value;
+		}
+		let value = self.keep(value);
+		let arguments = hidden.join(", ");
+		let sync = format!("((...$a) => {}({arguments}, ...$a))", value.primary_text());
+		if self.tasks.asynchronous
+			&& matches!(self.types.kind(self.type_of(n)), TypeKind::Function(sig) if self.types.sig(sig).is_async)
+		{
+			let call = self.helper("faCallValue");
+			let asynchronous = format!(
+				"(($task, ...$a) => {call}($task, {}, {arguments}, ...$a))",
+				value.text
+			);
+			let helper = self.helper("faAsyncValue");
+			js::call(helper, &[sync, asynchronous])
+		} else {
+			Expr::primary(sync)
+		}
+	}
+
 	/// A generic application used as a value (`repeatText(2)`): the
 	/// function, with its hidden arguments bound when it has some.
 	pub(crate) fn generic_application(&mut self, n: NodeId, callee: NodeId) -> Option<Expr> {
@@ -545,6 +583,7 @@ impl Generator<'_> {
 	/// The name of a hidden parameter (`$Item$describe`: Fa names never
 	/// contain `$`).
 	fn declare_hidden_name(&mut self, wanted: &str) -> String {
+		let wanted = crate::names::synthesized_name(wanted);
 		let mut name = format!("${wanted}");
 		let mut suffix = 0;
 		while self.hidden_names.values().any(|known| *known == name) {

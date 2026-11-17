@@ -28,6 +28,8 @@ mutable buffer = Array<Integer>.from([], capacity = 1000)
 
 Arrays own their storage. The native compiler can keep immutable values in read-only data or bounded stack storage. See [memory management](/advanced/memory-management).
 
+For a small list with a fixed maximum length, use an [InlineArray](/collections/inline-arrays). Its items stay inside its owner and never move on `push`. For exactly a fixed count of initialized items, use [CArray](/advanced/foreign-code).
+
 ## Creating collections
 
 All collections (`Array`, `Set`, `Map`, `Pool`, `Columnar`, ...) are created from a list literal `[...]`. Braces `{ ... }` are only used for objects.

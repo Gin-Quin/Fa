@@ -1,0 +1,17 @@
+type List = InlineArray<String, 512>
+async function make = (text: String): List => {
+	await Task.yield()
+	[text]
+}
+let callback = make
+let result = await callback("wide")
+console.log(result.length, try result[0]) -- prints: 1 wide
+let direct = await make("direct")
+console.log(direct.length, try direct[0]) -- prints: 1 direct
+let key = copy result
+let map: Map<List, Integer> = [(key, 7)]
+console.log(map.get(result)) -- prints: 7
+type Wrapper = { items: List }
+let outerKey = Wrapper { items = copy result }
+let table: Map<Wrapper, Integer> = [(copy outerKey, 8)]
+console.log(table.get(outerKey)) -- prints: 8

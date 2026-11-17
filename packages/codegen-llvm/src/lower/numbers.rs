@@ -21,6 +21,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		path: &str,
 		node: NodeId,
 	) -> Result<Option<Val<'ctx>>, Error> {
+		// Instance properties still evaluate their receiver, even when their
+		// result has a literal type (`makeInlineArray().capacity`).
+		if path.contains('#') {
+			return Ok(None);
+		}
 		let repr = self.node_repr(node)?;
 		if let Repr::Int(int) = repr
 			&& let Some(literal) = self

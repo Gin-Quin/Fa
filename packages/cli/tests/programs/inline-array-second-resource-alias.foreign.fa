@@ -1,0 +1,16 @@
+type Resource = {
+	values: InlineArray<String, 2>
+	function destroy = (self) mutates self => {
+		assert self.values.length == 1
+		self.values.clear()
+		console.log("drop alias")
+	}
+}
+type Item = Resource
+type Alias = Item
+do {
+	mutable items: InlineArray<Alias, 2> = [{ values = ["long ".repeat(12)] }]
+	items.clear() -- prints: drop alias
+	items.push({ values = ["long ".repeat(12)] })
+} -- prints: drop alias
+console.log("done") -- prints: done

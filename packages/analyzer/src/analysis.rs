@@ -566,6 +566,8 @@ bitflags! {
 		/// only calls. Additional errors supplied by its caller propagate past
 		/// this function's catches (callbacks.rs).
 		const CALLBACK_CALL = 1 << 18;
+		/// An inline append needs its capacity guard.
+		const CAPACITY_CHECK = 1 << 19;
 	}
 }
 
@@ -578,7 +580,8 @@ impl NodeFlags {
 		.union(NodeFlags::INDEX_CHECK)
 		.union(NodeFlags::CONVERSION_CHECK)
 		.union(NodeFlags::EXPONENT_CHECK)
-		.union(NodeFlags::SHIFT_CHECK);
+		.union(NodeFlags::SHIFT_CHECK)
+		.union(NodeFlags::CAPACITY_CHECK);
 }
 
 /// The analysis of one file.

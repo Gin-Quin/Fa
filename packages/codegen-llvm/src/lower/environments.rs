@@ -149,8 +149,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					index as u32 + ENVIRONMENT_FIELDS,
 					"",
 				)?;
-				let value = builder.build_load(self.llvm_type(repr), field, "")?;
-				builder.build_call(self.drop_function(repr)?, &[value.into()], "")?;
+				self.drop_at(&builder, repr, field)?;
 			}
 		}
 		let size = builder.build_int_cast(

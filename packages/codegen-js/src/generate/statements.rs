@@ -934,8 +934,12 @@ impl Generator<'_> {
 			let values = self.in_order(&[container, index, value], |g, node| g.expr(node));
 			let stored = self.copy_stored(value, values[2].clone());
 			let helper = self.helper("faIndexSet");
+			let drop = self
+				.drop_function(self.type_of(target_node))
+				.map(|drop| format!(", {drop}"))
+				.unwrap_or_default();
 			self.out.line(format!(
-				"{helper}({}, {}, {});",
+				"{helper}({}, {}, {}{drop});",
 				values[0].text, values[1].text, stored.text
 			));
 			return;

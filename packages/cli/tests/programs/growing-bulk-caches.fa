@@ -1,0 +1,126 @@
+-- Bulk appends keep enclosing scalar push caches coherent across segments.
+function fillBoolean = (
+	count: Integer<min = 0, max = 8193>
+	capacity: Integer<min = 0, max = 4096>
+) => {
+	mutable items = GrowingArray<Boolean>.from([], capacity = capacity)
+	items.push(false)
+	for round in 0..3 {
+		for 0..count { items.push(true) }
+		assert items.length == 1 + round * (count + 1) + count
+		assert items[-1] == (if count == 0 { false } else { true })
+		items.push(false)
+		assert items.length == 1 + (round + 1) * (count + 1)
+	}
+	for item, index in items {
+		assert item == (if index %% (count + 1) == 0 { false } else { true })
+	}
+}
+function fillUInt8 = (
+	count: Integer<min = 0, max = 8193>
+	capacity: Integer<min = 0, max = 4096>
+) => {
+	mutable items = GrowingArray<UInt8>.from([], capacity = capacity)
+	items.push(99)
+	for round in 0..3 {
+		for 0..count { items.push(231) }
+		assert items.length == 1 + round * (count + 1) + count
+		assert items[-1] == (if count == 0 { 99 } else { 231 })
+		items.push(99)
+		assert items.length == 1 + (round + 1) * (count + 1)
+	}
+	for item, index in items {
+		assert item == (if index %% (count + 1) == 0 { 99 } else { 231 })
+	}
+}
+function fillInt8 = (
+	count: Integer<min = 0, max = 8193>
+	capacity: Integer<min = 0, max = 4096>
+) => {
+	mutable items = GrowingArray<Int8>.from([], capacity = capacity)
+	items.push(99)
+	for round in 0..3 {
+		for 0..count { items.push(-7) }
+		assert items.length == 1 + round * (count + 1) + count
+		assert items[-1] == (if count == 0 { 99 } else { -7 })
+		items.push(99)
+		assert items.length == 1 + (round + 1) * (count + 1)
+	}
+	for item, index in items {
+		assert item == (if index %% (count + 1) == 0 { 99 } else { -7 })
+	}
+}
+function copyArrayEach = () => {
+	mutable source: Array<Integer> = []
+	for value in 0..257 { source.push(value) }
+	mutable items = GrowingArray<Integer>.from([], capacity = 4)
+	for round in 0..5 {
+		for item in source { items.push(item) }
+		assert items.length == round * 258 + 257
+		assert items[-1] == 256
+		items.push(999)
+		assert items.length == (round + 1) * 258
+	}
+	for item, index in items {
+		assert item == (if index %% 258 == 257 { 999 } else { index %% 258 })
+	}
+}
+function copyArrayRange = () => {
+	mutable source: Array<Integer> = []
+	for value in 0..257 { source.push(value) }
+	mutable items = GrowingArray<Integer>.from([], capacity = 4)
+	for round in 0..5 {
+		for index in 0..source.length { items.push(source[index]) }
+		assert items.length == round * 258 + 257
+		assert items[-1] == 256
+		items.push(999)
+		assert items.length == (round + 1) * 258
+	}
+	for item, index in items {
+		assert item == (if index %% 258 == 257 { 999 } else { index %% 258 })
+	}
+}
+function copyGrowingArrayEach = () => {
+	mutable source: GrowingArray<Integer> = []
+	for value in 0..257 { source.push(value) }
+	mutable items = GrowingArray<Integer>.from([], capacity = 4)
+	for round in 0..5 {
+		for item in source { items.push(item) }
+		assert items.length == round * 258 + 257
+		assert items[-1] == 256
+		items.push(999)
+		assert items.length == (round + 1) * 258
+	}
+	for item, index in items {
+		assert item == (if index %% 258 == 257 { 999 } else { index %% 258 })
+	}
+}
+function copyGrowingArrayRange = () => {
+	mutable source: GrowingArray<Integer> = []
+	for value in 0..257 { source.push(value) }
+	mutable items = GrowingArray<Integer>.from([], capacity = 4)
+	for round in 0..5 {
+		for index in 0..source.length { items.push(source[index]) }
+		assert items.length == round * 258 + 257
+		assert items[-1] == 256
+		items.push(999)
+		assert items.length == (round + 1) * 258
+	}
+	for item, index in items {
+		assert item == (if index %% 258 == 257 { 999 } else { index %% 258 })
+	}
+}
+let counts: Array<Integer<min = 0, max = 8193>> = [0, 1, 17, 257, 8193]
+let capacities: Array<Integer<min = 0, max = 4096>> = [0, 1, 128, 4096]
+for count in counts {
+	for capacity in capacities {
+		fillBoolean(count, capacity)
+		fillUInt8(count, capacity)
+		fillInt8(count, capacity)
+	}
+}
+copyArrayEach()
+copyArrayRange()
+copyGrowingArrayEach()
+copyGrowingArrayRange()
+console.log("growing bulk caches ok") -- prints: growing bulk caches ok

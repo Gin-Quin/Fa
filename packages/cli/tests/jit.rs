@@ -67,6 +67,50 @@ fn llvm() -> bool {
 }
 
 #[test]
+fn bulk_growing_appends_and_narrow_remainders_work_in_jit_and_cached_units() {
+	if !llvm() {
+		return;
+	}
+	let folder = scratch(
+		"bulk-growing",
+		&[
+			("package.fa", "export = { name = \"bulkGrowing\" }\n"),
+			(
+				"library/nested.fa",
+				include_str!(
+					"../../../design/reviews/repros/perf-arrays/per-unit/library/nested.fa"
+				),
+			),
+			(
+				"library/remainder.fa",
+				"export function = (value: UInt32): UInt32 => value %% 7\n",
+			),
+			(
+				"application/main.fa",
+				"export function = () => {\nlibrary.nested()\nassert library.remainder(UInt32.maxValue) == 3\nconsole.log(\"bulk jit ok\")\n}\n",
+			),
+		],
+	);
+	for opt in ["-O0", "-O3"] {
+		let arguments = ["run", "--target=native", "--asynchronous=false", opt];
+		let (stdout, stderr, code) = fa(&arguments, &folder, true);
+		assert_eq!((stdout.as_str(), code), ("bulk jit ok\n", 0), "{stderr}");
+		assert!(stderr.contains("jit: loaded "), "{stderr}");
+		assert!(
+			!stderr.contains("jit: loaded 1 object "),
+			"separate units: {stderr}"
+		);
+		let cached = fa(&arguments, &folder, true);
+		assert_eq!(
+			(cached.0, without_trace(&cached.1), cached.2),
+			(stdout.clone(), String::new(), code)
+		);
+		let linked = fa(&arguments, &folder, false);
+		assert_eq!(linked, (stdout, String::new(), code));
+	}
+}
+
+#[test]
 fn run_loads_a_file_in_memory_with_its_arguments() {
 	if !llvm() {
 		return;

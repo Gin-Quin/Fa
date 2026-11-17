@@ -2027,3 +2027,29 @@ layouts and all value assertions. No expected-skip list changes.
   pair of binaries. No benchmark source, arithmetic or FP flag changes.
   Raw samples, strict-control publication and inspection live in the dated
   arrays-loops result files and the array report.
+
+
+## Array performance review fixes (2026-11-17)
+
+- The private GrowingArray loop proof admits only known direct header uses
+  throughout the owner's use set and nested bodies. Fixed snapshots require
+  no header change. Push caches hold only length/cursor/end: scalar pushes
+  write through; segment growth refreshes cursor/end; every bulk append
+  refreshes all three from the real header before subsequent code. This rule
+  lives in `lower/growing_loops.rs`; `copies.rs` invokes its single refresh
+  after both fill and extend (flat and segmented sources). Reservation, owner
+  replacement/reset, escaping calls, aliases and captures withhold caching.
+  Item writes preserve the proof; growing collections have no `clear`.
+- Arithmetic narrowing must hold every input and every intermediate, not
+  just the final result. `ArithmeticBounds` in `lower/arith.rs` keeps the
+  result interval separate from the interval needed to compute it, so an
+  enclosing expression can still narrow independently. This fixes UInt32
+  remainder by small literals and UInt8/UInt16 division and remainder by
+  large literals; it also prevents poison from wider steps followed by zero.
+  Compute types, runtime checks and floor-division semantics do not change.
+- Advance the native object-cache version for both fixes. Keep existing
+  optimization gates and benchmark sources. O0 IR proves small cases still
+  narrow, bulk calls refresh all caches, and interfering uses withhold them.
+  Portable fixtures compare every sized integer's boundaries/powers of two
+  with compile-time execution and Bun, then LLVM O0/O3 with checks on/off.
+  Runtime, ABI, layout and floating-point rules are unchanged.

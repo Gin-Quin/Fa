@@ -1,0 +1,137 @@
+-- All Int16 boundaries and powers of two: interpreter, Bun and LLVM agree.
+static inputs: Array<Int16> = [
+	-32768
+	-32767
+	-16385
+	-16384
+	-16383
+	-8193
+	-8192
+	-8191
+	-4097
+	-4096
+	-4095
+	-2049
+	-2048
+	-2047
+	-1025
+	-1024
+	-1023
+	-513
+	-512
+	-511
+	-257
+	-256
+	-255
+	-129
+	-128
+	-127
+	-65
+	-64
+	-63
+	-33
+	-32
+	-31
+	-17
+	-16
+	-15
+	-9
+	-8
+	-7
+	-5
+	-4
+	-3
+	-2
+	-1
+	0
+	1
+	2
+	3
+	4
+	5
+	7
+	8
+	9
+	15
+	16
+	17
+	31
+	32
+	33
+	63
+	64
+	65
+	127
+	128
+	129
+	255
+	256
+	257
+	511
+	512
+	513
+	1023
+	1024
+	1025
+	2047
+	2048
+	2049
+	4095
+	4096
+	4097
+	8191
+	8192
+	8193
+	16383
+	16384
+	16385
+	32767
+]
+static divisors: Array<Int16> = [1, 2, 7, 16, 32767, -1, -2, -7, -32768]
+function dynamic = (value: Int16, divisor: Int16): (Int16, Int16) throws DivisionByZero =>
+	((try value // divisor), (try value %% divisor))
+function literals = (value: Int16): (Int16, Int16, Int16, Int16, Int16, Int16, Int16, Int16) =>
+	(value // 1, value %% 1, value // 2, value %% 2, value // 7, value %% 7, value // 16, value
+		%% 16)
+function wide = (value: Int16): (Int128, Int128) => {
+	let quotient: Int128 = Int128(value) // 65537
+	let rest: Int128 = Int128(value) %% 65537
+	(quotient, rest)
+}
+function rows = (): Array<(Int16, Int16)> throws DivisionByZero => {
+	mutable output: Array<(Int16, Int16)> = []
+	for value in inputs {
+		for divisor in divisors {
+			if value == Int16.minValue and divisor == -1 {
+				assert value %% divisor == 0
+				continue
+			}
+			output.push(try dynamic(value, divisor))
+		}
+	}
+	output
+}
+static expected: Array<(Int16, Int16)> = @rows()
+function literalRows = (): Array<(Int16, Int16, Int16, Int16, Int16, Int16, Int16, Int16)> =>
+	inputs.map(literals)
+static literalExpected: Array<(Int16, Int16, Int16, Int16, Int16, Int16, Int16, Int16)> = @literalRows()
+function wideRows = (): Array<(Int128, Int128)> => inputs.map(wide)
+static wideExpected: Array<(Int128, Int128)> = @wideRows()
+assert (try rows()) == expected
+assert inputs.map(literals) == literalExpected
+assert inputs.map(wide) == wideExpected
+function zeroDivision = (value: Int16, divisor: Int16): Boolean => {
+	let _result = value // divisor catch _error => return true
+	false
+}
+static zeroDivisionExpected = @zeroDivision(1, 0)
+assert zeroDivisionExpected
+assert zeroDivision(1, 0)
+function zeroRemainder = (value: Int16, divisor: Int16): Boolean => {
+	let _result = value %% divisor catch _error => return true
+	false
+}
+static zeroRemainderExpected = @zeroRemainder(1, 0)
+assert zeroRemainderExpected
+assert zeroRemainder(1, 0)
+console.log("division Int16 ok") -- prints: division Int16 ok

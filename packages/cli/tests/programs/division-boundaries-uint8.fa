@@ -1,0 +1,65 @@
+-- All UInt8 boundaries and powers of two: interpreter, Bun and LLVM agree.
+static inputs: Array<UInt8> = [
+	0
+	1
+	2
+	3
+	4
+	5
+	7
+	8
+	9
+	15
+	16
+	17
+	31
+	32
+	33
+	63
+	64
+	65
+	127
+	128
+	129
+	255
+]
+static divisors: Array<UInt8> = [1, 2, 7, 16, 255]
+function dynamic = (value: UInt8, divisor: UInt8): (UInt8, UInt8) throws DivisionByZero =>
+	((try value // divisor), (try value %% divisor))
+function literals = (value: UInt8): (UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8) =>
+	(value // 1, value %% 1, value // 2, value %% 2, value // 7, value %% 7, value // 16, value
+		%% 16)
+function wide = (value: UInt8): (UInt128, UInt128) => (value // 65537, value %% 65537)
+function rows = (): Array<(UInt8, UInt8)> throws DivisionByZero => {
+	mutable output: Array<(UInt8, UInt8)> = []
+	for value in inputs {
+		for divisor in divisors {
+			output.push(try dynamic(value, divisor))
+		}
+	}
+	output
+}
+static expected: Array<(UInt8, UInt8)> = @rows()
+function literalRows = (): Array<(UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8)> =>
+	inputs.map(literals)
+static literalExpected: Array<(UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8)> = @literalRows()
+function wideRows = (): Array<(UInt128, UInt128)> => inputs.map(wide)
+static wideExpected: Array<(UInt128, UInt128)> = @wideRows()
+assert (try rows()) == expected
+assert inputs.map(literals) == literalExpected
+assert inputs.map(wide) == wideExpected
+function zeroDivision = (value: UInt8, divisor: UInt8): Boolean => {
+	let _result = value // divisor catch _error => return true
+	false
+}
+static zeroDivisionExpected = @zeroDivision(1, 0)
+assert zeroDivisionExpected
+assert zeroDivision(1, 0)
+function zeroRemainder = (value: UInt8, divisor: UInt8): Boolean => {
+	let _result = value %% divisor catch _error => return true
+	false
+}
+static zeroRemainderExpected = @zeroRemainder(1, 0)
+assert zeroRemainderExpected
+assert zeroRemainder(1, 0)
+console.log("division UInt8 ok") -- prints: division UInt8 ok

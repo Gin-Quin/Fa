@@ -1445,7 +1445,7 @@ console.log(items, stable, words, maybe)
 		let hot: usize = many
 			.split("\n\n")
 			.filter(|block| !block.starts_with("push_grow"))
-			.map(|block| count(block, " = load "))
+			.map(|block| count(&block, " = load "))
 			.sum();
 		// the slot, the length, the capacity and the items, once
 		assert_eq!(hot, 4, "{many}");
@@ -1592,6 +1592,94 @@ console.log(items, stable, words, maybe)
 			OptLevel::O0,
 		);
 		assert!(!ir.contains("reverse_range:"), "{ir}");
+	}
+
+	#[test]
+	fn narrow_arithmetic_holds_operands_and_intermediate_values() {
+		let source = "function rest = (value: UInt32): UInt32 => value %% 7\nfunction quotient = (value: UInt8): Integer => value // 65537\nfunction largeDivisor = (value: UInt16): Integer => value %% 65537\nfunction intermediate = (value: UInt16): Integer => value * 2 * 0\nfunction small = (value: UInt8): Integer => (value %% 7) + 1\nconsole.log(rest(UInt32.maxValue), quotient(255), largeDivisor(65535), intermediate(65535), small(255))\n";
+		for target in [Target::Native, Target::NativeFreestanding, Target::Wasm] {
+			for checks in [false, true] {
+				let ir = ir_at_target(
+					&format!("arithmetic-width-{}-{checks}", target.name()),
+					source,
+					checks,
+					OptLevel::O0,
+					target,
+				);
+				for (name, operation) in [
+					("fa.rest", "urem i32"),
+					("fa.quotient", "udiv i32"),
+					("fa.largeDivisor", "urem i32"),
+				] {
+					let body = function(&ir, name);
+					assert!(body.contains(operation), "{body}");
+					assert!(!body.contains("to i16"), "{body}");
+				}
+				let body = function(&ir, "fa.intermediate");
+				assert!(
+					body.contains(if checks { "mul nuw i32" } else { "mul i32" }),
+					"{body}"
+				);
+				let body = function(&ir, "fa.small");
+				assert!(
+					body.contains("urem i16"),
+					"small operands still narrow: {body}"
+				);
+			}
+		}
+	}
+
+	#[test]
+	fn growing_bulk_appends_refresh_the_enclosing_push_cache() {
+		let source = include_str!("../../cli/tests/programs/growing-bulk-caches.fa");
+		for target in [Target::Native, Target::NativeFreestanding, Target::Wasm] {
+			let ir = ir_at_target(
+				&format!("growing-bulk-cache-{}", target.name()),
+				source,
+				true,
+				OptLevel::O0,
+				target,
+			);
+			for (name, append) in [
+				("fa.fillBoolean", "@fa_segmented_fill("),
+				("fa.fillUInt8", "@fa_segmented_fill("),
+				("fa.fillInt8", "@fa_segmented_fill("),
+				("fa.copyArrayEach", "@fa_segmented_append("),
+				("fa.copyArrayRange", "@fa_segmented_append("),
+				("fa.copyGrowingArrayEach", "@fa_segmented_extend_to("),
+				("fa.copyGrowingArrayRange", "@fa_segmented_extend_to("),
+			] {
+				let body = function(&ir, name);
+				assert!(body.contains("push_cursor"), "{body}");
+				let after = body.split(append).nth(1).expect("a bulk append");
+				let block = after.lines().skip(1).take(9).collect::<Vec<_>>().join("\n");
+				assert_eq!(count(&block, " = load "), 3, "length, cursor, end: {block}");
+				assert_eq!(count(&block, "store "), 3, "length, cursor, end: {block}");
+			}
+		}
+	}
+
+	#[test]
+	fn growing_header_changes_withhold_loop_caches() {
+		for (name, change) in [
+			("reset", "items = []"),
+			("replace", "items = [1, 2, 3]"),
+			("reserve", "items.reserve(4096)"),
+			("call", "grow(items)"),
+			(
+				"capture",
+				"function change = () mutates items => { items.push(9) }\nchange()",
+			),
+			("callback", "apply(items, grow)"),
+		] {
+			let source = format!(
+				"function grow = (items: GrowingArray<Integer>) mutates items.length => items.push(9)\nfunction apply = (items: GrowingArray<Integer>, action: (values: GrowingArray<Integer>) => Void mutates values) mutates items => action(items)\nfunction run = () => {{\nmutable items: GrowingArray<Integer> = [0]\nfor 0..2 {{\nfor 0..2 {{ {change} }}\nitems.push(7)\nconsole.log(items.length)\n}}\n}}\nrun()\n"
+			);
+			let ir = ir_of(&format!("growing-cache-reject-{name}"), &source);
+			let body = function(&ir, "fa.run");
+			assert!(!body.contains("push_cursor"), "{name}: {body}");
+			assert!(!body.contains("push_length"), "{name}: {body}");
+		}
 	}
 
 	#[test]
@@ -1753,7 +1841,7 @@ console.log(items, stable, words, maybe)
 		let hot: usize = many
 			.split("\n\n")
 			.filter(|block| !block.starts_with("push_next_segment"))
-			.map(|block| count(block, " = load "))
+			.map(|block| count(&block, " = load "))
 			.sum();
 		// the slot, the cursor, the end and the length, once
 		assert_eq!(hot, 4, "{many}");

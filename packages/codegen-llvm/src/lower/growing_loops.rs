@@ -5,7 +5,11 @@
 //! direct pushes. Without pushes all lookup facts are invariant; with pushes
 //! only the mutable cursor/end/length are cached, with write-through updates
 //! so errors and length observations keep their original behavior. A cold
-//! segment advance refreshes cursor/end and leaves length unchanged.
+//! segment advance refreshes cursor/end and leaves length unchanged. Bulk
+//! appends write the header directly and must refresh all three caches before
+//! any subsequent observation or push. Replacement, reservation and every
+//! unknown header use reject the proof, including uses in nested bodies and
+//! captures. Item writes do not change header facts.
 
 use fa_analyzer::ids::{NodeId, SymbolId};
 use fa_analyzer::symbols::{Resolution, SymbolKind};
@@ -34,6 +38,28 @@ pub(super) enum GrowingLoop<'ctx> {
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
+	/// Complete the write-through protocol after a bulk append. Read the real
+	/// fields, bypassing `growing_length`, which deliberately reads the cache.
+	pub(super) fn refresh_growing_after_append(
+		&self,
+		array: PointerValue<'ctx>,
+	) -> Result<(), Error> {
+		let facts = self.growing_loops.get(&array).copied();
+		debug_assert!(!matches!(facts, Some(GrowingLoop::Fixed { .. })));
+		if let Some(GrowingLoop::Push {
+			length,
+			cursor,
+			end,
+		}) = facts
+		{
+			for (field, cache) in [(0, length.pointer), (3, cursor), (4, end)] {
+				let (_, value) = self.growing_field(array, field, "push_refreshed")?;
+				self.builder.build_store(cache, value)?;
+			}
+		}
+		Ok(())
+	}
+
 	pub(super) fn snapshot_growing(
 		&self,
 		array: PointerValue<'ctx>,

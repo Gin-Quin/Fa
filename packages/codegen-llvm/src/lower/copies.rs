@@ -346,7 +346,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					],
 				)
 			}
+		}?;
+		if matches!(target.repr, Repr::Growing(_)) {
+			self.refresh_growing_after_append(target_pointer.into_pointer_value())?;
 		}
+		Ok(())
 	}
 }
 
@@ -541,6 +545,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						byte.into(),
 						k.into(),
 					],
+				)?;
+				self.refresh_growing_after_append(
+					target.value.expect("an array").into_pointer_value(),
 				)
 			}
 			_ => self.call_runtime(

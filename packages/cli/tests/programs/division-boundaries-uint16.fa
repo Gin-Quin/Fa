@@ -1,0 +1,91 @@
+-- All UInt16 boundaries and powers of two: interpreter, Bun and LLVM agree.
+static inputs: Array<UInt16> = [
+	0
+	1
+	2
+	3
+	4
+	5
+	7
+	8
+	9
+	15
+	16
+	17
+	31
+	32
+	33
+	63
+	64
+	65
+	127
+	128
+	129
+	255
+	256
+	257
+	511
+	512
+	513
+	1023
+	1024
+	1025
+	2047
+	2048
+	2049
+	4095
+	4096
+	4097
+	8191
+	8192
+	8193
+	16383
+	16384
+	16385
+	32767
+	32768
+	32769
+	65535
+]
+static divisors: Array<UInt16> = [1, 2, 7, 16, 65535]
+function dynamic = (value: UInt16, divisor: UInt16): (UInt16, UInt16) throws DivisionByZero =>
+	((try value // divisor), (try value %% divisor))
+function literals = (
+	value: UInt16
+): (UInt16, UInt16, UInt16, UInt16, UInt16, UInt16, UInt16, UInt16) =>
+	(value // 1, value %% 1, value // 2, value %% 2, value // 7, value %% 7, value // 16, value
+		%% 16)
+function wide = (value: UInt16): (UInt128, UInt128) => (value // 65537, value %% 65537)
+function rows = (): Array<(UInt16, UInt16)> throws DivisionByZero => {
+	mutable output: Array<(UInt16, UInt16)> = []
+	for value in inputs {
+		for divisor in divisors {
+			output.push(try dynamic(value, divisor))
+		}
+	}
+	output
+}
+static expected: Array<(UInt16, UInt16)> = @rows()
+function literalRows = (): Array<(UInt16, UInt16, UInt16, UInt16, UInt16, UInt16, UInt16, UInt16)> =>
+	inputs.map(literals)
+static literalExpected: Array<(UInt16, UInt16, UInt16, UInt16, UInt16, UInt16, UInt16, UInt16)> = @literalRows()
+function wideRows = (): Array<(UInt128, UInt128)> => inputs.map(wide)
+static wideExpected: Array<(UInt128, UInt128)> = @wideRows()
+assert (try rows()) == expected
+assert inputs.map(literals) == literalExpected
+assert inputs.map(wide) == wideExpected
+function zeroDivision = (value: UInt16, divisor: UInt16): Boolean => {
+	let _result = value // divisor catch _error => return true
+	false
+}
+static zeroDivisionExpected = @zeroDivision(1, 0)
+assert zeroDivisionExpected
+assert zeroDivision(1, 0)
+function zeroRemainder = (value: UInt16, divisor: UInt16): Boolean => {
+	let _result = value %% divisor catch _error => return true
+	false
+}
+static zeroRemainderExpected = @zeroRemainder(1, 0)
+assert zeroRemainderExpected
+assert zeroRemainder(1, 0)
+console.log("division UInt16 ok") -- prints: division UInt16 ok

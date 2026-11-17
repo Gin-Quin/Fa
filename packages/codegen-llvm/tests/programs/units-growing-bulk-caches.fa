@@ -1,0 +1,37 @@
+-- require-split: true
+-- prints: per-unit ok
+-- file: application/main.fa
+export function = () throws IndexError => {
+	library.nested()
+	assert library.remainder(UInt32.maxValue) == 3
+	let stored = library.generic<Integer>
+	assert (try stored(7)) == 524800
+	assert (try library.generic("a managed generic payload beyond inline storage")) == 524800
+	console.log("per-unit ok")
+}
+-- file: library/generic.fa
+export function = <Tag>(tag: Tag): Integer throws IndexError => {
+	mutable items: GrowingArray<{ value: Integer, tag: Tag }> = []
+	for i in 0..1025 { items.push({ value = i, tag }) }
+	mutable total = 0
+	for item in items { total += item.value }
+	for i in 0..1025 { try items[i].value += 1 }
+	assert (try items[-1]).value == 1025
+	total
+}
+-- file: library/nested.fa
+-- The nested-cache defect also occurs when this private owner is compiled per unit.
+export function = () => {
+	mutable flags: GrowingArray<Boolean> = []
+	for round in 0..2 {
+		for 0..3 { flags.push(true) }
+		assert flags.length == round * 4 + 3
+		flags.push(false)
+		assert flags.length == (round + 1) * 4
+	}
+	mutable count = 0
+	for flag in flags { if flag { count += 1 } }
+	assert count == 6
+}
+-- file: library/remainder.fa
+export function = (value: UInt32): UInt32 => value %% 7

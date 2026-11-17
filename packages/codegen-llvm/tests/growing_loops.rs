@@ -14,6 +14,16 @@ fn growing_loops_at_o0() {
 	for target in [Target::Native, Target::NativeFreestanding, Target::Wasm] {
 		for (case, source, expected) in [
 			(
+				"bulk",
+				"../cli/tests/programs/growing-bulk-caches.fa",
+				"growing bulk caches ok",
+			),
+			(
+				"fallbacks",
+				"../cli/tests/programs/growing-cache-fallbacks.fa",
+				"growing fallbacks ok",
+			),
+			(
 				"portable",
 				"../cli/tests/programs/growing-loop-facts.fa",
 				"growing loop facts ok",

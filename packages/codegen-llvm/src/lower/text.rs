@@ -645,25 +645,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.build_store(length_pointer, needed)?;
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(grow);
-		// a string in memory anyway (a field, an item: not a local the
-		// optimizer keeps in registers): the runtime appends to it in place,
-		// one call, so that the caller keeps few values alive around it
-		if target.as_instruction().is_none_or(|instruction| {
+		let in_memory = target.as_instruction().is_none_or(|instruction| {
 			instruction.get_opcode() != inkwell::values::InstructionOpcode::Alloca
-		}) {
-			self.call_runtime(
-				"fa_string_append_cold",
-				&[
-					target.into(),
-					suffix_bytes.into(),
-					suffix_length.into(),
-					suffix_capacity.into(),
-				],
-			)?;
-			self.builder.build_unconditional_branch(join)?;
-			self.builder.position_at_end(join);
-			return Ok(());
-		}
+		});
 		// one simple byte into an inline string with room (a character
 		// appended to a short string): the byte is ORed into its word of the
 		// value (the unused bytes are zero), the length in the tag byte grows,
@@ -710,51 +694,102 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.builder
 			.build_load(self.context.i8_type(), suffix_bytes, "")?
 			.into_int_value();
-		let byte = self.builder.build_int_z_extend(byte, self.usize, "")?;
-		let word_index = self.builder.build_right_shift(
-			tag_length,
-			self.usize
-				.const_int(word_bytes.trailing_zeros() as u64, false),
-			false,
-			"",
-		)?;
-		let offset =
-			self.builder
-				.build_and(tag_length, self.usize.const_int(word_bytes - 1, false), "")?;
-		let offset = self
-			.builder
-			.build_left_shift(offset, self.usize.const_int(3, false), "")?;
-		let piece = self.builder.build_left_shift(byte, offset, "")?;
-		let first = self.builder.build_ptr_to_int(bytes, self.usize, "")?;
-		let mut words = [first, length, capacity];
-		for (index, word) in words.iter_mut().enumerate() {
-			let here = self.builder.build_int_compare(
-				IntPredicate::EQ,
-				word_index,
-				self.usize.const_int(index as u64, false),
+		if in_memory {
+			// A field/item already has stable payload storage. Write only the
+			// new byte and tag: writing its whole last word could clobber the
+			// payload bytes that share that word with the encoding flags.
+			let destination = unsafe {
+				self.builder.build_in_bounds_gep(
+					self.context.i8_type(),
+					target,
+					&[tag_length],
+					"inline_byte",
+				)?
+			};
+			self.builder.build_store(destination, byte)?;
+			let tag = unsafe {
+				self.builder.build_in_bounds_gep(
+					self.context.i8_type(),
+					target,
+					&[self.usize.const_int(3 * word_bytes - 1, false)],
+					"inline_tag",
+				)?
+			};
+			let old = self
+				.builder
+				.build_right_shift(capacity, length_shift, false, "")?;
+			let old = self
+				.builder
+				.build_int_truncate(old, self.context.i8_type(), "")?;
+			let next =
+				self.builder
+					.build_int_add(old, self.context.i8_type().const_int(1, false), "")?;
+			self.builder.build_store(tag, next)?;
+		} else {
+			let byte = self.builder.build_int_z_extend(byte, self.usize, "")?;
+			let word_index = self.builder.build_right_shift(
+				tag_length,
+				self.usize
+					.const_int(word_bytes.trailing_zeros() as u64, false),
+				false,
 				"",
 			)?;
-			let part = self
+			let offset = self.builder.build_and(
+				tag_length,
+				self.usize.const_int(word_bytes - 1, false),
+				"",
+			)?;
+			let offset =
+				self.builder
+					.build_left_shift(offset, self.usize.const_int(3, false), "")?;
+			let piece = self.builder.build_left_shift(byte, offset, "")?;
+			let first = self.builder.build_ptr_to_int(bytes, self.usize, "")?;
+			let mut words = [first, length, capacity];
+			for (index, word) in words.iter_mut().enumerate() {
+				let here = self.builder.build_int_compare(
+					IntPredicate::EQ,
+					word_index,
+					self.usize.const_int(index as u64, false),
+					"",
+				)?;
+				let part = self
+					.builder
+					.build_select(here, piece, self.usize.const_zero(), "")?
+					.into_int_value();
+				*word = self.builder.build_or(*word, part, "")?;
+			}
+			let longer = self.builder.build_int_add(
+				words[2],
+				self.usize.const_int(1 << (word_bits - 8), false),
+				"",
+			)?;
+			let first = self
 				.builder
-				.build_select(here, piece, self.usize.const_zero(), "")?
-				.into_int_value();
-			*word = self.builder.build_or(*word, part, "")?;
+				.build_int_to_ptr(words[0], self.pointer_type(), "")?;
+			let updated = self.string_type.get_undef();
+			let updated = self.builder.build_insert_value(updated, first, 0, "")?;
+			let updated = self.builder.build_insert_value(updated, words[1], 1, "")?;
+			let updated = self.builder.build_insert_value(updated, longer, 2, "")?;
+			self.builder.build_store(target, updated)?;
 		}
-		let longer = self.builder.build_int_add(
-			words[2],
-			self.usize.const_int(1 << (word_bits - 8), false),
-			"",
-		)?;
-		let first = self
-			.builder
-			.build_int_to_ptr(words[0], self.pointer_type(), "")?;
-		let updated = self.string_type.get_undef();
-		let updated = self.builder.build_insert_value(updated, first, 0, "")?;
-		let updated = self.builder.build_insert_value(updated, words[1], 1, "")?;
-		let updated = self.builder.build_insert_value(updated, longer, 2, "")?;
-		self.builder.build_store(target, updated)?;
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(snapshot_append);
+		// A field/item's remaining slow cases update its header in place,
+		// keeping few values live across the call.
+		if in_memory {
+			self.call_runtime(
+				"fa_string_append_cold",
+				&[
+					target.into(),
+					suffix_bytes.into(),
+					suffix_length.into(),
+					suffix_capacity.into(),
+				],
+			)?;
+			self.builder.build_unconditional_branch(join)?;
+			self.builder.position_at_end(join);
+			return Ok(());
+		}
 		// one slot per function: each use is a store, a call and a load
 		let function = self.frame().function;
 		let existing = self.append_headers.borrow().get(&function).copied();

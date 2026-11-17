@@ -172,7 +172,11 @@ types and must not be replaced by fact-name equality.
   facts and last-use field returns: direct respond adds 29.72 M audit instructions
   versus interpolation, with 189,946 cold append calls (25.72 M inclusive) and
   40,000 slow String copies (6.50 M inclusive). Coordinate with feature/strings;
-  the copy alone does not explain the gap. Next retain masked Array-index and
+  the copy alone does not explain the gap. The guarded one-byte ASCII inline
+  field/item append path is implemented (2026-11-17): it removes all 124,389
+  short cold calls in the fresh respond audit. Remaining String work is room/mode
+  propagation across appends, longer literal appends, direct decimal formatting
+  and last-use field moves; the latter meets `feature/ownership`. Next retain masked Array-index and
   stored-node validity facts in lru-open, including backward-shift deletion:
   39,041 mapRemove calls cost 1.78 M inclusive instructions. Preserve checked
   failure paths; do not add unchecked benchmark accesses. Standard Map remains

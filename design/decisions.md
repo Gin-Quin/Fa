@@ -2723,3 +2723,29 @@ Ordinary String arguments are immutable values; explicitly dependent String
 arguments still retain their place. Borrowing a compile-time constant gives it
 caller-lived temporary storage. JSON default closures capture their snapshot
 slots by value, matching their nonescaping parser lifetime.
+
+## String performance: inline place appends (2026-11-17)
+
+A String field or collection item uses the existing local-string inline-byte
+proof before taking the cold append call: the current value is inline, its
+payload has room, and the suffix has exactly one byte and the ASCII flag.
+The owned/frame-buffer room test remains first. Unknown or non-ASCII suffixes,
+non-inline storage and exhausted inline capacity retain the existing fallback.
+Appending ASCII cannot join surrogate halves; existing encoding flags stay valid.
+This proof depends only on the current descriptor and applies inside generic
+instances, callbacks, coroutine bodies and separately compiled units.
+
+Fields/items already have payload storage, so their short path stores the new
+byte and increments only the final tag byte (23/11 payload bytes on native/wasm).
+The tag is derived from the pre-store descriptor: payload bytes sharing the
+capacity word are never restored from a stale word. Local allocas keep their
+existing register construction. No String ABI, allocation or lifetime rule changes.
+In particular, last-use String field returns and transient stores remain for
+`feature/ownership`; this change does not add its own move analysis.
+
+Fresh audit-size respond profiling confirms 189,946 cold append calls before,
+65,557 after: all 124,389 short calls disappear; growth and the 40,000 field-return
+copies are unchanged. Whole-process instructions fall from 235,269,947 to
+230,322,903 (2.10%). Final controlled CPU and full-audit/correctness evidence is
+recorded with the string performance report; instruction counts alone establish
+no CPU-time victory.

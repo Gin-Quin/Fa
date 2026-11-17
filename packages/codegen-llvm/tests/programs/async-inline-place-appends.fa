@@ -1,0 +1,51 @@
+-- Field/item appends preserve every inline payload byte and encoding flag,
+-- then fall back when the payload grows or the suffix is not one ASCII byte.
+-- The package runs as one module and per unit, including coroutine lowering.
+-- file: library/output.fa
+export type = { text: String }
+-- file: library/append.fa
+export function = (out: output, suffix: String): Void mutates out.text => {
+	out.text += suffix
+}
+-- file: application/main.fa
+function appendGeneric = <Tag>(out: library.output, suffix: String, _tag: Tag): Void mutates out.text => {
+	out.text += suffix
+}
+type Append = (out: library.output) => Void mutates out
+function apply = (out: library.output, append: Append): Void mutates out => append(out)
+
+export async function = (): Integer => {
+	let appendValue = library.append
+	let suffix = "c"
+	function closure = (out: library.output): Void mutates out => { out.text += suffix }
+	for length in 0..=40 {
+		let original = "x".repeat(length)
+		mutable out = library.output { text = original }
+		appendValue(out, "a")
+		assert out.text == original + "a"
+		appendGeneric(out, "b", length)
+		assert out.text == original + "ab"
+		apply(out, closure)
+		assert out.text == original + "abc"
+		mutable items = [out.text]
+		items[0] += "d"
+		assert items[0] == original + "abcd"
+		assert original == "x".repeat(length)
+	}
+	mutable out = library.output { text = "" }
+	mutable expected = ""
+	for suffix in ["é", "!", "😀"[0], "a", "😀"[1], "😀"[0], "😀"[1], "\0", "\r", "\n", "tail"] {
+		library.append(out, suffix)
+		expected += suffix
+		assert out.text == expected
+		assert out.text.length == expected.length
+		assert out.text.isWellFormed() == expected.isWellFormed()
+	}
+	mutable resumed = library.output { text = "12345678" }
+	await Task.yield()
+	library.append(resumed, "9")
+	assert resumed.text == "123456789"
+	console.log("inline place appends")
+	0
+}
+-- prints: inline place appends

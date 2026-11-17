@@ -320,6 +320,8 @@ Interpolation constructors and appended interpolations check each addition of by
 
 - **Counted append loops.** A loop appending characters or digits can keep a dynamic short result inline. It reserves the prefix plus the number of rounds before the loop; a longer suffix uses the ordinary append path and reserves the remaining rounds again. An invariant mode lets LLVM select the inline or buffer loop once. The payload byte and the final length/tag byte are stored separately, preserving the bytes in the last word.
 
+- **Inline field/item appends.** The same inline, available-room and one-byte ASCII suffix guards apply to a String in a field or collection item. That path writes its payload byte and increments its tag byte directly, without calling the runtime or overwriting the other payload bytes in the capacity word. Unicode suffixes and growth retain the ordinary append path.
+
 - **Destination passing.** A function that builds a mutable string and returns it, possibly with a final suffix, is expanded into an append destination when its result is appended there. The function has no effects, errors, early returns, captures or calls of program functions, and its arguments cannot read the destination.
 
 ### JavaScript

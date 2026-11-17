@@ -260,6 +260,34 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn inline_ascii_byte_appends_update_places_without_a_runtime_call() {
+		let source = "type Output = { text: String }\nfunction append = (out: Output, suffix: String): Void mutates out.text => { out.text += suffix }\nmutable out = Output { text = \"abc\" }\nappend(out, arguments.get(0) ?? \"!\")\nconsole.log(out.text)\n";
+		for target in [Target::Native, Target::Wasm] {
+			let ir = ir_at_target("inline-place-byte", source, false, OptLevel::O0, target);
+			let body = function(&ir, "fa.append");
+			let inline = body.split_once("\nappend_inline:").expect("inline guard").1;
+			let inline = inline.split_once("\nappend_snapshot:").expect("fallback").0;
+			assert!(inline.contains("inline_byte"), "{inline}");
+			assert!(inline.contains("inline_tag"), "{inline}");
+			assert_eq!(inline.matches("store i8").count(), 2, "{inline}");
+			assert!(!inline.contains("call "), "{inline}");
+			assert!(body.contains("@fa_string_append_cold("), "{body}");
+			for suffix in ["é", "two"] {
+				let source =
+					source.replace("out.text += suffix", &format!("out.text += \"{suffix}\""));
+				let ir = ir_at_target(
+					"inline-place-fallback",
+					&source,
+					false,
+					OptLevel::O3,
+					target,
+				);
+				assert!(!ir.contains("inline_byte"), "{suffix}/{target:?}: {ir}");
+			}
+		}
+	}
+
+	#[test]
 	fn callback_instances_keep_the_nonthrowing_calls_plain() {
 		let ir = ir_of(
 			"callback-instances",

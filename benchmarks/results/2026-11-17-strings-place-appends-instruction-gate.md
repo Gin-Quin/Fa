@@ -7,7 +7,7 @@
 | fannkuch-redux | 9 | 137,427,631 | 137,427,631 | +0.00000% | identical ELF |
 | fib | 35 | 236,888,550 | 236,888,550 | +0.00000% | identical ELF |
 | graph | 10,000 | 10,450,964 | 10,450,964 | +0.00000% | identical ELF |
-| growing-index | 1,000,000 | 365,174,773 | 365,174,782 | +0.00000% | fresh profile |
+| growing-index | 1,000,000 | 365,174,773 | 365,174,796 | +0.00001% | fresh profile |
 | growing-index-array | 1,000,000 | 314,168,552 | 314,168,552 | +0.00000% | fresh profile |
 | interp | 17 | 18,856,550 | 18,856,550 | +0.00000% | identical ELF |
 | lru | 200,000 | 19,154,063 | 19,154,063 | +0.00000% | identical ELF |
@@ -28,7 +28,7 @@
 | spectral-norm | 1,000 | 535,731,282 | 535,731,282 | +0.00000% | identical ELF |
 | string-building | 300,000 | 228,872,671 | 228,872,671 | +0.00000% | identical ELF |
 | string-building-bytes | 300,000 | 175,744,408 | 175,744,422 | +0.00001% | fresh profile |
-| string-building-growing | 300,000 | 187,641,559 | 187,641,559 | +0.00000% | fresh profile |
+| string-building-growing | 300,000 | 187,641,559 | 187,641,545 | -0.00001% | fresh profile |
 | strlist | 200,000 | 85,936,748 | 85,936,748 | +0.00000% | identical ELF |
 | sum | 3,200,000 | 161,782,646 | 161,782,646 | +0.00000% | identical ELF |
 | sum-reserved | 3,200,000 | 161,782,591 | 161,782,591 | +0.00000% | identical ELF |

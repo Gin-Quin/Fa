@@ -1,6 +1,6 @@
 {
   "before_source": "5e3b602d",
-  "after_source": "c07909e0",
+  "after_source": "dd427387",
   "rule": "after Ir <= before Ir * 1.01",
   "rows": [
     {
@@ -84,11 +84,11 @@
       "benchmark": "growing-index",
       "size": 1000000,
       "before_ir": 365174773,
-      "after_ir": 365174782,
-      "change_percent": 2.464573323202046e-06,
+      "after_ir": 365174796,
+      "change_percent": 6.298354016109897e-06,
       "identical_executable": false,
       "before_sha256": "813f94be438723d371125f066d70f428003b38201c171b3258e7c1a9ee0e3025",
-      "after_sha256": "bf2fe68e119e02d64e6f145d53cdec6ac4b5a57506d4c23431fdf4876819a179",
+      "after_sha256": "78dbaffdd62be9945865ae2579967846a008fd86d4b493c073eec75f81b5d6bb",
       "passes": true
     },
     {
@@ -99,7 +99,7 @@
       "change_percent": 0.0,
       "identical_executable": false,
       "before_sha256": "f0e59b57dbe8c53f3f47da33a66d83fc4508c3527c06825ee0b2f2fcfe422b87",
-      "after_sha256": "d8cbd07946f3efb2a328a30cd3b3f8a0cddead30bb6eaac1a91ed4daeb0f825f",
+      "after_sha256": "85a83ccfcb96e359fe575faf515f557805d8cebdd9eab95d83ec4ba4082d7111",
       "passes": true
     },
     {
@@ -308,18 +308,18 @@
       "change_percent": 7.96611405728953e-06,
       "identical_executable": false,
       "before_sha256": "bf9709b01819ed215e3845343a34f3cd975dc3e129b03d128a9e66e9de1b46d9",
-      "after_sha256": "129a157c9b5f8238b7e6e5d69f05e4417d24d8c85cdcf72506a1c934cc24b2da",
+      "after_sha256": "0a5d4927636783c6680716e9bdbab2702c8235c50d04d828cfc5cdc65eb17fed",
       "passes": true
     },
     {
       "benchmark": "string-building-growing",
       "size": 300000,
       "before_ir": 187641559,
-      "after_ir": 187641559,
-      "change_percent": 0.0,
+      "after_ir": 187641545,
+      "change_percent": -7.461033724176502e-06,
       "identical_executable": false,
       "before_sha256": "ec8faf9f56ee3281205ff89a338032b1bf4017141bf984015072f04d7c83bbf5",
-      "after_sha256": "98bc3e6bb26afab4e8547b0358fe28679e55657e9ac098cf7aa4be8257888839",
+      "after_sha256": "3cf4556be11a5f9e36149c6bdb6cef042db3c1e5f2a601ccb7977650a1d8b2ff",
       "passes": true
     },
     {

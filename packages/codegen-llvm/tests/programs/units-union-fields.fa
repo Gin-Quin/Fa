@@ -1,0 +1,11 @@
+-- require-split: true
+-- asynchronous: false
+-- prints: 7
+-- prints: managed payload beyond inline capacity
+-- file: application/main.fa
+export function = () => {
+	console.log(library.read<Integer>({ kind = "a", data = 7 }))
+	console.log(library.read<String>({ aPadding = 3, kind = "b", data = "managed payload beyond inline capacity" }))
+}
+-- file: library/read.fa
+export function = <Item>(value: { kind: "a", data: Item } | { aPadding: Integer, kind: "b", data: Item }): Item => value.data

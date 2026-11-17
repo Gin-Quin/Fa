@@ -17,6 +17,19 @@ mod with_llvm {
 	use fa_codegen_llvm::{OptLevel, Options, Target, compile};
 
 	#[test]
+	fn common_union_fields_read_the_selected_slot_without_copying_the_object() {
+		let source = "type Value = { kind: \"a\", count: Integer } | { aPadding: Integer, kind: \"b\", count: Integer }\nfunction read = (value: Value): Integer => value.count\nconsole.log(read({ kind = \"a\", count = 3 }), read({ aPadding = 99, kind = \"b\", count = 7 }))\n";
+		for target in [Target::Native, Target::Wasm, Target::NativeFreestanding] {
+			let ir = ir_at_target("common-union-field", source, true, OptLevel::O0, target);
+			let read = ir.split("@fa.read(").nth(1).expect("the field reader");
+			let read = read.split("\n}").next().unwrap();
+			assert!(read.contains("union_field_member"), "{target:?}: {read}");
+			assert!(!read.contains("@fa_alloc("), "{target:?}: {read}");
+			assert!(!read.contains("@fa.copy"), "{target:?}: {read}");
+		}
+	}
+
+	#[test]
 	fn nullable_lookup_references_keep_addresses_without_allocating_cells() {
 		let source = "function clear = (values: Array<Integer>): Boolean => {\nmutable use selected = values.find((value) => value > 0)\nreuse selected = none\nselected is none\n}\nconsole.log(clear([1, 2]))\n";
 		for target in [Target::Native, Target::Wasm, Target::NativeFreestanding] {

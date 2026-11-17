@@ -80,6 +80,7 @@ mod tree_payloads;
 mod tree_strings;
 mod trees;
 mod tuples;
+mod union_fields;
 mod union_inlining;
 pub(crate) mod units;
 pub(crate) mod values;

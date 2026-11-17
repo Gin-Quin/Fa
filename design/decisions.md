@@ -2778,3 +2778,13 @@ holder; it creates neither an optional value slot nor an owned temporary. Strip
 parentheses and `try` before recognizing every built-in reference producer.
 Capture discovery traverses named call argument values only: a key resolves to
 the callee parameter and is metadata, not a captured variable.
+
+
+## Native completeness: common union fields (2026-11-17)
+
+Select the actual anonymous-union payload layout by its tag before projecting a
+common field. Equal field layouts merge addresses, preserving borrowed reads and
+writable aliases; heterogeneous fields merge an owned value of the complete
+joined field type before ordinary narrowing. Runtime alternative tags use the
+concrete type in the shared store, so local analyzed types, generic substitutions
+and separately compiled consumers agree. This retains written type origins.

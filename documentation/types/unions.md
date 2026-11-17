@@ -291,3 +291,18 @@ function load = (): String throws ApiError => ...
 ```
 
 See [errors](/values/errors).
+
+:::implementation
+## Common anonymous-union fields
+
+LLVM dispatches a common field access on the actual alternative's tag and uses
+that alternative's payload layout and field offset. Equal field representations
+merge their addresses, so reads and writable places keep the existing storage.
+Different field representations convert the selected value to the field's joined
+type and merge an owned result. Chained fields continue from that result.
+
+Anonymous alternatives use concrete types interned in the shared type store for
+their runtime tags. A local analyzed type and its substituted generic instance
+must retain the same identity; separately compiled units use the stable hash of
+that concrete identity.
+:::

@@ -13,8 +13,7 @@ analyzer/tests/cases/types/3.11-generics/gn-2.fa: target limit: formatting Float
 analyzer/tests/cases/types/3.11-generics/gn-6.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
 analyzer/tests/cases/types/3.11-generics/gn-8.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
 analyzer/tests/cases/types/3.13-type-conversion/cv-1.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
-analyzer/tests/cases/types/3.4-anonymous-unions-and-optionals/un-15.fa: line 5: this member is not supported by the native backend yet
-analyzer/tests/cases/types/3.4-anonymous-unions-and-optionals/un-5.fa: line 4: this member is not supported by the native backend yet
+analyzer/tests/cases/types/3.4-anonymous-unions-and-optionals/un-15.fa: documented target limit: Float output requires snprintf from libc on native-freestanding; build for native or wasm
 analyzer/tests/cases/types/3.5-named-unions-and-errors/nu-1.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
 analyzer/tests/cases/types/3.5-named-unions-and-errors/nu-8.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
 analyzer/tests/cases/types/3.9-fields-and-key-sets/fields-json.fa: target limit: std.json requires libc (AN004); build for native

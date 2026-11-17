@@ -4,8 +4,6 @@ analyzer/tests/cases/advanced/14-concurrency-without-async/adv-14.6-01.fa: line 
 analyzer/tests/cases/advanced/14-concurrency-without-async/adv-14.6-09.fa: line 5: error[CONC001]: `for parallel` is only available on `native`, not on `wasm`: branch with `@if target is "native"`, or write a plain `for`
 analyzer/tests/cases/comptime/directories.fa: main.fa:4:19: this member is not supported by the native backend yet
 analyzer/tests/cases/comptime/for-per-item.fa: main.fa:19:14: a value of type `Void` is not supported by the native backend yet
-analyzer/tests/cases/types/3.4-anonymous-unions-and-optionals/un-15.fa: line 5: this member is not supported by the native backend yet
-analyzer/tests/cases/types/3.4-anonymous-unions-and-optionals/un-5.fa: line 4: this member is not supported by the native backend yet
 analyzer/tests/cases/types/5.4-set-t-and-growingset-t/se-3.fa: line 3: the `key` of `Set.from` is not supported by the native backend yet
 analyzer/tests/cases/values/09-none-and-optionals/T-OPT-7.fa: line 3: `get` on this array is not supported by the native backend yet
 cli/tests/programs/builtin-methods.fa: line 34: `Integer#checkedPow` is not supported by the native backend yet

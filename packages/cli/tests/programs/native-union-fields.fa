@@ -1,0 +1,35 @@
+type Left = { kind: "left", count: Integer, text: String, nested: { value: Integer } }
+type Right = { aPadding: Integer, kind: "right", count: Integer, text: String, nested: { value: Integer } }
+function describe = (value: Left | Right): String => "{value.kind} {value.count} {value.text} {value.nested.value}"
+mutable left: Left | Right = { kind = "left", count = 1, text = "left text beyond inline capacity", nested = { value = 3 } }
+mutable right: Left | Right = { aPadding = 100, kind = "right", count = 2, text = "right text beyond inline capacity", nested = { value = 4 } }
+console.log(describe(left)) -- prints: left 1 left text beyond inline capacity 3
+console.log(describe(right)) -- prints: right 2 right text beyond inline capacity 4
+
+type First<Item> = { kind: "first", data: Item }
+type Second<Item> = { aPadding: Integer, kind: "second", data: Item }
+function read = <Item>(value: First<Item> | Second<Item>): Item => value.data
+let a: First<Integer> | Second<Integer> = { kind = "first", data = 7 }
+let b: First<String> | Second<String> = { aPadding = 5, kind = "second", data = "generic data beyond inline capacity" }
+console.log(read<Integer>(a), read<String>(b)) -- prints: 7 generic data beyond inline capacity
+
+type Mixed = { kind: "number", data: Integer } | { aPadding: Integer, kind: "text", data: String }
+function data = (value: Mixed): Integer | String => value.data
+console.log(data({ kind = "number", data = 9 })) -- prints: 9
+console.log(data({ aPadding = 8, kind = "text", data = "mixed data beyond inline capacity" })) -- prints: mixed data beyond inline capacity
+
+type MaybeText = { kind: "empty", data: None } | { aPadding: Integer, kind: "text", data: String }
+function text = (value: MaybeText): String? => value.data
+function length = (value: MaybeText): Integer => {
+	let selected = value.data
+	if selected is not none { return selected.length }
+	0
+}
+console.log(text({ kind = "empty", data = none })) -- prints: none
+console.log(text({ aPadding = 3, kind = "text", data = "optional data beyond inline capacity" })) -- prints: optional data beyond inline capacity
+console.log(length({ kind = "empty", data = none }), length({ aPadding = 3, kind = "text", data = "abc" })) -- prints: 0 3
+
+-- The type supplies an unbound function; the actual item supplies self.
+type Human = { name: String, function describe = (self): String => "human {self.name}" }
+let method = Human.describe
+console.log([Human { name = "Ada" }].map(method)) -- prints: ["human Ada"]

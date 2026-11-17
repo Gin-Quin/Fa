@@ -701,6 +701,25 @@ mod tests {
 	}
 
 	#[test]
+	fn a_later_method_call_keeps_its_receiver_owner_live() {
+		for body in ["original.push(2)", "console.log(original.sum())"] {
+			let statements = format!(
+				"mutable original: Array<Integer> = [1]\nfunction visit = () => {body}\nlet moved = original\nvisit()\nconsole.log(moved)\n"
+			);
+			for source in [
+				statements.clone(),
+				format!("function run = () => {{ {statements} }}\nrun()\n"),
+			] {
+				assert_eq!(
+					crate::check::test_support::codes(&source),
+					["MEM004"],
+					"{source}"
+				);
+			}
+		}
+	}
+
+	#[test]
 	fn an_exported_reader_keeps_its_module_owner_live_after_initialization() {
 		let source = "let original = [1, 2]\nmutable target = original\ntarget.push(3)\nexport function = () => console.log(original.length, target.length)\n";
 		assert_eq!(crate::check::test_support::codes(source), ["MEM004"]);

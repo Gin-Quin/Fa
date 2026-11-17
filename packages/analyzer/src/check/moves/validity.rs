@@ -18,7 +18,16 @@ impl Walker<'_> {
 		if !self.body.flow.reachable {
 			return;
 		}
-		let places = self.places_of(node);
+		let mut places = self.places_of(node);
+		// A selected method is not itself a place, but evaluating it still
+		// reads its receiver. Freeze that receiver's lexical origin just as
+		// for a field: canonical move paths alone lose capture boundaries.
+		if places.is_empty()
+			&& matches!(self.view(node), crate::syntax::View::Access { .. })
+			&& self.move_places.contains_key(&node)
+		{
+			places = self.callee_receiver_places(node);
+		}
 		if places.is_empty() {
 			return;
 		}

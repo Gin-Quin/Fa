@@ -1,0 +1,24 @@
+function local = (): Integer => {
+	mutable items = [1]
+	function append = () => items.push(2)
+	let saved = copy items
+	append()
+	saved.length * 10 + items.length
+}
+static compiled = @local()
+console.log(compiled, local()) -- prints: 12 12
+
+mutable original = [3]
+function mutate = () => original.push(4)
+function total = (): Integer => original.sum()
+let saved = copy original
+mutate()
+console.log(saved, total()) -- prints: [3] 7
+
+function make = (): () => Integer => {
+	let items = [5, 6]
+	function read = (): Integer => items.sum()
+	read
+}
+let read = make()
+console.log(read(), read()) -- prints: 11 11

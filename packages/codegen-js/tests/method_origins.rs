@@ -8,7 +8,11 @@ use fa_analyzer::{CodebaseResolver, Session};
 use fa_codegen_js::{EntryOptions, Options, Target, generate, generate_program};
 
 fn runtime(target: Target) -> Option<PathBuf> {
-	let name = target.name();
+	let name = if target == Target::Web {
+		"node"
+	} else {
+		target.name()
+	};
 	if target == Target::Bun
 		&& let Some(home) = std::env::var_os("HOME")
 	{
@@ -39,14 +43,15 @@ fn files(source: &str) -> Vec<(String, String)> {
 }
 
 #[test]
-fn written_method_origins_survive_erasure_on_bun_and_node() {
+fn written_method_origins_survive_erasure_on_all_javascript_targets() {
 	let fixtures = [
 		include_str!("../../analyzer/tests/cases/review/written-method-origins.fa"),
 		include_str!("../../analyzer/tests/cases/review/written-method-generic-owners.fa"),
 		include_str!("../../analyzer/tests/cases/review/written-method-origins-async.fa"),
 		include_str!("../../analyzer/tests/cases/modules/generic-hidden-arguments.fa"),
+		include_str!("../../analyzer/tests/cases/review/written-method-origins-async-awaited.fa"),
 	];
-	for target in [Target::Bun, Target::Node] {
+	for target in [Target::Bun, Target::Node, Target::Web] {
 		let Some(runtime) = runtime(target) else {
 			eprintln!("skipped: {} is not installed", target.name());
 			continue;
@@ -55,11 +60,27 @@ fn written_method_origins_survive_erasure_on_bun_and_node() {
 			let options = Options::new(target, "method-origins.fa");
 			let mut files = files(source);
 			let modules = if files.is_empty() {
-				let (mut session, file) = fa_analyzer::analyze_source(source);
-				vec![(
-					"main.js".to_string(),
-					generate(&mut session, file, &options).unwrap().code,
-				)]
+				let mut session = Session::new();
+				session.set_target(target.name());
+				let file = session.set_source("main", std::sync::Arc::from(*source));
+				let output = generate(&mut session, file, &options);
+				if target == Target::Web
+					&& *source
+						== include_str!(
+							"../../analyzer/tests/cases/review/written-method-origins-async.fa"
+						) {
+					let error = output.unwrap_err();
+					assert!(!error.diagnostics.is_empty());
+					assert!(
+						error
+							.diagnostics
+							.iter()
+							.all(|diagnostic| diagnostic.code.id == "CONC010"),
+						"{error:?}"
+					);
+					continue;
+				}
+				vec![("main.js".to_string(), output.unwrap().code)]
 			} else {
 				files.push((
 					"package.fa".to_string(),
@@ -85,10 +106,18 @@ fn written_method_origins_survive_erasure_on_bun_and_node() {
 				std::fs::create_dir_all(path.parent().unwrap()).unwrap();
 				std::fs::write(path, code).unwrap();
 			}
-			let output = Command::new(&runtime)
-				.arg(directory.join("main.js"))
-				.output()
-				.unwrap();
+			let mut command = Command::new(&runtime);
+			if target == Target::Web {
+				command.args([
+					"--experimental-vm-modules",
+					"--disable-warning=ExperimentalWarning",
+				]);
+				command.arg(
+					PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+						.join("../cli/tests/programs/web-runner.mjs"),
+				);
+			}
+			let output = command.arg(directory.join("main.js")).output().unwrap();
 			assert!(
 				output.status.success(),
 				"{} fixture {index}: {} ({})",

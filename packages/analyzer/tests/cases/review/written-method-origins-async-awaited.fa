@@ -1,0 +1,38 @@
+-- Awaited constraint methods remain available on the web, including phantom
+-- owner arguments, imported wrappers, recursive forwarding and unused methods.
+-- file: library/invoke.fa
+export async function = <Item: { describe: async (self) => String }>(item: Item): String => await item.describe()
+-- file: library/forward.fa
+export async function = <Renamed: { describe: async (self) => String }>(item: Renamed): String => await invoke(item)
+-- file: library/Labeled.fa
+export type<label: String> = {
+	name: String
+	async function describe = (self): String => {
+		await std.time.sleep(1)
+		"{label}: {self.name}"
+	}
+}
+-- file: application/main.fa
+type Fast = {
+	name: String
+	async function describe = (self): String => self.name
+}
+type Wrapped<Item: { describe: async (self) => String }> = {
+	value: Item
+	async function describe = (self): String => await self.value.describe()
+}
+async function first = <Left: { describe: async (self) => String }, Right: { describe: async (self) => String }>(left: Left, right: Right): String => await left.describe()
+async function unused = <Item: { describe: async (self) => String }>(item: Item): Integer => 1
+async function repeat = <Item: { describe: async (self) => String }>(item: Item, count: Integer): String => {
+	if count == 0 { return await item.describe() }
+	return await repeat(item, count - 1)
+}
+export async function = () => {
+	let value = library.Labeled<"async"> { name = "Ada" }
+	console.log(await library.forward(value)) -- prints: async: Ada
+	console.log(await library.invoke<library.Labeled<"async">>(value)) -- prints: async: Ada
+	console.log(first(Fast { name = "fast" }, value), unused(value)) -- prints: fast 1
+	let wrapped = Wrapped<library.Labeled<"async">> { value }
+	console.log(await library.invoke(wrapped)) -- prints: async: Ada
+	console.log(await repeat(value, 2)) -- prints: async: Ada
+}

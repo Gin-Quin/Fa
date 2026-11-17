@@ -1,3 +1,2 @@
 # Known failures on web; every entry is executed.
 # An unlisted failure, listed success or stale entry fails tests/programs.rs.
-analyzer/tests/cases/review/written-method-origins-async.fa: Blocking generic async method calls on web pass the receiver string as task (faSleep writes task.wake).

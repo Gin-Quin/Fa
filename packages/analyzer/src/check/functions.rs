@@ -623,20 +623,37 @@ impl Walker<'_> {
 				param_sigs.extend_from_slice(&expected_params[param_sigs.len()..]);
 			}
 		}
+		// Recursive calls need the function's own generic binders before
+		// checking its body, including identity applications of rigid params.
+		let generics = self
+			.generic_params
+			.get(&lambda)
+			.or_else(|| {
+				owner
+					.declaration
+					.and_then(|decl| self.generic_params.get(&decl))
+			})
+			.cloned()
+			.unwrap_or_default();
+		let generic_types: Vec<_> = generics
+			.iter()
+			.map(|&param| self.s.types.intern(TypeKind::Param(param)))
+			.collect();
 		if let Some(symbol) = owner.symbol {
 			let frame = self.decl_stack.len().saturating_sub(1) as u32;
 			let fn_ty = if incomplete {
 				Some(TypeId::UNKNOWN)
 			} else {
 				returns.map(|ret| {
-					self.function_type(
+					let ty = self.function_type(
 						&param_sigs,
 						(ret, reference),
 						throws,
 						declared_effects,
 						&declared_requires,
 						owner.is_async,
-					)
+					);
+					self.generic_function_type(ty, &generic_types)
 				})
 			};
 			let symbol = self.a.symbols.symbol_mut(symbol);
@@ -659,7 +676,7 @@ impl Walker<'_> {
 				scope,
 				throws,
 				captures: Vec::new(),
-				generics: Vec::new(),
+				generics,
 			};
 			if let Some(declaration) = owner.declaration {
 				self.a.functions.insert(declaration, info.clone());

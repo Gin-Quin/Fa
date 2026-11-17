@@ -28,20 +28,22 @@
 use rustc_hash::FxHashMap;
 
 use crate::analysis::{
-	Argument, AsyncSummary, AwaitInfo, AwaitKind, CallInfo, Callee, StartInfo, TargetSet,
+	Argument, AsyncMethod, AsyncSummary, AwaitInfo, AwaitKind, CallInfo, Callee, StartInfo,
+	TargetSet,
 };
 use crate::builtins;
+use crate::check::task_methods::{AsyncCall, AsyncCallee};
 use crate::check::{BodyCx, FnCx, Walker};
 use crate::diagnostics::codes::advanced::{
 	CONC010, CONC014, CONC015, CONC016, CONC017, CONC018, CONC019, REF013,
 };
 use crate::diagnostics::codes::types::{FN063, FN084};
 use crate::diagnostics::codes::values::E_TYPE_1;
-use crate::ids::{NodeId, PlaceId, SymbolId, TypeId};
+use crate::ids::{NodeId, ParamId, PlaceId, SymbolId, TypeId};
 use crate::modules::FileRole;
 use crate::symbols::{Resolution, ScopeKind, SymbolKind};
 use crate::syntax::{NodeList, View};
-use crate::types::{CollKind, SyncKind, TypeFlags, TypeKind};
+use crate::types::{CollKind, FieldFlags, SyncKind, TypeFlags, TypeKind};
 
 /// The key of the top level of a file in `Interface::async_summaries`.
 pub const TOP_LEVEL: NodeId = NodeId(u32::MAX);
@@ -100,6 +102,8 @@ pub(crate) struct TaskState {
 	/// The blocking calls of this file's functions: `(call, callee key,
 	/// callee name)`, checked once the summaries are settled.
 	blocking_calls: Vec<(NodeId, NodeId, String)>,
+	/// Call vertices specialize conditional method restrictions in the fixpoint.
+	calls: FxHashMap<NodeId, AsyncCall>,
 	/// The awaited calls of this file's functions: `(await, callee key)`.
 	awaited_calls: Vec<(NodeId, NodeId)>,
 	/// What each kept task uses, by `start` node (A2).
@@ -133,7 +137,9 @@ enum Target {
 	/// A function of this file: its lambda node and name.
 	Local(NodeId, String),
 	/// A function of another file: its summary and name.
-	External(Option<AsyncSummary>, String),
+	External(Option<AsyncSummary>, Vec<ParamId>, String),
+	/// A method called through a generic constraint.
+	Method(AsyncMethod),
 	/// A function value of an `async` type.
 	AsyncValue,
 	/// Anything else: no wait.
@@ -188,24 +194,7 @@ fn merge(into: &mut AsyncSummary, dep: &AsyncSummary, mode: Mode, name: &str, is
 			});
 		}
 	}
-	let removed = into.blocking - dep.blocking;
-	if !removed.is_empty() {
-		into.blocking -= removed;
-		for (targets, chain) in &dep.blocked_by {
-			let lost = *targets & removed;
-			if !lost.is_empty() {
-				into.blocked_by.push((lost, format!("{name} → {chain}")));
-			}
-		}
-		let explained = dep
-			.blocked_by
-			.iter()
-			.fold(TargetSet::empty(), |all, (targets, _)| all | *targets);
-		let unexplained = removed - explained;
-		if !unexplained.is_empty() {
-			into.blocked_by.push((unexplained, name.to_string()));
-		}
-	}
+	into.merge_blocking(dep, name);
 }
 
 /// Removes targets from a summary's `blocking`, with the reason.
@@ -356,13 +345,13 @@ impl Walker<'_> {
 					immediate_task: false,
 				})
 			}
-			Target::External(summary, _) if is_async => Some(AwaitInfo {
+			Target::External(summary, _, _) if is_async => Some(AwaitInfo {
 				kind: AwaitKind::Call,
 				suspends: summary.is_some_and(|summary| summary.suspends),
 				cancelled: false,
 				immediate_task: false,
 			}),
-			Target::AsyncValue => Some(AwaitInfo {
+			Target::AsyncValue | Target::Method(_) if is_async => Some(AwaitInfo {
 				kind: AwaitKind::FunctionValue,
 				suspends: true,
 				cancelled: false,
@@ -695,6 +684,12 @@ impl Walker<'_> {
 	/// around it, and `CONC010` for a blocking call of a primitive or of
 	/// another file's function that can't block on the target.
 	pub(super) fn after_call(&mut self, n: NodeId, callee: NodeId) {
+		if self
+			.a
+			.has_flags(n, crate::analysis::NodeFlags::GENERIC_APPLICATION)
+		{
+			return;
+		}
 		if self.builtin_path(n, callee) == Some("Pointer#write")
 			&& let Some(crate::analysis::Argument::Given(value)) =
 				self.a.calls.get(&n).and_then(|call| call.arguments.first())
@@ -803,16 +798,42 @@ impl Walker<'_> {
 				}
 			}
 			Target::Local(key, name) => {
+				let parameters = self.async_parameters(self.s.module_id(self.file), key);
+				let key = if parameters.is_empty() {
+					key
+				} else {
+					let edge = self.async_call(n, AsyncCallee::Local(key), &parameters);
+					self.tasks.calls.insert(n, edge);
+					n
+				};
 				self.acc().deps.push((key, mode, name.clone()));
 				if mode == Mode::Blocking {
 					self.tasks.blocking_calls.push((n, key, name));
 				}
 			}
-			Target::External(Some(summary), name) => {
+			Target::External(Some(summary), _, name) if summary.methods.is_empty() => {
 				self.a.reads_target |= mode == Mode::Blocking && !summary.blocking.is_all();
 				merge(&mut self.acc().own, &summary, mode, &name, true);
 				if mode == Mode::Blocking && !summary.blocking.contains(current) {
 					self.report_blocking_call(n, &name, &summary);
+				}
+			}
+			Target::External(Some(summary), parameters, name) => {
+				let edge = self.async_call(n, AsyncCallee::External(summary), &parameters);
+				self.tasks.calls.insert(n, edge);
+				self.acc().deps.push((n, mode, name.clone()));
+				if mode == Mode::Blocking {
+					self.tasks.blocking_calls.push((n, n, name));
+				}
+			}
+			Target::Method(method) => {
+				let acc = &mut self.acc().own;
+				if !acc.methods.contains(&method) {
+					acc.methods.push(method);
+					acc.methods.sort_unstable();
+				}
+				if mode == Mode::Awaited {
+					acc.suspends = true;
 				}
 			}
 			Target::AsyncValue if mode == Mode::Awaited => {
@@ -854,7 +875,32 @@ impl Walker<'_> {
 				None => Target::Plain,
 			};
 		}
-		let callee = self.strip_groups(callee);
+		let mut callee = self.strip_groups(callee);
+		while let View::Call { callee: inner, .. } = self.view(callee) {
+			if !self
+				.a
+				.has_flags(callee, crate::analysis::NodeFlags::GENERIC_APPLICATION)
+			{
+				break;
+			}
+			callee = self.strip_groups(inner);
+		}
+		if let View::Access { target, members } = self.view(callee)
+			&& let Some(member) = members.last()
+			&& let Resolution::Field(shape, index) = self.a.resolution(member)
+		{
+			let field = self.s.types.shape_fields(shape)[index as usize];
+			let receiver = members
+				.len()
+				.checked_sub(2)
+				.and_then(|index| members.get(index))
+				.unwrap_or(target);
+			if field.flags.contains(FieldFlags::METHOD)
+				&& let TypeKind::Param(param) = self.s.types.kind(self.type_of(receiver))
+			{
+				return Target::Method(AsyncMethod::new(&self.s.types, param, field.name));
+			}
+		}
 		// a method of a worker: it waits for the worker's thread
 		if let View::Access { target, .. } = self.view(callee)
 			&& matches!(
@@ -889,12 +935,18 @@ impl Walker<'_> {
 			other => other,
 		};
 		if let Resolution::External(_) = resolution {
-			let summary = self.s.external_node(resolution).and_then(|(module, decl)| {
+			let declaration = self.s.external_node(resolution);
+			let summary = declaration.and_then(|(module, decl)| {
 				self.s
-					.interface(module)
-					.and_then(|interface| interface.async_summaries.get(&decl).cloned())
+					.interface(module)?
+					.async_summaries
+					.get(&decl)
+					.cloned()
 			});
-			return Target::External(summary, name);
+			let parameters = declaration
+				.map(|(module, decl)| self.async_parameters(module, decl))
+				.unwrap_or_default();
+			return Target::External(summary, parameters, name);
 		}
 		let callee_ty = self.type_of(callee);
 		match self.signature_of(callee_ty) {
@@ -1274,6 +1326,12 @@ impl Walker<'_> {
 				acc: std::mem::take(&mut self.tasks.top),
 			},
 		);
+		for &call in self.tasks.calls.keys() {
+			walked.entry(call).or_insert_with(|| Walked {
+				is_async: true,
+				acc: Acc::new(),
+			});
+		}
 		let mut keys: Vec<NodeId> = walked.keys().copied().collect();
 		keys.sort_unstable();
 		let mut settled: FxHashMap<NodeId, AsyncSummary> = keys
@@ -1289,7 +1347,10 @@ impl Walker<'_> {
 			let mut changed = false;
 			for &key in &keys {
 				let entry = &walked[&key];
-				let mut summary = entry.acc.own.clone();
+				let mut summary = match self.tasks.calls.get(&key) {
+					Some(call) => self.async_instance(call, &settled),
+					None => entry.acc.own.clone(),
+				};
 				summary.suspends &= entry.is_async;
 				for (dep, mode, name) in &entry.acc.deps {
 					if let Some(dep) = settled.get(dep) {
@@ -1297,9 +1358,17 @@ impl Walker<'_> {
 					}
 				}
 				let before = &settled[&key];
-				if (before.suspends, before.starts, before.blocking)
-					!= (summary.suspends, summary.starts, summary.blocking)
-				{
+				if (
+					before.suspends,
+					before.starts,
+					before.blocking,
+					&before.methods,
+				) != (
+					summary.suspends,
+					summary.starts,
+					summary.blocking,
+					&summary.methods,
+				) {
 					changed = true;
 				}
 				settled.insert(key, summary);

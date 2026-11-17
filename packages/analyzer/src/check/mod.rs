@@ -65,6 +65,7 @@ mod spreads;
 mod std_library;
 mod strings;
 mod structural;
+mod task_methods;
 pub(crate) mod tasks;
 mod tests;
 mod tuples;

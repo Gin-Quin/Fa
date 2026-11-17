@@ -11,7 +11,7 @@
 use fa_analyzer::analysis::{Argument, Callee};
 use fa_analyzer::ids::{NodeId, TypeId};
 use fa_analyzer::syntax::{TemplatePart, TemplateParts, View};
-use fa_analyzer::types::{FloatBits, TypeKind};
+use fa_analyzer::types::{CollKind, FloatBits, TypeKind};
 
 use crate::generate::{Generator, Kind};
 use crate::js::{self, Expr, Prec};
@@ -63,6 +63,23 @@ impl Generator<'_> {
 			};
 			return Piece::Text(text);
 		}
+		if let Some(drop) = self.temporary_resource_drop(node) {
+			if !self.guard_frames.is_empty() {
+				let temp = self.inline_temp();
+				self.guard_frames
+					.last_mut()
+					.expect("a statement")
+					.push(format!("{drop}({temp});"));
+				let value = Expr::primary(format!("({temp} = {})", value.at(Prec::Assign)));
+				return self.top_level_piece(value, ty);
+			}
+			let temp = self.temp();
+			let formatted = self.format_top(Expr::name(temp.clone(), false), ty);
+			return Piece::Value(Expr::primary(format!(
+				"(({temp}) => {{ try {{ return {}; }} finally {{ {drop}({temp}); }} }})({})",
+				formatted.text, value.text
+			)));
+		}
 		self.top_level_piece(value, ty)
 	}
 
@@ -72,7 +89,11 @@ impl Generator<'_> {
 			return Piece::Text(text);
 		}
 		match self.types.kind(ty) {
-			TypeKind::None => Piece::Text("none".to_string()),
+			TypeKind::None if value.pure => Piece::Text("none".to_string()),
+			TypeKind::None => Piece::Value(Expr::primary(format!(
+				"({}, \"none\")",
+				value.at(Prec::Assign)
+			))),
 			_ => Piece::Value(self.format_top(value, ty)),
 		}
 	}
@@ -260,9 +281,9 @@ impl Generator<'_> {
 				let helper = self.helper("faFormatTuple");
 				format!("(value) => {helper}(value, [{}])", formats.join(", "))
 			}
-			TypeKind::Collection(_, item, key) => {
+			TypeKind::Collection(kind, item, key) => {
 				let item_format = self.nested_formatter(item);
-				if key == TypeId::NONE {
+				if !matches!(kind, CollKind::Map | CollKind::GrowingMap) {
 					let helper = self.helper("faFormatArray");
 					format!("(value) => {helper}(value, {item_format})")
 				} else {

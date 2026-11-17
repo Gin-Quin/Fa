@@ -339,6 +339,7 @@ pub(crate) fn with_module<R>(
 			}
 		}
 	}
+	crate::optimize::materialize_aggregate_copies(&module, &machine)?;
 	keep_huge_functions_unoptimized(&module);
 	let pipeline = if asynchronous {
 		options.coroutine_pipeline()

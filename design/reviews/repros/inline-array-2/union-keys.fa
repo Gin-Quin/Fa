@@ -1,0 +1,28 @@
+-- Fictitious tuple metadata was removed: exercise real inline union items.
+type Value = Union {
+	None
+	Packed = { flag: Boolean, count: Int16, small: Int8 }
+	Word = String
+}
+function mutate = (items: InlineArray<Value, 2>) mutates items[..] => {
+	for item in items {
+		if item is Value.Packed {
+			item.flag = false
+			item.count += 1
+		}
+	}
+}
+function build = (): InlineArray<Value, 2> => {
+	mutable items: InlineArray<Value, 2> = [Value.Packed { flag = true, count = 2, small = 3 }]
+	mutate(items)
+	items
+}
+let key = build()
+let same: InlineArray<Value, 2> = [Value.Packed { count = 3, flag = false, small = 3 }]
+assert key == same
+mutable entries: Map<InlineArray<Value, 2>, Integer> = []
+entries[key] = 7
+console.log(try entries[same]) -- prints: 7
+static folded = @build()
+assert folded == same
+console.log(folded) -- prints: [Value.Packed { count = 3, flag = false, small = 3 }]

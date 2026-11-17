@@ -54,6 +54,7 @@ impl Walker<'_> {
 		});
 		self.s.types.set_param_bounds(param, ty, default_ty);
 		let symbol = self.declare(generic, name, SymbolKind::Static);
+		self.value_param_symbols.insert(symbol, param);
 		let symbol = self.a.symbols.symbol_mut(symbol);
 		symbol.ty = ty;
 		symbol.state = DeclState::Done;
@@ -112,6 +113,10 @@ impl Walker<'_> {
 				let symbol = self.a.symbols.lookup(self.body.scope, sym)?;
 				let data = self.a.symbols.symbol(symbol);
 				let (kind, ty) = (data.kind, data.ty);
+				if let Some(&param) = self.value_param_symbols.get(&symbol) {
+					self.set_resolution(n, Resolution::Local(symbol));
+					return Some(self.s.types.intern(TypeKind::Param(param)));
+				}
 				if kind != SymbolKind::Static || !self.s.types.is_literal(ty) {
 					return None;
 				}
@@ -123,8 +128,13 @@ impl Walker<'_> {
 	}
 
 	/// The value of a constant integer expression.
-	fn constant_int(&self, n: NodeId) -> Option<I256> {
-		match self.view(n) {
+	fn constant_int(&mut self, n: NodeId) -> Option<I256> {
+		let tree = Arc::clone(&self.tree);
+		match syntax::view(&tree, n) {
+			View::Name(_) => self
+				.constant_type(n)
+				.and_then(|ty| self.s.types.as_int(ty))
+				.and_then(|int| int.literal()),
 			View::Integer(value) => Some(value),
 			View::Negate(inner) => self.constant_int(inner).map(|value| -value),
 			View::Group(inner) => self.constant_int(inner),

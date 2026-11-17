@@ -53,7 +53,7 @@ unsafe extern "C" {
 /// compiler is never reused.
 const VERSION: &str = concat!(
 	env!("CARGO_PKG_VERSION"),
-	"-split-7-platform-1-effects-1-errors-1-regions-1-packed-capacity-1-frame-1-sync-payload-1-region-string-view-1-region-edges-1-inline-length-1-template-size-1-coroutine-decimal-1-array-capacities-1-map-probes-3-key32-sentinel-3-map-headers-3-map-positive-probes-1-map-scalar64-1-map-generic-layout-2-array-extents-1-growing-bulk-cache-1-arithmetic-width-1"
+	"-split-7-platform-1-effects-1-errors-1-regions-1-packed-capacity-1-frame-1-sync-payload-1-region-string-view-1-region-edges-1-inline-length-4-template-size-1-coroutine-decimal-1-array-capacities-1-map-probes-3-key32-sentinel-3-map-headers-3-map-positive-probes-1-map-scalar64-1-map-generic-layout-2-unique-sections-1-array-extents-1-growing-bulk-cache-1-arithmetic-width-1"
 );
 
 /// A file name made of a module path.
@@ -115,7 +115,9 @@ fn options_key(target: Target, options: &Options, split: &SplitOptions, hasher: 
 }
 
 /// The target machine of an object of the program: with emulated
-/// thread-local variables when the JIT loads it.
+/// thread-local variables when the JIT loads it, and one ELF section per
+/// function, global and jump table for `--gc-sections` when the objects
+/// are linked without LTO.
 fn unit_machine(
 	target: Target,
 	options: &Options,
@@ -124,6 +126,9 @@ fn unit_machine(
 	let machine = target.machine(options)?;
 	if split.in_memory {
 		crate::target::use_emulated_tls(&machine);
+	}
+	if target != Target::Wasm && !split.lto {
+		crate::target::use_unique_sections(&machine);
 	}
 	Ok(machine)
 }
@@ -166,6 +171,7 @@ fn emit(
 			}
 		}
 	}
+	crate::optimize::materialize_aggregate_copies(module, machine)?;
 	crate::compile::keep_huge_functions_unoptimized(module);
 	let pipeline = if split.lto {
 		if options.size {
@@ -177,6 +183,8 @@ fn emit(
 				crate::OptLevel::O3 => "thinlto-pre-link<O3>",
 			}
 		}
+	} else if options.asynchronous == Some(true) {
+		options.coroutine_pipeline()
 	} else {
 		options.pipeline()
 	};
@@ -396,9 +404,6 @@ fn lower_and_emit(
 	let (symbols, requests) = lower(lowering)?;
 	timings.build = start.elapsed();
 	module.verify()?;
-	if target != Target::Wasm && !split.lto {
-		function_sections(&module);
-	}
 	if let Some(parent) = object.parent() {
 		fs::create_dir_all(parent)?;
 	}
@@ -482,17 +487,6 @@ fn compile_instances(
 	})
 }
 
-/// One section per function (ELF), so that `--gc-sections` drops the
-/// functions nothing calls.
-fn function_sections(module: &Module<'_>) {
-	for function in module.get_functions() {
-		if function.count_basic_blocks() > 0 {
-			let name = function.get_name().to_string_lossy().into_owned();
-			function.set_section(Some(&format!(".text.{name}")));
-		}
-	}
-}
-
 /// The runtime object of a target and options: compiled once, then taken
 /// from `cache` (else written into `directory`).
 fn runtime_object(
@@ -557,9 +551,6 @@ fn runtime_object(
 		}
 	}
 	module.verify()?;
-	if target != Target::Wasm && !split.lto {
-		function_sections(&module);
-	}
 	// a unique name first: several builds (and threads of one) may write
 	// the cache at once
 	static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);

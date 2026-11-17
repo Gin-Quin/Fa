@@ -1,0 +1,30 @@
+function exercise = <Item: { payload: Array<String> }, capacity: UInt32>(first: Item, second: Item, third: Item): InlineArray<Item, capacity>
+	throws CapacityError => {
+	mutable items: InlineArray<Item, capacity> = []
+	assert items.capacity == capacity
+	try items.push(copy first)
+	try items.push(copy second)
+	try items.push(copy third)
+	mutable full = false
+	items.push(copy first) catch _error => { full = true }
+	assert full
+	assert items.get(0)?.payload == first.payload
+	assert items.get(3) is none
+	items[0] = copy second
+	for item in items { item = copy first }
+	assert items.pop()?.payload == first.payload
+	assert items.take(0).payload == first.payload
+	items.delete(0)
+	assert items.pop() is none
+	try items.push(copy second)
+	items.clear()
+	try items.push(copy third)
+	items
+}
+type Data = { payload: Array<String> }
+function run = (): InlineArray<Data, 3> throws CapacityError => {
+	try exercise<Data, 3>({ payload = ["one"] }, { payload = ["two"] }, { payload = ["three"] })
+}
+console.log(try run()) -- prints: [{ payload = ["three"] }]
+static result = @run()
+console.log(result) -- prints: [{ payload = ["three"] }]

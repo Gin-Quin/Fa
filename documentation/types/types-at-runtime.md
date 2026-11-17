@@ -81,7 +81,10 @@ let json = Json.stringify(schema)
 | `Schema.Fields` | `flags: Array<SchemaFlag>` | a `Fields` type |
 | `Schema.Tuple` | `items: Array<Schema>` | a tuple |
 | `Schema.Collection` | `kind: String`, `key: Schema?`, `item: Schema` | a collection: `kind` is its name (`"Array"`, `"Map"`, ...), and `key` is set for maps |
+| `Schema.InlineArray` | `item: Schema`, `capacity: Integer<min = 0>` | an inline array, including its fixed capacity |
 | `Schema.Function` | `parameters: Array<SchemaProperty>`, `returns: Schema`, `throws: Schema?`, `async: Boolean` | a function type |
+
+`Schema.InlineArray` retains both the item type and the capacity. `TypeFromSchema` reconstructs the same `InlineArray<Item, capacity>` and rejects a capacity outside 0…4,294,967,295 or a non-integer capacity. The capacity is a count, not a map key.
 
 A `Schema.Function` describes the parameters, the result, the errors and `async`, but not the `requires`, `mutates` and `invalidates` effects.
 

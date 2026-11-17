@@ -2062,3 +2062,161 @@ All 107 IR checks and native/freestanding/wasm corpora pass. No CPU timing claim
 is made. Evidence: `benchmarks/results/2026-11-17-arrays-review{,-before,-gate}.json`
 and its generated Markdown. The independent compile-time widening follow-up is
 in TODO; the already recorded per-unit freestanding O0 linker issue remains.
+## Links step 1b: InlineArray (2026-11-16)
+
+`InlineArray<Item, capacity>` is represented in the analyzer as a collection
+with a new kind and its integer capacity in the second type argument slot.
+This keeps capacity in type identity, stable hashes, substitutions and exported
+interfaces using the existing collection machinery. Capacity is invariant.
+The collection's category flags come from its items, unlike a heap collection.
+
+LLVM uses the existing aggregate ABI with a dedicated layout: an array of
+capacity item slots followed by the smallest unsigned initialized-prefix count.
+Copy and destruction traverse only that prefix. Existing read-only array
+algorithms can borrow a temporary stack header pointing at the inline slots;
+that header never owns storage and is never used for growth or destruction.
+JavaScript and the interpreter keep ordinary arrays and obtain the capacity
+from the analyzed type. A distinct capacity-check flag records conditional
+append errors independently of index checks.
+
+JSON schemas retain the bound: JavaScript's array schema carries an optional
+maximum count; the native schema has a bounded-array tag. Validation happens
+before constructing the typed value, including in nested fields and unions.
+CapacityError's only member is InlineFull; existing built-in error numbers
+remain unchanged by appending it to the prelude error table.
+
+Inline capacities can be UInt32-constrained compile-time parameters as well as
+constant integer expressions. Their HAS_PARAM flag is retained independently
+of the items' ownership flags; native instantiation resolves the constant and
+JavaScript uses the existing hidden value parameter. Scalar optional results
+of get/pop are derived from the analyzed result type, preserving flattened
+optionals and the value-less representation of none.
+
+The interpreter's existing value-only user-call arguments lost mutations of
+borrowed lists. Calls now carry resolved caller places for borrowed arguments
+and write back their parameter slots on normal and error exits, including
+partially applied calls. Collection iteration binds ordinary loop variables
+to the original indexed place; index expressions are saved once before the
+loop. This uses the shared interpreter path rather than an InlineArray-only
+mutation mechanism.
+
+A constant inline capacity property still evaluates its receiver and destroys
+its temporary owner at the statement boundary. Native numeric-constant folding
+therefore excludes instance properties; JavaScript temporary-resource accesses
+include collection length/capacity reads. `None` items use one byte of slot
+storage with no semantic payload, so generic slot addressing retains a stride.
+
+JavaScript in-place writes of resource-containing objects and positional lists
+now drop their old contents and transfer the new ones while retaining the
+outer object/array identity required by `use` aliases. They avoid structural
+copying of unique items. Printing a None-typed effectful expression evaluates
+it before emitting the fixed text `none`, including in interpolation.
+
+## InlineArray review fixes (2026-11-16)
+
+The initialized-prefix bound must survive every generic call, including compile-time calls. The interpreter receives leading value parameters in declaration order (owner parameters before method parameters), forwards symbolic bindings through nested calls, and binds them in function values using its existing closure argument map. Capacity reads and checked pushes use that value. Builtin argument omission follows `Argument::Default`/`Missing`; a supplied `none` is never an omitted argument. Receiver places retain all field steps for both ordinary and inline collections. Native constant lowering checks the bound before creating any storage, independently of interpreter correctness.
+
+Inline-array flags inherit the item's ownership/category and containment flags, plus parameter/unknown metadata from the bound. They exclude scalar ordering and JavaScript BigInt representation. JavaScript lifetime dispatch identifies inline arrays even when the capacity is symbolic; destruction depends on Item, not on knowing a numeric bound. Native hashing visits the initialized prefix with the array hashing algorithm; an inline list is never exposed as a fictitious tuple field layout.
+
+Lead decision: reflection uses a distinct `Schema.InlineArray { item: Schema, capacity: Integer<min = 0> }`, because the capacity belongs to the type and has no meaning for other collection kinds. There is no existing fixed-count CArray schema representation to reuse. `TypeFromSchema` reconstructs the exact item and bound, rejecting non-integer, negative or greater-than-UInt32 capacities with an actionable diagnostic.
+
+The cleanup audit also found that erased generic Item had no destructor capability in the reviewed implementation. Generic requirements now include a drop operation for each type parameter, passed through local/imported calls and function values; ordinary instantiations pass a shared no-op. A composite drop involving a parameter is a local closure capturing that operation, not a global helper referring to a function-local name. Generic locals use the existing drop-flag/move machinery. This adds no metadata or wrapper to an inline array.
+
+Generic field defaults on native retain type bindings as well as representation bindings, since a value parameter can change aggregate layout without changing the scalar representation of the parameter. Native substitution promotes the module identity before using a scratch type-store view; a local ID belongs only to its source view. The ordinary `Array<none>` control uses canonical byte storage when push/pop have no semantic item payload.
+
+Inline representations carry their fully instantiated identity in the shared type store. The identity must outlive temporary binding scopes: call sites, function-value thunks and another compilation unit use exactly the same slots and count layout. Remote signature construction binds value types as well as representations. Shared interning supplies exact identity comparisons for resource methods and conversions; field lookup compares resolved names across local and shared symbol IDs. Structural generic instances need not retain a nominal identity, so field defaults recover their declaration from the default's source and the recorded generic application.
+
+The native object-cache version advances to `inline-length-3` so a cached caller with the previous incomplete generic aggregate ABI cannot be reused. Recursive type arguments and targets participate in native parameter collection, and generic recursive declarations are published before scratch-view substitution creates an instance with new arguments.
+
+Native JSON entry points resolve their concrete type before building schemas and memoizing readers/writers, so different capacity instances cannot reuse a symbolic reader with a different aggregate ABI. Hidden generic capability names use the same synthesized-name sanitizer as global helpers, including derived types displayed with angle brackets.
+
+The imported generic-owner O0 probe exposed an inherited freestanding link failure: an unused constant containing the libc stack-guard callback kept the callback live from a shared data section. Per-unit ELF emission separates data sections as well as function sections, so garbage collection discards the unused constant and callback together (since the merge with the trunk, through the target machine: see "Links step 1b: merge with the trunk"). The required split O0 imported-owner fixture covers this on every LLVM target.
+
+Contextual generic function-value specialization also applies to lambdas and parenthesized names. JavaScript binds their destructor/method/value arguments exactly once at the node carrying the instantiation; native declaration values recover that node through their group parents before constructing the thunk. The inline callback fixture checks named, lambda and grouped values at runtime and compile time; the existing ordinary Array.map generic-lambda case remains the control.
+
+The full corpus exposed a timer race in the existing async-starter regression: sleeping 5 ms cannot guarantee a yielded detached task has finished. The test now polls explicit completion flags through asynchronous sleep, retaining detached tasks and all ten event-order/shared-state expectations. This is a test synchronization correction, with no scheduler or runtime change.
+
+## InlineArray second review fixes (2026-11-16)
+
+Aggregate parameters use the same borrowed-place ABI in direct calls, function
+values, generic thunks and asynchronous entries. The representation does not
+change because another function in the program suspends, or because an item has
+a destructor. Awaited and kept coroutine calls retain the caller's place;
+detached tasks construct their owned snapshot in the frame before suspension.
+Only Task-consuming parameters transfer ownership; ordinary resource parameters
+borrow as required by the memory-management specification.
+
+Native representation identity compares promoted and local nominal identities
+through the shared store before interpreting a union as a box. Hash helpers
+borrow aggregate keys by address so an inline capacity never becomes wasm
+function arity. Nested aggregate fields use that same helper convention.
+
+The LLVM integration matrix is deterministic and grouped by item kind to bound
+compiler memory. Each operation sequence is evaluated by the compile-time
+interpreter in a local place; the runtime encloses that value in each tested
+position. Bun must agree with that oracle before native/wasm/freestanding O0/O3
+are compared, with leak checks. Generated annotated sources remain in target/tmp
+for inspecting individual failures; the generator and harness live in tests/.
+
+The O0 wasm audit additionally removes tagged code pointers: wasm callable
+indices can be odd, so they cannot share their low bit with a linear-memory
+entry table. Every callable in an asynchronous program now uses a constant
+`{ sync, async }` entry table, with a null async entry for synchronous functions;
+synchronous programs keep direct code pointers. Generic producers, compositions,
+error adapters and worker callbacks share this rule. Aggregate copy helpers use
+caller-owned result storage as well as address parameters, including their early
+return paths, so wide return values are not flattened either.
+
+Inline copy/drop/hash and nested equality helpers operate on initialized places,
+without loading capacity-sized values at entry. Wide helpers remain out of line
+to bound optimizer expansion. Resource destructors borrow the actual cleanup
+place; field cleanup observes their writes. The object-cache ABI suffix advances
+to `inline-length-4` for these calling conventions. Closure captures transfer
+unique ownership only when the closure escapes; aggregate literal fields and
+items publish that escape just as assignment does.
+
+Destructor lookup searches matching declarations for the method, rather than
+letting an empty alias declaration hide its nominal Resource's `destroy`.
+This applies to local and other-file native lowering and JavaScript. The
+generated Resource rows check construction-derived destruction counts as well
+as the cross-engine trace, so agreement between two missing destructors cannot
+serve as a passing oracle.
+
+Wide evaluated aggregates get private stack snapshots at their original read.
+Helpers borrow those immutable snapshots; stores from them remain byte copies
+before LLVM SROA. This preserves evaluation order if a later argument mutates
+the source, and prevents capacity-sized SSA expansion and wasm argument
+promotion. Copies of owners still construct only the initialized prefix; an
+opaque byte snapshot neither creates another owner nor interprets spare slots.
+The same normalization runs for whole-program and per-unit compilation.
+
+Imported function names and namespace paths use the same reached-function
+resolver as direct calls and explicit generic applications. Their values use
+the existing synchronous/asynchronous thunks, including defaults and aggregate
+borrows. Non-LTO asynchronous units also run the coroutine pipeline at O0:
+dead-code removal alone cannot emit their unsplit coroutine intrinsics.
+
+The indirect argument path uses the Task-consuming predicate too; a fresh
+Resource argument remains a caller-owned temporary. JavaScript retains fresh
+borrowed arguments through the statement and releases them before an enclosing
+error handler on failure, including errors evaluating later arguments. Cleanup
+frames belong to the function being generated, never its enclosing declaration.
+The throwing-literal fixture constructs its resource prefix through a factory;
+moving a borrowed generic resource parameter into the prefix was invalid under
+the documented parameter contract. Typed errors retain their declared payload
+field formatter, independently of ordinary union payload representation order.
+
+## Links step 1b: merge with the trunk (2026-11-17)
+
+Objects linked without LTO (per-unit O0 builds, cached `fa run` objects, the
+JIT) are compiled by a target machine with LLVM's `FunctionSections` and
+`DataSections` (`fa_use_unique_sections` of the shim), as clang's
+`-ffunction-sections -fdata-sections`; the pass that named a section per
+function and global in the IR is removed. Sections named in the IR left the
+jump tables of every function in one shared `.rodata`: once any live
+function's jump table was there, `--gc-sections` kept every function those
+tables jump into. After the merge, the unused `json_value` of the
+freestanding runtime was kept this way, with its `strtod`, and the split O0
+freestanding imports fixtures no longer linked; the trunk's leak-checked
+per-unit map packages failed the same way. Wasm and ThinLTO objects are
+unchanged. The object-cache version is bumped.

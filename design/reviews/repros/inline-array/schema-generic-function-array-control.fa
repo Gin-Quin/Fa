@@ -1,0 +1,7 @@
+-- Ordinary Array control for erased generic-function reflection.
+-- Expected: Array<String>. Actual: Array<Never>, then E-TYPE-1.
+function schemaFor = <Item>(): Schema => @typeToSchema(Array<Item>)
+static result = @schemaFor<String>()
+type Reflected = TypeFromSchema<result>
+let words: Reflected = ["kept"]
+console.log(words)

@@ -1,0 +1,25 @@
+-- Fictitious tuple metadata was removed: exercise real inline union items.
+type Value = Union {
+	None
+	Packed = { flag: Boolean, count: Int16, small: Int8 }
+	Word = String
+}
+function mutate = (items: Array<Value>) mutates items[..] => {
+	for item in items {
+		if item is Value.Packed {
+			item.flag = false
+			item.count += 1
+		}
+	}
+}
+function build = (): Array<Value> => {
+	mutable items: Array<Value> = [Value.Packed { flag = true, count = 2, small = 3 }]
+	mutate(items)
+	items
+}
+let key = build()
+let same: Array<Value> = [Value.Packed { count = 3, flag = false, small = 3 }]
+assert key == same
+mutable entries: Map<Array<Value>, Integer> = []
+entries[key] = 7
+console.log(try entries[same]) -- prints: 7

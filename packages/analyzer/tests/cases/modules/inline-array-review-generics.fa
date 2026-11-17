@@ -1,0 +1,18 @@
+-- file: library/inline.fa
+export namespace = {
+	function empty = <capacity: UInt32>(): InlineArray<Integer, capacity> => []
+	function append = <capacity: UInt32>(values: InlineArray<Integer, capacity>)
+		throws CapacityError mutates values.length => { try values.push(9) }
+}
+-- file: application/main.fa
+function build = (): InlineArray<Integer, 1> throws CapacityError => {
+	mutable values = library.inline.empty<1>()
+	try library.inline.append<1>(values)
+	library.inline.append<1>(values) catch _error => {}
+	values
+}
+static values = @build()
+export function = () throws CapacityError => {
+	console.log(try build()) -- prints: [9]
+	console.log(values, values.capacity) -- prints: [9] 1
+}

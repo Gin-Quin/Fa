@@ -10,11 +10,94 @@ use inkwell::passes::PassBuilderOptions;
 use inkwell::targets::TargetMachine;
 use inkwell::values::{
 	AnyValueEnum, AsValueRef, BasicValue, BasicValueEnum, FunctionValue, InstructionOpcode,
-	InstructionValue, PhiValue,
+	InstructionValue, PhiValue, PointerValue,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{Error, OptLevel, Options};
+
+pub(crate) fn mark_aggregate_snapshot(value: BasicValueEnum<'_>) -> Result<(), Error> {
+	let instruction = value.as_instruction_value().expect("a snapshot load");
+	let context = value.get_type().into_struct_type().get_context();
+	instruction
+		.set_metadata(
+			context.metadata_node(&[]),
+			context.get_kind_id("fa.aggregate.snapshot"),
+		)
+		.map_err(|error| Error::Llvm(error.to_string()))
+}
+
+/// A byte snapshot made when a wide aggregate was evaluated. Its memory is
+/// private to that evaluation, so later helper calls may borrow its address.
+pub(crate) fn aggregate_snapshot(mut value: BasicValueEnum<'_>) -> Option<PointerValue<'_>> {
+	if !value.is_struct_value() {
+		return None;
+	}
+	let mut instruction = value.as_instruction_value()?;
+	// Aggregate freezes only settle inactive union padding. Place helpers
+	// freeze each initialized item when they load it instead.
+	while instruction.get_opcode() == InstructionOpcode::Freeze {
+		value = instruction.get_operand(0)?.value()?;
+		instruction = value.as_instruction_value()?;
+	}
+	if instruction.get_opcode() != InstructionOpcode::Load
+		|| instruction
+			.get_metadata(
+				value
+					.get_type()
+					.into_struct_type()
+					.get_context()
+					.get_kind_id("fa.aggregate.snapshot"),
+			)
+			.is_none()
+	{
+		return None;
+	}
+	Some(instruction.get_operand(0)?.value()?.into_pointer_value())
+}
+
+/// Reusing a snapshot in multiple stores must stay a memory copy. Letting a
+/// capacity-sized SSA load reach SROA expands every unused slot at every use.
+pub(crate) fn materialize_aggregate_copies(
+	module: &Module<'_>,
+	machine: &TargetMachine,
+) -> Result<(), Error> {
+	let context = module.get_context();
+	let data = machine.get_target_data();
+	let usize = context.ptr_sized_int_type(&data, None);
+	let builder = context.create_builder();
+	for function in module.get_functions() {
+		for block in function.get_basic_blocks() {
+			let stores: Vec<_> = block
+				.get_instructions()
+				.filter(|instruction| instruction.get_opcode() == InstructionOpcode::Store)
+				.collect();
+			for store in stores {
+				let Some(value) = store.get_operand(0).and_then(|operand| operand.value()) else {
+					continue;
+				};
+				let Some(source) = aggregate_snapshot(value) else {
+					continue;
+				};
+				let destination = store
+					.get_operand(1)
+					.and_then(|operand| operand.value())
+					.expect("a store destination")
+					.into_pointer_value();
+				builder.position_before(&store);
+				builder.build_memcpy(
+					destination,
+					1,
+					source,
+					1,
+					usize.const_int(data.get_store_size(&value.get_type()), false),
+				)?;
+				store.erase_from_basic_block();
+			}
+		}
+	}
+	Ok(())
+}
 
 pub(crate) fn expose_tail_recursion(
 	module: &Module<'_>,

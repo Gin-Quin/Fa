@@ -189,6 +189,18 @@ impl Walker<'_> {
 		items: NodeList<'_>,
 		expected: Option<TypeId>,
 	) -> TypeId {
+		if let Some(expected) = expected
+			&& let Some((item, _)) = self.s.types.inline_array_types(expected)
+			&& let Some(capacity) = self.s.types.inline_capacity_range(expected)
+		{
+			return self.check_inline_literal(
+				n,
+				items,
+				expected,
+				item,
+				u32::try_from(capacity.lo).unwrap_or(0),
+			);
+		}
 		// `[1.0, 2.0, 3.0]` as a `CArray(Float32, 3)` (foreign.rs)
 		if let Some(expected) = expected
 			&& let TypeKind::CArray(item, count) = self.s.types.kind(expected)
@@ -232,6 +244,7 @@ impl Walker<'_> {
 				continue;
 			}
 			let ty = self.check(item, expected_item);
+			self.escape(item, n);
 			if let Some(expected_item) = expected_item {
 				self.sink(item, ty, expected_item);
 			}
@@ -299,6 +312,7 @@ impl Walker<'_> {
 			matches!(
 				kind,
 				CollKind::Array
+					| CollKind::InlineArray
 					| CollKind::GrowingArray
 					| CollKind::Set | CollKind::GrowingSet
 					| CollKind::Map | CollKind::GrowingMap
@@ -333,6 +347,7 @@ impl Walker<'_> {
 			TypeKind::CArray(item, _) => Some(item),
 			TypeKind::Collection(
 				CollKind::Array
+				| CollKind::InlineArray
 				| CollKind::GrowingArray
 				| CollKind::Set
 				| CollKind::GrowingSet

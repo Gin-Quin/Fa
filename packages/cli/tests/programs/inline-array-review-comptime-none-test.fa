@@ -1,0 +1,19 @@
+function isNone = (value: Integer?): Boolean => value is none
+
+function build = (): Boolean => {
+	mutable values: InlineArray<none, 2> = []
+	values.push(none)
+	isNone(values.pop())
+}
+console.log(build()) -- prints: true
+static result = @build()
+console.log(result) -- prints: true
+
+function ordinary = (): Boolean => {
+	mutable values: Array<none> = []
+	values.push(none)
+	isNone(values.pop())
+}
+console.log(ordinary()) -- prints: true
+static ordinaryResult = @ordinary()
+console.log(ordinaryResult) -- prints: true

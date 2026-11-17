@@ -190,11 +190,11 @@ impl Walker<'_> {
 		self.check(inner, expected)
 	}
 
-	/// `copy value` produces a value, never a place. Concrete copyability
-	/// checks belong to the subsequent ownership-enforcement slice.
+	/// `copy value` produces a value, never a place. Check the projected
+	/// result type: an ordinary data projection need not copy a resource.
 	pub(super) fn check_copy(&mut self, inner: NodeId, expected: Option<TypeId>) -> TypeId {
 		let ty = self.check(inner, expected);
-		if let Some(expected) = expected
+		let target = if let Some(expected) = expected
 			&& self
 				.s
 				.types
@@ -202,9 +202,16 @@ impl Walker<'_> {
 				.is_ok()
 		{
 			self.sink(inner, ty, expected);
-			return expected;
+			expected
+		} else {
+			ty
+		};
+		if self.s.types.owns_unique(target) {
+			let diagnostic = self.diagnostic(&crate::diagnostics::codes::advanced::MEM003, inner,
+				"this value owns a Task or a resource and cannot be copied: borrow it, move the owner, or copy a data projection without its unique fields");
+			self.report(diagnostic);
 		}
-		ty
+		target
 	}
 
 	/// `()`: not a value (`E-TUP-1`, tuples.rs).

@@ -373,6 +373,37 @@ impl Walker<'_> {
 					self.s.types.tuple(&members)
 				}
 			}
+			"InlineArray" => {
+				let Some(Value::Integer(capacity)) = field("capacity") else {
+					return self.invalid_schema(
+						n,
+						&TF042,
+						"an inline array needs an integer `capacity` from 0 through 4294967295",
+					);
+				};
+				if capacity < I256::ZERO || capacity > I256::from(u32::MAX) {
+					return self.invalid_schema(
+						n,
+						&TF042,
+						"an inline-array capacity must be from 0 through 4294967295: choose a capacity in that range",
+					);
+				}
+				let item = match field("item") {
+					Some(item) => self.schema_type(n, &item, named, depth + 1),
+					None => return self.invalid_schema(n, &TF042, "an inline array has an `item`"),
+				};
+				if item == TypeId::VOID {
+					return self.invalid_schema(
+						n,
+						&TF042,
+						"`Void` has no value: use an item type that can be stored in the inline array",
+					);
+				}
+				let capacity = self.s.types.int_literal(capacity);
+				self.s
+					.types
+					.collection(CollKind::InlineArray, item, capacity)
+			}
 			"Collection" => {
 				let item = match field("item") {
 					Some(item) => self.schema_type(n, &item, named, depth + 1),

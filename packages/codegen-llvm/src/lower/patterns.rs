@@ -37,8 +37,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		narrowed: Repr,
 		node: NodeId,
 	) -> Result<Val<'ctx>, Error> {
-		if value.repr == narrowed {
-			return Ok(value);
+		if value.repr == narrowed || self.same_layout(value.repr, narrowed) {
+			return Ok(Val {
+				repr: narrowed,
+				..value
+			});
 		}
 		if let Repr::Rec(target) = value.repr
 			&& self.compressed_union_link(value.repr).is_some()
@@ -63,9 +66,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let (_, inner) = self.optional_split(value)?;
 			return self.unbox(inner.expect("a box"), narrowed);
 		}
-		if narrowed == scalar.repr() {
+		if narrowed == scalar.repr() || self.same_layout(scalar.repr(), narrowed) {
 			let (_, inner) = self.optional_split(value)?;
-			return Ok(inner.expect("a value"));
+			return Ok(Val {
+				repr: narrowed,
+				..inner.expect("a value")
+			});
 		}
 		if let Scalar::Rec(target) = scalar
 			&& self.repr_of(target, node.index())? == narrowed

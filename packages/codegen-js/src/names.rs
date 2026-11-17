@@ -188,23 +188,7 @@ impl Scopes {
 	/// Declares a name in the module scope (a module-level constant made
 	/// while generating an inner scope).
 	pub fn declare_global(&mut self, wanted: &str) -> String {
-		// Synthesized names may include a displayed type (`Wrapper<String>`).
-		// Keep them readable while ensuring the spelling is one JS identifier.
-		let mut base: String = wanted
-			.chars()
-			.map(|character| {
-				if character.is_ascii_alphanumeric() || matches!(character, '_' | '$') {
-					character
-				} else {
-					'_'
-				}
-			})
-			.collect();
-		if !base.starts_with(|character: char| {
-			character.is_ascii_alphabetic() || matches!(character, '_' | '$')
-		}) {
-			base.insert(0, '$');
-		}
+		let base = synthesized_name(wanted);
 		let mut name = base.clone();
 		let mut index = 1;
 		while self.is_visible(&name) || is_reserved(&name) {
@@ -237,6 +221,26 @@ impl Scopes {
 			.insert(name.clone());
 		name
 	}
+}
+
+/// One JavaScript identifier from a synthesized name that may display a type.
+pub(crate) fn synthesized_name(wanted: &str) -> String {
+	let mut base: String = wanted
+		.chars()
+		.map(|character| {
+			if character.is_ascii_alphanumeric() || matches!(character, '_' | '$') {
+				character
+			} else {
+				'_'
+			}
+		})
+		.collect();
+	if !base.starts_with(|character: char| {
+		character.is_ascii_alphabetic() || matches!(character, '_' | '$')
+	}) {
+		base.insert(0, '$');
+	}
+	base
 }
 
 #[cfg(test)]

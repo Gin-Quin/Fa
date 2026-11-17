@@ -260,6 +260,8 @@ impl Generator<'_> {
 			// a generic function's hidden parameters first (generics.rs)
 			let mut parameters = g.declare_hidden(info.lambda);
 			let mut prologue = Writer::at(indent + 1);
+			let mut owner_declarations = Writer::at(indent + 1);
+			let mut default_owners = Vec::new();
 			// the requirements: hidden parameters after the regular ones (references.rs)
 			let requirements = g.declare_requirements(info);
 			let required = !requirements.is_empty();
@@ -300,17 +302,37 @@ impl Generator<'_> {
 					continue;
 				};
 				let (lines, value) = g.capture_at(indent + 2, |g| g.expr(default));
-				if g.omitted_by_sentinel(param.symbol) {
+				let sentinel = g.omitted_by_sentinel(param.symbol);
+				let default_test = if sentinel {
 					let omitted = g.helper("faOmitted");
-					let test = if arrow {
+					if arrow {
 						format!("{name} === {omitted}")
 					} else {
 						format!(
 							"arguments.length < {} || {name} === {omitted}",
 							parameters.len() + 1
 						)
-					};
-					prologue.open(format!("if ({test})"));
+					}
+				} else {
+					format!("{name} === undefined")
+				};
+
+				if g.owns_resource(param.symbol)
+					&& !g
+						.types
+						.consumes_parameter(g.analysis.symbols.symbol(param.symbol).ty)
+				{
+					let flag = g.temp();
+					owner_declarations.line(format!("let {flag} = false;"));
+					prologue.open(format!("if ({default_test})"));
+					prologue.append(lines);
+					prologue.line(format!("{name} = {};", value.text));
+					prologue.line(format!("{flag} = true;"));
+					prologue.close("");
+					default_owners.push((param.symbol, flag));
+					parameters.push(name);
+				} else if sentinel {
+					prologue.open(format!("if ({default_test})"));
 					prologue.append(lines);
 					prologue.line(format!("{name} = {};", value.text));
 					prologue.close("");
@@ -335,11 +357,23 @@ impl Generator<'_> {
 				parameters.extend(g.declare_param_sources(instance));
 			}
 			let parameters = format!("({})", parameters.join(", "));
-			// the parameters holding a resource: moved in, dropped at the end
-			// unless they move out (resources.rs)
+			// Parameters borrow resources. Only a Task-consuming parameter
+			// owns its argument; ordinary resources remain with the caller.
 			let mut drops = Vec::new();
 			for param in &info.params {
-				if g.owns_resource(param.symbol) {
+				if let Some((_, flag)) = default_owners
+					.iter()
+					.find(|(symbol, _)| *symbol == param.symbol)
+				{
+					let ty = g.analysis.symbols.symbol(param.symbol).ty;
+					if let Some(drop) = g.drop_function(ty) {
+						drops.push(format!("if ({flag}) {drop}({});", g.name_of(param.symbol)));
+					}
+				} else if g
+					.types
+					.consumes_parameter(g.analysis.symbols.symbol(param.symbol).ty)
+					&& g.owns_resource(param.symbol)
+				{
 					let saved = std::mem::replace(&mut g.out, prologue);
 					if let Some(drop) = g.own_resource(param.symbol) {
 						drops.push(drop);
@@ -384,6 +418,7 @@ impl Generator<'_> {
 					body.line(format!("return {};", value.text));
 				}
 				let mut wrapped = Writer::at(indent + 1);
+				wrapped.append(owner_declarations);
 				wrapped.open("try");
 				wrapped.append(indent_by_one(body));
 				drops.reverse();
@@ -430,6 +465,42 @@ impl Generator<'_> {
 
 	/// A call.
 	pub(crate) fn call(&mut self, n: NodeId, callee: NodeId, arguments: NodeList<'_>) -> Expr {
+		// On success the statement retains borrowed temporaries. On error
+		// release them before an enclosing catch, including argument errors.
+		self.guard_frames.push(Vec::new());
+		let (lines, value) = self.capture(|g| g.call_inner(n, callee, arguments));
+		let mut release = self.guard_frames.pop().expect("the call's temporaries");
+		if release.is_empty() {
+			self.out.append(lines);
+			return value;
+		}
+		release.reverse();
+		let release = release.join(" ");
+		let result = self.inline_temp();
+		let failed = (!self.guard_frames.is_empty()).then(|| self.inline_temp());
+		if let Some(failed) = &failed {
+			self.guard_frames
+				.last_mut()
+				.expect("an enclosing scope")
+				.push(format!("if (!{failed}) {{ {release} }}"));
+			self.out.line(format!("{failed} = false;"));
+		}
+		self.out.open("try");
+		self.out.append(indent_by_one(lines));
+		self.out.line(format!("{result} = {};", value.text));
+		if let Some(failed) = failed {
+			let error = self.temp();
+			self.out.reopen(&format!("catch ({error})"));
+			self.out
+				.line(format!("{failed} = true; {release} throw {error};"));
+			self.out.close("");
+		} else {
+			self.out.close(&format!("finally {{ {release} }}"));
+		}
+		Expr::name(result, false)
+	}
+
+	fn call_inner(&mut self, n: NodeId, callee: NodeId, arguments: NodeList<'_>) -> Expr {
 		// `pick(value, { foo })`: the value copied to the node's type
 		if let Some(&value) = self.analysis.forwards.get(&n) {
 			let ty = self.type_of(n);
@@ -887,7 +958,21 @@ impl Generator<'_> {
 				let value = self.expr(node);
 				self.detached_argument(node, value)
 			}
-			_ => self.expr(node),
+			_ => {
+				let value = self.expr(node);
+				if !self.types.consumes_parameter(self.type_of(node))
+					&& let Some(drop) = self.temporary_resource_drop(node)
+				{
+					let temp = self.inline_temp();
+					self.guard_frames
+						.last_mut()
+						.expect("a call")
+						.push(format!("{drop}({temp});"));
+					Expr::primary(format!("({temp} = {})", value.at(Prec::Assign)))
+				} else {
+					value
+				}
+			}
 		}
 	}
 
@@ -1017,6 +1102,7 @@ impl Generator<'_> {
 				js::call(helper, &values)
 			}
 			"Array#push" => {
+				let inline = self.types.inline_array_types(self.receiver_type(callee));
 				let receiver = self.receiver(callee);
 				let nodes: Vec<NodeId> = arguments
 					.iter()
@@ -1034,6 +1120,22 @@ impl Generator<'_> {
 				let receiver = self.keep_before(receiver, &lines);
 				self.out.append(lines);
 				let values: Vec<String> = values.into_iter().map(|value| value.text).collect();
+				if let Some((_, capacity)) = inline
+					&& self
+						.analysis
+						.has_flags(n, fa_analyzer::analysis::NodeFlags::CAPACITY_CHECK)
+				{
+					let helper = self.helper("faInlinePush");
+					let Some(capacity) = self.hidden_value(capacity) else {
+						return self.unsupported(n, "an unresolved inline-array capacity");
+					};
+					let mut arguments = vec![receiver.text, capacity, values[0].clone()];
+					let (item, _) = inline.expect("an inline array");
+					if let Some(drop) = self.drop_function(item) {
+						arguments.push(drop);
+					}
+					return js::call(helper, &arguments);
+				}
 				Expr::primary(format!(
 					"{}.push({})",
 					receiver.primary_text(),
@@ -1256,6 +1358,22 @@ impl Generator<'_> {
 			js::call(name, &all)
 		};
 		let texts: Vec<String> = values.iter().map(|value| value.text.clone()).collect();
+		if let Some((item, _)) = self.types.inline_array_types(self.receiver_type(callee))
+			&& matches!(path, "Array#clear" | "Array#delete")
+			&& let Some(drop) = self.drop_function(item)
+		{
+			let mut arguments = texts.clone();
+			arguments.push(drop);
+			return helper(
+				self,
+				if path == "Array#clear" {
+					"faInlineClear"
+				} else {
+					"faInlineDelete"
+				},
+				arguments,
+			);
+		}
 		match path {
 			"Array#get" => helper(self, "faArrayGet", texts),
 			"Array#isEmpty" => Expr::new(format!("{target}.length === 0"), Prec::Equality),

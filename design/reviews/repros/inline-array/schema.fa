@@ -1,0 +1,5 @@
+static schema = @typeToSchema(InlineArray<Integer, 2>)
+console.log(schema)
+type Again = TypeFromSchema<schema>
+let values: Again = [1]
+console.log(values.capacity) -- expected: 2

@@ -79,6 +79,10 @@ pub enum Scalar {
 	Pointer,
 	Sync(TypeId),
 	Links(TypeId),
+	Function(TypeId),
+	Pool(TypeId),
+	Columnar(TypeId),
+	Task(TypeId),
 }
 
 impl Scalar {
@@ -103,6 +107,10 @@ impl Scalar {
 			Scalar::InlineUnion(nominal) => Repr::InlineUnion(nominal),
 			Scalar::Object(ty) => Repr::Object(ty),
 			Scalar::Array(item) => Repr::Array(item),
+			Scalar::Function(ty) => Repr::Function(ty),
+			Scalar::Pool(item) => Repr::Pool(item),
+			Scalar::Columnar(item) => Repr::Columnar(item),
+			Scalar::Task(ty) => Repr::Task(ty),
 			Scalar::Tuple(ty) => Repr::Tuple(ty),
 			Scalar::Range => Repr::Range,
 			Scalar::Rec(ty) => Repr::Rec(ty),
@@ -129,6 +137,10 @@ impl Scalar {
 			Repr::InlineUnion(nominal) => Scalar::InlineUnion(nominal),
 			Repr::Object(ty) => Scalar::Object(ty),
 			Repr::Array(item) => Scalar::Array(item),
+			Repr::Function(ty) => Scalar::Function(ty),
+			Repr::Pool(item) => Scalar::Pool(item),
+			Repr::Columnar(item) => Scalar::Columnar(item),
+			Repr::Task(ty) => Scalar::Task(ty),
 			Repr::Tuple(ty) => Scalar::Tuple(ty),
 			Repr::Range => Scalar::Range,
 			Repr::Rec(ty) => Scalar::Rec(ty),
@@ -362,6 +374,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					_ => Repr::Rec(target),
 				}
 			}
+			TypeKind::Collection(CollKind::InlineArray, ..) => {
+				// Unlike a heap array, this aggregate's layout must remain
+				// concrete after the instance's binding scope ends (thunks,
+				// returned values and declarations in another unit).
+				let ty = self.shared_type(self.concrete_type(ty));
+				if self.inline_info(ty).is_none() {
+					return Err(
+						self.unsupported(node, "an inline array outside a concrete instance")
+					);
+				}
+				Repr::Tuple(ty)
+			}
 			TypeKind::Collection(CollKind::Array, item, _) => Repr::Array(item),
 			TypeKind::Collection(CollKind::GrowingArray, item, _) => Repr::Growing(item),
 			// a columnar is stored like a pool for now, by rows (the column
@@ -432,6 +456,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if !items.contains(&TypeId::NONE) {
 					return Ok(common);
 				}
+				if matches!(common, Repr::Optional(_) | Repr::None) {
+					return Ok(common);
+				}
 				match Scalar::of(common) {
 					Some(scalar) => Repr::Optional(scalar),
 					None => {
@@ -456,7 +483,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// Direct recursive objects and optionals keep their boxes. Check the
 	/// complete inline graph, including mutual recursion and nested tuples,
 	/// rather than assuming that seeing a collection anywhere is sufficient.
-	fn recursive_layout_is_finite(&self, ty: TypeId) -> bool {
+	pub(super) fn recursive_layout_is_finite(&self, ty: TypeId) -> bool {
 		let mut active = FxHashSet::default();
 		let mut done = FxHashSet::default();
 		let mut stack = vec![(ty, false)];
@@ -476,6 +503,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			match self.types().kind(at) {
 				TypeKind::Object(_) => {
 					stack.extend(self.types().fields_of(at).iter().map(|f| (f.ty, false)));
+				}
+				TypeKind::Collection(CollKind::InlineArray, item, _) => {
+					if self
+						.inline_info(at)
+						.is_none_or(|(_, capacity)| capacity != 0)
+					{
+						stack.push((item, false));
+					}
 				}
 				TypeKind::Tuple(list) | TypeKind::Union(list) => {
 					stack.extend(self.types().list_items(list).iter().map(|t| (*t, false)));
@@ -562,7 +597,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return self.context.i32_type().into();
 		}
 		match repr {
-			Repr::Bool => self.context.bool_type().into(),
+			// None carries no payload; a collection slot still has a byte stride.
+			Repr::Bool | Repr::None => self.context.bool_type().into(),
 			Repr::Int(int) => self.int_type(int.bits).into(),
 			Repr::BigInt => self.context.i64_type().into(),
 			Repr::F64 | Repr::Percentage => self.context.f64_type().into(),
@@ -602,7 +638,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					false,
 				)
 				.into(),
-			Repr::Void | Repr::Never | Repr::None => panic!("{repr:?} has no IR type"),
+			Repr::Void | Repr::Never => panic!("{repr:?} has no IR type"),
 		}
 	}
 
@@ -704,6 +740,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return false;
 		}
 		let (from, to) = match (from, to) {
+			(Repr::InlineUnion(a), Repr::InlineUnion(b)) | (Repr::Enum(a), Repr::Enum(b)) => {
+				let mut merger = self.types().merger(Some(self.session.module_id(self.file)));
+				return merger.nominal(a) == merger.nominal(b);
+			}
+			(Repr::Tuple(a), Repr::Tuple(b)) if self.same_type(a, b) => return true,
 			(Repr::Rec(a), Repr::Rec(b)) => match (self.repr_of(a, 0), self.repr_of(b, 0)) {
 				(Ok(a), Ok(b)) => (a, b),
 				_ => return false,
@@ -832,6 +873,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				repr: if to.has_value() { value.repr } else { to },
 				value: if to.has_value() { value.value } else { None },
 			});
+		}
+		// Promotion to the shared type store preserves identity and storage.
+		// Rebuilding that same object would create an extra owning value.
+		if let (Repr::Object(from), Repr::Object(target)) = (value.repr, to)
+			&& self.same_type(from, target)
+		{
+			return Ok(Val { repr: to, ..value });
 		}
 		if to == Repr::Union && value.repr != Repr::Union {
 			if let Repr::Rec(target) = value.repr
@@ -970,6 +1018,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			(Repr::Task(from), Repr::Task(to_type))
 				if self.task_result_repr(from, node)?
 					== self.task_result_repr(to_type, node)? =>
+			{
+				Val::new(to, raw)
+			}
+			(Repr::Tuple(from_type), Repr::Tuple(to_type))
+				if self.inline_info(from_type).is_some()
+					&& self.inline_info(to_type).is_some()
+					&& self.llvm_type(value.repr) == self.llvm_type(to) =>
 			{
 				Val::new(to, raw)
 			}

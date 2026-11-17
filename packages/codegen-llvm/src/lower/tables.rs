@@ -579,7 +579,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let i64 = self.context.i64_type();
 		let function = self.module.add_function(
 			"fa.hash",
-			i64.fn_type(&[self.llvm_type(repr).into()], false),
+			i64.fn_type(
+				&[if self.llvm_type(repr).is_struct_type() {
+					self.pointer_type().into()
+				} else {
+					self.llvm_type(repr).into()
+				}],
+				false,
+			),
 			Some(Linkage::Internal),
 		);
 		self.runtime.add_attributes(function, &["nounwind"]);
@@ -598,9 +605,74 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let builder = self.context.create_builder();
 		builder.position_at_end(self.context.append_basic_block(function, "entry"));
 		let value = function.get_nth_param(0).expect("a value");
+		self.keep_aggregate_helper(function, repr);
+		if let Repr::Tuple(ty) = repr
+			&& self.inline_info(ty).is_some()
+		{
+			let hash =
+				self.hash_inline_place(&builder, function, ty, value.into_pointer_value())?;
+			builder.build_return(Some(&hash))?;
+			return Ok(function);
+		}
+		let value = self.helper_parameter(&builder, repr, value)?;
 		let hash = self.build_hash(&builder, function, repr, value)?;
 		builder.build_return(Some(&hash))?;
 		Ok(function)
+	}
+
+	fn hash_inline_place(
+		&self,
+		builder: &Builder<'ctx>,
+		function: FunctionValue<'ctx>,
+		ty: TypeId,
+		source: PointerValue<'ctx>,
+	) -> Result<IntValue<'ctx>, Error> {
+		let i64 = self.context.i64_type();
+		let (item_type, capacity) = self.inline_info(ty).expect("an inline array");
+		if capacity == 0 {
+			return Ok(i64.const_zero());
+		}
+		let slot = Slot {
+			pointer: source,
+			repr: Repr::Tuple(ty),
+		};
+		let length_pointer = builder.build_struct_gep(self.inline_type(ty), source, 1, "")?;
+		let length = builder
+			.build_load(self.inline_length_type(capacity), length_pointer, "")?
+			.into_int_value();
+		let length = builder.build_int_z_extend(length, i64, "")?;
+		let item = self.item_repr(item_type, NodeId::new(0))?;
+		let items = builder.build_struct_gep(self.inline_type(ty), slot.pointer, 0, "")?;
+		self.hash_items(builder, function, item, items, length)
+	}
+
+	fn hash_items(
+		&self,
+		builder: &Builder<'ctx>,
+		function: FunctionValue<'ctx>,
+		item: Repr,
+		items: PointerValue<'ctx>,
+		length: IntValue<'ctx>,
+	) -> Result<IntValue<'ctx>, Error> {
+		let i64 = self.context.i64_type();
+		let accumulator = builder.build_alloca(i64, "hash")?;
+		builder.build_store(accumulator, length)?;
+		let hash_at = self.hash_at_function(item)?;
+		self.helper_loop(builder, function, length, |builder, index| {
+			let pointer =
+				unsafe { builder.build_in_bounds_gep(self.llvm_type(item), items, &[index], "")? };
+			let next = builder
+				.build_call(hash_at, &[pointer.into()], "")?
+				.try_as_basic_value()
+				.basic()
+				.expect("a hash")
+				.into_int_value();
+			let current = builder.build_load(i64, accumulator, "")?.into_int_value();
+			let combined = self.combine(builder, current, next)?;
+			builder.build_store(accumulator, combined)?;
+			Ok(())
+		})?;
+		Ok(builder.build_load(i64, accumulator, "")?.into_int_value())
 	}
 
 	/// `fa.hash_at.<shape>(ptr key) -> i64`, the hash of a key in an entry:
@@ -626,7 +698,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.get_nth_param(0)
 			.expect("a key")
 			.into_pointer_value();
-		let loaded = builder.build_load(self.llvm_type(repr), pointer, "")?;
+		let loaded = if self.llvm_type(repr).is_struct_type() {
+			pointer.into()
+		} else {
+			builder.build_load(self.llvm_type(repr), pointer, "")?
+		};
 		let hashed = builder
 			.build_call(hash, &[loaded.into()], "")?
 			.try_as_basic_value()
@@ -693,6 +769,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let call_hash =
 			|repr: Repr, value: BasicValueEnum<'ctx>| -> Result<IntValue<'ctx>, Error> {
 				let function = self.hash_function(repr)?;
+				let value = self.helper_argument(builder, value)?;
 				Ok(builder
 					.build_call(function, &[value.into()], "")?
 					.try_as_basic_value()
@@ -812,6 +889,27 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.into_int_value();
 				builder.build_int_z_extend_or_bit_cast(hash, i64, "")?
 			}
+			Repr::Array(item_type) => {
+				let item = self.item_repr(item_type, NodeId::new(0))?;
+				let array = value.into_pointer_value();
+				if item == Repr::Str {
+					builder.build_call(
+						self.runtime.function("fa_array_materialize")?,
+						&[array.into()],
+						"",
+					)?;
+				}
+				let header = self.header_type();
+				let items_pointer = builder.build_struct_gep(header, array, 0, "")?;
+				let items = builder
+					.build_load(self.pointer_type(), items_pointer, "")?
+					.into_pointer_value();
+				let length_pointer = builder.build_struct_gep(header, array, 1, "")?;
+				let length = builder
+					.build_load(i64, length_pointer, "")?
+					.into_int_value();
+				self.hash_items(builder, function, item, items, length)?
+			}
 			Repr::Object(_) | Repr::Tuple(_) => {
 				let fields = match repr {
 					Repr::Object(ty) => self.object_fields(ty),
@@ -866,53 +964,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let loaded = builder.build_load(self.llvm_type(target_repr), address, "")?;
 				call_hash(target_repr, loaded)?
 			}
-			Repr::Array(item_type) => {
-				let item = self.item_repr(item_type, NodeId::new(0))?;
-				let header = self.header_type();
-				let array = value.into_pointer_value();
-				if item == Repr::Str {
-					builder.build_call(
-						self.runtime.function("fa_array_materialize")?,
-						&[array.into()],
-						"",
-					)?;
-				}
-				let items_pointer = builder.build_struct_gep(header, array, 0, "")?;
-				let items = builder
-					.build_load(self.pointer_type(), items_pointer, "")?
-					.into_pointer_value();
-				let length_pointer = builder.build_struct_gep(header, array, 1, "")?;
-				let length = builder
-					.build_load(i64, length_pointer, "")?
-					.into_int_value();
-				let accumulator = builder.build_alloca(i64, "hash")?;
-				builder.build_store(accumulator, length)?;
-				let item_type = self.llvm_type(item);
-				let before = builder.get_insert_block().expect("a block");
-				let test = self.context.append_basic_block(function, "each");
-				let body = self.context.append_basic_block(function, "each_body");
-				let end = self.context.append_basic_block(function, "each_end");
-				builder.build_unconditional_branch(test)?;
-				builder.position_at_end(test);
-				let index = builder.build_phi(i64, "index")?;
-				index.add_incoming(&[(&i64.const_zero(), before)]);
-				let current = index.as_basic_value().into_int_value();
-				let more = builder.build_int_compare(IntPredicate::SLT, current, length, "")?;
-				builder.build_conditional_branch(more, body, end)?;
-				builder.position_at_end(body);
-				let pointer =
-					unsafe { builder.build_in_bounds_gep(item_type, items, &[current], "")? };
-				let loaded = builder.build_load(item_type, pointer, "")?;
-				let next = call_hash(item, loaded)?;
-				let hash = builder.build_load(i64, accumulator, "")?.into_int_value();
-				let hash = self.combine(builder, hash, next)?;
-				builder.build_store(accumulator, hash)?;
-				let following = builder.build_int_add(current, i64.const_int(1, false), "")?;
-				index.add_incoming(&[(&following, builder.get_insert_block().expect("a block"))]);
-				builder.build_unconditional_branch(test)?;
-				builder.position_at_end(end);
-				builder.build_load(i64, accumulator, "")?.into_int_value()
-			}
 			Repr::Range => {
 				let structure = value.into_struct_value();
 				let mut hash = i64.const_int(3, false);
@@ -962,6 +1013,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Some(Linkage::Internal),
 		);
 		self.runtime.add_attributes(function, &["nounwind"]);
+		self.keep_aggregate_helper(function, repr);
 		self.drop_functions.borrow_mut().insert(key, function);
 		// lowered as a function of its own
 		let saved_frame = self.frame.take();
@@ -970,10 +1022,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.frame_mut().same_value_zero = same_value_zero;
 		let a = function.get_nth_param(0).expect("a").into_pointer_value();
 		let b = function.get_nth_param(1).expect("b").into_pointer_value();
-		let a = self.load(Slot { pointer: a, repr })?;
-		let b = self.load(Slot { pointer: b, repr })?;
 		let node = NodeId::new(0);
-		let equal = self.values_equal_any(a, b, node)?;
+		let equal = if let Repr::Tuple(ty) = repr
+			&& let Some((item, _)) = self.inline_info(ty)
+		{
+			let a = self.inline_view_at(Slot { pointer: a, repr }, ty)?;
+			let b = self.inline_view_at(Slot { pointer: b, repr }, ty)?;
+			self.arrays_equal(a, b, item, node)?
+		} else {
+			let a = self.load(Slot { pointer: a, repr })?;
+			let b = self.load(Slot { pointer: b, repr })?;
+			self.values_equal_any(a, b, node)?
+		};
 		let result = self.builder.build_int_z_extend(equal, i32, "")?;
 		self.end_scope(0, None)?;
 		self.builder.build_return(Some(&result))?;
@@ -1105,8 +1165,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// The hash of a key.
 	fn hash_of(&mut self, key: Val<'ctx>) -> Result<IntValue<'ctx>, Error> {
 		let function = self.hash_function(key.repr)?;
+		let argument = self.helper_argument(&self.builder, key.value.expect("a key"))?;
 		Ok(self
-			.call_value(function, &[key.value.expect("a key").into()])?
+			.call_value(function, &[argument.into()])?
 			.into_int_value())
 	}
 
@@ -2558,7 +2619,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					if self.needs_drop(repr) {
 						let field = builder.build_struct_gep(table.entry, entry, index, "")?;
 						let loaded = builder.build_load(self.llvm_type(repr), field, "")?;
-						builder.build_call(self.drop_function(repr)?, &[loaded.into()], "")?;
+						self.call_drop(builder, repr, loaded)?;
 					}
 				}
 				Ok(())
@@ -2608,11 +2669,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					if self.needs_drop(repr) {
 						let field = builder.build_struct_gep(table.entry, entry, index, "")?;
 						let loaded = builder.build_load(self.llvm_type(repr), field, "")?;
-						let copied = builder
-							.build_call(self.copy_function(repr)?, &[loaded.into()], "")?
-							.try_as_basic_value()
-							.basic()
-							.expect("a copy");
+						let copied = self.call_copy(builder, repr, loaded)?;
 						builder.build_store(field, copied)?;
 					}
 				}

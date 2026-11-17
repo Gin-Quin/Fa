@@ -1,0 +1,7 @@
+type Node = { value: Integer, children: InlineArray<Node, 2> = [] }
+let tree = Node { value = 1, children = [{ value = 2 }, { value = 3 }] }
+let duplicate = copy tree
+console.log(duplicate.value) -- prints: 1
+for child in duplicate.children { console.log(child.value) }
+-- prints: 2
+-- prints: 3

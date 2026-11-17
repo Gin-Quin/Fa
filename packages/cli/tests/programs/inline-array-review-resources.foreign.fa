@@ -1,0 +1,49 @@
+type Resource = {
+	name: String
+	function destroy = (self) => { console.log("drop {self.name}") }
+}
+function make = (name: String): Resource => Resource { name = name }
+function exercise = <Item, capacity: UInt32>(make: (String) => Item)
+	throws CapacityError => {
+	mutable values: InlineArray<Item, capacity> = []
+	try values.push(make("old"))
+	values[0] = make("replacement") -- prints: drop old
+	try values.push(make("deleted"))
+	values.delete(1) -- prints: drop deleted
+	let _taken = values.take(0)
+	values.clear()
+	try values.push(make("popped"))
+	let _popped = values.pop()
+	try values.push(make("cleared"))
+	values.clear() -- prints: drop cleared
+	try values.push(make("replaced list"))
+	values = [] -- prints: drop replaced list
+	try values.push(make("kept"))
+	console.log(values.length) -- prints: 1
+} -- prints: drop popped
+-- prints: drop replacement
+-- prints: drop kept
+try exercise<Resource, 2>(make)
+
+
+type Node<Item> = { value: Item, children: InlineArray<Node<Item>, 2> = [] }
+function nested = <Item>(make: () => Item) => {
+	let _tree: Node<Item> = { value = make(), children = [{ value = make() }] }
+}
+nested<Resource>(() => make("recursive"))
+-- prints: drop recursive
+-- prints: drop recursive
+
+type Bounded<capacity: UInt32> = {
+	items: InlineArray<Resource, capacity> = []
+	function append = (self, name: String) throws CapacityError mutates self.items.length => {
+		try self.items.push(make(name))
+	}
+}
+do {
+	mutable box: Bounded<1> = {}
+	try box.append("generic kept")
+	box.append("generic overflow") catch _error => console.log("full")
+	-- prints: drop generic overflow
+	-- prints: full
+} -- prints: drop generic kept

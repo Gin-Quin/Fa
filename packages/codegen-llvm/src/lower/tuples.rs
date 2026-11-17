@@ -27,6 +27,9 @@ pub(crate) const INCLUSIVE: u64 = 4;
 impl<'ctx> Lowering<'_, 'ctx> {
 	/// The struct of a tuple type.
 	pub(crate) fn tuple_type(&self, ty: TypeId) -> StructType<'ctx> {
+		if self.inline_info(ty).is_some() {
+			return self.inline_type(ty);
+		}
 		let items: Vec<BasicTypeEnum<'ctx>> = self
 			.tuple_items(ty)
 			.iter()
@@ -118,6 +121,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		ty: TypeId,
 		node: NodeId,
 	) -> Result<(), Error> {
+		if let Some((item, _)) = self.inline_info(ty) {
+			let view = self.inline_view(value, ty)?;
+			return self.append_array(view, item, node);
+		}
 		let structure = value.value.expect("a tuple").into_struct_value();
 		// a `CArray` prints like an array
 		let c_array = matches!(self.types().kind(ty), TypeKind::CArray(..));
@@ -297,6 +304,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		index: NodeId,
 	) -> Result<Option<Val<'ctx>>, Error> {
 		match self.node_repr(target)? {
+			Repr::Tuple(ty) if self.inline_info(ty).is_some() => {
+				let slot = if self.is_place(target) {
+					self.place(target)?
+				} else {
+					let value = self.expr(target)?;
+					if value.repr == Repr::Never {
+						return Ok(Some(value));
+					}
+					let slot = self.alloca(value.repr, "inline.indexed")?;
+					self.builder
+						.build_store(slot.pointer, value.value.expect("an inline array"))?;
+					slot
+				};
+				Ok(Some(match self.inline_element(slot, ty, index, node)? {
+					Some(slot) => self.load(slot)?,
+					None => Val::never(),
+				}))
+			}
 			// `values[i]` of a `CArray`: from memory
 			Repr::Tuple(ty) if self.c_array_count(ty).is_some() => {
 				let value = self.expr(target)?;
@@ -459,6 +484,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Repr::Tuple(ty) = self.node_repr(target)? else {
 			return Ok(None);
 		};
+		if self.inline_info(ty).is_some() {
+			let slot = self.place(target)?;
+			return self.inline_element(slot, ty, index, node);
+		}
 		// `values[i] = …` of a `CArray`: in its place
 		if self.c_array_count(ty).is_some() {
 			let slot = self.place(target)?;

@@ -1,0 +1,9 @@
+-- Same callback and suspension with an ordinary array.
+async function append = <Item>(items: Array<Item>, item: Item) mutates items => {
+	await Task.yield()
+	items.push(item)
+}
+mutable items: Array<String> = []
+let callback = append<String>
+await callback(items, "kept")
+console.log(items) -- prints: ["kept"]

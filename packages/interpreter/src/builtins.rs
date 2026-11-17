@@ -432,6 +432,15 @@ pub fn call(
 	let receiver = arguments.first().cloned().unwrap_or(Value::None);
 	let arg = |index: usize| argument(&arguments, index);
 	Ok(match path {
+		"Function#bind" => {
+			let Value::Function(mut function) = receiver else {
+				return Err(stop("only a function can bind generic arguments"));
+			};
+			Arc::make_mut(&mut function)
+				.bound
+				.extend(arguments.iter().skip(1).cloned().enumerate());
+			Value::Function(function)
+		}
 		// ── strings ──
 		"String#length" => Value::int(grapheme_count(text(&receiver)?) as i64),
 		// the room of a string is its JavaScript length at compile time, as on JavaScript:
@@ -781,6 +790,14 @@ pub fn mutate(
 			let result = match path {
 				"Array#push" => {
 					let value = arg(0)?;
+					if let Some(capacity) = arguments.get(1)
+						&& I256::from(list.len() as u64) >= integer(capacity)?
+					{
+						return Err(Error::Thrown(Value::error(
+							"CapacityError.InlineFull",
+							vec![],
+						)));
+					}
 					reserve_growth(interpreter, list.len(), list.capacity())?;
 					list.push(value);
 					Value::None

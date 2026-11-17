@@ -249,6 +249,7 @@ version = "0.1.0"
 dependencies = [
  "ethnum",
  "fa-analyzer",
+ "fa-codegen-js",
  "fa-interpreter",
  "fa-parser",
  "inkwell",

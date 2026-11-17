@@ -1,0 +1,15 @@
+function build = (): InlineArray<String, 3> throws CapacityError | IndexError => {
+	mutable buffer: library.inline.Buffer<3> = {}
+	try buffer.exercise()
+	buffer.items
+}
+static result = @build()
+export function = () throws CapacityError | IndexError => {
+	console.log(try build()) -- prints: ["result"]
+	console.log(result) -- prints: ["result"]
+	mutable rows: Array<library.inline.Buffer<3>> = [{}]
+	for row in rows {
+		try row.exercise()
+		console.log(row.items) -- prints: ["result"]
+	}
+}

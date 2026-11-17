@@ -1,0 +1,11 @@
+-- Inherited generic-function reflection gap; a capacity-only type alias works.
+-- Expected: the reflected function result reconstructs InlineArray<String, 2>.
+-- Actual: TF042 because the generic body schema has capacity = none.
+type Mirrored<capacity: UInt32> = TypeFromSchema<@typeToSchema(InlineArray<Integer, capacity>)>
+let value: Mirrored<2> = [1]
+console.log(value, value.capacity)
+function schemaFor = <capacity: UInt32>(): Schema => @typeToSchema(InlineArray<String, capacity>)
+static result = @schemaFor<2>()
+type Reflected = TypeFromSchema<result>
+let words: Reflected = ["kept"]
+console.log(words, words.capacity)

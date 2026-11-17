@@ -4,18 +4,22 @@
 -- (backends review 2026-11-05, findings 9 and 10)
 use { sleep } = std.time
 
+mutable awaitedDone = false
+
 async function run = (name: String) => {
 	start do {
 		console.log("{name} task starts")
 		await Task.yield()
 		console.log("{name} task ends")
+		if name == "awaited" { awaitedDone = true }
 	}
 	console.log("{name} returns")
 }
 
 await run("awaited")
 console.log("after awaited")
-await sleep(5)
+-- Wait for completion: Task.yield has no wall-clock completion deadline.
+while not awaitedDone { await sleep(1) }
 -- prints: awaited returns
 -- prints: after awaited
 -- prints: awaited task starts
@@ -29,10 +33,12 @@ console.log("after blocking")
 -- prints: after blocking
 
 mutable shared = 1
+mutable sharedDone = false
 start do {
 	await sleep(5)
 	console.log("shared", shared) -- prints: shared 2
+	sharedDone = true
 }
 shared = 2
-await sleep(30)
+while not sharedDone { await sleep(1) }
 console.log("end", shared) -- prints: end 2

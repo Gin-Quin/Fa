@@ -109,7 +109,7 @@ One entry per work package of [the dated inventory §4](reviews/inventory-2026-1
 - **Worker cancellation follow-up.** Preserve preparation/commit snapshot timing, cancellation during import and linear queue processing. Investigate native/free dispatch with a synchronized queued call before treating the JS microtask-order fixture as a portable cancellation test.
 - **Resource-safe deep helpers and transport.** Ordinary JS copy/equality/assignment/format/JSON-write are iterative; recursive resource destruction and finite-schema JSON parsing still need their separately scoped work. Preserve prototype shared-handle identity, helper dependency isolation and clean generated output while landing ownership.
 - **Other inventory/review coverage.** Implement the provisional std.http surface; verify full-Unicode case conversion and JSON lone-surrogate output. Add regressions for move-mutable-use-branch and callback-capture-overlap when ownership lands. Reconcile pending-documentation implementation notes and stale historical spec-review entries when their subjects change.
-- **Review's pre-existing O0 freestanding link bug.** Per-unit packages reference `_exit` from the hosted fault handler. Add the missing O0 + multi-file fixture and guard hosted runtime code for freestanding; do not hide it with a skip. Also cover another unit's function used directly as a value/composition, currently unsupported.
+- **Review's pre-existing O0 freestanding link bug.** Per-unit packages reference `_exit` from the hosted fault handler. Add the missing O0 + multi-file fixture and guard hosted runtime code for freestanding; do not hide it with a skip. Also cover another unit's function in a composition.
 
 ## Contained links (adopted, 2026-11-16)
 

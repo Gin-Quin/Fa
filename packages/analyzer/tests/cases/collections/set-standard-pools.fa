@@ -1,0 +1,161 @@
+-- Complete-item equality through generic code, at compile time and runtime.
+function exercise = <Item>(first: Item, second: Item): Boolean => {
+	mutable items: Set<Item> = [first, first]
+	assert items.size == 1
+	assert items.includes(first)
+	assert not items.includes(second)
+	assert not items.add(first)
+	assert items.add(second)
+	assert items.delete(first)
+	assert not items.delete(first)
+	assert not items.includes(first)
+	let taken = items.take(second) ?? first
+	assert items.isEmpty()
+	assert items.add(taken)
+	assert items.includes(second)
+	items.clear()
+	assert items.isEmpty()
+	mutable growing = GrowingSet<Item>.from([first, first], capacity = 8)
+	assert not growing.add(first)
+	assert growing.add(second)
+	assert growing.includes(first)
+	true
+}
+type Cell = { x: Integer, label: String }
+console.log(
+	@exercise<Pool<Cell>>([{ x = 1, label = "a" }], [{ x = 1, label = "b" }])
+	exercise<Pool<Cell>>([{ x = 1, label = "a" }], [{ x = 1, label = "b" }])
+) -- prints: true true
+console.log(
+	@exercise<GrowingPool<Cell>>([{ x = 1, label = "a" }], [{ x = 1, label = "b" }])
+	exercise<GrowingPool<Cell>>([{ x = 1, label = "a" }], [{ x = 1, label = "b" }])
+) -- prints: true true
+console.log(
+	@exercise<Columnar<Cell>>([{ x = 1, label = "a" }], [{ x = 1, label = "b" }])
+	exercise<Columnar<Cell>>([{ x = 1, label = "a" }], [{ x = 1, label = "b" }])
+) -- prints: true true
+console.log(
+	@exercise<GrowingColumnar<Cell>>([{ x = 1, label = "a" }], [{ x = 1, label = "b" }])
+	exercise<GrowingColumnar<Cell>>([{ x = 1, label = "a" }], [{ x = 1, label = "b" }])
+) -- prints: true true
+console.log(
+	@exercise<OrderedColumnar<Cell>>([{ x = 1, label = "a" }], [{ x = 1, label = "b" }])
+	exercise<OrderedColumnar<Cell>>([{ x = 1, label = "a" }], [{ x = 1, label = "b" }])
+) -- prints: true true
+
+static equal0 = Set<Pool<Cell>>.from([[{ x = 1, label = "a" }], [{ x = 1, label = "b" }]])
+	== Set<Pool<Cell>>.from([[{ x = 1, label = "b" }], [{ x = 1, label = "a" }]])
+static different0 = Set<Pool<Cell>>.from([[{ x = 1, label = "a" }]])
+	!= Set<Pool<Cell>>.from([[{ x = 1, label = "b" }]])
+static growingEqual0 = GrowingSet<Pool<Cell>>.from([
+	[{ x = 1, label = "a" }]
+	[{ x = 1, label = "b" }]
+])
+	== GrowingSet<Pool<Cell>>.from([[{ x = 1, label = "b" }], [{ x = 1, label = "a" }]])
+console.log(
+	equal0
+	Set<Pool<Cell>>.from([[{ x = 1, label = "a" }], [{ x = 1, label = "b" }]])
+		== Set<Pool<Cell>>.from([[{ x = 1, label = "b" }], [{ x = 1, label = "a" }]])
+	different0
+	Set<Pool<Cell>>.from([[{ x = 1, label = "a" }]])
+		!= Set<Pool<Cell>>.from([[{ x = 1, label = "b" }]])
+	growingEqual0
+	GrowingSet<Pool<Cell>>.from([[{ x = 1, label = "a" }], [{ x = 1, label = "b" }]])
+		== GrowingSet<Pool<Cell>>.from([[{ x = 1, label = "b" }], [{ x = 1, label = "a" }]])
+) -- prints: true true true true true true
+
+static equal1 = Set<GrowingPool<Cell>>.from([[{ x = 1, label = "a" }], [{ x = 1, label = "b" }]])
+	== Set<GrowingPool<Cell>>.from([[{ x = 1, label = "b" }], [{ x = 1, label = "a" }]])
+static different1 = Set<GrowingPool<Cell>>.from([[{ x = 1, label = "a" }]])
+	!= Set<GrowingPool<Cell>>.from([[{ x = 1, label = "b" }]])
+static growingEqual1 = GrowingSet<GrowingPool<Cell>>.from([
+	[{ x = 1, label = "a" }]
+	[{ x = 1, label = "b" }]
+])
+	== GrowingSet<GrowingPool<Cell>>.from([[{ x = 1, label = "b" }], [{ x = 1, label = "a" }]])
+console.log(
+	equal1
+	Set<GrowingPool<Cell>>.from([[{ x = 1, label = "a" }], [{ x = 1, label = "b" }]])
+		== Set<GrowingPool<Cell>>.from([[{ x = 1, label = "b" }], [{ x = 1, label = "a" }]])
+	different1
+	Set<GrowingPool<Cell>>.from([[{ x = 1, label = "a" }]])
+		!= Set<GrowingPool<Cell>>.from([[{ x = 1, label = "b" }]])
+	growingEqual1
+	GrowingSet<GrowingPool<Cell>>.from([[{ x = 1, label = "a" }], [{ x = 1, label = "b" }]])
+		== GrowingSet<GrowingPool<Cell>>.from([[{ x = 1, label = "b" }], [{ x = 1, label = "a" }]])
+) -- prints: true true true true true true
+
+static equal2 = Set<Columnar<Cell>>.from([[{ x = 1, label = "a" }], [{ x = 1, label = "b" }]])
+	== Set<Columnar<Cell>>.from([[{ x = 1, label = "b" }], [{ x = 1, label = "a" }]])
+static different2 = Set<Columnar<Cell>>.from([[{ x = 1, label = "a" }]])
+	!= Set<Columnar<Cell>>.from([[{ x = 1, label = "b" }]])
+static growingEqual2 = GrowingSet<Columnar<Cell>>.from([
+	[{ x = 1, label = "a" }]
+	[{ x = 1, label = "b" }]
+])
+	== GrowingSet<Columnar<Cell>>.from([[{ x = 1, label = "b" }], [{ x = 1, label = "a" }]])
+console.log(
+	equal2
+	Set<Columnar<Cell>>.from([[{ x = 1, label = "a" }], [{ x = 1, label = "b" }]])
+		== Set<Columnar<Cell>>.from([[{ x = 1, label = "b" }], [{ x = 1, label = "a" }]])
+	different2
+	Set<Columnar<Cell>>.from([[{ x = 1, label = "a" }]])
+		!= Set<Columnar<Cell>>.from([[{ x = 1, label = "b" }]])
+	growingEqual2
+	GrowingSet<Columnar<Cell>>.from([[{ x = 1, label = "a" }], [{ x = 1, label = "b" }]])
+		== GrowingSet<Columnar<Cell>>.from([[{ x = 1, label = "b" }], [{ x = 1, label = "a" }]])
+) -- prints: true true true true true true
+
+static equal3 = Set<GrowingColumnar<Cell>>.from([
+	[{ x = 1, label = "a" }]
+	[{ x = 1, label = "b" }]
+])
+	== Set<GrowingColumnar<Cell>>.from([[{ x = 1, label = "b" }], [{ x = 1, label = "a" }]])
+static different3 = Set<GrowingColumnar<Cell>>.from([[{ x = 1, label = "a" }]])
+	!= Set<GrowingColumnar<Cell>>.from([[{ x = 1, label = "b" }]])
+static growingEqual3 = GrowingSet<GrowingColumnar<Cell>>.from([
+	[{ x = 1, label = "a" }]
+	[{ x = 1, label = "b" }]
+])
+	== GrowingSet<GrowingColumnar<Cell>>.from([[{ x = 1, label = "b" }], [{ x = 1, label = "a" }]])
+console.log(
+	equal3
+	Set<GrowingColumnar<Cell>>.from([[{ x = 1, label = "a" }], [{ x = 1, label = "b" }]])
+		== Set<GrowingColumnar<Cell>>.from([[{ x = 1, label = "b" }], [{ x = 1, label = "a" }]])
+	different3
+	Set<GrowingColumnar<Cell>>.from([[{ x = 1, label = "a" }]])
+		!= Set<GrowingColumnar<Cell>>.from([[{ x = 1, label = "b" }]])
+	growingEqual3
+	GrowingSet<GrowingColumnar<Cell>>.from([[{ x = 1, label = "a" }], [{ x = 1, label = "b" }]])
+		== GrowingSet<GrowingColumnar<Cell>>.from([
+			[{ x = 1, label = "b" }]
+			[{ x = 1, label = "a" }]
+		])
+) -- prints: true true true true true true
+
+static equal4 = Set<OrderedColumnar<Cell>>.from([
+	[{ x = 1, label = "a" }]
+	[{ x = 1, label = "b" }]
+])
+	== Set<OrderedColumnar<Cell>>.from([[{ x = 1, label = "b" }], [{ x = 1, label = "a" }]])
+static different4 = Set<OrderedColumnar<Cell>>.from([[{ x = 1, label = "a" }]])
+	!= Set<OrderedColumnar<Cell>>.from([[{ x = 1, label = "b" }]])
+static growingEqual4 = GrowingSet<OrderedColumnar<Cell>>.from([
+	[{ x = 1, label = "a" }]
+	[{ x = 1, label = "b" }]
+])
+	== GrowingSet<OrderedColumnar<Cell>>.from([[{ x = 1, label = "b" }], [{ x = 1, label = "a" }]])
+console.log(
+	equal4
+	Set<OrderedColumnar<Cell>>.from([[{ x = 1, label = "a" }], [{ x = 1, label = "b" }]])
+		== Set<OrderedColumnar<Cell>>.from([[{ x = 1, label = "b" }], [{ x = 1, label = "a" }]])
+	different4
+	Set<OrderedColumnar<Cell>>.from([[{ x = 1, label = "a" }]])
+		!= Set<OrderedColumnar<Cell>>.from([[{ x = 1, label = "b" }]])
+	growingEqual4
+	GrowingSet<OrderedColumnar<Cell>>.from([[{ x = 1, label = "a" }], [{ x = 1, label = "b" }]])
+		== GrowingSet<OrderedColumnar<Cell>>.from([
+			[{ x = 1, label = "b" }]
+			[{ x = 1, label = "a" }]
+		])
+) -- prints: true true true true true true

@@ -1,0 +1,21 @@
+-- Both constructors evaluate the source, then their single capacity hint once.
+function check = (): Boolean => {
+	mutable order = 0
+	function source = (): Array<Integer> => {
+		order = order * 10 + 1
+		[1, 2, 2]
+	}
+	function hint = (): Integer<min = 0, max = 16> => {
+		order = order * 10 + 2
+		16
+	}
+	let items = Set.from(source(), capacity = hint())
+	assert items.size == 2
+	assert order == 12
+	order = 0
+	let growing = GrowingSet.from(source(), capacity = hint())
+	assert growing.size == 2
+	assert order == 12
+	true
+}
+console.log(@check(), check()) -- prints: true true

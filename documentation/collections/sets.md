@@ -38,8 +38,8 @@ A set always hashes and compares its complete item using the item's standard has
 ```fa
 type User = { id: Integer, name: String }
 mutable users: Map<Integer, User> = []
-users.set(1, User { id = 1, name = "Ana" })
-users.set(1, User { id = 1, name = "Bao" }) -- replaces the value at key 1
+users[1] = User { id = 1, name = "Ana" }
+users[1] = User { id = 1, name = "Bao" } -- replaces the value at key 1
 ```
 
 Storing a collection-valued item follows the [copy and move rules](/advanced/memory-management#structures). The hash/equality rule never authorizes copying unique data.

@@ -1,0 +1,25 @@
+use { sleep } = std.time
+async function distinct = <Item>(items: Array<Item>): Set<Item> => {
+	await sleep(1)
+	Set.from(items, capacity = 16)
+}
+async function check = (): Boolean => {
+	let make = distinct<Integer>
+	let values = await make([1, 2, 2])
+	assert values.size == 2
+	assert values.includes(2)
+	let objects = await distinct([
+		{ id = 1, name = "a" }
+		{ id = 1, name = "b" }
+		{ id = 1, name = "a" }
+	])
+	assert objects.size == 2
+	assert objects.includes({ id = 1, name = "b" })
+	mutable growing = GrowingSet<Integer>.from([1, 1], capacity = 16)
+	await sleep(1)
+	assert growing.add(2)
+	assert not growing.add(1)
+	assert growing.includes(2)
+	true
+}
+console.log(await check()) -- prints: true

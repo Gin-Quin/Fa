@@ -1,0 +1,166 @@
+-- Complete-item equality through generic code, at compile time and runtime.
+function exercise = <Item>(first: Item, second: Item): Boolean => {
+	mutable items: Set<Item> = [first, first]
+	assert items.size == 1
+	assert items.includes(first)
+	assert not items.includes(second)
+	assert not items.add(first)
+	assert items.add(second)
+	assert items.delete(first)
+	assert not items.delete(first)
+	assert not items.includes(first)
+	let taken = items.take(second) ?? first
+	assert items.isEmpty()
+	assert items.add(taken)
+	assert items.includes(second)
+	items.clear()
+	assert items.isEmpty()
+	mutable growing = GrowingSet<Item>.from([first, first], capacity = 8)
+	assert not growing.add(first)
+	assert growing.add(second)
+	assert growing.includes(first)
+	true
+}
+type Cell = { x: Integer, label: String }
+type Shape = Union { Empty, Point = Cell }
+console.log(
+	@exercise<Tuple<Integer, String>>((1, "a"), (1, "b"))
+	exercise<Tuple<Integer, String>>((1, "a"), (1, "b"))
+) -- prints: true true
+console.log(
+	@exercise<Cell>(Cell { x = 1, label = "a" }, Cell { x = 1, label = "b" })
+	exercise<Cell>(Cell { x = 1, label = "a" }, Cell { x = 1, label = "b" })
+) -- prints: true true
+console.log(
+	@exercise<Cell?>(none, Cell { x = 1, label = "a" })
+	exercise<Cell?>(none, Cell { x = 1, label = "a" })
+) -- prints: true true
+console.log(
+	@exercise<Shape>(Shape.Point { x = 1, label = "a" }, Shape.Point { x = 1, label = "b" })
+	exercise<Shape>(Shape.Point { x = 1, label = "a" }, Shape.Point { x = 1, label = "b" })
+) -- prints: true true
+console.log(
+	@exercise<Shape>(Shape.Empty, Shape.Point { x = 1, label = "a" })
+	exercise<Shape>(Shape.Empty, Shape.Point { x = 1, label = "a" })
+) -- prints: true true
+console.log(
+	@exercise<Cell | Integer>(Cell { x = 1, label = "a" }, 1)
+	exercise<Cell | Integer>(Cell { x = 1, label = "a" }, 1)
+) -- prints: true true
+
+static equal0 = Set<Tuple<Integer, String>>.from([(1, "a"), (1, "b")])
+	== Set<Tuple<Integer, String>>.from([(1, "b"), (1, "a")])
+static different0 = Set<Tuple<Integer, String>>.from([(1, "a")])
+	!= Set<Tuple<Integer, String>>.from([(1, "b")])
+static growingEqual0 = GrowingSet<Tuple<Integer, String>>.from([(1, "a"), (1, "b")])
+	== GrowingSet<Tuple<Integer, String>>.from([(1, "b"), (1, "a")])
+console.log(
+	equal0
+	Set<Tuple<Integer, String>>.from([(1, "a"), (1, "b")])
+		== Set<Tuple<Integer, String>>.from([(1, "b"), (1, "a")])
+	different0
+	Set<Tuple<Integer, String>>.from([(1, "a")]) != Set<Tuple<Integer, String>>.from([(1, "b")])
+	growingEqual0
+	GrowingSet<Tuple<Integer, String>>.from([(1, "a"), (1, "b")])
+		== GrowingSet<Tuple<Integer, String>>.from([(1, "b"), (1, "a")])
+) -- prints: true true true true true true
+
+static equal1 = Set<Cell>.from([Cell { x = 1, label = "a" }, Cell { x = 1, label = "b" }])
+	== Set<Cell>.from([Cell { x = 1, label = "b" }, Cell { x = 1, label = "a" }])
+static different1 = Set<Cell>.from([Cell { x = 1, label = "a" }])
+	!= Set<Cell>.from([Cell { x = 1, label = "b" }])
+static growingEqual1 = GrowingSet<Cell>.from([
+	Cell { x = 1, label = "a" }
+	Cell { x = 1, label = "b" }
+])
+	== GrowingSet<Cell>.from([Cell { x = 1, label = "b" }, Cell { x = 1, label = "a" }])
+console.log(
+	equal1
+	Set<Cell>.from([Cell { x = 1, label = "a" }, Cell { x = 1, label = "b" }])
+		== Set<Cell>.from([Cell { x = 1, label = "b" }, Cell { x = 1, label = "a" }])
+	different1
+	Set<Cell>.from([Cell { x = 1, label = "a" }]) != Set<Cell>.from([Cell { x = 1, label = "b" }])
+	growingEqual1
+	GrowingSet<Cell>.from([Cell { x = 1, label = "a" }, Cell { x = 1, label = "b" }])
+		== GrowingSet<Cell>.from([Cell { x = 1, label = "b" }, Cell { x = 1, label = "a" }])
+) -- prints: true true true true true true
+
+static equal2 = Set<Cell?>.from([none, Cell { x = 1, label = "a" }])
+	== Set<Cell?>.from([Cell { x = 1, label = "a" }, none])
+static different2 = Set<Cell?>.from([none]) != Set<Cell?>.from([Cell { x = 1, label = "a" }])
+static growingEqual2 = GrowingSet<Cell?>.from([none, Cell { x = 1, label = "a" }])
+	== GrowingSet<Cell?>.from([Cell { x = 1, label = "a" }, none])
+console.log(
+	equal2
+	Set<Cell?>.from([none, Cell { x = 1, label = "a" }])
+		== Set<Cell?>.from([Cell { x = 1, label = "a" }, none])
+	different2
+	Set<Cell?>.from([none]) != Set<Cell?>.from([Cell { x = 1, label = "a" }])
+	growingEqual2
+	GrowingSet<Cell?>.from([none, Cell { x = 1, label = "a" }])
+		== GrowingSet<Cell?>.from([Cell { x = 1, label = "a" }, none])
+) -- prints: true true true true true true
+
+static equal3 = Set<Shape>.from([
+	Shape.Point { x = 1, label = "a" }
+	Shape.Point { x = 1, label = "b" }
+])
+	== Set<Shape>.from([Shape.Point { x = 1, label = "b" }, Shape.Point { x = 1, label = "a" }])
+static different3 = Set<Shape>.from([Shape.Point { x = 1, label = "a" }])
+	!= Set<Shape>.from([Shape.Point { x = 1, label = "b" }])
+static growingEqual3 = GrowingSet<Shape>.from([
+	Shape.Point { x = 1, label = "a" }
+	Shape.Point { x = 1, label = "b" }
+])
+	== GrowingSet<Shape>.from([
+		Shape.Point { x = 1, label = "b" }
+		Shape.Point { x = 1, label = "a" }
+	])
+console.log(
+	equal3
+	Set<Shape>.from([Shape.Point { x = 1, label = "a" }, Shape.Point { x = 1, label = "b" }])
+		== Set<Shape>.from([Shape.Point { x = 1, label = "b" }, Shape.Point { x = 1, label = "a" }])
+	different3
+	Set<Shape>.from([Shape.Point { x = 1, label = "a" }])
+		!= Set<Shape>.from([Shape.Point { x = 1, label = "b" }])
+	growingEqual3
+	GrowingSet<Shape>.from([Shape.Point { x = 1, label = "a" }, Shape.Point { x = 1, label = "b" }])
+		== GrowingSet<Shape>.from([
+			Shape.Point { x = 1, label = "b" }
+			Shape.Point { x = 1, label = "a" }
+		])
+) -- prints: true true true true true true
+
+static equal4 = Set<Shape>.from([Shape.Empty, Shape.Point { x = 1, label = "a" }])
+	== Set<Shape>.from([Shape.Point { x = 1, label = "a" }, Shape.Empty])
+static different4 = Set<Shape>.from([Shape.Empty])
+	!= Set<Shape>.from([Shape.Point { x = 1, label = "a" }])
+static growingEqual4 = GrowingSet<Shape>.from([Shape.Empty, Shape.Point { x = 1, label = "a" }])
+	== GrowingSet<Shape>.from([Shape.Point { x = 1, label = "a" }, Shape.Empty])
+console.log(
+	equal4
+	Set<Shape>.from([Shape.Empty, Shape.Point { x = 1, label = "a" }])
+		== Set<Shape>.from([Shape.Point { x = 1, label = "a" }, Shape.Empty])
+	different4
+	Set<Shape>.from([Shape.Empty]) != Set<Shape>.from([Shape.Point { x = 1, label = "a" }])
+	growingEqual4
+	GrowingSet<Shape>.from([Shape.Empty, Shape.Point { x = 1, label = "a" }])
+		== GrowingSet<Shape>.from([Shape.Point { x = 1, label = "a" }, Shape.Empty])
+) -- prints: true true true true true true
+
+static equal5 = Set<Cell | Integer>.from([Cell { x = 1, label = "a" }, 1])
+	== Set<Cell | Integer>.from([1, Cell { x = 1, label = "a" }])
+static different5 = Set<Cell | Integer>.from([Cell { x = 1, label = "a" }])
+	!= Set<Cell | Integer>.from([1])
+static growingEqual5 = GrowingSet<Cell | Integer>.from([Cell { x = 1, label = "a" }, 1])
+	== GrowingSet<Cell | Integer>.from([1, Cell { x = 1, label = "a" }])
+console.log(
+	equal5
+	Set<Cell | Integer>.from([Cell { x = 1, label = "a" }, 1])
+		== Set<Cell | Integer>.from([1, Cell { x = 1, label = "a" }])
+	different5
+	Set<Cell | Integer>.from([Cell { x = 1, label = "a" }]) != Set<Cell | Integer>.from([1])
+	growingEqual5
+	GrowingSet<Cell | Integer>.from([Cell { x = 1, label = "a" }, 1])
+		== GrowingSet<Cell | Integer>.from([1, Cell { x = 1, label = "a" }])
+) -- prints: true true true true true true

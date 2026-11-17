@@ -1,0 +1,27 @@
+-- require-split: true
+-- A set constructor and operations crossing generic/closure/module boundaries.
+-- file: library/sets.fa
+export namespace = {
+	function distinct = <Item>(items: Array<Item>, capacity: Integer<min = 0>): Set<Item> =>
+		Set.from(items, capacity = capacity)
+	function throughCallback = <Item>(
+		make: (Array<Item>, Integer<min = 0>) => Set<Item>
+		items: Array<Item>
+	): Set<Item> => make(items, 16)
+	function captured = (capacity: Integer<min = 0>) =>
+		(items: Array<Integer>) => Set.from(items, capacity = capacity)
+}
+-- file: application/main.fa
+export function = () => {
+	let create = library.sets.distinct<Integer>
+	let numbers = library.sets.throughCallback(create, [1, 2, 2])
+	console.log(numbers.size, numbers.includes(2)) -- prints: 2 true
+	let make = library.sets.captured(16)
+	let captured = make([3, 3, 4])
+	console.log(captured.size, captured.includes(4)) -- prints: 2 true
+	let objects = library.sets.distinct(
+		[{ id = 1, name = "a" }, { id = 1, name = "b" }, { id = 1, name = "a" }]
+		16
+	)
+	console.log(objects.size) -- prints: 2
+}

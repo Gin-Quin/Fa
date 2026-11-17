@@ -42,7 +42,10 @@ impl Generator<'_> {
 	/// parts (a mutable binding, or a value read from a mutable place).
 	pub(crate) fn bind_pattern(&mut self, pattern: NodeId, value: Expr, mutable: bool, copy: bool) {
 		let Some(info) = self.analysis.pattern(pattern).cloned() else {
-			self.unsupported(pattern, "this pattern");
+			self.internal_error(
+				pattern,
+				"the analyzer did not publish the destructuring pattern",
+			);
 			return;
 		};
 		let value = if value.stable {

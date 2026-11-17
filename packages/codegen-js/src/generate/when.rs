@@ -19,7 +19,7 @@ impl Generator<'_> {
 	/// A `when` whose arms' values go to `dest`.
 	pub(crate) fn when_into(&mut self, n: NodeId, dest: Dest) {
 		let Ok(list) = decision_list(self.tree, self.analysis, n) else {
-			self.unsupported(n, "this `when`");
+			self.internal_error(n, "the checked when has an invalid decision list");
 			return;
 		};
 		let units = self.has(self.strip_groups(list.subject), NodeFlags::STRING_CODE_UNIT)

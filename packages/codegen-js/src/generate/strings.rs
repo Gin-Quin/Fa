@@ -589,7 +589,7 @@ impl Generator<'_> {
 					.and_then(|info| info.arguments.first())
 				{
 					Some(Argument::Given(index)) => *index,
-					_ => return self.unsupported(n, "a missing code-unit index"),
+					_ => return self.internal_error(n, "the checked codeUnitAt call has no index"),
 				};
 				self.code_unit(n, index, receiver, Expr::primary(given[0].clone()))
 			}

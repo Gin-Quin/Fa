@@ -1072,6 +1072,19 @@ impl<'s> Generator<'s> {
 		Expr::constant("undefined", crate::js::Prec::Primary)
 	}
 
+	/// An analyzed program violated the generator's input contract. Report
+	/// the compiler fault without panicking or calling it a language gap.
+	pub(crate) fn internal_error(&mut self, n: NodeId, missing: &str) -> Expr {
+		self.error(
+			&AN001,
+			n,
+			format!(
+				"internal JavaScript compiler error: {missing}; please report this compiler bug"
+			),
+		);
+		Expr::constant("undefined", crate::js::Prec::Primary)
+	}
+
 	/// Notes that the program reads `arguments`.
 	pub(crate) fn use_arguments(&mut self) -> Expr {
 		self.uses_arguments = true;

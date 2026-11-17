@@ -30,7 +30,7 @@ use fa_analyzer::analysis::{Argument, Callee};
 use fa_analyzer::ids::{FileId, NodeId, TypeId};
 use fa_analyzer::session::Session;
 use fa_analyzer::syntax::{View, view};
-use fa_analyzer::types::{CollKind, TypeKind, TypeStore};
+use fa_analyzer::types::{CollKind, TypeFlags, TypeKind, TypeStore};
 
 /// A kind of whole-program fact.
 pub struct FactKind {
@@ -312,24 +312,87 @@ impl ProgramFacts {
 
 pub use fa_analyzer::stable_names::stable_type_name;
 
-/// Whether a type is a plain `Map`.
-fn is_map(types: &TypeStore, ty: TypeId) -> bool {
-	matches!(types.kind(ty), TypeKind::Collection(CollKind::Map, _, _))
+/// A generic component stands for every instantiation of it. Widen the
+/// whole component (including nested parameters), retaining the other
+/// component's identity. This intentionally ignores parameter constraints
+/// and correlations: exclusions may be conservative, never incomplete.
+fn map_component(types: &TypeStore, ty: TypeId) -> Option<String> {
+	// Scalar refinements can pass through a map view without conversion.
+	// Their storage, rather than their current range/literal, names the ABI.
+	let ty = match types.kind(ty) {
+		TypeKind::Int(id) => TypeId::of_storage(types.int(id).storage),
+		// Union payloads may widen without changing their erased native
+		// representation. Conservatively share exclusions across that family,
+		// including optional scalars and nominal member subsets.
+		TypeKind::Union(_) | TypeKind::NamedUnion(..) | TypeKind::Member(..) => {
+			return Some("*".to_string());
+		}
+		TypeKind::Enum(nominal, _) | TypeKind::EnumMember(nominal, _) => {
+			return Some(fa_analyzer::stable_names::stable_decl_name(
+				types,
+				types.nominal(nominal).key,
+			));
+		}
+		_ => types.widen(ty),
+	};
+	let name = stable_type_name(types, ty)?;
+	Some(
+		if types
+			.flags(ty)
+			.intersects(TypeFlags::HAS_PARAM | TypeFlags::HAS_UNKNOWN)
+			// Nominal union arguments are spelled even when their flags
+			// describe only the union's runtime value.
+			|| name.contains('$')
+		{
+			"*".to_string()
+		} else {
+			name
+		},
+	)
 }
 
-/// The key of a map type in a fact set: its stable name, or `None` (a map
-/// type without one is never dense in a build per unit).
+/// The key of a map exclusion: stable key/value names, with `*` for a
+/// component containing a parameter. Shared by whole-program and per-unit
+/// compilation, before any instance or constructor chooses a layout.
 fn map_key(types: &TypeStore, ty: TypeId) -> Option<String> {
-	if !is_map(types, ty) {
+	let TypeKind::Collection(CollKind::Map, item, key) = types.kind(ty) else {
 		return None;
-	}
-	stable_type_name(types, ty)
+	};
+	Some(format!(
+		"Map<{}, {}>",
+		map_component(types, key).unwrap_or_else(|| "*".to_string()),
+		map_component(types, item).unwrap_or_else(|| "*".to_string()),
+	))
+}
+
+/// Query every exclusion that can match a concrete map, including generic
+/// bodies in other units. The caller supplies a logged lookup for cached
+/// units: absence of a wildcard is a dependency too.
+pub(crate) fn map_excluded(
+	types: &TypeStore,
+	ty: TypeId,
+	mut contains: impl FnMut(&str) -> bool,
+) -> bool {
+	let TypeKind::Collection(CollKind::Map, item, key) = types.kind(ty) else {
+		return true;
+	};
+	let (Some(key), Some(item)) = (map_component(types, key), map_component(types, item)) else {
+		return true;
+	};
+	[
+		format!("Map<{key}, {item}>"),
+		format!("Map<*, {item}>"),
+		format!("Map<{key}, *>"),
+		"Map<*, *>".to_string(),
+	]
+	.iter()
+	.any(|name| contains(name))
 }
 
 /// See [`REFERENCED_MAPS`]: a node of the map type in the value of a `use`,
 /// `reuse` or `provide`, in an argument of a call of a function of the
 /// program other than as the whole argument, or in a lambda.
-fn referenced_maps(session: &Session, files: &[FileId]) -> BTreeSet<String> {
+pub(crate) fn referenced_maps(session: &Session, files: &[FileId]) -> BTreeSet<String> {
 	let types = session.types();
 	let mut found = BTreeSet::new();
 	for &file in files {
@@ -384,7 +447,7 @@ fn referenced_maps(session: &Session, files: &[FileId]) -> BTreeSet<String> {
 }
 
 /// See [`DELETED_WHILE_ITERATED_MAPS`].
-fn deleted_while_iterated_maps(session: &Session, files: &[FileId]) -> BTreeSet<String> {
+pub(crate) fn deleted_while_iterated_maps(session: &Session, files: &[FileId]) -> BTreeSet<String> {
 	let types = session.types();
 	let mut found = BTreeSet::new();
 	for &file in files {
@@ -535,7 +598,43 @@ pub(crate) fn short_reference(
 
 #[cfg(test)]
 mod tests {
+	use fa_analyzer::ids::TypeId;
+	use fa_analyzer::types::{CollKind, TypeStore};
+
 	use super::stable_type_name;
+
+	#[test]
+	fn generic_map_exclusions_match_instances_and_invalidate_cached_absences() {
+		let (session, file) = fa_analyzer::session::analyze_source(
+			"function prune = <K>(map: Map<K, Int64>) mutates map => map.deleteWhere((_key, _value) => true)\n",
+		);
+		let facts = super::ProgramFacts::of_unit(&session, &[file]);
+		assert!(facts.contains(super::DELETED_WHILE_ITERATED_MAPS, "Map<*, Int64>"));
+		let mut types = TypeStore::new();
+		let wide = types.collection(CollKind::Map, TypeId::INT64, TypeId::INT64);
+		let other = types.collection(CollKind::Map, TypeId::STRING, TypeId::INT64);
+		let unknown = types.collection(CollKind::Map, TypeId::UNKNOWN, TypeId::INT64);
+		assert_eq!(
+			super::map_key(&types, unknown).as_deref(),
+			Some("Map<Int64, *>")
+		);
+		assert!(super::map_excluded(&types, unknown, |_| false));
+		let log = super::FactLog::default();
+		let empty = super::ProgramFacts::default();
+		assert!(!super::map_excluded(&types, wide, |key| {
+			empty
+				.consulted(super::DELETED_WHILE_ITERATED_MAPS, Some(&log))
+				.contains(key)
+		}));
+		assert!(super::FactLog::still_holds(&log.to_text(), Some(&empty)));
+		assert!(!super::FactLog::still_holds(&log.to_text(), Some(&facts)));
+		assert!(super::map_excluded(&types, wide, |key| {
+			facts.contains(super::DELETED_WHILE_ITERATED_MAPS, key)
+		}));
+		assert!(!super::map_excluded(&types, other, |key| {
+			facts.contains(super::DELETED_WHILE_ITERATED_MAPS, key)
+		}));
+	}
 
 	/// The stable names of the values of a program, by name.
 	fn names(source: &str, wanted: &[&str]) -> Vec<Option<String>> {

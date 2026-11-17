@@ -1,0 +1,21 @@
+export function = (): Integer => {
+	mutable map = library.create(-1)
+	assert map.get(7) is none
+	library.replace(map, Int64(7), UInt64(70))
+	assert map.get(7) == UInt64(70)
+	use held = map.getOrInsert(0, 0)
+	for i in 1..300 { map[Int64(i)] = UInt64(i) }
+	held += 1
+	assert held == UInt64(11)
+	assert map.get(-1) == UInt64.maxValue
+	map.deleteWhere((key, _) => key != -1)
+	assert map.size == 1
+	assert map.get(-1) == UInt64.maxValue
+	mutable inlineMap = library.inline(7)
+	inlineMap.reserve(1000)
+	assert inlineMap.get(UInt64.maxValue) == 20
+	assert inlineMap.take(7) == 30
+	assert inlineMap.get(0) == 10
+	console.log("per-unit ok")
+	0
+}

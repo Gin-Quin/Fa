@@ -396,7 +396,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			// a reference is the value it designates (`T in pool`)
 			TypeKind::Ref(target, _) => return self.repr_of(target, node),
-			TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, _, _) => Repr::Map(ty),
+			TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, _, _) => {
+				Repr::Map(self.concrete_type(ty))
+			}
 			// a worker is its state (parallel.rs), or in asynchronous mode a
 			// handle to its thread (tasks.rs)
 			TypeKind::Sync(fa_analyzer::types::SyncKind::Worker, state)
@@ -407,7 +409,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			TypeKind::Sync(kind, _) if kind != fa_analyzer::types::SyncKind::Ordering => {
 				Repr::Sync(ty)
 			}
-			TypeKind::Collection(CollKind::Set | CollKind::GrowingSet, _, _) => Repr::Set(ty),
+			TypeKind::Collection(CollKind::Set | CollKind::GrowingSet, _, _) => {
+				Repr::Set(self.concrete_type(ty))
+			}
 			TypeKind::Union(list) => {
 				// a union of literals of one kind (`0 | 1`, `"a" | "b"`), with `none` or not
 				let items = types.list_items(list);
@@ -716,6 +720,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			},
 			(Repr::Optional(a), Repr::Optional(b)) => {
 				return a != b && self.same_layout(a.repr(), b.repr());
+			}
+			(Repr::Map(_), Repr::Map(_)) | (Repr::Set(_), Repr::Set(_)) => {
+				return match (self.table_of(from), self.table_of(to)) {
+					(Ok(a), Ok(b)) => {
+						a.key == b.key
+							&& a.value == b.value && a.growing == b.growing
+							&& a.dense == b.dense && a.inline == b.inline
+					}
+					_ => false,
+				};
 			}
 			// arrays of items with the same representation (an instance's
 			// `Array(Item)` and the `Array(String)` it was made for)

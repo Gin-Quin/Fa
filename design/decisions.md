@@ -1771,3 +1771,306 @@ The static type at the place of an enumeration decides its field order: declarat
 Implementation belongs to [O34c, ownership and written origins](todo.md#o34c-static-type-field-enumeration), using the mechanism that already selects methods of a written type. It is outside the string redesign: this branch retains trunk's existing field-enumeration behavior, including the preexisting anonymous-object target difference, and reverts the partial ordering changes from the review investigation. Acceptance fixtures are retained under `design/reviews/repros/strings/field-enumeration/`. The differential harness's explicit `DEFERRED_CASE_CLASSES` list links both generated enumeration classes to O34c and reports their exclusion; `FA_STRINGS_DIFFERENTIAL_DEFERRED=1` opts into them for that work.
 
 The independent recursive JSON bug remains part of the string review fixes: schema name bindings are scoped to the serialization subtree, so unrelated recursive declarations sharing a short name cannot reuse each other's definition. Required JSON probes use declared envelopes to test this without depending on the deferred anonymous order. Object-union schema selection checks fields and literal discriminants. Compile-time generic key-set calls and native keyed borrows keep their own regressions, with sorted probe output so the current enumeration order is not changed or assumed.
+
+## Collections performance (implementation, 2026-11-16)
+
+### Ported private negative map probes
+
+Port the proof of `1e3a91d7` onto trunk's storage ABI, without changing map
+semantics or the eager reservation contract. One function-local private inline
+Map/32-bit-key pair can retain a failed lookup. A runtime valid bit plus table
+pointer and raw-key equality protect joins and backedges; ordinary lookup is the
+fallback. Index-changing runtime calls, potentially map-mutating named calls and
+map-owning drops invalidate the hint. Calls proved to mutate only map-free data
+can keep it. Closed synchronous whole-program compilation excludes callbacks,
+generics, external code, captures and reference uses. This deliberately retains
+the validated optimization's conservative scope.
+
+An inline backward shift adds exactly one empty slot and leaves former empty
+slots empty. Update a missing key's probe to the earlier of its old empty slot
+and that hole, in cyclic order from its home. The separate all-ones-key slot
+cannot affect a run. Append receives raw key bits, allowing the sentinel guard
+to disappear when range facts exclude it. Read-only literal construction and
+`fa_table_local` use the same all-ones marker as heap slots; explicit copies,
+reserve/growth, clear, iteration and deletion keep every 32-bit key available.
+Bump the object-cache version for the changed append ABI.
+
+Validation: LLVM-enabled workspace 1,378 passed, zero failed, eight existing
+ignored; 90 IR checks included. C ASan/UBSan passes. Shared fixtures additionally
+pass Bun/Node/web and every LLVM target with leak checks. A borrowed-only runtime
+literal is verified to call `fa_table_local` in a fixed 160-byte frame block;
+read-only and explicit-copy cases are separate.
+
+All 36 audit rows pass exact output/source checks and the +1% instruction gate.
+Lru: 20,241,014 → 18,739,665 Ir (−7.417%); words unchanged, word-count −5 startup
+instructions. Largest other increase is five Ir on lru-open (+0.000024%). The
+21-round CPU-5 before/after/Goose/Rust series fails the identical-binary control
+on all three map rows. CPU gains and regressions are **not resolved**; preserve
+these first samples, with no retiming to replace them. Canonical profiles,
+artifacts, paired samples and strict-control tables are retained in
+`benchmarks/results/2026-11-16-collections-{before,probes}.json` and the generated
+`2026-11-16-collections-probes.md`. No benchmark source or string code changed.
+
+### Ported private inline map headers
+
+Port `3d93c163` using today's `storage` word rather than its old `directory=-1`
+marker: 1 means a private frame header owning ordinary heap probe slots. Growth,
+reserve, clear and drops retain their existing payload ownership; free releases
+slots but not this header. Copies already reset storage to heap (0); immutable
+read-only and whole-frame storage remain 2/3.
+
+The existing closed synchronous whole-program and inline KEY32 proofs apply.
+Every owner use must remain in its function and be a supported immediate map
+operation, indexing, scalar measurement or direct iteration. Copies, returns,
+unknown uses, references, captures and shared top-level initializer locals are
+excluded by this proof. Literals and literal-source `Map.from` are the covered fresh
+constructors; replacement retains normal drop/ownership rules.
+
+Record eligible initializers without allocating. Existing read-only, whole-frame
+and caller-buffer storage stays preferred. Only the actual remaining constructor
+allocates a fixed entry-block header, charging 96 aligned bytes against the
+shared 4 KiB / recursive 512-byte collection frame budget on both pointer widths.
+Tests require 42 ordinary headers, five recursive headers, or 41 after a 160-byte
+immutable literal; additional constructors fall back to the heap. Bump the object
+cache version. No input-sized stack allocation or map-value layout change.
+
+Final validation: LLVM-enabled workspace 1,381 passed, zero failed, eight existing
+ignored, including all 93 IR checks. New shared fixtures pass Bun/Node/web and
+native/freestanding/wasm with leak checks. C ASan/UBSan, fmt and Clippy pass.
+Manual O0 IR confirms private frame headers in the reassignment loop and the
+throwing cleanup fixture, and the earlier immutable-literal path stays distinct.
+
+All 36 audit rows match exact output and unchanged source hashes. Lru rises
+18,739,665 → 19,070,292 Ir (+1.764%) versus probes alone, with 181,188 fewer data
+reads and more register moves/stores. All 35 other rows remain within +1%.
+The named/literal LLVM header type produces identical optimized main IR and is
+not the cause of that instruction trade-off.
+
+**Keep the port on CPU evidence.** In the first 21-round header series on CPU 5,
+header/probe-only CPU is 0.917 / 0.919 (ratio of medians / paired median), while
+Fa/Goose is 0.986 / 0.967 and Fa/Rust 0.489 / 0.491. The identical-binary control
+0.993 / 1.028 passes strict <3% on both measures. Lru meets both CPU goals in
+this series despite its additional instructions. Retain its broad quartiles;
+instruction count alone is not the acceptance metric. Words/word-count controls
+fail and their CPU verdicts remain not resolved. No primary series is replaced.
+
+Canonical complete profiles, samples, manifests and strict-control tables are
+`benchmarks/results/2026-11-16-collections-headers.{json,md}`; the earlier probe
+and baseline files remain separate. No benchmark source or string code changed.
+
+### Successful same-key probe reuse (2026-11-16)
+
+Part 1 item 2 extends the accepted private inline KEY32 cache to found as well
+as missing slots. An inline remove/take only looks up its entry before release,
+so it can consume the same guarded lookup as insertion or value replacement.
+The ordinary lookup remains the fallback whenever the existing closed-program,
+layout, local owner/key, capture/reference or effect proof does not hold.
+
+Replacement of a scalar value changes no index position. Keep that position,
+but always load the new value from its slot. A deletion may move any positive
+slot by backward shifting: invalidate positive entries of that table before
+release. Negative entries retain their existing final-hole update; another
+map's release leaves a cached slot untouched. Append/growth, reserve, clear,
+drop and unknown effects keep their existing invalidation. Key/table identity
+checks and entry initialization still protect joins and backedges. No C runtime
+or String-key code changes; bump the object-cache generation for the lowering.
+
+New IR tests cover firing on native/wasm and fallback for references and key
+parameters. Programs cover same-key overwrite/take/delete, the sentinel, zero,
+wraparound colliding deletion, mutable keys and named calls that clear/rehash.
+Validation and measured acceptance follow in the continuation report.
+
+Instruction checkpoint: all 36 audit rows pass exact output and unchanged-source
+checks, with none above +1% versus the accepted private-header compiler.
+Lru is 19,070,292 → 19,047,821 Ir (−0.118%); words is unchanged and word-count
+changes by −19 Ir. The complete profile is retained in
+`benchmarks/results/2026-11-16-collections-positive.{json,md}`. Full workspace
+validation is still running; controlled CPU measurements follow after it.
+
+Final item 2 validation: LLVM-enabled workspace 1,382 passed, zero failed,
+eight existing ignored (68 groups, 94 IR checks). Shared CLI 11/11 and LLVM
+4/4 pass, including native/freestanding/wasm leak checks. Fmt/Clippy are clean.
+The complete retained dataset adds 21 interleaved CPU-5 rounds on each map row,
+including the accepted-header compiler as the before actor. All three identical
+binary controls fail: lru 1.100 / 1.073, words 1.009 / 0.947, word-count
+0.939 / 0.948 (ratio of medians / paired median). Their CPU verdicts are **not
+resolved**; no speedup or regression is established. Keep the correct guarded
+reuse and its small instruction reduction. Preserve the accepted item 1 series
+separately; this unresolved series neither replaces nor reconfirms it. No source
+benchmark, String code or runtime ABI changed in this item.
+
+
+### Scalar64 inline map entries (2026-11-16)
+
+Part 1 item 3 extends inline entries from 8/16/32-bit integer keys and narrow
+values to 64-bit integer keys and scalar values (integer, boolean, float) of
+at most 64 bits. Keep the existing dense-map reference proof, merged per-unit
+facts, deleteWhere exclusion and GrowingMap stable chunks. String keys and all
+String hashing/comparison/lowering are unchanged. Private header/probe proofs
+retain their 32-bit key restriction.
+
+KEY64 uses the full key as its presence marker. All ones lives after the probe
+array with the existing separate presence bit, just as KEY32. Hash homes for
+rehashing and backward shifts match generated integer hashing: xor with the
+upper 32 bits, multiply by the odd golden-ratio constant, xor again with the
+upper half. Each step is bijective. Preserve the existing KEY32 rotated hash.
+The append ABI now carries 64 raw key bits, zero-extending KEY32; bump the
+object-cache generation. All three runtime IR targets are regenerated.
+
+Small tagged keys with wide values use an 8-byte prefix (tag plus padding) so
+the entry remains ABI aligned. Narrow tagged entries keep their 4-byte prefix.
+Match runtime stride/offset, read-only global padding, frame-buffer sizing and
+copy/grow/clear/iteration. No unaligned wide loads or changes to shared Slot
+lowering. Runtime tests cover all four key widths, wide value bits, heap and
+private frame headers, randomized operations and 64-bit wraparound deletion.
+Shared fixtures separately cover full-width extrema, mutable/static/frame maps,
+copy independence, small-key alignment, references and deleteWhere/GrowingMap
+fallbacks. IR checks require firing and the three fallbacks on native and wasm.
+Full validation and controlled measurements follow.
+
+Actual benchmark IR check: word-count uses KEY64-eligible integer fields, but
+its numeric map retains stable chunks. `facts::short_reference` rejects the
+named `random.next` call inside getOrInsert: it scans the initializer as well
+as the statements after the reference. The String map already uses dense
+entries. Preserve this existing reference-proof boundary in this item, as
+required; do not change ownership/fact analysis or the benchmark to force a
+layout. Scalar64 fires in the new eligible programs and remains unavailable
+where the existing reference proof declines it. The pre-reference argument
+call case is a separately recorded proof follow-up, so this item must not be
+reported as solving word-count even if a noisy CPU point estimate improves.
+
+Item 3 checkpoint: 27/36 instruction profiles completed, all within +1%; lru 19,047,821 → 19,153,936 Ir (+0.557%). Complete validation and remaining profiles/CPU phases are pending. Preserve these partial rows as the work checkpoint, not an acceptance claim. Full Bun/Node/web program suites and multi-file packages pass. Manual O0 native/wasm IR confirms KEY64 frame payload 232 bytes rounded to an aligned 240-byte buffer.
+
+Complete instruction phase: all 36 audit rows pass the +1% gate versus the
+successful-probe compiler, with exact unchanged source hashes and outputs.
+Lru is 19,047,821 → 19,153,936 Ir (+0.5571%), words is unchanged at 28,382,794,
+word-count is 235,017,839 → 235,017,865 (+26 Ir). The 27 checkpoint records are
+identical in the complete profile. No instruction win on these map benchmarks
+is claimed. Canonical scalar64 results now contain the complete instruction
+phase; full workspace and controlled CPU acceptance remain pending.
+
+The full corpus exposed two wrong pre-existing order assertions in
+`table-storage.fa` and its O0 counterpart: returned Map<Integer,Integer> printed
+[(9, 2), (8, 1)] instead of [(8, 1), (9, 2)]. The language specifies no map
+iteration order. Correct both fixtures to require the exact formatted string
+in either of the two possible orders, plus both keyed values and size two;
+print the keyed values deterministically. This preserves formatting/content
+checks and adds cardinality checking, without pinning a storage layout.
+No expected-skip changes. All other outputs in all three targets matched.
+Focused corrected fixtures pass all LLVM targets/leak checks (4/4), fmt and
+Clippy pass; the whole workspace is rerun. Compiler sources remain identical
+to 1f8e7118, so existing instruction profiles and archived binaries are valid.
+
+Scalar64 validation checkpoint after correcting the two order assumptions:
+37 complete workspace result groups, 706 passed,
+zero failed so far; all 95 IR checks, packages, Bun/Node/web, C-library,
+object-cache and memory groups pass. The full LLVM program corpus is still
+active; final workspace acceptance and CPU phases remain pending. Compiler
+sources remain unchanged from the archived 1f8e7118 build. The GCC sanitizer
+runtime harness independently ran and passed (1/1) rather than relying on the
+Clang environment's unavailable ASan probe. No additional skip was introduced.
+
+Final scalar64 validation: LLVM-enabled workspace 1,383 passed, zero failed,
+eight pre-existing ignored, 68 result groups including all 95 IR checks.
+Native 812 / freestanding 723 / wasm 791 programs pass with leak checking;
+existing documented skips remain 31 / 120 / 52. Fmt/Clippy are warning-free;
+GCC ASan/UBSan passed via both the script and actual Rust runtime harness.
+The two corrected order assumptions are the only existing tests changed.
+
+The first 21-round CPU-5 series is retained in full. Lru control 0.991 / 0.966
+fails, and word-count control 0.960 / 1.006 fails: both remain not resolved.
+Words control 0.992 / 0.999 passes; Fa/Goose 1.171 / 1.137 is behind the 1.10
+goal, Fa/Rust 0.483 / 0.464 meets its goal. After/before words 0.987 / 0.961
+has broad paired quartiles [0.848, 1.011]; do not claim the scalar64 layout
+caused a speedup in this unchanged String-key workload. Word-count still needs
+the separate reference-initializer proof, and String work remains separate.
+This item supplies the requested guarded layout, not a demonstrated map-row
+speedup. Preserve the accepted header lru series independently.
+
+Complete evidence is `benchmarks/results/2026-11-16-collections-scalar64.{json,md}`:
+all 36 profiles, three CPU phases, 315 samples, 63 round orders, binary/source
+hashes and strict-control publication. Benchmark sources and driver unchanged.
+The dataset round-trips byte-for-byte; all 27 checkpoint rows are retained.
+Part 2 remains unimplemented at this completed-item context boundary.
+
+
+## Collection map review fixes (2026-11-16)
+
+C1 exposed an ABI disagreement: a generic `deleteWhere` used the generic
+map TypeId's dense layout while its concrete caller constructed scalar64
+inline slots. C2 has the same cause in the other direction: concrete callers
+requiring stable references passed chunked tables to generic mutation code
+using dense/inline entries. C2 predates scalar64.
+
+One policy now lives in `facts.rs::map_excluded`, called by
+`lower/tables.rs::table_of` after resolving the concrete instance. The same
+collectors supply whole-program exclusions and merged per-unit facts. Each
+generic key/value component becomes a wildcard, including nested parameters;
+non-generic components retain their stable identity. We deliberately widen
+constraints and repeated-parameter correlations rather than requiring a
+complete call/instance inventory before any constructor is lowered. This
+changes only representation eligibility, never accepted programs or map
+semantics. Generic code without exclusions retains inline entries at every
+supported integer width. Concrete reference facts apply inside instances too.
+
+Sibling checks exposed helper caches keyed only by scalar representations:
+`Map<Int64, Int64>` requiring chunks and an inline `Map<Integer, Integer>`
+shared a generic copy helper and crashed. Copy/drop/equality helpers and
+read-only literal caches now include exact type bindings; map representations
+carry concrete type identities, generic argument conversion forwards those
+bindings, and nested collections compare actual table layouts. Callback
+indexing also registers generic type methods before their child lambdas and
+defers local named closures to their enclosing instance. These retain accepted
+generic methods and captured-map code while avoiding eager erased layouts.
+
+An additional view boundary used the same scalar storage with different
+range spellings: `Map<Int64,Integer<min=0,max=100>>` could be read as
+`Map<Int64,Integer>`, losing the source reference exclusion and reading the
+wrong value. Scalar fact components now use their storage type; literal
+components widen to their base type. Union/optional refinements conservatively
+use a wildcard, and enum member subsets share their nominal identity. This
+keeps erased scalar views on the same side of the layout rule.
+
+Cache logs query all matching concrete/wildcard exclusions, including their
+absence; the object ABI version changes. Copies, drops, callbacks, readonly
+literals and frame constructors all pass through `table_of`; private headers
+and lookup hints retain their narrower separate proofs. M1 (split freestanding
+O0 runtime linking) is independent and remains a documented follow-up.
+
+A generic constant constructor with a local `let` literal exposed static
+header reuse between UInt32-key/chunked and UInt16-key/inline instances
+(both with Int64 values). The static-cache fix is guarded by native/wasm IR checks
+requiring both a chunked 32-entry block and an eight-slot tagged inline block, plus
+leak-checked O0/O3 execution. Scalar-range, optional, union and enum views
+have shared runtime regressions too.
+
+Focused validation passes: 97 IR tests, 24 O0/leak executions, the shared O3
+map corpus on all LLVM targets, 105 reviewer standalone executions, 15 package
+executions (only the three pre-existing M1 links remain blocked), 12 split IR
+module checks and 28 independent optimization controls. Workspace Clippy is
+warning-free; the GCC sanitizer runtime test actually executes and passes.
+Final LLVM-enabled workspace validation passes: 1,387 tests, zero failures,
+eight pre-existing ignored tests, 69 result groups. Native/freestanding/wasm
+program counts are 822/733/801 with unchanged skips; CLI Bun/Node/web, JIT,
+packages/workspaces, memory, C-library, formatter/parser, language-server and
+doctests all pass. No expected-skip list changed.
+No benchmark source/runtime C/String code changes are involved.
+
+The shared multi-file runner now recognizes an explicit `package.fa` fixture
+and invokes the package root, so library namespaces and split compilation
+are exercised on Bun, Node and web. The read-only fixture varies only
+Number-backed generic keys and retains concrete Int64 values: a generic
+Int64 value literal separately exposes a pre-existing JavaScript conversion
+bug (recorded with a durable repro in todo). The corrected fixture still
+fails on the archived scalar64 native compiler and preserves both static
+layouts and all value assertions. No expected-skip list changes.
+
+
+## String landing with native map optimizations (2026-11-17)
+
+Retain both cache generations and both sets of runtime changes. The map-probe
+classifier treats `Bytes` as map-free: its fixed-length raw payload cannot contain
+a map. This replaces the removed `Character` arm from the trunk's classifier.
+Mutating a separate Bytes owner therefore preserves a private scalar map's cached
+probe, under the existing table/key identity and effect proofs. The shared program
+checks execution; native and wasm IR checks require the probe to survive the call.

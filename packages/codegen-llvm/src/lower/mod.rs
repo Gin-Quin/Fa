@@ -52,6 +52,8 @@ mod inlining;
 mod io;
 mod iterators;
 mod json;
+mod map_headers;
+mod map_probes;
 mod numbers;
 mod objects;
 mod ownership;
@@ -296,7 +298,7 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	small_mutable_strings: FxHashMap<FileId, rustc_hash::FxHashSet<SymbolId>>,
 	/// The constants already emitted: string literals and check sites.
 	constants: FxHashMap<Vec<u8>, PointerValue<'ctx>>,
-	readonly_collections: FxHashMap<(FileId, NodeId, Repr), Val<'ctx>>,
+	readonly_collections: FxHashMap<(FileId, NodeId, String), Val<'ctx>>,
 	/// Source functions in a resolved direct-call cycle, shared by instances.
 	recursive_functions: rustc_hash::FxHashSet<(FileId, NodeId)>,
 	/// Line starts of the source, for locations.
@@ -403,6 +405,8 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// and measured, by symbol: the call, evaluated again (on an immutable
 	/// text) where they are read, so that the array is never built.
 	virtual_code_points: FxHashMap<SymbolId, NodeId>,
+	map_probes: map_probes::Probes<'ctx>,
+	local_map_headers: map_headers::Headers<'ctx>,
 	/// The whole program is lowered in this module (`compile.rs`, not the
 	/// units of `units.rs`): whole-program layouts may apply (dense maps).
 	whole_program: bool,
@@ -416,11 +420,11 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The facts this lowering consulted (the key of a cached unit).
 	pub(crate) fact_log: Option<std::sync::Arc<crate::facts::FactLog>>,
 	/// The map types the program may keep a reference into the values of
-	/// (`program::unsafe_maps`).
-	unsafe_maps: rustc_hash::FxHashSet<TypeId>,
+	/// (`facts::referenced_maps`, including generic patterns).
+	unsafe_maps: std::collections::BTreeSet<String>,
 	/// The map types some `deleteWhere` iterates over while deleting: their
 	/// entries stay out of the probe array (`tables.rs`, `inline`).
-	no_inline_maps: rustc_hash::FxHashSet<TypeId>,
+	no_inline_maps: std::collections::BTreeSet<String>,
 	/// The union types whose arrays the program only builds with `push` and
 	/// reads with `for` (`packed::packable_items`).
 	packable_items: rustc_hash::FxHashSet<TypeId>,
@@ -514,6 +518,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			.map(|(_, path)| path.clone())
 			.unwrap_or_default();
 		let state = program::FileState::new(session, entry, &path);
+		let fact_files: Vec<_> = files.iter().map(|(file, _)| *file).collect();
 		let mut lowering = Lowering {
 			session,
 			file: entry,
@@ -590,13 +595,15 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			resource_flags: std::cell::RefCell::new(FxHashMap::default()),
 			field_flags: std::cell::RefCell::new(FxHashMap::default()),
 			virtual_code_points: FxHashMap::default(),
+			map_probes: map_probes::Probes::default(),
+			local_map_headers: Default::default(),
 			whole_program: false,
 			program_facts: None,
 			fact_log: None,
 			index_proofs: std::cell::RefCell::new(None),
 			program_proof_claims: std::cell::OnceCell::new(),
-			unsafe_maps: program::unsafe_maps(session, files),
-			no_inline_maps: program::no_inline_maps(session, files),
+			unsafe_maps: crate::facts::referenced_maps(session, &fact_files),
+			no_inline_maps: crate::facts::deleted_while_iterated_maps(session, &fact_files),
 			packable_items: packed::packable_items(session, files),
 			packed_layouts: std::cell::RefCell::new(FxHashMap::default()),
 			readonly_collections: FxHashMap::default(),
@@ -1234,6 +1241,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		function: FunctionValue<'ctx>,
 		arguments: &[BasicMetadataValueEnum<'ctx>],
 	) -> Result<inkwell::values::BasicValueEnum<'ctx>, Error> {
+		self.invalidate_runtime_map_probes(function.get_name().to_str().unwrap_or(""))?;
 		let call = self.builder.build_call(function, arguments, "")?;
 		Ok(call
 			.try_as_basic_value()
@@ -1247,6 +1255,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		name: &str,
 		arguments: &[BasicMetadataValueEnum<'ctx>],
 	) -> Result<(), Error> {
+		self.invalidate_runtime_map_probes(name)?;
 		let function = self.runtime.function(name)?;
 		self.builder.build_call(function, arguments, "")?;
 		Ok(())
@@ -1372,13 +1381,18 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				})
 			})
 			.collect();
+		// Children can precede their method declaration in node order. Their
+		// callbacks must see the enclosing type parameters before indexing.
+		self.generic_type_methods.extend(
+			type_generics
+				.iter()
+				.map(|(&node, info)| ((self.file, node), info.clone())),
+		);
 		for (node, mut info) in infos {
-			if let Some((generics, declared)) = type_generics.get(&node) {
+			if let Some((generics, _)) = type_generics.get(&node) {
 				let mut all = generics.clone();
 				all.extend(info.generics.iter().copied());
 				info.generics = all;
-				self.generic_type_methods
-					.insert((self.file, node), (generics.clone(), *declared));
 			}
 			if let Some(symbol) = info.symbol {
 				self.symbol_functions.insert(symbol, node);
@@ -1388,9 +1402,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				self.generic_functions.insert(node, info);
 				continue;
 			}
-			if info.declaration.is_none() && self.inside_generic_function(node) {
-				// a lambda of a generic function: declared per instance of the
-				// function around it, when evaluated (`closures.rs`)
+			if self.inside_generic_function(node) {
+				// A closure or local function inherits its enclosing instance,
+				// even when it declares no generic parameters of its own.
 				self.generic_functions.insert(node, info);
 				continue;
 			}
@@ -2974,6 +2988,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				self.fresh(value)
 			}
 		} else {
+			self.prepare_local_map_header(node, symbol, value_node)?;
 			let repr = self.repr_of(self.analysis.symbols.symbol(symbol).ty, node.index())?;
 			let destination = if self.uses_return_slot(repr) {
 				Some(self.slot_of(symbol, node)?)

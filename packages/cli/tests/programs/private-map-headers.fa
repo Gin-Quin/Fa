@@ -1,0 +1,36 @@
+-- Local map headers release their entries, including across reassignment.
+-- asynchronous: false
+-- require-split: true
+
+function fresh = (): Map<UInt32, UInt32> => Map<UInt32, UInt32>.from([(7, 8)], capacity = 32)
+for round in 0..128 {
+	mutable map = Map<UInt32, UInt32>.from([(0, 1)], capacity = 32)
+	let key: UInt32 = round + 2
+	assert map.get(key) is none
+	map[key] = key
+	map.reserve(256)
+	assert map.get(key) == key
+	assert map.get(0) == 1
+	assert map.delete(0)
+	assert map.size == 1
+	map.clear()
+	map[UInt32.maxValue] = 9
+	assert map.get(UInt32.maxValue) == 9
+	map = fresh()
+	assert map.get(7) == 8
+	assert map.get(UInt32.maxValue) is none
+}
+
+type Stop = Errors { Done }
+function scoped = (fail: Boolean): Integer throws Stop.Done => {
+	mutable map = Map<UInt32, UInt32>.from([(0, 1)], capacity = 32)
+	map[2] = 3
+	if fail { throw Stop.Done }
+	map.size
+}
+let failed = scoped(true) catch _error => -1
+let succeeded = scoped(false) catch _error => -1
+assert failed == -1
+assert succeeded == 2
+
+console.log("private map headers") -- prints: private map headers

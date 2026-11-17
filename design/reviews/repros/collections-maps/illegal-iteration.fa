@@ -1,0 +1,5 @@
+mutable map: Map<Int64, Int64> = [(1, 10), (2, 20)]
+for (key, value) in map {
+	map.delete(key)
+	console.log(value)
+}

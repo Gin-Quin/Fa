@@ -1,0 +1,17 @@
+-- asynchronous: false
+type Owner = {
+	values: Map<UInt32, UInt64>
+	function change = (self, key: UInt32) mutates self => {
+		self.values.clear()
+		self.values.reserve(1000)
+		self.values[key] = 77
+	}
+}
+mutable owner = Owner { values = [(0, 1)] }
+let key: UInt32 = UInt32.maxValue
+assert owner.values.get(key) is none
+owner.change(key)
+owner.values[key] = 88
+assert owner.values.take(key) == UInt64(88)
+assert owner.values.get(0) is none
+console.log("method ok") -- prints: method ok

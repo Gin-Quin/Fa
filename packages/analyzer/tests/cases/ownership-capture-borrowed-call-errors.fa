@@ -1,0 +1,9 @@
+type Reader = () => Integer
+
+function make = (): Reader => {
+	let items = [1]
+	function inspect = (): Integer => items.length
+	function saved = (): Integer => items.length -- error: MEM004
+	console.log(inspect())
+	saved
+}

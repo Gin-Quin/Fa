@@ -2227,3 +2227,19 @@ previously omitted data read only by a nested closure; it does not flatten named
 callee handles or change the declaration-time environment policy. Logical-only
 inputs encountered in an unfinished specialization remain pending until their
 concrete facts exist.
+
+## Ownership enforcement: borrowed-call capture conflicts (2026-11-17)
+
+Capture-store MEM004 witnesses include known later borrowed calls, saved callback
+arguments and omitted defaults. A worklist propagates complete unconditional
+direct-source observations and excludes each invocation's own locals, so a
+recursive call does not read a previous activation's owner. Written arguments
+bypass their defaults; borrowed callbacks retain all their captured inputs for
+the receiving call, including when ignored. Owned handles observe their own
+environments.
+
+This positive-witness query is deliberately separate from move authorization.
+Pending/conditional dependencies and calls that replace captured bindings do
+not supply its proofs. Captured-binding replacements are excluded transitively,
+because a later read may refer to a new value. Complete conditional/versioned
+liveness and coordinated capture transfer remain required for point2.

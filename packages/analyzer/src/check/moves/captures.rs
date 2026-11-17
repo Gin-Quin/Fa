@@ -12,7 +12,11 @@ use crate::types::{FieldFlags, Ownership, TypeKind};
 impl Walker<'_> {
 	/// Borrowing cannot supply an owned capture. A later direct source use
 	/// also proves that the capture needs an independent snapshot.
-	pub(super) fn check_structure_capture_stores(&mut self, graph: &super::graph::Graph) {
+	pub(super) fn check_structure_capture_stores(
+		&mut self,
+		graph: &super::graph::Graph,
+		borrowed_calls: &rustc_hash::FxHashMap<NodeId, rustc_hash::FxHashSet<SymbolId>>,
+	) {
 		let functions: Vec<_> = self
 			.a
 			.escapes
@@ -48,6 +52,9 @@ impl Walker<'_> {
 							&& self.a.escapes.contains(&info.lambda)
 					});
 					creation
+						|| borrowed_calls
+							.get(&node)
+							.is_some_and(|roots| roots.contains(&symbol))
 						|| matches!(self.view(node), View::Name(_))
 							&& self.move_places.get(&node).is_some_and(|places| {
 								places
@@ -487,5 +494,54 @@ mod tests {
 		analyzed(
 			"use { AtomicInteger } = std.concurrency\ntype Reader = () => Integer\nfunction read = (counter: AtomicInteger): Reader => () => counter.load()\n",
 		);
+	}
+	#[test]
+	fn a_later_borrowed_call_keeps_a_capture_source_live() {
+		let source = "type Reader = () => Integer\nfunction make = (): (Reader, Reader) => {\n let items = [1]\n function inspect = (): Integer => items.length\n function saved = (): Integer => items.length\n console.log(inspect())\n (saved, saved)\n}\nlet readers = make()\nconsole.log(readers[0]())\n";
+		assert_eq!(codes(source), ["MEM004"]);
+	}
+	#[test]
+	fn transitive_borrowed_calls_keep_capture_sources_live() {
+		let source = "type Reader = () => Integer\nfunction make = (): Reader => {\n let items = [1]\n function inspect = (): Integer => items.length\n function invoke = (): Integer => inspect()\n function saved = (): Integer => items.length\n console.log(invoke())\n saved\n}\n";
+		assert_eq!(codes(source), ["MEM004"]);
+	}
+
+	#[test]
+	fn an_ignored_saved_callback_keeps_its_borrowed_captures_live() {
+		let source = "type Reader = () => Integer\nfunction ignore = (_callback: Reader): Integer => 0\nfunction make = (): Reader => {\n let items = [1]\n function inspect = (): Integer => items.length\n let callback = inspect\n function saved = (): Integer => items.length\n console.log(ignore(callback))\n saved\n}\n";
+		assert_eq!(codes(source), ["MEM004"]);
+	}
+
+	#[test]
+	fn omitted_defaults_borrow_the_capture_source_only_when_used() {
+		for (argument, expected) in [("", vec!["MEM004"]), ("0", vec![])] {
+			let source = format!(
+				"type Reader = () => Integer\nfunction make = (): Reader => {{\n let items = [1]\n function inspect = (value: Integer = items.length): Integer => value\n function saved = (): Integer => items.length\n console.log(inspect({argument}))\n saved\n}}\n"
+			);
+			assert_eq!(codes(&source), expected);
+		}
+	}
+
+	#[test]
+	fn a_borrowed_call_before_capture_is_not_a_later_use() {
+		let source = "type Reader = () => Integer\nfunction make = (): Reader => {\n let items = [1]\n function inspect = (): Integer => items.length\n console.log(inspect())\n function saved = (): Integer => items.length\n saved\n}\n";
+		assert!(codes(source).is_empty());
+	}
+
+	#[test]
+	fn calling_an_owned_callback_uses_its_environment() {
+		let source = "type Reader = () => Integer\nfunction ignore = (_callback: Reader): Integer => 0\nfunction make = (): Reader => {\n let items = [1]\n function saved = (): Integer => items.length\n console.log(ignore(saved))\n saved\n}\n";
+		assert!(codes(source).is_empty());
+	}
+
+	#[test]
+	fn a_recursive_invocation_does_not_read_the_current_activations_local() {
+		let source = "type Reader = () => Integer\nfunction make = (again: Boolean): Reader => {\n let items = [1]\n function saved = (): Integer => items.length\n if again { console.log(make(false)()) }\n saved\n}\n";
+		assert!(codes(source).is_empty());
+	}
+	#[test]
+	fn replacing_a_borrowed_binding_does_not_read_its_old_value() {
+		let source = "type Reader = () => Integer\nfunction make = (): Reader => {\n mutable items = [1]\n function replace = (): Integer => { items = [2]\n items.length }\n function saved = (): Integer => items.length\n console.log(replace())\n saved\n}\n";
+		assert!(codes(source).is_empty());
 	}
 }

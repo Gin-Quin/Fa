@@ -1,0 +1,19 @@
+-- prints: 2 1 1
+-- prints: 2 1 1
+
+type Reader = () => Integer
+
+function summary = (): (Integer, Integer, Integer) => {
+	mutable items = [1]
+	function inspect = (): Integer => items.length
+	let snapshot = copy items
+	function saved = (): Integer => snapshot.length
+	let readers = (saved, saved)
+	items.push(2)
+	(inspect(), readers[0](), readers[1]())
+}
+
+static compiled = @summary()
+console.log(compiled[0], compiled[1], compiled[2])
+let executed = summary()
+console.log(executed[0], executed[1], executed[2])

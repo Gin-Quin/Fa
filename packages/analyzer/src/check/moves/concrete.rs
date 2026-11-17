@@ -13,6 +13,8 @@ use crate::syntax::View;
 impl Walker<'_> {
 	pub(super) fn finish_concrete_moves(&mut self) -> FxHashMap<NodeId, NodeId> {
 		let mut conflicts = FxHashMap::default();
+		self.publish_callable_capture_facts();
+		let borrowed_calls = self.borrowed_call_observations();
 		self.collect_store_values();
 		let reads = self.ownership_reads();
 		let mut commits: FxHashMap<NodeId, Vec<NodeId>> = FxHashMap::default();
@@ -80,7 +82,7 @@ impl Walker<'_> {
 					}
 				}
 			}
-			self.check_structure_capture_stores(&graph);
+			self.check_structure_capture_stores(&graph, &borrowed_calls);
 			self.check_move_validity(&graph);
 		}
 		conflicts

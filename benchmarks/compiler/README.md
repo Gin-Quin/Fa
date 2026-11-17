@@ -15,7 +15,7 @@ are one standalone file, 100, 1,000 and 2,000 library files, approximately 500 F
 lines each. Packages also have three cyclic namespace files, an entry and a Fa
 configuration; JSON records exact file/line/byte counts and SHA-256s of the inputs.
 `--files 1,100 --lines 100 --runs 3` is a smoke run, never an acceptance result.
-`--mode prepare|measure|profile|corpus|render` resumes one stage using the report.
+`--mode prepare|measure|profile|corpus|rss|render` resumes one stage using the report.
 Keep the first primary report: use a different `--report` for a supplemental run.
 There is no outlier removal. Resumed runs reject changed executables and inputs.
 
@@ -45,7 +45,13 @@ CPUs 0–4, wall-time Fa/Bun <=1.20, on a shared machine. Reference: one worker 
 CPU 5 (`RAYON_NUM_THREADS=1`, `bun check --threads=1`), recording CPU cost as well as
 wall time. All preparation, builds, tests and profilers use CPUs 0–4. The driver
 itself runs on CPUs 0–4. Each child retains microsecond user/system CPU via wait4,
-wall time and kernel peak RSS; Fa checks are monitored against 512 MiB RSS. Bun's
+wall time and GNU-time child peak RSS; Fa checks are monitored against 512 MiB RSS.
+The identical GNU-time launcher is included in both tools' CPU/wall measurements.
+Its child is forked after exec, avoiding Linux wait4's inherited Python-parent
+high-water floor. The uncorrected wait4 RSS is retained as `launcher_peak_rss_kib`.
+The first CPU-5 series predates this correction: its small-input CPU/wall samples
+are preserved, with separately labeled eleven-round RSS supplements (`--mode rss`).
+Larger old peaks above the launcher floor remain valid. Bun's
 RSS is reported without imposing Fa's bound. Child output must be empty and exit
 zero in every measured run. Bun's variable success summary on stderr is excluded.
 

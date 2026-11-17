@@ -12,11 +12,12 @@ import statistics
 import subprocess
 import sys
 import time
-import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
+RUNNER_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 sys.path.insert(0, str(ROOT / "benchmarks/audit"))
-from measurements import control_passes, order_for_round, paired, quantile, sample, snapshot
+from measurements import control_passes, order_for_round, paired, quantile, snapshot
+from resources import sample
 
 
 def run(command, **kwargs):
@@ -24,7 +25,8 @@ def run(command, **kwargs):
 
 
 def digest(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    with Path(path).open("rb") as source:
+        return hashlib.file_digest(source, "sha256").hexdigest()
 
 
 def identity(path):
@@ -87,7 +89,7 @@ def measure(args, data):
     data.setdefault("series", [])
     for fixture in data["fixtures"]:
         for mode in args.modes:
-            row = {"files": fixture["files"], "mode": mode, "start": snapshot(), "samples": {}, "orders": [], "runner_sha256": digest(__file__)}
+            row = {"files": fixture["files"], "mode": mode, "start": snapshot(), "samples": {}, "orders": [], "runner_sha256": RUNNER_SHA256}
             cmds = commands(args, fixture, mode)
             row["commands"] = cmds
             # A whole successful run warms filesystem pages; no checker cache is persisted.
@@ -138,7 +140,7 @@ def profile(args, data):
     fixture = data["fixtures"][-1]
     directory = args.directory / "profile"
     directory.mkdir(parents=True, exist_ok=True)
-    result = {"files": fixture["files"], "timings": {}, "runner_sha256": digest(__file__)}
+    result = {"files": fixture["files"], "timings": {}, "runner_sha256": RUNNER_SHA256}
     for mode in ("single", "default"):
         command = commands(args, fixture, mode)["fa"] + ["--timings"]
         path = directory / f"timings-{mode}.txt"
@@ -181,35 +183,8 @@ def profile(args, data):
 
 
 def corpus_sample(command, output_path=None, timeout=60):
-    with tempfile.TemporaryFile() as output:
-        start = time.perf_counter()
-        child = subprocess.Popen(command, stdout=output, stderr=output)
-        failure = None
-        while True:
-            pid, status, usage = os.wait4(child.pid, os.WNOHANG)
-            if pid:
-                child.returncode = os.waitstatus_to_exitcode(status)
-                break
-            try:
-                proc = Path(f"/proc/{child.pid}/status").read_text()
-                rss = next((int(line.split()[1]) for line in proc.splitlines() if line.startswith("VmRSS:")), 0)
-            except FileNotFoundError:
-                rss = 0
-            if failure is None and (rss > 512 * 1024 or time.perf_counter() - start > timeout):
-                failure = "memory limit" if rss > 512 * 1024 else "timeout"
-                child.kill()
-            time.sleep(.002)
-        output.seek(0)
-        diagnostics = output.read()
-        if output_path is not None:
-            output_path.write_bytes(diagnostics)
-        if usage.ru_maxrss > 512 * 1024:
-            failure = "memory limit"
-        return {"wall": time.perf_counter() - start, "user": usage.ru_utime,
-                "system": usage.ru_stime, "cpu": usage.ru_utime + usage.ru_stime,
-                "peak_rss_kib": usage.ru_maxrss, "exit": child.returncode,
-                "diagnostic_bytes": len(diagnostics), "diagnostic_sha256": hashlib.sha256(diagnostics).hexdigest(),
-                "failure": failure if failure else (None if child.returncode in (0, 1) else "abnormal exit")}
+    return sample(command, None, timeout=timeout, max_rss_kib=512 * 1024,
+                  allowed_exits=(0, 1), check=False, output_path=output_path)
 
 
 def corpus(args, data):
@@ -236,6 +211,21 @@ def corpus(args, data):
     save(args, data)
 
 
+def rss_supplement(args, data):
+    for row in data.get("series", []):
+        if row["files"] > 100 or "launcher_peak_rss_kib" in row["samples"]["fa"][0]:
+            continue
+        row["rss_note"] = "Independent GNU-time RSS supplement: original wait4 RSS is a launcher-contaminated upper bound; original CPU/wall preserved."
+        row["rss_samples"] = {"fa": [], "bun": []}
+        for index in range(args.runs):
+            for label in order_for_round(["fa", "bun"], index):
+                value = sample(row["commands"][label], b"", max_rss_kib=512 * 1024 if label == "fa" else None)
+                row["rss_samples"][label].append(value)
+        row["rss_summary"] = {label: distribution([s["peak_rss_kib"] for s in samples])
+                              for label, samples in row["rss_samples"].items()}
+        save(args, data)
+
+
 def markdown(data):
     lines = ["# Checker comparison", "", "Generated from the accompanying JSON; seconds and MiB. Default parallelism on CPUs 0–4 is the wall-time goal; single worker on CPU 5 measures CPU cost. Shared machine, warm filesystem cache, fresh checker processes.", "",
              "| Files | Mode | Fa wall Q1 / med / Q3 | Bun wall Q1 / med / Q3 | Fa/Bun wall medians / paired [Q1,Q3] | Wall goal | CPU ratio medians / paired | Control wall / CPU | Fa / Bun peak MiB (max) |", "|---:|---|---:|---:|---:|---|---:|---|---:|"]
@@ -245,13 +235,13 @@ def markdown(data):
         a, b = row["summary"]["fa"], row["summary"]["bun"]
         w, c = row["comparisons"]["wall"], row["comparisons"]["cpu"]
         ctrl = " / ".join(f"{row['controls'][m]['ratio_of_medians']:.3f},{row['controls'][m]['median']:.3f} {'pass' if row['controls'][m]['passes'] else 'fail'}" for m in ("wall", "cpu"))
-        rss = [max(s["peak_rss_kib"] for s in row["samples"][label]) / 1024 for label in ("fa", "bun")]
+        rss = [max(s["peak_rss_kib"] for s in row.get("rss_samples", row["samples"])[label]) / 1024 for label in ("fa", "bun")]
         lines.append(f"| {row['files']} | {row['mode']} | {dist(a['wall'])} | {dist(b['wall'])} | {w['ratio_of_medians']:.3f} / {w['median']:.3f} [{w['q1']:.3f},{w['q3']:.3f}] | {w['verdict']} | {c['ratio_of_medians']:.3f} / {c['median']:.3f} | {ctrl} | {rss[0]:.1f} / {rss[1]:.1f} |")
     lines += ["", "| Files | Mode | Tool | User Q1 / med / Q3 | System Q1 / med / Q3 | CPU Q1 / med / Q3 | CPU/wall (median ratio) | RSS MiB Q1 / med / Q3 |", "|---:|---|---|---:|---:|---:|---:|---:|"]
     for row in data.get("series", []):
         for label in ("fa", "bun"):
             s = row["summary"][label]
-            rss = {k: v / 1024 for k, v in s["peak_rss_kib"].items()}
+            rss = {k: v / 1024 for k, v in row.get("rss_summary", {}).get(label, s["peak_rss_kib"]).items()}
             lines.append(f"| {row['files']} | {row['mode']} | {label} | {dist(s['user'])} | {dist(s['system'])} | {dist(s['cpu'])} | {s['cpu']['median'] / s['wall']['median']:.2f} | {dist(rss)} |")
     return "\n".join(lines) + "\n"
 
@@ -266,7 +256,7 @@ def save(args, data):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("all", "prepare", "measure", "profile", "corpus", "render"), default="all")
+    parser.add_argument("--mode", choices=("all", "prepare", "measure", "profile", "corpus", "rss", "render"), default="all")
     parser.add_argument("--files", type=lambda s: list(map(int, s.split(','))), default=[1, 100, 1000, 2000])
     parser.add_argument("--no-build", action="store_true", help="use an already-built release checker")
     parser.add_argument("--lines", type=int, default=500)
@@ -295,14 +285,17 @@ def main():
                 "start": snapshot(), "machine": platform.uname()._asdict(), "runs": args.runs,
                 "fa_binary": identity(args.fa), "bun_binary": identity(args.bun),
                 "versions": versions, "pinned_typescript": pinned,
-                "runner_sha256": digest(__file__), "generator_sha256": digest(ROOT / "benchmarks/compiler/paired.ts"),
+                "runner_sha256": RUNNER_SHA256, "generator_sha256": digest(ROOT / "benchmarks/compiler/paired.ts"),
                 "sources": {str(p): digest(ROOT / p) for p in (
                     "benchmarks/compiler/check_speed.py", "benchmarks/compiler/paired.ts",
-                    "benchmarks/compiler/generate.ts", "packages/benchmark-typescript/bun.lock")},
+                    "benchmarks/compiler/generate.ts", "benchmarks/compiler/resources.py", "packages/benchmark-typescript/bun.lock")},
                 "environment": {key: os.environ[key] for key in (
                     "FA_PIPELINE", "FA_TREE_BUDGET", "FA_SCHEDULE_SEED", "RAYON_NUM_THREADS", "BUN_JSC_useJIT") if key in os.environ},
                 "seed": 1, "lines": args.lines, "affinity": {"single": "5", "default": "0-4"},
                 "goal": "wall time with default parallelism <= 1.20 * bun check; shared machine",
+                "resource_method": "GNU time child RSS; wait4 microsecond CPU including identical GNU-time launcher overhead",
+                "logical_cpus": os.cpu_count(), "runner_affinity": sorted(os.sched_getaffinity(0)),
+                "cpu_model": next((line.split(":", 1)[1].strip() for line in Path("/proc/cpuinfo").read_text().splitlines() if line.startswith("model name")), None),
                 "cache": "Only OS file pages survive: no watch server, incremental Program or .tsbuildinfo"}
         prepare(args, data)
         save(args, data)
@@ -322,6 +315,8 @@ def main():
         profile(args, data)
     if args.mode in ("all", "corpus"):
         corpus(args, data)
+    if args.mode == "rss":
+        rss_supplement(args, data)
     save(args, data)
 
 

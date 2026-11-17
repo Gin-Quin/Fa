@@ -320,4 +320,45 @@ fn relations_are_recorded_for_the_backends() {
 	let unlinks: Vec<&Vec<u32>> = analysis.relation_unlinks.values().collect();
 	assert_eq!(unlinks, [&vec![0, 1, 2, 3]]);
 	assert_eq!(symbol_type(&session, file, "ana"), "Person");
+	let person = analysis.type_of(node(&session, file, "ana"));
+	assert_eq!(
+		session.types().ownership(person),
+		crate::types::Ownership::Ordinary
+	);
+	let fields = session.types().fields_of(person);
+	assert_eq!(
+		fields
+			.iter()
+			.filter(|field| field.flags.contains(crate::types::FieldFlags::RELATION))
+			.count(),
+		7
+	);
+}
+
+#[test]
+fn relation_initializers_borrow_structure_elements() {
+	let (session, file) = analyzed(
+		r#"
+	type Town = {
+		people: Pool<Person> = []
+		type Person = {
+			name: String
+			items: Array<Integer> = []
+			friends: Pool<Person in people>
+			friendOf: Pool<in people->friends>
+		}
+	}
+	function example = () => {
+		mutable town: Town = {}
+		use ana = town.people.add({ name = "Ana", items = [1] })
+		use bao = town.people.add({ name = "Bao", friends = [ana] })
+		console.log(ana.name, bao.friends.size)
+	}
+	"#,
+	);
+	let person = session.analysis(file).type_of(node(&session, file, "ana"));
+	assert_eq!(
+		session.types().ownership(person),
+		crate::types::Ownership::Structure
+	);
 }

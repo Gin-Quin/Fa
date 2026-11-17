@@ -714,11 +714,21 @@ impl Walker<'_> {
 		while let Some(parent) = self.parent(value) {
 			match self.view(parent) {
 				View::Group(_) => value = parent,
+				// A many-side initializer is a list of links, not a list of
+				// copies of the elements' data.
+				View::Array { .. } => value = parent,
 				View::Assignment {
 					target,
 					value: Some(stored),
 					..
 				} if stored == value => {
+					if let Some(object) = self.parent(parent)
+						&& let Some(info) = self.a.objects.get(&object)
+					{
+						let ty = info.ty;
+						let field = self.tree.text(target.index()).to_string();
+						return self.side_of(ty, &field).is_some();
+					}
 					let View::Access {
 						target: holder,
 						members,

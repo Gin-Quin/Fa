@@ -417,6 +417,7 @@ impl Walker<'_> {
 			let mut flags = FieldFlags::empty();
 			flags.set(FieldFlags::READONLY, readonly);
 			flags.set(FieldFlags::REACTIVE, reactive);
+			flags.set(FieldFlags::RELATION, relation.is_some());
 			flags.set(FieldFlags::PRIVATE, text.starts_with('#'));
 			flags.set(
 				FieldFlags::METHOD,

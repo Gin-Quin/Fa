@@ -464,6 +464,8 @@ Storing all the nodes in one pool has two further benefits: destroying the list 
 :::implementation
 ## Implementation details
 
+The type store marks relation sides as links, so ownership classification follows only data fields. A relation initializer stores references, including each item of a many-side literal; copying an element out checks only its data fields.
+
 ### Native
 
 - Each relation side has a source created when an observer reads it. Updates notify the sources of the sides they change; native relation helpers identify these sources by their offsets.

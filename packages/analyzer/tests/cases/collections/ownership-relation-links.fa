@@ -1,0 +1,42 @@
+-- prints: 1 1 1
+-- prints: Ana none 0
+-- prints: 1 1
+
+type Town = {
+	people: Pool<Person> = []
+	type Person = {
+		name: String
+		bestFriend: (Person in people)?
+		bestFriendOf: Pool<people->bestFriend>
+		friends: Pool<Person in people>
+		friendOf: Pool<in people->friends>
+	}
+}
+
+function example = () => {
+	mutable town: Town = {}
+	use ana = town.people.add({ name = "Ana" })
+	use bao = town.people.add({ name = "Bao", bestFriend = ana, friends = [ana] })
+	console.log(bao.friends.size, ana.friendOf.size, ana.bestFriendOf.size)
+	let duplicate = ana
+	console.log(duplicate.name, duplicate.bestFriend?.name ?? "none", duplicate.friends.size)
+}
+example()
+
+type Records = {
+	people: Pool<Person> = []
+	type Person = {
+		name: String
+		items: Array<Integer> = []
+		friends: Pool<Person in people>
+		friendOf: Pool<in people->friends>
+	}
+}
+
+function linkStructures = () => {
+	mutable records: Records = {}
+	use ana = records.people.add({ name = "Ana", items = [7] })
+	use bao = records.people.add({ name = "Bao", friends = [ana] })
+	console.log(ana.items.length, bao.friends.size)
+}
+linkStructures()

@@ -2243,3 +2243,14 @@ Pending/conditional dependencies and calls that replace captured bindings do
 not supply its proofs. Captured-binding replacements are excluded transitively,
 because a later read may refer to a new value. Complete conditional/versioned
 liveness and coordinated capture transfer remain required for point2.
+
+### Ownership enforcement: relation fields are links (implementation, 2026-11-17)
+
+Resolved relation fields carry `FieldFlags::RELATION` in their declared shape,
+including imported types. The shared ownership, structural-projection and deep
+conversion queries already exclude those fields from owned data. A direct-side
+initializer and the items of its many-side literal store links; final store
+collection uses completed object metadata to exclude them from owning stores.
+Ordinary element data copies without `copy`; an element's actual collection data
+still makes it a structure. This implements the existing relation specification,
+without adding copies of linked elements or changing their identities.

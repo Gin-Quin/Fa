@@ -133,6 +133,14 @@ impl Walker<'_> {
 				self.record_copy_sources(value);
 			}
 		}
+		// Object metadata is complete now. A side's initializer may have
+		// been visited before its containing object was recorded.
+		let sites: Vec<_> = self.copy_sites.iter().copied().collect();
+		for value in sites {
+			if self.is_relation_link_store(value) {
+				self.copy_sites.remove(&value);
+			}
+		}
 	}
 
 	/// The runtime body owning a declaration or read. A nested function

@@ -1,0 +1,15 @@
+-- A common field written through a parameter or a module value declares the mutation.
+type A = { kind: "a", count: Integer }
+type B = { aPadding: Integer, kind: "b", count: Integer }
+function bump = (value: A | B) mutates value => {
+	value.count += 1
+}
+mutable shared: A | B = { aPadding = 0, kind = "b", count = 10 }
+function bumpShared = () mutates shared => {
+	shared.count += 5
+}
+mutable local: A | B = { kind = "a", count = 1 }
+bump(local)
+bump(shared)
+bumpShared()
+console.log(local.count, shared.count) -- prints: 2 16

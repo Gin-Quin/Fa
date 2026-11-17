@@ -1326,6 +1326,7 @@ impl Walker<'_> {
 						}
 					}
 				}
+				self.common_union_fields.insert(member);
 				let ty = self.s.types.union(&types);
 				Some((ty, MemberKind::Field(FieldFlags::empty())))
 			}

@@ -1,0 +1,9 @@
+-- error: EFF007
+-- A function that mutates a common union field can't receive a `let` value.
+type A = { kind: "a", count: Integer }
+type B = { aPadding: Integer, kind: "b", count: Integer }
+function bump = (value: A | B) mutates value => {
+	value.count += 1
+}
+let frozen: A | B = { kind = "a", count = 1 }
+bump(frozen)

@@ -1,0 +1,9 @@
+-- error: EFF003
+-- A function writing a common union field of a module value declares it.
+type A = { kind: "a", count: Integer }
+type B = { aPadding: Integer, kind: "b", count: Integer }
+mutable shared: A | B = { aPadding = 0, kind = "b", count = 1 }
+function bump = () => {
+	shared.count += 1
+}
+bump()

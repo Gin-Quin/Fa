@@ -184,6 +184,9 @@ impl Walker<'_> {
 		let text = self.tree.name(name).to_string();
 		let step = match self.a.resolution(member) {
 			Resolution::Field(..) => Step::Field(self.s.types.syms.intern(&text)),
+			_ if self.common_union_fields.contains(&member) => {
+				Step::Field(self.s.types.syms.intern(&text))
+			}
 			Resolution::Builtin(builtin) => {
 				let path = crate::builtins::get(builtin).path;
 				if path.ends_with("#length") {

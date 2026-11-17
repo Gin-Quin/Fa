@@ -2749,3 +2749,22 @@ estimators are unresolved. Profiles use CPUs 0–4. Callgrind exclusive instruct
 categories supplement existing broad wall-phase timings; they are not converted
 into fictional per-phase milliseconds. No checker optimization is part of this
 audit. See `benchmarks/compiler/README.md` for the reproducible command.
+
+The resource collector measures RSS in GNU time's post-exec child: Linux wait4
+otherwise retains the Python launcher's earlier high-water mark for small tools.
+CPU keeps microsecond wait4 precision for the whole waited command, including the
+identical small GNU-time launcher on both sides. The first reference timing
+series is retained, with separate eleven-round RSS supplements for its affected
+small rows. Every completed new round is checkpointed and resume keeps it.
+
+Optimized Rust Walker symbols omit their source module. The phase attribution
+therefore records a method-to-phase registry from the formatted source impls,
+with source hashes; allocator accounting and shared syntax decoding stay separate.
+Exclusive categories partition user-space instructions; inclusive caller costs
+are retained separately. Kernel time and scheduler waiting are not converted into
+instruction-based phase milliseconds.
+
+Validation without LLVM exposed missing compile_file/run unavailable-result APIs.
+Their non-LLVM stubs now match the other compile APIs and have direct tests, so
+runtime-guarded native fixtures still compile. The checker implementation and the
+measured release binary are unchanged.

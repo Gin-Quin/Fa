@@ -177,6 +177,7 @@ def category(name, methods=None):
     if match and match[1] in phases:
         return phases[match[1]]
     rules = [
+        ("runtime_other", ("fa_interpreter::memory",)),
         ("compile_time", ("fa_interpreter", "fa_analyzer::comptime", "::check::comptime")),
         ("references_moves_relations", ("::check::references", "::check::reference_sensitivity", "::check::moves", "::check::relations", "::flow::values")),
         ("flow_effects", ("::flow::", "::check::flow", "::check::effects", "::check::control", "::check::conditions", "::check::tasks")),

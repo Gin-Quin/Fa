@@ -30,6 +30,7 @@ class StatisticsTests(unittest.TestCase):
         self.assertEqual(category("fa_analyzer::check::moves::finish_moves"), "references_moves_relations")
         self.assertEqual(category("fa_analyzer::types::store::kind"), "types_checking")
         self.assertEqual(category("malloc"), "runtime_other")
+        self.assertEqual(category("fa_interpreter::memory::CountingAllocator::alloc"), "runtime_other")
 
     def test_optimized_walker_names_use_their_source_phase(self):
         self.assertEqual(category("???:<fa_analyzer::check::Walker>::record_value_origins"), "references_moves_relations")

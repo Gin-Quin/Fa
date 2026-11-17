@@ -992,9 +992,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let read = match (read, element.default) {
 				(None, Some(default)) => self.expr(default)?,
 				(Some(read), Some(default)) if matches!(read.repr, Repr::Optional(_)) => {
-					let target = self.repr_of(element.ty, pattern.index())?;
-					let result = self.alloca(target, "with_default")?;
 					let (present, inner) = self.split_optional(&self.builder, read)?;
+					let target = match element.binding {
+						PatternBinding::Symbol(symbol) => self.slot_of(symbol, pattern)?.repr,
+						PatternBinding::Nested(nested) => {
+							let ty = self.analysis.pattern(nested).expect("a nested pattern").ty;
+							self.repr_of(ty, nested.index())?
+						}
+						PatternBinding::None => inner.repr,
+					};
+					let result = self.alloca(target, "with_default")?;
 					let given = self.append_block("given_field");
 					let fallback = self.append_block("default_field");
 					let join = self.append_block("bound_field");

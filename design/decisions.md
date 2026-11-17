@@ -2542,3 +2542,8 @@ ordinary loop bindings still designate their original fields. Destructured
 function parameters bind the same PatternInfo after receiving each argument,
 before later defaults or the body read its names. This also fixes the previously
 masked uninitialized bindings in tuples-ranges-patterns.fa.
+
+Destructuring defaults join in the bound symbol's representation (or the nested
+pattern's nonoptional source type), rather than PatternElement.ty, which describes
+the optional field as read. Keep the existing lazy branch and ordinary ownership
+helpers on each arm, including nullable collection/union storage and errors.

@@ -1,0 +1,55 @@
+type Option<Item> = { value: Item? }
+function choose = <Item>(optional: Item?, fallback: Item): Item => {
+	let option: Option<Item> = { value = optional }
+	let { value = fallback } = option
+	value
+}
+console.log(choose<Integer>(none, 4), choose<Integer>(7, 4))
+console.log(choose<String>(none, "fallback"), choose<String>("given", "fallback"))
+console.log(choose<Array<String>>(none, ["fallback"]), choose<Array<String>>(["given"], ["fallback"]))
+-- prints: 4 7
+-- prints: fallback given
+-- prints: ["fallback"] ["given"]
+
+function fallback = (): String => {
+	console.log("fallback evaluated")
+	"fresh"
+}
+function text = (input: String?): String => {
+	let options: Option<String> = { value = input }
+	let { value = fallback(), missing = "absent" } = options
+	"{value} {missing}"
+}
+console.log(text("kept"))
+console.log(text(none))
+-- prints: kept absent
+-- prints: fallback evaluated
+-- prints: fresh absent
+
+type Child = { label: String }
+type Parent = { child: Child? }
+function nested = (parent: Parent): String => {
+	let { child { label } = Child { label = "default" } } = parent
+	label
+}
+console.log(nested(Parent { child = none }), nested(Parent { child = Child { label = "present" } }))
+-- prints: default present
+
+type Failure = Errors { missing }
+function fail = (): String throws Failure => throw Failure.missing
+function throwing = (input: String?): String throws Failure => {
+	let options: Option<String> = { value = input }
+	let { value = try fail() } = options
+	value
+}
+console.log(throwing("safe") catch _error => "caught", throwing(none) catch _error => "caught")
+-- prints: safe caught
+
+async function delayed = (input: Array<String>?): Array<String> => {
+	let options: Option<Array<String>> = { value = input }
+	let { value = ["async"] } = options
+	await std.time.sleep(1)
+	value
+}
+console.log(await delayed(none), await delayed(["given"]))
+-- prints: ["async"] ["given"]

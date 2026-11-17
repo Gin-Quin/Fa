@@ -43,8 +43,6 @@ analyzer/tests/cases/values/06-numbers/T-NUM-8.fa: target limit: formatting Floa
 analyzer/tests/cases/values/07-strings-and-characters/T-STR-11.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
 analyzer/tests/cases/values/09-none-and-optionals/T-OPT-7.fa: line 3: `get` on this array is not supported by the native backend yet
 analyzer/tests/cases/values/10-tuples/T-TUP-6.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
-analyzer/tests/cases/values/16-destructuring/T-DST-3.fa: line 2: converting a value from Optional(Int(IntRepr { bits: 64, signed: true })) to Int(IntRepr { bits: 64, signed: true }) is not supported by the native backend yet
-analyzer/tests/cases/values/16-destructuring/T-DST-4.fa: line 2: converting a value from Optional(Int(IntRepr { bits: 64, signed: true })) to Int(IntRepr { bits: 64, signed: true }) is not supported by the native backend yet
 analyzer/tests/cases/values/17-conditionals/T-IF-4.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
 analyzer/tests/cases/values/17-conditionals/T-WHEN-13.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
 cli/tests/programs/array-callbacks-generics.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native

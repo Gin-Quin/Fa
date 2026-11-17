@@ -217,4 +217,7 @@ their declared layout, using the existing value-copy helpers. Array rest uses
 the same owned slice operation as range indexing, after the pattern's single
 length check. Rest bindings participate in the ordinary local or module cleanup,
 including in loop bodies and async frames.
+An optional field with a default branches on presence and joins in storage of
+the binding's nonoptional type, including for a nested pattern. Only the absent
+branch evaluates the default; both branches use the ordinary ownership helpers.
 :::

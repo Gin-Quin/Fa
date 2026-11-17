@@ -5,8 +5,6 @@ analyzer/tests/cases/types/3.4-anonymous-unions-and-optionals/un-15.fa: line 5: 
 analyzer/tests/cases/types/3.4-anonymous-unions-and-optionals/un-5.fa: line 4: this member is not supported by the native backend yet
 analyzer/tests/cases/types/5.4-set-t-and-growingset-t/se-3.fa: line 3: the `key` of `Set.from` is not supported by the native backend yet
 analyzer/tests/cases/values/09-none-and-optionals/T-OPT-7.fa: line 3: `get` on this array is not supported by the native backend yet
-analyzer/tests/cases/values/16-destructuring/T-DST-3.fa: line 2: converting a value from Optional(Int(IntRepr { bits: 64, signed: true })) to Int(IntRepr { bits: 64, signed: true }) is not supported by the native backend yet
-analyzer/tests/cases/values/16-destructuring/T-DST-4.fa: line 2: converting a value from Optional(Int(IntRepr { bits: 64, signed: true })) to Int(IntRepr { bits: 64, signed: true }) is not supported by the native backend yet
 cli/tests/programs/builtin-methods.fa: line 34: `Integer#checkedPow` is not supported by the native backend yet
 cli/tests/programs/js-million-copy.fa: runtime: recursive deep copy/equality exhausts the stack at one million nodes; use iterative native helpers
 cli/tests/programs/number-api.fa: line 47: this name is not supported by the native backend yet

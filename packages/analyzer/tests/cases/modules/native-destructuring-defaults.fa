@@ -1,0 +1,23 @@
+-- require-split: true
+-- file: library/options.fa
+type Options = { value: String? }
+let configuration: Options = { value = none }
+let { value = "module default" } = configuration
+export namespace = {
+	function describe = (): String => value
+	function choose = <Item>(input: Item?, fallback: Item): Item => {
+		let option: { value: Item? } = { value = input }
+		let { value = fallback } = option
+		value
+	}
+}
+-- file: application/main.fa
+export function = (arguments: Array<String>): Integer => {
+	console.log(library.options.describe())
+	console.log(library.options.choose<String>(none, "fallback"))
+	console.log(library.options.choose<Array<String>>(["given"], ["fallback"]))
+	0
+}
+-- prints: module default
+-- prints: fallback
+-- prints: ["given"]

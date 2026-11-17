@@ -1882,14 +1882,21 @@ impl Walker<'_> {
 impl Walker<'_> {
 	/// `E-OBJ-14`: after `=>`, braces are a block, so `(v) => { x = v, y = 0 }`
 	/// assigns undeclared names. When every statement of a function's block
-	/// body is such a field, it is reported once (not `E-DECL-1` per name),
-	/// and the body is not checked. Whether it reported.
-	pub(super) fn report_object_like_block(&mut self, body: NodeId) -> bool {
+	/// body assigns an undeclared name: the comma form, or a body whose
+	/// return type is an object type, is reported once as an object, its
+	/// field values checked, the block not; otherwise (`{ conter = 1 }`, a
+	/// typo as likely) the names keep their `E-DECL-1`, with the hint.
+	/// Whether it reported.
+	pub(super) fn report_object_like_block(
+		&mut self,
+		body: NodeId,
+		returns: Option<TypeId>,
+	) -> bool {
 		let statements: Vec<NodeId> = match self.view(body) {
 			View::Block { statements } => statements.iter().collect(),
 			_ => return false,
 		};
-		let mut fields = Vec::new();
+		let mut fields = ObjectLikeFields::default();
 		let looks_like_object = !statements.is_empty()
 			&& statements
 				.into_iter()
@@ -1897,25 +1904,41 @@ impl Walker<'_> {
 		if !looks_like_object {
 			return false;
 		}
-		let diagnostic = self.diagnostic(
-			&E_OBJ_14,
-			body,
-			format!(
-				"after `=>`, braces are a block, and `{}` {} not declared: to return an object, write its type before the braces, like `=> TypeName {{ {} }}`",
-				fields.join("`, `"),
-				if fields.len() == 1 { "is" } else { "are" },
-				self.tree.text(body.index()).trim_matches(['{', '}', ' ', '\n', '\t']),
-			),
+		let object = returns.filter(|&ty| {
+			!self.s.types.is_recovering(ty) && matches!(self.s.types.kind(ty), TypeKind::Object(_))
+		});
+		if !fields.comma && object.is_none() {
+			self.object_hint_names.extend(fields.targets);
+			return false;
+		}
+		let type_name = object.map_or("TypeName".to_string(), |ty| self.display(ty));
+		let names = fields.names.join("`, `");
+		let message = format!(
+			"after `=>`, braces are a block, and `{names}` {} not declared: to return an object, write its type before the braces: `=> {type_name} {{ {} }}`",
+			if fields.names.len() == 1 { "is" } else { "are" },
+			self.tree
+				.text(body.index())
+				.trim_matches(['{', '}', ' ', '\n', '\t']),
 		);
+		let diagnostic = self.diagnostic(&E_OBJ_14, body, message);
 		self.report(diagnostic);
+		// the values are still checked: their errors, the names they use
+		for value in fields.values {
+			self.check(value, None);
+		}
 		true
 	}
 
 	/// The fields of a statement that looks like the fields of an object
 	/// literal: `x = v`, or `x = v, y = 0` (a tuple of assignments, or
 	/// `x = (v, y = 0)`), each name undeclared.
-	fn collect_object_like_fields(&mut self, statement: NodeId, fields: &mut Vec<String>) -> bool {
+	fn collect_object_like_fields(
+		&mut self,
+		statement: NodeId,
+		fields: &mut ObjectLikeFields,
+	) -> bool {
 		if let View::Tuple { items } = self.view(statement) {
+			fields.comma = true;
 			let items: Vec<NodeId> = items.iter().collect();
 			return items
 				.into_iter()
@@ -1936,13 +1959,30 @@ impl Walker<'_> {
 		if self.is_declared(name) || self.lookup_builtin(&text).is_some() {
 			return false;
 		}
-		fields.push(text);
-		let others: Vec<NodeId> = match self.view(value) {
-			View::Tuple { items } => items.iter().skip(1).collect(),
-			_ => Vec::new(),
+		fields.names.push(text);
+		fields.targets.push(target);
+		let (first, others): (NodeId, Vec<NodeId>) = match self.view(value) {
+			View::Tuple { items } => {
+				fields.comma = true;
+				let mut items = items.iter();
+				let first = items.next().unwrap_or(value);
+				(first, items.collect())
+			}
+			_ => (value, Vec::new()),
 		};
+		fields.values.push(first);
 		others
 			.into_iter()
 			.all(|item| self.collect_object_like_fields(item, fields))
 	}
+}
+
+/// What [`Walker::report_object_like_block`] collects.
+#[derive(Default)]
+struct ObjectLikeFields {
+	names: Vec<String>,
+	targets: Vec<NodeId>,
+	values: Vec<NodeId>,
+	/// Written with commas: not a meaningful block.
+	comma: bool,
 }

@@ -1184,7 +1184,7 @@ impl Walker<'_> {
 		});
 		self.memo(n, |w| {
 			if !w.jump_target(n, "break") {
-				return TypeId::UNKNOWN;
+				return TypeId::NEVER;
 			}
 			let Some((kind, _, used)) = target else {
 				return TypeId::NEVER;
@@ -1249,9 +1249,10 @@ impl Walker<'_> {
 			self.body.flow.set_unreachable();
 			return TypeId::NEVER;
 		}
-		// a `break` without a loop (`E-LOOP-12`, `E-LOOP-13`) leaves nothing:
-		// the code after it is not reported unreachable as well
-		TypeId::UNKNOWN
+		// a `break` without a loop (`E-LOOP-12`, `E-LOOP-13`) still ends the
+		// path, vacuously: the code after it is not reported unreachable
+		self.body.flow = FlowState::impossible();
+		TypeId::NEVER
 	}
 
 	/// `continue`
@@ -1262,11 +1263,8 @@ impl Walker<'_> {
 			.last()
 			.is_some_and(|cx| cx.function_depth == self.body.functions.len());
 		self.memo(n, |w| {
-			if w.jump_target(n, "continue") {
-				TypeId::NEVER
-			} else {
-				TypeId::UNKNOWN
-			}
+			w.jump_target(n, "continue");
+			TypeId::NEVER
 		});
 		if valid && self.body.flow.reachable {
 			let state = self.body.flow.fork();
@@ -1277,11 +1275,12 @@ impl Walker<'_> {
 				.continues
 				.push(state);
 		}
-		// as for `break`: an invalid `continue` leaves nothing
-		if !valid {
-			return TypeId::UNKNOWN;
+		// as for `break`: an invalid `continue` ends the path vacuously
+		if valid {
+			self.body.flow.set_unreachable();
+		} else {
+			self.body.flow = FlowState::impossible();
 		}
-		self.body.flow.set_unreachable();
 		TypeId::NEVER
 	}
 

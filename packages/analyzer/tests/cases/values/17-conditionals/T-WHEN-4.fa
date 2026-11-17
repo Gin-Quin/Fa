@@ -1,4 +1,4 @@
--- skip-target: bun node web (the JavaScript backend does not lower a tuple binding `as (a, b)` of a `when` arm yet: AN001)
+-- pending: no engine lowers a tuple binding in a `when` arm yet (compile-time evaluation, JavaScript, LLVM)
 -- brief: → `12 6`
 type Position = { x: Float, y: Float }
 type Shape = Union { Point, Circle = { radius: Float }, Rectangle = { width: Float, height: Float }, Segment = Tuple<Position, Position> }

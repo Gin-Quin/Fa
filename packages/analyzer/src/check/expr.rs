@@ -112,7 +112,7 @@ impl Walker<'_> {
 			let diagnostic = w.diagnostic(
 				&E_DECL_1,
 				n,
-				if text == "Character" { "`Character` is no longer a type: use `String` for text, including a single code unit or code point".to_string() } else { format!("`{text}` is not declared: declare it with `let` or `mutable` first") },
+				if text == "Character" { "`Character` is no longer a type: use `String` for text, including a single code unit or code point".to_string() } else if w.object_hint_names.contains(&n) { format!("`{text}` is not declared: declare it with `let` or `mutable` first; or, to return an object, write its type before the braces: `=> TypeName {{ … }}`") } else { format!("`{text}` is not declared: declare it with `let` or `mutable` first") },
 			);
 			w.report(diagnostic);
 			TypeId::UNKNOWN

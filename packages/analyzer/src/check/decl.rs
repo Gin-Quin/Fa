@@ -641,8 +641,12 @@ impl Walker<'_> {
 					SymbolKind::Parameter { .. } | SymbolKind::SelfParameter
 				)
 			});
+		// an undeclared name (`E-DECL-1`, maybe a typo of the mutated one)
+		let undeclared = place.symbol.is_none() && matches!(self.view(name), View::Name(_));
 		// the parameter's `mutates` is not reported unused as well (EFF011)
-		if parameter && let Some(cx) = self.body.functions.last_mut() {
+		if (parameter || undeclared)
+			&& let Some(cx) = self.body.functions.last_mut()
+		{
 			cx.uncovered = true;
 		}
 		let ty = self.memo(n, |w| {

@@ -143,7 +143,6 @@ codes! {
 	W_ERR_1 = "W-ERR-1", Warning, ["WEF002"], "try on an expression that can't fail [D-23]";
 	W_ERR_2 = "W-ERR-2", Warning, [], "catch on an expression that can't fail";
 	W_ERR_4 = "W-ERR-4", Warning, [], "is Error decided at compile time (always true; never true is E-CMP-7)";
-	W_LEX_1 = "W-LEX-1", Warning, [], "a comment above a declaration separated by a blank line *and* starting with --- (probably meant as documentation)";
 	W_LOOP_1 = "W-LOOP-1", Warning, [], "break <value> in a statement loop";
 	W_NUM_1 = "W-NUM-1", Warning, ["WCV001"], "useless conversion";
 	W_NUM_2 = "W-NUM-2", Warning, [], "integer condition made constant by facts (\"the condition is always false\")";

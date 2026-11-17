@@ -1,0 +1,17 @@
+-- The analyzer's part of a tuple binding in a `when` arm (no engine lowers it
+-- yet: T-WHEN-4): the valid form is accepted, the wrong ones are reported.
+type Pair = Union { Empty, Two = Tuple<Integer, Integer>, One = Integer }
+function sum = (pair: Pair): Integer => when pair is {
+	Pair.Two as (p, q) => p + q
+	Pair.One as single => single
+	Pair.Empty => 0
+}
+function a = (pair: Pair): Integer => when pair is {
+	Pair.One as (x, y) => x -- error: E-DST-2
+	Pair.Two as (p, q, r) => p -- error: E-DST-5
+	Pair.Empty => 0
+}
+function b = (pair: Pair): Integer => when pair is {
+	Pair.Two as (p, p) => p -- error: E-DST-7
+	else => 0
+}

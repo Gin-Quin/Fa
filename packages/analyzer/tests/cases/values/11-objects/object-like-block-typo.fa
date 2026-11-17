@@ -1,0 +1,10 @@
+-- A block assigning one undeclared name is as likely a typo: E-DECL-1 on the
+-- name, its message with the object hint added (review M4).
+mutable counter = 0
+function bump = () mutates counter => {
+	conter = counter + 1 -- error: E-DECL-1
+}
+function reset = () mutates counter => { countr = 0 } -- error: E-DECL-1
+bump()
+reset()
+console.log(counter)

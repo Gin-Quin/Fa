@@ -2738,3 +2738,11 @@ Values and control-flow brief, branch `analyzer/pending-a`.
 - **Assigning a parameter** (`EFF006`, `E-DECL-13`) marks the function's effects as not covered: its `mutates` is not also reported unused (`EFF011`).
 - **E-OBJ-14**: a function body block whose statements are all assignments to undeclared names (`{ x = v, y = 0 }`, read as `x = v, y = 0`) is reported once on the block, and the block is not checked further.
 - **E-CMP-5 in `when`**: a range value used as a pattern, as for `is`. **TY057 (E-CMP-9) after `is`**: an unqualified member, as in `when`.
+
+### Review fixes (2026-11-17, decided by the lead)
+
+- **Nested literal lengths**: the length of a nested literal is known at every depth (`[[1, 2], [3, 4]]` has 2 items of 2 items each) as long as the value keeps its literal type; `let [[a, b], [c, d]] = m` needs no `try` (values/numbers rule 3). Not implemented yet: T-DST-13 is pending.
+- **W-LEX-1 is retired**: the blank line is the documented way to write a comment that is not documentation.
+- **Tuple bindings of `when` arms**: the analyzer accepts and checks them; the printing cases stay pending until every engine lowers them (no skip list for it).
+- **E-OBJ-14** is reported alone only where the block can't be meant as a block: the comma form, or a function whose return type is an object type (named in the fix). A block assigning undeclared names otherwise keeps `E-DECL-1` on each name, with the object hint in its message. The field values are always checked.
+- **An invalid `break`/`continue`** ends its path, vacuously (`FlowState::impossible`): the narrowing after it holds, and the code after it is not reported unreachable.

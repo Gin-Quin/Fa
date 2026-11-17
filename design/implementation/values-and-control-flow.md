@@ -163,7 +163,7 @@ Source: `getting-started/syntax-basics`.
 | E-LEX-4 | `!` not followed by `=` (`!x`, `x!`) | Fa has no `!`: use `not` for booleans, `is not none` or `??` for optionals |
 | E-LEX-5 | `else` at the start of a line | write `} else {` on one line (parser today silently produces garbage: an `if` then a dangling block) |
 | E-LEX-6 | unterminated string or block comment | — |
-| W-LEX-1 | a comment above a declaration separated by a blank line *and* starting with `---` (probably meant as documentation) | optional lint, low priority |
+| (retired) | a comment above a declaration separated by a blank line and starting with `---`: the blank line is the documented way to write a comment that is not documentation (getting-started/syntax-basics), so no warning (decided by the lead, 2026-11-17) | — |
 
 ### Runtime semantics
 

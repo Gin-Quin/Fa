@@ -1,0 +1,10 @@
+-- An invalid `break` (E-LOOP-12) still ends its path: the narrowing after the
+-- `if` holds, and only the unreachable-code warning that followed it is gone
+-- (review of analyzer/pending-a, M3).
+function h = (n: Integer?): Integer => {
+	if n is none {
+		break -- error: E-LOOP-12
+	}
+	n + 1
+}
+console.log(h(1))

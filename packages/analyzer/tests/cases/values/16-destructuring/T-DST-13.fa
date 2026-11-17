@@ -1,6 +1,6 @@
--- corrected: the inner arrays are not proven to have two items: `try let` (operations/destructuring)
+-- pending: the lengths of nested literals are not tracked yet (values/numbers, rule 3: `[[1, 2], [3, 4]]` has 2 items of 2 items each): the inner patterns ask for `try`
 -- brief: → `5`
 let m = [[1, 2], [3, 4]]
-try let [[a, b], [c, d]] = m
+let [[a, b], [c, d]] = m
 console.log(a + d)
 -- prints: 5

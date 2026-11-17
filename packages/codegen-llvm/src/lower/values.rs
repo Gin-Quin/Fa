@@ -252,6 +252,15 @@ pub enum Repr {
 }
 
 impl Repr {
+	/// Optionality is flattened: an absent lookup and a stored `none` have
+	/// the same value, including for a collection whose only item is None.
+	pub fn optional(self) -> Option<Self> {
+		match self {
+			Repr::Optional(_) | Repr::None => Some(self),
+			repr => Scalar::of(repr).map(Repr::Optional),
+		}
+	}
+
 	/// Whether values of this representation exist at run time.
 	pub fn has_value(self) -> bool {
 		!matches!(self, Repr::Void | Repr::Never | Repr::None)

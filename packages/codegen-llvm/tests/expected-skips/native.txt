@@ -1,7 +1,6 @@
 # The programs the native target doesn't pass yet, with the reason
 # (`tests/programs.rs`): any other compile error fails.
 analyzer/tests/cases/types/5.4-set-t-and-growingset-t/se-3.fa: line 3: the `key` of `Set.from` is not supported by the native backend yet
-analyzer/tests/cases/values/09-none-and-optionals/T-OPT-7.fa: line 3: `get` on this array is not supported by the native backend yet
 cli/tests/programs/builtin-methods.fa: line 34: `Integer#checkedPow` is not supported by the native backend yet
 cli/tests/programs/js-million-copy.fa: runtime: recursive deep copy/equality exhausts the stack at one million nodes; use iterative native helpers
 cli/tests/programs/number-api.fa: line 47: this name is not supported by the native backend yet

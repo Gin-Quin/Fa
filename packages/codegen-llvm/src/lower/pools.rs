@@ -22,7 +22,7 @@ use inkwell::builder::Builder;
 use inkwell::values::{FunctionValue, IntValue, PointerValue};
 
 use crate::error::Error;
-use crate::lower::values::{IntRepr, Repr, Scalar, Val};
+use crate::lower::values::{IntRepr, Repr, Val};
 use crate::lower::{LoopFrame, Lowering, Slot};
 
 /// How a `for` reaches the elements that never move of a collection.
@@ -499,17 +499,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			repr => repr,
 		};
 		// an optional value (a map's `T?` values): absent reads as `none` too
-		let repr = match value_repr {
-			Repr::Optional(_) => value_repr,
-			_ => match Scalar::of(value_repr) {
-				Some(scalar) => Repr::Optional(scalar),
-				None => {
-					return Err(
-						self.unsupported(node.index(), "an optional reference to this value")
-					);
-				}
-			},
-		};
+		let repr = value_repr
+			.optional()
+			.ok_or_else(|| self.unsupported(node.index(), "an optional reference to this value"))?;
+		if repr == Repr::None {
+			return Ok(Val::none());
+		}
 		let result = self.alloca(repr, "element")?;
 		self.builder
 			.build_store(result.pointer, super::zero_of(self.llvm_type(repr)))?;

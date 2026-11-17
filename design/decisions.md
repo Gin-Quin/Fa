@@ -2788,3 +2788,12 @@ writable aliases; heterogeneous fields merge an owned value of the complete
 joined field type before ordinary narrowing. Runtime alternative tags use the
 concrete type in the shared store, so local analyzed types, generic substitutions
 and separately compiled consumers agree. This retains written type origins.
+
+
+## Native completeness: optional array lookups (2026-11-17)
+
+Flatten lookup optionality at the representation boundary. Already optional items
+keep their representation, and None-only items have no value to load. Array and
+GrowingArray share the get lowering while retaining their own addressing;
+collection-reference reads use the same optional representation rule. Receiver
+and index evaluation still occur for None-only lookups.

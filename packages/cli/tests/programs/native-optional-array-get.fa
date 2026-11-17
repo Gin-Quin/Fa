@@ -1,0 +1,30 @@
+function lookup = <Item>(items: Array<Item?>, index: Integer): Item? => items.get(index)
+function growingLookup = <Item>(items: GrowingArray<Item?>, index: Integer): Item? => items.get(index)
+let integers: Array<Integer?> = [1, none, 3]
+console.log(lookup(integers, 0), lookup(integers, 1), lookup(integers, -1), lookup(integers, -4), lookup(integers, 9)) -- prints: 1 none 3 none none
+let strings: Array<String?> = ["managed string beyond inline capacity", none]
+console.log(lookup(strings, 0), lookup(strings, 1), lookup(strings, -1), lookup(strings, 9)) -- prints: managed string beyond inline capacity none none none
+let objects: Array<{ value: Integer }?> = [{ value = 7 }, none]
+console.log(lookup(objects, 0)?.value, lookup(objects, 1)?.value, lookup(objects, 9)?.value) -- prints: 7 none none
+let growing: GrowingArray<String?> = [none, "growing managed string beyond inline capacity"]
+console.log(growingLookup(growing, 0), growingLookup(growing, -1), growingLookup(growing, 9)) -- prints: none growing managed string beyond inline capacity none
+let inline: InlineArray<Integer?, 3> = [1, none, 3]
+console.log(inline.get(0), inline.get(1), inline.get(-1), inline.get(9)) -- prints: 1 none 3 none
+let mixed: Array<(Integer | String)?> = [5, none, "mixed managed payload beyond inline capacity"]
+console.log(mixed.get(0), mixed.get(1), mixed.get(-1), mixed.get(9)) -- prints: 5 none mixed managed payload beyond inline capacity none
+
+mutable values: Array<Integer?> = [4, none]
+mutable use current = values.get(0)
+if current is not none { current += 2 }
+reuse current = values.get(1)
+assert current is none
+reuse current = values.get(9)
+assert current is none
+console.log(values) -- prints: [6, none]
+
+mutable calls = 0
+function next = (): Integer mutates calls => { calls += 1
+	3
+}
+let absent: Array<None> = [none]
+console.log(absent.get(next()), calls) -- prints: none 1

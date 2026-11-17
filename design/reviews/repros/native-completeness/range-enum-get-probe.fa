@@ -1,0 +1,46 @@
+-- Ranges as values, enumeration conversions, flattened optional lookups.
+type Window = { span: Range, label: String }
+mutable windows: Array<Window> = [{ span = 1..5, label = "a" }, { span = 2..=8, label = "b" }]
+windows[0].span.end = none
+windows[1].span.start = none
+windows[1].span.includesEnd = false
+console.log(windows[0].span, windows[1].span)
+console.log(
+	windows[0].span == 1..
+	windows[1].span == ..8
+	windows[1].span != ..8
+	windows[0].span == 1..5
+)
+mutable r = 3..7
+let saved = r
+r.start = 0
+console.log(r, saved, r == saved)
+function sameRange = (left: Range, right: Range): Boolean => left == right
+console.log(sameRange(0..7, r), sameRange(1..=2, 1..2))
+mutable keyed: Map<Range, String> = [(1..3, "one-three")]
+mutable key = 1..9
+key.end = 3
+console.log(keyed.get(key) ?? "missing")
+
+type Level = Enum { low = 5, middle = 0, high = 9223372036854775807 }
+type Plain = Enum { a, b, c, d }
+for level in Level.members { console.log(Integer(level), Int64(level)) }
+for value in Plain.members { console.log(UInt8(value), Int16(value)) }
+let levels: Array<Level?> = [Level.high, none]
+console.log(levels.map((level) => if level is not none { Integer(level) } else { 0 }))
+
+mutable maybeNames: GrowingArray<String?> = ["first name beyond the inline capacity", none]
+maybeNames.push("third")
+console.log(
+	maybeNames.get(0)
+	maybeNames.get(1)
+	maybeNames.get(2)
+	maybeNames.get(-1)
+	maybeNames.get(7)
+)
+let objects: Array<{ v: Integer }?> = [{ v = 1 }, none]
+console.log(objects.get(0)?.v ?? -1, objects.get(1)?.v ?? -1, objects.get(5)?.v ?? -1)
+let nones: GrowingArray<None> = [none, none]
+console.log(nones.get(0), nones.get(9))
+mutable growingStrings: GrowingArray<String> = ["s0 beyond the inline capacity", "s1"]
+console.log(growingStrings.get(0), growingStrings.get(-1), growingStrings.get(2))

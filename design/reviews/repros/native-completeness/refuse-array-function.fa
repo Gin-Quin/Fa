@@ -1,0 +1,17 @@
+-- Must be refused: a module-level lookup reference into an Array, and a function that pushes
+-- (Array#push may reallocate and move every item). Accepted today: the write goes to the old storage natively.
+mutable numbers: Array<Integer> = [1, 2, 3]
+mutable use found = numbers.find((value) => value == 2)
+function grow = () mutates numbers => {
+	for index in 0..1000 { numbers.push(index) }
+}
+function write = (): Integer mutates numbers => {
+	if found is not none {
+		found = 7
+		return found
+	}
+	0
+}
+grow()
+console.log(write())
+console.log(numbers.get(1) ?? -1)

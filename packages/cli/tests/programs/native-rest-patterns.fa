@@ -1,0 +1,63 @@
+-- Rest values own their fields/items independently of the source.
+type Person = { name: String, age: Integer, city: String }
+mutable person: Person = { name = "Ana", age = 3, city = "Lyon" }
+let { name as firstName, ...details } = person
+person.city = "Paris"
+console.log(firstName, details, person.city)
+-- prints: Ana { age = 3, city = "Lyon" } Paris
+let { name as _name, age as _age, city as _city, ...empty } = person
+console.log(empty)
+-- prints: {}
+
+function tail = <Item>(items: Array<Item>): Array<Item> throws IndexError => {
+	try let [_first, ...rest] = items
+	rest
+}
+console.log(tail(["one", "two", "three"]) catch _error => [])
+console.log(tail([1]) catch _error => [])
+console.log(tail<Integer>([]) catch _error => [-1])
+-- prints: ["two", "three"]
+-- prints: []
+-- prints: [-1]
+mutable words = ["a", "b", "c"]
+mutable [head, ...tailWords] = words
+try tailWords[0] = "changed"
+words[2] = "source"
+console.log(head, tailWords, words)
+-- prints: a ["changed", "c"] ["a", "b", "source"]
+let [...all] = words
+console.log(all)
+-- prints: ["a", "b", "source"]
+
+for { name, ...rest } in [Person { name = "Bo", age = 2, city = "X" }] {
+	console.log(name, rest)
+}
+-- prints: Bo { age = 2, city = "X" }
+let { point { x, ...other }, ...outer } = { point = { x = 1, y = "yes" }, flag = true }
+console.log(x, other, outer)
+-- prints: 1 { y = "yes" } { flag = true }
+
+async function delayed = (items: Array<String>): Array<String> throws IndexError => {
+	try let [_first, ...rest] = items
+	await std.time.sleep(1)
+	rest
+}
+console.log(await delayed(["x", "y"]) catch _error => [])
+-- prints: ["y"]
+
+type Payload = { id: Integer, words: Array<String> }
+mutable payload: Payload = { id = 7, words = ["kept", "safe"] }
+mutable { id, ...remaining } = copy payload
+try remaining.words[0] = "rest"
+try payload.words[1] = "source"
+console.log(id, remaining.words, payload.words)
+-- prints: 7 ["rest", "safe"] ["kept", "source"]
+let people = Columnar<Person>.from([Person { name = "Cy", age = 4, city = "Z" }])
+for { name, ...rest } in people {
+ console.log(name, rest)
+}
+-- prints: Cy { age = 4, city = "Z" }
+
+function describe = ({ name, ...rest }: Person): String => "{name} {rest.city}"
+console.log(describe(person))
+-- prints: Ana Paris

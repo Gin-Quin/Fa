@@ -2107,6 +2107,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				{
 					self.frame_mut().readonly_strings.insert(pointer);
 				}
+				self.bind_parameter_pattern(param.node, param.symbol)?;
 				continue;
 			}
 			let slot = self.alloca(repr, "parameter")?;
@@ -2155,6 +2156,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					}
 				}
 			}
+			self.bind_parameter_pattern(param.node, param.symbol)?;
 		}
 		if let Some(sig) = info.sig {
 			let requires = self.types().sig(sig).requires;

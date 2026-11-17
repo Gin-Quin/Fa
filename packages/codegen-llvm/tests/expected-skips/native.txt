@@ -7,10 +7,7 @@ analyzer/tests/cases/types/5.4-set-t-and-growingset-t/se-3.fa: line 3: the `key`
 analyzer/tests/cases/values/09-none-and-optionals/T-OPT-7.fa: line 3: `get` on this array is not supported by the native backend yet
 analyzer/tests/cases/values/16-destructuring/T-DST-3.fa: line 2: converting a value from Optional(Int(IntRepr { bits: 64, signed: true })) to Int(IntRepr { bits: 64, signed: true }) is not supported by the native backend yet
 analyzer/tests/cases/values/16-destructuring/T-DST-4.fa: line 2: converting a value from Optional(Int(IntRepr { bits: 64, signed: true })) to Int(IntRepr { bits: 64, signed: true }) is not supported by the native backend yet
-analyzer/tests/cases/values/16-destructuring/T-DST-5.fa: line 3: a rest pattern is not supported by the native backend yet
-analyzer/tests/cases/values/16-destructuring/T-DST-6.fa: line 3: a rest pattern is not supported by the native backend yet
 cli/tests/programs/builtin-methods.fa: line 34: `Integer#checkedPow` is not supported by the native backend yet
 cli/tests/programs/js-million-copy.fa: runtime: recursive deep copy/equality exhausts the stack at one million nodes; use iterative native helpers
 cli/tests/programs/number-api.fa: line 47: this name is not supported by the native backend yet
 cli/tests/programs/references.fa: line 42: a `use` of this value is not supported by the native backend yet
-cli/tests/programs/tuples-ranges-patterns.fa: line 39: a rest pattern is not supported by the native backend yet

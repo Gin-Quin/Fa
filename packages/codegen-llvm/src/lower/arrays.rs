@@ -2501,7 +2501,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.slots.insert(symbol, Slot { pointer, repr });
 		}
 		if info.rest.is_some() {
-			return Err(self.unsupported(node.index(), "a rest pattern in a `for`"));
+			let value = self.load(item)?;
+			self.bind_rest(info, value, node)?;
 		}
 		Ok(())
 	}

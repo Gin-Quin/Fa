@@ -844,13 +844,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					unreachable!()
 				};
 				let (chunk, slot) = chunk.expect("a chunk");
-				self.bind_columns(
-					destructured.as_ref().expect("a pattern"),
-					object,
-					chunk,
-					slot,
-					node,
-				)?;
+				let info = destructured.as_ref().expect("a pattern");
+				self.bind_columns(info, object, chunk, slot, node)?;
+				if info.rest.is_some() {
+					let value = self.load(element_slot)?;
+					self.bind_rest(info, value, node)?;
+				}
 			}
 			_ if destructured.is_some() => {
 				self.bind_item_pattern(

@@ -2535,3 +2535,10 @@ place once, then updates the bound and its presence flag together; clearing a
 bound stores zero so range keys keep canonical hashes. Equality compares all
 flags and only the present bounds. No heap storage or new runtime helper is
 needed for ranges, including generic, async and per-unit compilation.
+
+Rest patterns use the analyzer's rest type for object projection and the existing
+owned range-slice lowering for arrays. Loop rests own their projected values;
+ordinary loop bindings still designate their original fields. Destructured
+function parameters bind the same PatternInfo after receiving each argument,
+before later defaults or the body read its names. This also fixes the previously
+masked uninitialized bindings in tuples-ranges-patterns.fa.

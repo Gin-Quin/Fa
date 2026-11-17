@@ -208,3 +208,13 @@ Destructuring extracts values. To build a type from some fields of another type,
 type Contact = Pick<User, { name, email }>
 type PublicUser = Omit<User, { password }>
 ```
+
+:::implementation
+LLVM binds the analyzer's `PatternInfo` in source order after evaluating the
+source once. Destructured function parameters bind their patterns from the
+received argument before later parameters and the body use those names. Object rest projects the fields of the analyzer's rest type in
+their declared layout, using the existing value-copy helpers. Array rest uses
+the same owned slice operation as range indexing, after the pattern's single
+length check. Rest bindings participate in the ordinary local or module cleanup,
+including in loop bodies and async frames.
+:::

@@ -79,6 +79,7 @@ pub(crate) enum Argument {
 pub(crate) enum Step {
 	Field(Arc<str>),
 	Index(Node),
+	Key(Node),
 }
 
 #[derive(Clone)]
@@ -207,6 +208,7 @@ impl<'a> Builder<'a> {
 				.map(|step| match step {
 					ir::Step::Field(name) => Step::Field(Arc::clone(name)),
 					ir::Step::Index(index) => Step::Index(self.add(index)),
+					ir::Step::Key(key) => Step::Key(self.add(key)),
 				})
 				.collect(),
 		}

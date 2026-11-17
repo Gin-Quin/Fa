@@ -1285,7 +1285,7 @@ impl<'a> Lowerer<'a> {
 		};
 		if let Some(place) = borrowed.as_mut() {
 			for step in &mut place.steps {
-				if let Step::Index(value) = step {
+				if let Step::Index(value) | Step::Key(value) = step {
 					let slot = self.temp();
 					setup.push(Expr::Let(slot, value.clone().boxed()));
 					*value = Expr::Local(slot);
@@ -1442,7 +1442,11 @@ impl<'a> Lowerer<'a> {
 			View::Index { target, index } => {
 				let mut place = self.place(target)?;
 				let index = self.expr(index);
-				place.steps.push(Step::Index(index));
+				place.steps.push(if self.a.key_reads.contains(&n) {
+					Step::Key(index)
+				} else {
+					Step::Index(index)
+				});
 				Some(place)
 			}
 			_ => None,

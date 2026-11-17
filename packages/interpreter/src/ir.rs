@@ -162,6 +162,8 @@ pub enum Step {
 	Field(Arc<str>),
 	/// `[index]` (or `[key]` of a map).
 	Index(Expr),
+	/// The checked dotted field path of a key-set loop.
+	Key(Expr),
 }
 
 /// An assignable place: a local and the steps below it.

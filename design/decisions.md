@@ -2313,3 +2313,13 @@ static subtrees and lazy defaults remain shared constants. This preserves bound
 checks through generic decoders of String or Bytes JSON inputs. CapacityError
 retains the trunk's internal error ID 12; Utf8Error is appended at 13, with its
 runtime constructor and explicit ID assertions updated together.
+
+
+Borrowed compile-time key-set arguments retain a distinct checked field-path
+step. Resolve it to ordinary field steps before gathering the argument and its
+writeback, sharing the existing object copy-on-write preflight. A generic key
+read's quiet analysis can have unknown type, so treating only String-typed
+arguments as immutable does not cover it. The required differential corpus
+caught writeback through an ordinary object index; the mixed capacity/key-set
+fixture checks nested paths, UTF-16 lengths and hidden argument order on every
+target without weakening that corpus.

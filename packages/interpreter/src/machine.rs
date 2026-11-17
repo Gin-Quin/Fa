@@ -501,7 +501,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 			.steps
 			.iter()
 			.filter_map(|step| match step {
-				Step::Index(node) => Some(Input::Expr(*node)),
+				Step::Index(node) | Step::Key(node) => Some(Input::Expr(*node)),
 				_ => None,
 			})
 			.collect();
@@ -581,16 +581,35 @@ impl<'i, 'h> Machine<'i, 'h> {
 			Finish::Mutate(path, place) => self.place(place, PlaceAction::Mutate(path, values)),
 			Finish::Place(place, action) => {
 				let mut keys = values.into_iter();
+				let mut steps = Vec::new();
+				for step in place.steps {
+					match step {
+						Step::Field(name) => steps.push(PlaceStep::Field(name)),
+						Step::Index(_) => {
+							steps.push(PlaceStep::Index(keys.next().expect("a place index")))
+						}
+						Step::Key(_) => {
+							let key = keys.next().expect("a field path");
+							let path = key.as_str().ok_or_else(|| {
+								Error::Stop("expected a checked field path".into())
+							})?;
+							self.interpreter.reserve(
+								path.len().saturating_add(
+									path.split('.')
+										.count()
+										.saturating_mul(std::mem::size_of::<PlaceStep>()),
+								),
+							)?;
+							steps.extend(
+								path.split('.')
+									.map(|name| PlaceStep::Field(Arc::from(name))),
+							);
+						}
+					}
+				}
 				let resolved = ResolvedPlace {
 					slot: place.slot,
-					steps: place
-						.steps
-						.into_iter()
-						.map(|step| match step {
-							Step::Field(name) => PlaceStep::Field(name),
-							Step::Index(_) => PlaceStep::Index(keys.next().expect("a place index")),
-						})
-						.collect(),
+					steps,
 				};
 				match action {
 					PlaceAction::Borrow(mut gather) => {

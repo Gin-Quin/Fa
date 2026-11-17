@@ -2545,8 +2545,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		})
 	}
 
+	/// A temporary tagged view for comparison. It borrows the complete payload;
+	/// neither the tag wrapper nor its data acquires ownership or cleanup.
+	fn comparison_union_view(&self, value: Val<'ctx>, node: NodeId) -> Result<Val<'ctx>, Error> {
+		let ty = self
+			.canonical_type(value.repr)
+			.ok_or_else(|| self.unsupported(node.index(), "comparing this value with a union"))?;
+		let layout = self.box_type(Some(value.repr));
+		let pointer = self.alloca_type(layout.into(), "comparison_view")?;
+		let id = self.context.i64_type().const_int(self.type_id(ty), false);
+		let tag = self.builder.build_struct_gep(layout, pointer, 0, "")?;
+		self.builder.build_store(tag, id)?;
+		let data = self.builder.build_struct_gep(layout, pointer, 1, "")?;
+		self.builder
+			.build_store(data, value.value.expect("a payload"))?;
+		Ok(Val::new(Repr::Union, pointer))
+	}
+
 	/// `a == b` on values of unions: the same member, and equal data (like
-	/// `faEquals` on JavaScript). A value of a member type is boxed first.
+	/// `faEquals` on JavaScript). A plain operand provides a borrowed tagged view.
 	pub(crate) fn unions_equal(
 		&mut self,
 		left: Val<'ctx>,
@@ -2562,7 +2579,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let right = if union(right.repr) {
 			right
 		} else {
-			self.convert(right, left.repr, node.index())?
+			self.comparison_union_view(right, node)?
 		};
 		let left = self.union_view(left)?;
 		let right = self.union_view(right)?;

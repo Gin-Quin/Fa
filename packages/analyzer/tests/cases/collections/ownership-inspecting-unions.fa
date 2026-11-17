@@ -1,0 +1,12 @@
+type Box = { items: Array<Integer> }
+function same = (value: Box | String, box: Box): Boolean => value == box
+function inspect = (): Integer => {
+	let box = Box { items = [1, 2] }
+	let value: Box | String = copy box
+	assert same(value, box)
+	assert not same("other", box)
+	assert box.items.length == 2
+	2
+}
+static compiled = @inspect()
+console.log(compiled, inspect()) -- prints: 2 2

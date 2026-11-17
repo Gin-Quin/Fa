@@ -1,0 +1,18 @@
+-- Comparing compatible collection types inspects their original items.
+function differentMaps = (left: Map<Integer, { name: String, age: Integer }>, right: Map<Integer, { name: String }>): Boolean => left != right
+function differentSets = (left: Set<{ name: String, age: Integer }>, right: Set<{ name: String }>): Boolean => left != right
+function sameSets = (left: Set<Array<1 | 2>>, right: Set<Array<Integer>>): Boolean => left == right
+function inspect = (): Integer => {
+	let people: Map<Integer, { name: String, age: Integer }> = [(1, { name = "Ana", age = 2 })]
+	let names: Map<Integer, { name: String }> = [(1, { name = "Ana" })]
+	assert differentMaps(people, names)
+	let complete: Set<{ name: String, age: Integer }> = [{ name = "Ana", age = 2 }]
+	let labels: Set<{ name: String }> = [{ name = "Ana" }]
+	assert differentSets(complete, labels)
+	let exact: Set<Array<1 | 2>> = [[1, 2]]
+	let wide: Set<Array<Integer>> = [[1, 2]]
+	assert sameSets(exact, wide)
+	3
+}
+static compiled = @inspect()
+console.log(compiled, inspect()) -- prints: 3 3

@@ -3035,3 +3035,15 @@ Omitted borrowed parameters preserve the selected existing place, including its 
 #### Ownership enforcement: map entry transfers (2026-11-17)
 
 Map entry grouping preserves normal expression evaluation and coercions. An entry supplied as a temporary or an analyzer-proven moved whole tuple transfers both parts into the table; its old tuple cleanup is removed or its source slot cleared. Splitting a moved whole owner internally is not a new source-level partial move. Borrowed collection-construction inputs remain subject to the later construction-store slice. This removes an implicit Resource copy and early duplicate finalization in the map-entry fallback.
+
+### Ownership enforcement: general field transfers (lead, 2026-11-17)
+
+The point-4 field-transfer mechanism is independent of value category. At the
+owner's last use, a field path owning storage moves without copying, including
+a String field or an ordinary object/tuple containing strings. The analyzer
+publishes the same move fact for every such path and for stored temporaries;
+native cleanup excludes the transferred path and drops the rest once. Ordinary
+values never require `copy`; their move is an optimization promised by the
+native String contract. Structures still require `copy` when their source stays
+live. The perf/strings `respond` and `records` acceptance programs join the
+ownership fixtures when they land on main.

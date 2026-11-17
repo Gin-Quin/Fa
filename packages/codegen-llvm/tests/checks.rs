@@ -463,6 +463,48 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn union_equality_borrows_the_plain_values_payload() {
+		let source =
+			include_str!("../../analyzer/tests/cases/collections/ownership-inspecting-unions.fa");
+		for target in [Target::Native, Target::Wasm] {
+			let ir = ir_at_target(
+				"inspecting-union-payload",
+				source,
+				true,
+				OptLevel::O0,
+				target,
+			);
+			let body = function(&ir, "fa.same");
+			assert!(
+				!body.contains("@fa.copy") && !body.contains("@fa_alloc"),
+				"{target:?}: {body}"
+			);
+		}
+	}
+
+	#[test]
+	fn table_equality_inspects_both_original_entry_layouts() {
+		let source =
+			include_str!("../../analyzer/tests/cases/collections/ownership-inspecting-tables.fa");
+		for target in [Target::Native, Target::Wasm] {
+			let ir = ir_at_target(
+				"inspecting-table-layouts",
+				source,
+				true,
+				OptLevel::O0,
+				target,
+			);
+			for name in ["fa.differentMaps", "fa.differentSets", "fa.sameSets"] {
+				let body = function(&ir, name);
+				assert!(
+					!body.contains("@fa.copy") && !body.contains("@fa.convert"),
+					"{target:?}: {name}\n{body}"
+				);
+			}
+		}
+	}
+
+	#[test]
 	fn caught_structure_values_move_without_a_copier() {
 		let source = include_str!("../../analyzer/tests/cases/ownership-caught-values.fa");
 		for target in [Target::Native, Target::Wasm] {

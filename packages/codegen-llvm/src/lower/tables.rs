@@ -1255,20 +1255,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		_node: NodeId,
 	) -> Result<(IntValue<'ctx>, IntValue<'ctx>), Error> {
 		let hash = self.hash_of(key)?;
-		let slot = self.alloca(table.key, "key")?;
+		// A lookup inspects its needle in its original representation. The
+		// callback reads stored keys using the table's layout, independently.
+		let slot = self.alloca(key.repr, "key")?;
 		self.builder
 			.build_store(slot.pointer, key.value.expect("a key"))?;
 		// integers are compared bitwise in the probe loop, strings by the
 		// runtime (`STRING_KEY`: in place, three words when both are inline),
 		// the other keys with their `==`
-		let bitwise = match table.key {
-			Repr::Str => u64::MAX,
-			_ => Self::bitwise_key_size(table),
+		let bitwise = if key.repr != table.key {
+			0
+		} else {
+			match table.key {
+				Repr::Str => u64::MAX,
+				_ => Self::bitwise_key_size(table),
+			}
 		};
 		let equals = if bitwise > 0 {
 			self.pointer_type().const_null()
 		} else {
-			self.equals_function(table.key)?
+			self.comparison_pair_function(table.key, key.repr, true)?
 				.as_global_value()
 				.as_pointer_value()
 		};
@@ -1858,9 +1864,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: NodeId,
 	) -> Result<IntValue<'ctx>, Error> {
 		let table = self.table_of(a.repr)?;
+		let other_table = self.table_of(b.repr)?;
 		let first = a.value.expect("a table").into_pointer_value();
-		let second = self.convert(b, a.repr, node.index())?;
-		let second = second.value.expect("a table").into_pointer_value();
+		let second = b.value.expect("a table").into_pointer_value();
 		let result = self.alloca(Repr::Bool, "tables_equal")?;
 		let a_length = self.table_field(first, 1)?;
 		let b_length = self.table_field(second, 1)?;
@@ -1874,7 +1880,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.position_at_end(compare);
 		self.for_each_entry(first, table, |this, entry, _| {
 			let key = this.load(this.entry_slot(entry, table, false)?)?;
-			let (position, _) = this.table_find(second, table, key, node)?;
+			let (position, _) =
+				this.table_lookup_uncached("fa_table_find", second, other_table, key, node)?;
 			let found = this.builder.build_int_compare(
 				IntPredicate::SGE,
 				position,
@@ -1890,9 +1897,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					this.builder.build_conditional_branch(found, check, join)?;
 					this.builder.position_at_end(check);
 					let value = this.entry_slot(entry, table, true)?;
-					let other_entry = this.entry_at(second, table, position)?;
-					let other = this.entry_slot(other_entry, table, true)?;
-					let compare = this.nested_equals_function(repr)?;
+					let other_entry = this.entry_at(second, other_table, position)?;
+					let other = this.entry_slot(other_entry, other_table, true)?;
+					let compare = if repr == other.repr {
+						this.nested_equals_function(repr)?
+					} else {
+						this.nested_equals_pair_function(repr, other.repr)?
+					};
 					let equal = this
 						.builder
 						.build_call(compare, &[value.pointer.into(), other.pointer.into()], "")?

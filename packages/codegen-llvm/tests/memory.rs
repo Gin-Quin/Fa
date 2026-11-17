@@ -64,7 +64,7 @@ for index in 0..200_000 {
 	let shape = make(index)
 	mutable holder: Box = { name = "box {index}", items = ["a" + "b", "c".repeat(200)], best = none }
 	holder.best = holder.items.get(1)
-	let copied = holder
+	let copied = copy holder
 	holder.items = []
 	count += copied.items.length
 	let parsed = check(if index %% 2 == 0 { " {index} " } else { "x{index}" }) catch error => -1

@@ -1,9 +1,8 @@
--- a moved task (into a function, a field, an array, a closure, on one
+-- a moved task (into a function, a field, an array, a stored callback parameter, on one
 -- branch, in a loop) can't be used afterwards: MEM002
 type Holder = { task: Task<Integer> }
 async function compute = (value: Integer): Integer => value + 1
 function same = (task: Task<Integer>): Task<Integer> => task
-function run = (work: () => Task<Integer>): Integer => 0
 async function main = (flag: Boolean) => {
 	let a = start compute(1)
 	let b = same(a)
@@ -12,17 +11,20 @@ async function main = (flag: Boolean) => {
 	let holder = Holder { task = c }
 	console.log(await c)                 -- error: MEM002
 	let d = start compute(3)
-	let stored = [() => d]
-	console.log(run(stored[0]))
+	let stored = [(task: Task<Integer>): Task<Integer> => task]
+	let storedResult = stored[0](d)
 	console.log(await d)                 -- error: MEM002
 	let tupleTask = start compute(6)
-	let pair = ((() => tupleTask), 0)
+	let pair = (((task: Task<Integer>): Task<Integer> => task), 0)
+	let tupleResult = pair[0](tupleTask)
 	console.log(await tupleTask)         -- error: MEM002
 	let objectTask = start compute(7)
-	let callbacks = { work = () => objectTask }
+	let callbacks = { work = (task: Task<Integer>): Task<Integer> => task }
+	let objectResult = callbacks.work(objectTask)
 	console.log(await objectTask)        -- error: MEM002
 	let inlineTask = start compute(8)
-	let inlineCallbacks: InlineArray<() => Task<Integer>, 1> = [() => inlineTask]
+	let inlineCallbacks: InlineArray<(task: Task<Integer>) => Task<Integer>, 1> = [(task) => task]
+	let inlineResult = inlineCallbacks[0](inlineTask)
 	console.log(await inlineTask)        -- error: MEM002
 	let e = start compute(4)
 	if flag {

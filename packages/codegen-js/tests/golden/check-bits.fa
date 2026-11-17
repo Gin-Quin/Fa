@@ -1,7 +1,7 @@
 -- Each check twice: where the analyzer asks for it, and where it proved it
 -- needless (no check in the JavaScript).
 function indices = (items: Array<Integer>, i: Integer): Integer throws IndexError => {
-	mutable duplicate = items
+	mutable duplicate = copy items
 	for j in 0..duplicate.length {
 		duplicate[j] = duplicate[j] + 1
 	}

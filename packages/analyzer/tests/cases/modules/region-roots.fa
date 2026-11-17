@@ -19,7 +19,7 @@ export function = (depth: Integer, text: String): model.Tree => if depth == 0 {
 export function = (tree: model.Tree): model.Tree => when tree is {
 	model.Tree.Empty => tree
 	model.Tree.Leaf => tree
-	model.Tree.Branch as { left } => left
+	model.Tree.Branch as { left } => copy left
 }
 -- file: library/count.fa
 export function = (tree: model.Tree): Integer => when tree is {

@@ -183,7 +183,7 @@ fn a_remote_escape_invalidates_cached_region_builders() {
 	assert!(rebuilt(&first, &again).is_empty());
 	files.push((
 		"library/escape.fa".into(),
-		"export function = (tree: model.Tree): Integer => {\nlet box = { tree }\nwhen box.tree is {\nmodel.Tree.Leaf => 0\nmodel.Tree.Branch => 1\n}\n}".into(),
+		"export function = (tree: model.Tree): Integer => {\nlet box = { tree = copy tree }\nwhen box.tree is {\nmodel.Tree.Leaf => 0\nmodel.Tree.Branch => 1\n}\n}".into(),
 	));
 	files.iter_mut().find(|(path, _)| path == "application/main.fa").unwrap().1 = "export function = () => {\nconsole.log(library.count(library.build(3)))\nconsole.log(library.double(2))\nconsole.log(library.escape(library.build(0)))\n}".into();
 	std::thread::sleep(std::time::Duration::from_millis(20));

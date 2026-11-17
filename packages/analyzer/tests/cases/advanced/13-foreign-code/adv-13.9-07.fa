@@ -17,7 +17,7 @@ export namespace = {
 		0
 	}
 	function sorted = (values: Array<Int32>): Array<Int32> => {
-		mutable duplicate = values
+		mutable duplicate = copy values
 		sort(duplicate, duplicate.length, 4, compareInts)
 		duplicate
 	}

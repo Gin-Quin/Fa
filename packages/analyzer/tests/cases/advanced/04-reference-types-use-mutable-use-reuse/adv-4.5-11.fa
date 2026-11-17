@@ -5,4 +5,4 @@ function addressOf = (user: { address: { city: String } }): { city: String } in 
 function makePeople = () => [Person { name = "Ana" }]
 function firstOf = (persons: Array<Person>): (Person in persons)? => persons.get(0)
 use p = firstOf(makePeople()) -- error REF017
-let q = firstOf(makePeople()) -- valid: a copy
+let q = copy firstOf(makePeople()) -- valid: a copy

@@ -9,8 +9,8 @@ let capacity = bytes.capacity -- error: E-OBJ-5
 let extra = Bytes.filled(2, capacity = 4) -- error: FN023
 let extraFrom = Bytes.from([1], capacity = 4) -- error: FN023
 let wrong: Bytes = [1, 2] -- error: E-TYPE-1
-let array: Array<Byte> = bytes -- error: E-TYPE-1
-let text: String = bytes -- error: E-TYPE-1
+let array: Array<Byte> = copy bytes -- error: E-TYPE-1
+let text: String = copy bytes -- error: E-TYPE-1
 let negative = Bytes.filled(-1) -- error: E-NUM-6
 let tooLarge = Bytes.filled(1, value = 256) -- error: E-NUM-6
 let immutable = Bytes.from([1])

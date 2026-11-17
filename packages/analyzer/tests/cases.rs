@@ -273,6 +273,22 @@ fn parse_case(text: &str) -> Case {
 
 /// Runs one file and returns what doesn't match. A test file is the module
 /// `main.test` (its path without `.fa` otherwise).
+/// A standalone foreign case keeps the same context as the CLI and native
+/// program harnesses. Explicit `-- file:` paths remain authoritative.
+fn parse_case_path(path: &Path, text: &str) -> Case {
+	let mut case = parse_case(text);
+	if path.to_string_lossy().ends_with(".foreign.fa")
+		&& case.files.len() == 1
+		&& case.files[0].path == "main.fa"
+		&& !text
+			.lines()
+			.any(|line| line.trim_start().starts_with("-- file:"))
+	{
+		case.files[0].path = "main.foreign.fa".into();
+	}
+	case
+}
+
 fn run_file(file: &CaseFile, test_file: bool, target: Option<&str>) -> Vec<String> {
 	let stem = file.path.strip_suffix(".fa").unwrap_or(&file.path);
 	let module = if test_file && !stem.ends_with(".test") {
@@ -547,7 +563,7 @@ fn cases() {
 		let group = relative.split('/').next().unwrap_or("").to_string();
 		let tally = tallies.entry(group).or_default();
 		let text = std::fs::read_to_string(path).unwrap();
-		let case = parse_case(&text);
+		let case = parse_case_path(path, &text);
 		if !case.errors.is_empty() {
 			tally.failed += 1;
 			let _ = writeln!(
@@ -680,4 +696,18 @@ fn annotations_are_parsed() {
 	assert_eq!(multi.files.len(), 2);
 	assert_eq!(multi.files[1].path, "main.fa");
 	assert_eq!(multi.files[1].expected[0].line, Some(1));
+}
+
+#[test]
+fn foreign_cases_preserve_their_declaration_context() {
+	let path = Path::new("owned.foreign.fa");
+	let case = parse_case_path(
+		path,
+		"type Resource = { function destroy = (self) => {} }\nlet owner = Resource {}\n",
+	);
+	assert_eq!(case.files[0].path, "main.foreign.fa");
+	let problems = run_program(&case.files, None);
+	assert!(problems.is_empty(), "{problems:?}");
+	let explicit = parse_case_path(path, "-- file: main.fa\nlet value = 1\n");
+	assert_eq!(explicit.files[0].path, "main.fa");
 }

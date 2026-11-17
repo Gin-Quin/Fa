@@ -17,7 +17,7 @@ console.log(duplicate, view, data)
 mutable use writable = data[0..2]
 try writable[0] = 255
 console.log(writable, duplicate, data)
-mutable second = data
+mutable second = copy data
 second[0] = 1
 console.log(data, second)
 reuse writable = data[2..4]

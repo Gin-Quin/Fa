@@ -6,12 +6,12 @@ function logNames = (humans: Array<Human>) => {
 	}
 }
 let superHumans = [SuperHuman { name = "A", powers = "x" }]
-logNames(superHumans) -- prints: A
+logNames(copy superHumans) -- prints: A
 function addJohn = (humans: Array<Human>) mutates humans => {
 	humans.push({ name = "John" })
 }
 mutable heroes = [SuperHuman { name = "A", powers = "x" }]
-addJohn(heroes) -- error STR005
+addJohn(heroes) -- error MEM004, STR005
 function keepNamed = <Item: Human>(items: Array<Item>) mutates items => {
 	items.deleteWhere((item) => item.name == "")
 }

@@ -1,4 +1,4 @@
--- error: CL010
+-- error: MEM004
 -- brief: ✗ ma-12: CL010 (Map keys are exact)
 type Human = { name: String }
 type Hero = { name: String, power: String }

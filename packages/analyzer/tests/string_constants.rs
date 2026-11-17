@@ -7,7 +7,7 @@ use fa_interpreter::Value;
 #[test]
 fn malformed_constants_and_bytes_survive_analysis_and_interfaces() {
 	let (session, file) = analyze_source(
-		"static high = \"😀\"[0]\nstatic low = \"😀\"[1]\nstatic joined = high + low\nstatic binary = \"é日😀\".toUtf8()\nstatic record = { half = high, bytes = binary }\n",
+		"static high = \"😀\"[0]\nstatic low = \"😀\"[1]\nstatic joined = high + low\nstatic binary = \"é日😀\".toUtf8()\nstatic record = { half = high, bytes = copy binary }\n",
 	);
 	let errors: Vec<_> = session
 		.diagnostics(file)

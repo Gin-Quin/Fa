@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- error: E-DECL-12
 -- brief: ⇒ E-DECL-12
 mutable xs = [1]

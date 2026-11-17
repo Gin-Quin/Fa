@@ -15,7 +15,7 @@ async function echo = (stream: TcpStream) => {
 		}
 		await stream.write(buffer, count) catch error => break
 	}
-	stream.close()
+	-- The caller owns this borrowed stream; the task drops its transferred argument.
 }
 
 async function serve = (listener: TcpListener) => {
@@ -37,10 +37,14 @@ sleep(1)
 let elapsed: Integer = monotonic()
 
 -- move-only: a socket used after it moved
-async function twice = (stream: TcpStream) => {
+async function twice = () => {
+	let stream = await TcpStream.connect("localhost", 8080) catch _ => return
 	let moved = stream
 	let again = stream -- error MEM002
 }
+
+-- A borrowed stream cannot end its owner's lifetime.
+function closeBorrowed = (stream: TcpStream) => stream.close() -- error MEM002
 
 -- `read` mutates its buffer: it must be `mutable`
 async function readInto = (stream: TcpStream): Integer => {

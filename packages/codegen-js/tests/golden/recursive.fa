@@ -3,9 +3,9 @@ mutable head: Link? = none
 for index in 0..3 {
 	head = Link { value = index, next = head }
 }
-mutable snapshot = head
+mutable snapshot = copy head
 if head is not none { head.value = -1 }
 while snapshot is not none {
 	console.log(snapshot.value)
-	snapshot = snapshot.next
+	snapshot = copy snapshot.next
 }

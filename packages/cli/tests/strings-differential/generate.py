@@ -759,9 +759,9 @@ function regionProbe = (text: String): String => {
     for start in [0, if text.length > 0 { 1 } else { 0 }, if text.length > 1 { text.length - 1 } else { 0 }] {
         let end = if text.length - start > 3 { start + 3 } else { text.length }
         let leaf = sliceLeaf(source, start, end)
-        let duplicate = leaf
+        let duplicate = copy leaf
         let tree = SliceTree.List { items = [leaf, duplicate] }
-        let copied = tree
+        let copied = copy tree
         rows.push(treeUnits(tree) + ";" + treeUnits(copied))
     }
     rows.join("|")

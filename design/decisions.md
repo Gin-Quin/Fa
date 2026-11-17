@@ -2108,6 +2108,70 @@ The dataset round-trips byte-for-byte; all 27 checkpoint rows are retained.
 Part 2 remains unimplemented at this completed-item context boundary.
 
 
+## Arrays and arithmetic performance (implementation, 2026-11-16)
+
+- **Boolean block fills (item 2):** extend the existing byte-fill recognizer
+  to `Repr::Bool` with a Boolean literal or analyzer compile-time value,
+  encoded as the canonical byte 0/1. Both contiguous and segmented arrays
+  use their existing fill runtime; the storage layout and ABI do not change.
+  The single-push body, plain receiver, finite range, reactive and coroutine
+  restrictions remain. Runtime values (including ordinary named constants
+  not supplied by compile-time evaluation), non-byte representations and
+  additional effects keep their original rounds. O0 IR checks cover firing
+  and fallback on all three LLVM targets; generic instances, function values,
+  callbacks, captures, async suspension and whole/split packages execute with
+  leak checks. Bounds still evaluate left to right once, appends retain
+  existing items, and empty ranges do nothing. Measurements and final
+  validation follow in the lead's `reports/perf-arrays.md`.
+- **Item 2 instruction gate:** all 40 comparisons pass +1%, with unchanged
+  sources, flags and exact outputs. Sieve's main loses the 10 M-instruction
+  initialization loop, but libc's repeated byte stores contribute 10 M Ir:
+  whole-process counts are 203,737,011 before and 203,737,139 after. Its hot
+  marking loop is unchanged. This is a block-fill code-generation change,
+  not an instruction-count speedup. CPU acceptance is measured separately.
+  The largest other increase is 36 Ir on words (+0.000127%). Full native,
+  freestanding and wasm executable/leak corpora pass (829/740/808 programs).
+- **Item 2 CPU outcome:** retain the first 21-round series at 100 million
+  items (105 samples, 21 orders, CPU 5), including the archived before
+  compiler in the same rounds. After/before point ratios are 0.876 / 0.901;
+  after/Goose 1.019 / 1.002 and after/Rust 0.907 / 0.935. The identical-binary
+  control is 0.970 / 0.900 and fails strict 3% on both estimators, so every
+  CPU gain/goal verdict remains **not resolved**. No favorable retiming
+  replaces this series. Keep the safe block-fill lowering and its complete
+  instruction gate, without claiming a demonstrated CPU speedup. Canonical
+  data: `benchmarks/results/2026-11-16-arrays-boolean.{json,md}`. All 1,392
+  distinct workspace tests validate; the initial run's sole stdout/stderr
+  capture flake passes in the unchanged 22-test workspace rerun and has a
+  separate harness follow-up in TODO.
+- **Constant remainder:** an exact positive immutable divisor declared outside
+  the innermost loop can use the existing guarded unsigned reciprocal for a
+  64-bit signed `%%` on native/freestanding targets. The singleton type, use
+  interval or initializer interval supplies the constant proof. The guard
+  still checks the actual divisor is positive and the dividend nonnegative;
+  negative dividends keep the floor-adjusted signed remainder. Zero and
+  minimum/-1 guards still precede this lowering. Exact negative/zero divisors,
+  constant quotients, unsigned helper calls and wasm retain their old paths.
+  No collection representation, runtime ABI or floating operation changes.
+- Firing/fallback IR checks and programs cover local/module constants, signed
+  endpoints, generic instances, callbacks/function values, captured constants,
+  suspension and whole-program/per-unit package compilation. Measurements and
+  final validation are recorded in the lead's `reports/perf-arrays.md`.
+- **Item 1 acceptance:** all 40 instruction comparisons pass +1% (the 36
+  audit rows plus indexing at 16 and 1,000 items). At one million items,
+  GrowingArray falls from 418,172,759 to 394,172,782 Ir; Array from
+  336,668,459 to 314,168,479. Maximum other increase is 0.685642% on
+  string-building-bytes; String lowering is unchanged. The first six 21-round
+  CPU series retain 693 samples and all controls. The large Array control
+  passes: after/before 0.848 / 0.860 (ratio of medians / paired median),
+  after/Goose 0.933 / 0.926, after/Rust 1.058 / 1.059. It meets the Goose
+  goal and remains behind Rust. GrowingArray at one million and 1,000 items
+  and Array at 16 fail their controls: their CPU effects stay unresolved.
+  Keep the wide quartiles and the other controlled results in
+  `benchmarks/results/2026-11-16-arrays-remainder.{json,md}`. No universal
+  hardware speedup or GrowingArray layout verdict follows from this series.
+  Full LLVM-enabled validation: 1,389 passed, zero failed, eight existing
+  ignored, including 98 IR tests and nine new O0/leak executions.
+
 ## Collection map review fixes (2026-11-16)
 
 C1 exposed an ABI disagreement: a generic `deleteWhere` used the generic
@@ -2179,6 +2243,145 @@ bug (recorded with a durable repro in todo). The corrected fixture still
 fails on the archived scalar64 native compiler and preserves both static
 layouts and all value assertions. No expected-skip list changes.
 
+## Array performance — guarded range reversal (2026-11-16)
+
+- Rejected after controlled CPU measurement. The candidate recognized the
+  ordinary six-statement two-ended swap over one scalar Array.
+  Both counters must be local mutable i64 values, distinct from the item storage;
+  copied scalar temporaries have no observable copy/drop effects. Representation
+  conversions, references, shared/reactive places and asynchronous programs
+  withhold the proof. Different steps or extra statements keep their loops.
+- It versioned the loop with `0 <= low < high < length`. The inclusive span and all
+  pair indices then fit i64 and stay in bounds. One typed pair loop replaces
+  its checks, with final low/high written exactly as after the original rounds.
+  Its two halves are disjoint; scoped alias declarations apply once per reversal
+  invocation, allowing vectorization without claiming disjointness across flips.
+  No floating-point arithmetic is introduced or reordered. The original loop
+  remains the fallback, preserving negative-index normalization, error order,
+  no-op ranges, copies/drops and partial mutations. No runtime or ABI change.
+- Portable oracle, extreme bounds, generic/function-value/callback/capture,
+  async and per-unit cases cover firing and fallback behavior on every target.
+  Performance/validation records live in the array report and dated audit data.
+- Although fannkuch N=9 instructions fell 9.63% and all 40 instruction gates
+  passed, the first N=10 CPU series has after/before point estimates
+  1.024733 / 1.036930 with a passing same-binary control. There is no demonstrated
+  CPU gain. Restore ordinary checked loops; retain the behavioral fixtures and
+  all evidence. The firing/vectorization assertion belongs to the rejected
+  implementation and is replaced by a check that ordinary loops remain checked.
+  The Goose goal is unresolved; Rust passes the task's point-estimator policy.
+  No statistical significance is inferred from that policy or the quartiles.
+  Two read-only committee reviews agreed to close this attempt without a tuning
+  sweep or selecting a favorable same-binary repeat.
+
+## Array performance — closed array extents (2026-11-16)
+
+- Extend the existing analyzer array-family walk with a separate exact-length
+  fact. Minimum-length index proofs continue to allow push; exact extents
+  require no push anywhere in the family. The single root must be a direct
+  passive literal, with no spread, call, implicit default, conversion, failure
+  or reactive observation during construction. Generic/unknown types, escapes,
+  replacement and opaque inputs withhold the stronger fact.
+- Reuse the private-array and direct-call claims across compilation units;
+  explicitly consult program opacity independently of the index prover.
+  Record absent private-array/opaque exclusions and advance the object-cache
+  version. Changes to either exclusion must invalidate consuming units.
+- Substitute only an Array header loaded from a source slot, after every
+  local/global binding of that address has the same known extent. Unknown or
+  conflicting provenance retains the header load. Reserve may move storage,
+  so the items pointer remains an actual load. C-library exports and key-loop
+  snapshots retain their conservative paths.
+- Keep existing per-outer-iteration distinct-index scopes. Constant trip counts
+  allow LLVM to choose unrolling and register promotion without cloning source
+  loops, changing layouts or adding floating-point reassociation/contract flags.
+  Exact floating-state, generic/function-value/callback/capture/async, O0/leak
+  and whole/split/cache tests cover the proof and its fallbacks. Measurements
+  and final acceptance follow in the array performance report. The first CPU
+  series passes its control (1.000995/1.003666) and observes 4.81%/3.55%
+  before/after reductions. All 40 instruction gates pass; nbody falls 13.146%
+  to 753 M Ir. Goose passes (0.881/0.882); Rust remains ahead (1.122/1.091).
+  Retain the general proof; outer-loop/register promotion remains a follow-up.
+  Quartiles describe samples, without a claim of statistical significance.
+
+## Array performance — GrowingArray loop facts (2026-11-16)
+
+- Ordinary GrowingArray scans use one counted inner loop per live segment,
+  clamped to the snapshot length. There is no per-item segment-boundary lookup.
+  The existing iteration rule forbids resizing/replacing the iterated receiver,
+  including via callbacks; item mutations and all control flow remain live.
+  Zero-sized items and specialized byte searches retain the prior cursor path.
+- A synchronous counted loop over a private owner may hoist lookup metadata.
+  The full use set must stay in the owner's function and never expose its
+  header: only direct indexing, iteration, measurement, replacement and known
+  direct push/reserve calls are accepted globally. Within the loop replacement
+  and reserve are rejected. Exports, references, shared/reactive owners and
+  foreign-file uncertainty reject the private-owner proof. Parameters may
+  instead use the existing no-reference hoisting proof only when the body has
+  no calls at all: an aliased GrowingArray parameter may push without
+  invalidating item references. The invariant contiguous mode is
+  available to LLVM's existing loop unswitching, preserving the segmented path.
+- If that loop pushes, cursor/end/length use private scalar slots promoted by
+  LLVM, with write-through stores on every push. Cold segment growth refreshes
+  cursor/end; it leaves length unchanged. Other calls cannot reach this private
+  header. Index entries and items remain live. Unproven cases keep the prior
+  lowering, layout, bounds checks and error behavior. No inferred reservation,
+  runtime ABI change, string change or relaxed floating-point rule is involved.
+- Measurements and validation are recorded in the array performance report;
+  CPU acceptance requires the retained interleaved same-binary control.
+
+
+## Array performance — conditional loop inspection (2026-11-17)
+
+- Retain each first 21-round series and require the identical-binary control
+  to pass on both estimators. Particle control 1.045095/1.033545 fails: all
+  its CPU verdicts are not resolved, and its loop is not inspected or changed.
+- Mandelbrot control 1.011932/1.006945 passes. Fa/Goose 1.010024/1.017118
+  meets the goal; Fa/Rust 1.040557/1.052847 remains behind. Its loop has the
+  same 17 instructions, 75 bytes and FP operation order as Rust, except the
+  counter register. The Fa loop begins at 0x5920 (0 modulo 32), Rust at
+  0x15190 (16 modulo 32). Fa's two-byte forward exit branch at 0x595f
+  straddles a 32-byte boundary; Rust's at 0x151cf does not. The inspected
+  binary hashes match those timed by the driver.
+- This is a concrete placement hypothesis, not a demonstrated causal speedup.
+  Keep production lowering unchanged and leave a bounded branch-placement
+  experiment as a follow-up. Do not infer an alignment policy from a single
+  pair of binaries. No benchmark source, arithmetic or FP flag changes.
+  Raw samples, strict-control publication and inspection live in the dated
+  arrays-loops result files and the array report.
+
+
+## Array performance review fixes (2026-11-17)
+
+- The private GrowingArray loop proof admits only known direct header uses
+  throughout the owner's use set and nested bodies. Fixed snapshots require
+  no header change. Push caches hold only length/cursor/end: scalar pushes
+  write through; segment growth refreshes cursor/end; every bulk append
+  refreshes all three from the real header before subsequent code. This rule
+  lives in `lower/growing_loops.rs`; `copies.rs` invokes its single refresh
+  after both fill and extend (flat and segmented sources). Reservation, owner
+  replacement/reset, escaping calls, aliases and captures withhold caching.
+  Item writes preserve the proof; growing collections have no `clear`.
+- Arithmetic narrowing must hold every input and every intermediate, not
+  just the final result. `ArithmeticBounds` in `lower/arith.rs` keeps the
+  result interval separate from the interval needed to compute it, so an
+  enclosing expression can still narrow independently. This fixes UInt32
+  remainder by small literals and UInt8/UInt16 division and remainder by
+  large literals; it also prevents poison from wider steps followed by zero.
+  Compute types, runtime checks and floor-division semantics do not change.
+- Advance the native object-cache version for both fixes. Keep existing
+  optimization gates and benchmark sources. O0 IR proves small cases still
+  narrow, bulk calls refresh all caches, and interfering uses withhold them.
+  Portable fixtures compare every sized integer's boundaries/powers of two
+  with compile-time execution and Bun, then LLVM O0/O3 with checks on/off.
+  Runtime, ABI, layout and floating-point rules are unchanged.
+
+Review-fix acceptance: all 40 instruction comparisons against reviewed source
+15d6f7f5 pass +1%; the maximum is graph +36 Ir (+0.000344470%). Full LLVM-enabled
+workspace validation passes 1,405 tests (eight existing ignored); final focused
+arithmetic/JIT runs cover the two late tests, for 1,407 distinct validated tests.
+All 107 IR checks and native/freestanding/wasm corpora pass. No CPU timing claim
+is made. Evidence: `benchmarks/results/2026-11-17-arrays-review{,-before,-gate}.json`
+and its generated Markdown. The independent compile-time widening follow-up is
+in TODO; the already recorded per-unit freestanding O0 linker issue remains.
 
 ### Ownership enforcement: published capture creation types (implementation, 2026-11-17)
 

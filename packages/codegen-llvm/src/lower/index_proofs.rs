@@ -9,7 +9,7 @@
 //! (`facts::PROOF_CLAIMS`). Index proofs require an array private to its
 //! file and places whose values no other file may supply.
 
-use fa_analyzer::ids::NodeId;
+use fa_analyzer::ids::{NodeId, SymbolId};
 use fa_analyzer::proofs::{IndexFacts, ProofScope, index_facts};
 
 use super::Lowering;
@@ -37,12 +37,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		)
 	}
 
-	fn with_index_facts(&self, read: impl FnOnce(&IndexFacts) -> bool) -> bool {
+	/// Exact length of a closed, never-resized array family.
+	pub(crate) fn fixed_array_length(&self, symbol: SymbolId) -> Option<u64> {
+		self.with_index_facts(|facts| facts.fixed_array_length(symbol))
+	}
+
+	fn with_index_facts<R: Default>(&self, read: impl FnOnce(&IndexFacts) -> R) -> R {
 		if self.index_proofs.borrow().is_none() {
 			let facts = self.compute_index_facts();
 			*self.index_proofs.borrow_mut() = Some(facts);
 		}
-		self.index_proofs.borrow().as_ref().is_some_and(read)
+		self.index_proofs
+			.borrow()
+			.as_ref()
+			.map(read)
+			.unwrap_or_default()
 	}
 
 	fn compute_index_facts(&self) -> IndexFacts {

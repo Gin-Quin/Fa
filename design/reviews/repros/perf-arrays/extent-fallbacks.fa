@@ -1,0 +1,21 @@
+type Cell = { value: Integer }
+function length = (items: Array<Cell>): Integer => items.length
+function resize = (items: Array<Cell>, round: Integer) mutates items => {
+	items.push({ value = round })
+	items.reserve(100)
+}
+function exercise = () throws IndexError => {
+	mutable items: Array<Cell> = [{ value = 1 }, { value = 2 }, { value = 3 }]
+	for round in 0..4 {
+		assert length(items) == round + 3
+		resize(items, round)
+		assert length(items) == round + 4
+		use last = try items[-1]
+		last.value += 10
+		assert (try items[-1]).value == round + 10
+	}
+	items = []
+	assert length(items) == 0
+	console.log("extent fallbacks ok")
+}
+try exercise()

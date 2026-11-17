@@ -1,0 +1,21 @@
+use { sleep } = std.time
+async function make = <Item>(tag: Item, count: Integer<min = 0>): Array<Boolean> => {
+	await sleep(1)
+	mutable bucket = { tag = tag, flags = Array<Boolean>.from([], capacity = count) }
+	for 0..count { bucket.flags.push(true) }
+	await sleep(1)
+	for 0..count { bucket.flags.push(false) }
+	bucket.flags
+}
+async function growing = (count: Integer): GrowingArray<Boolean> => {
+	mutable flags: GrowingArray<Boolean> = []
+	for 0..count {
+		flags.push(true)
+		await sleep(1)
+	}
+	flags
+}
+assert (await make(1, 130)).filter((flag) => flag).length == 130
+assert (await make({ value = 1 }, 130)).length == 260
+assert (await growing(3)).every((flag) => flag)
+console.log("async boolean fill ok") -- prints: async boolean fill ok

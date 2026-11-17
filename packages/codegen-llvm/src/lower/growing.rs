@@ -30,6 +30,7 @@ use inkwell::builder::Builder;
 use inkwell::types::StructType;
 use inkwell::values::{IntValue, PointerValue};
 
+use super::growing_loops::GrowingLoop;
 use crate::error::Error;
 use crate::lower::values::{IntRepr, Repr, Val};
 use crate::lower::{Lowering, Slot};
@@ -67,7 +68,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// A header field of a `GrowingArray` (0 length, 3 cursor, 4 end), loaded
 	/// with the header tag.
-	fn growing_field(
+	pub(super) fn growing_field(
 		&self,
 		array: PointerValue<'ctx>,
 		field: u32,
@@ -161,6 +162,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		builder: &Builder<'ctx>,
 		array: PointerValue<'ctx>,
 	) -> Result<IntValue<'ctx>, Error> {
+		if let Some(GrowingLoop::Fixed { length, .. }) = self.growing_loops.get(&array) {
+			return Ok(*length);
+		}
+		if let Some(GrowingLoop::Push { length, .. }) = self.growing_loops.get(&array) {
+			return Ok(self.load(*length)?.int());
+		}
 		let field = builder.build_struct_gep(self.segmented_type(), array, 0, "")?;
 		let length = builder.build_load(self.context.i64_type(), field, "length")?;
 		if let Some(instruction) = inkwell::values::BasicValue::as_instruction_value(&length) {
@@ -183,11 +190,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.growing_at_with_k(builder, array, item, index, k)
 	}
 
-	fn growing_k(
+	pub(super) fn growing_k(
 		&self,
 		builder: &Builder<'ctx>,
 		array: PointerValue<'ctx>,
 	) -> Result<IntValue<'ctx>, Error> {
+		if let Some(GrowingLoop::Fixed { k, .. }) = self.growing_loops.get(&array) {
+			return Ok(*k);
+		}
 		let k_pointer = builder.build_struct_gep(self.segmented_type(), array, 2, "")?;
 		let k = builder
 			.build_load(self.context.i32_type(), k_pointer, "segment_k")?
@@ -227,20 +237,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.expect("a count")
 			.into_int_value();
 		let segment = builder.build_int_sub(i64.const_int(63, false), zeros, "segment")?;
-		let field = builder.build_struct_gep(self.segmented_type(), array, 5, "")?;
-		let directory = builder.build_load(self.pointer_type(), field, "segments")?;
-		self.tag(
-			inkwell::values::BasicValue::as_instruction_value(&directory).expect("a load"),
-			true,
-		)?;
-		let slot = unsafe {
-			builder.build_in_bounds_gep(
-				self.usize,
-				directory.into_pointer_value(),
-				&[segment],
-				"",
-			)?
-		};
+		let directory = self.growing_directory(builder, array)?;
+		let slot = unsafe { builder.build_in_bounds_gep(self.usize, directory, &[segment], "")? };
 		let items = builder.build_load(self.usize, slot, "segment_address")?;
 		self.tag(
 			inkwell::values::BasicValue::as_instruction_value(&items).expect("a load"),
@@ -253,6 +251,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let offset = builder.build_int_mul(index, size, "item_offset")?;
 		let address = builder.build_int_add(items.into_int_value(), offset, "item_address")?;
 		Ok(builder.build_int_to_ptr(address, self.pointer_type(), "item_pointer")?)
+	}
+
+	pub(super) fn growing_directory(
+		&self,
+		builder: &Builder<'ctx>,
+		array: PointerValue<'ctx>,
+	) -> Result<PointerValue<'ctx>, Error> {
+		if let Some(GrowingLoop::Fixed { directory, .. }) = self.growing_loops.get(&array) {
+			return Ok(*directory);
+		}
+		let field = builder.build_struct_gep(self.segmented_type(), array, 5, "")?;
+		let directory = builder.build_load(self.pointer_type(), field, "segments")?;
+		self.tag(
+			inkwell::values::BasicValue::as_instruction_value(&directory).expect("a load"),
+			true,
+		)?;
+		Ok(directory.into_pointer_value())
 	}
 
 	/// A `GrowingArray` taking the items of an owned array (not registered).
@@ -417,12 +432,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.i64_type()
 				.const_int(u64::from(self.segment_bits(item)), false)
 		});
-		let contiguous = if default_k.is_some() {
+		let fixed = self.growing_loops.get(&array).copied();
+		let contiguous = if let Some(GrowingLoop::Fixed { contiguous, .. }) = fixed {
+			contiguous
+		} else if default_k.is_some() {
 			self.context.bool_type().const_zero()
 		} else {
 			self.growing_single_segment(array)?
 		};
-		let first_items = self.growing_first_items(&self.builder, array)?;
+		let first_items = if let Some(GrowingLoop::Fixed { first, .. }) = fixed {
+			first
+		} else {
+			self.growing_first_items(&self.builder, array)?
+		};
 		let position = if checked && may_be_negative {
 			// `0 <= index < length` on the common path, as for arrays
 			// (`checked_item`): a negative index is counted from the end in
@@ -527,8 +549,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// `fa_segmented_push_slot` with the header tags: until a segment is
 		// full, a push is one comparison, one store and one increment, and
 		// consecutive pushes keep the cursor in a register (see `push_onto`)
-		let (_, cursor) = self.growing_field(array, 3, "cursor")?;
-		let (_, end) = self.growing_field(array, 4, "end")?;
+		let cached = self.growing_loops.get(&array).copied();
+		let (cursor, end) = if let Some(GrowingLoop::Push { cursor, end, .. }) = cached {
+			(
+				self.builder
+					.build_load(self.pointer_type(), cursor, "cursor")?,
+				self.builder.build_load(self.pointer_type(), end, "end")?,
+			)
+		} else {
+			(
+				self.growing_field(array, 3, "cursor")?.1,
+				self.growing_field(array, 4, "end")?.1,
+			)
+		};
 		let room = self.builder.build_int_compare(
 			IntPredicate::NE,
 			cursor.into_pointer_value(),
@@ -545,6 +578,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			"fa_segmented_next",
 			&[array.into(), size.into(), bits.into()],
 		)?;
+		let receiver = receiver.filter(|_| cached.is_none());
 		let header = match receiver {
 			Some(slot) => {
 				let reloaded = self
@@ -560,6 +594,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			None => array,
 		};
 		let (_, next_cursor) = self.growing_field(header, 3, "cursor")?;
+		if let Some(GrowingLoop::Push { end, .. }) = cached {
+			let (_, next_end) = self.growing_field(header, 4, "end")?;
+			self.builder.build_store(end, next_end)?;
+		}
 		let next_end = self.builder.get_insert_block().expect("a block");
 		self.builder.build_unconditional_branch(store)?;
 		self.builder.position_at_end(store);
@@ -586,14 +624,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.build_struct_gep(self.segmented_type(), array, 3, "")?;
 		let stored = self.builder.build_store(cursor_pointer, advanced)?;
 		self.tag(stored, true)?;
-		let (length_pointer, length) = self.growing_field(array, 0, "length")?;
+		if let Some(GrowingLoop::Push { cursor, .. }) = cached {
+			self.builder.build_store(cursor, advanced)?;
+		}
+		let length_pointer = self
+			.builder
+			.build_struct_gep(self.segmented_type(), array, 0, "")?;
+		let length = self.growing_length(&self.builder, array)?;
 		let length = self.builder.build_int_nsw_add(
-			length.into_int_value(),
+			length,
 			self.context.i64_type().const_int(1, false),
 			"",
 		)?;
 		let stored = self.builder.build_store(length_pointer, length)?;
 		self.tag(stored, true)?;
+		if let Some(GrowingLoop::Push { length: cache, .. }) = cached {
+			self.builder.build_store(cache.pointer, length)?;
+		}
 		Ok(())
 	}
 

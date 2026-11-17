@@ -1,0 +1,81 @@
+-- Print every endpoint comparison so a mismatch cannot stop later widths.
+function observeInt8 = (value: Int8) => {
+	let divisor: Int8 = 7
+	for 0..1 {
+		console.log("Int8", value %% divisor, value %% 7)
+	}
+}
+observeInt8(Int8.minValue)
+observeInt8(Int8.maxValue)
+function observeInt16 = (value: Int16) => {
+	let divisor: Int16 = 7
+	for 0..1 {
+		console.log("Int16", value %% divisor, value %% 7)
+	}
+}
+observeInt16(Int16.minValue)
+observeInt16(Int16.maxValue)
+function observeInt32 = (value: Int32) => {
+	let divisor: Int32 = 7
+	for 0..1 {
+		console.log("Int32", value %% divisor, value %% 7)
+	}
+}
+observeInt32(Int32.minValue)
+observeInt32(Int32.maxValue)
+function observeInt64 = (value: Int64) => {
+	let divisor: Int64 = 7
+	for 0..1 {
+		console.log("Int64", value %% divisor, value %% 7)
+	}
+}
+observeInt64(Int64.minValue)
+observeInt64(Int64.maxValue)
+function observeInt128 = (value: Int128) => {
+	let divisor: Int128 = 7
+	for 0..1 {
+		console.log("Int128", value %% divisor, value %% 7)
+	}
+}
+observeInt128(Int128.minValue)
+observeInt128(Int128.maxValue)
+function observeUInt8 = (value: UInt8) => {
+	let divisor: UInt8 = 7
+	for 0..1 {
+		console.log("UInt8", value %% divisor, value %% 7)
+	}
+}
+observeUInt8(UInt8.minValue)
+observeUInt8(UInt8.maxValue)
+function observeUInt16 = (value: UInt16) => {
+	let divisor: UInt16 = 7
+	for 0..1 {
+		console.log("UInt16", value %% divisor, value %% 7)
+	}
+}
+observeUInt16(UInt16.minValue)
+observeUInt16(UInt16.maxValue)
+function observeUInt32 = (value: UInt32) => {
+	let divisor: UInt32 = 7
+	for 0..1 {
+		console.log("UInt32", value %% divisor, value %% 7)
+	}
+}
+observeUInt32(UInt32.minValue)
+observeUInt32(UInt32.maxValue)
+function observeUInt64 = (value: UInt64) => {
+	let divisor: UInt64 = 7
+	for 0..1 {
+		console.log("UInt64", value %% divisor, value %% 7)
+	}
+}
+observeUInt64(UInt64.minValue)
+observeUInt64(UInt64.maxValue)
+function observeUInt128 = (value: UInt128) => {
+	let divisor: UInt128 = 7
+	for 0..1 {
+		console.log("UInt128", value %% divisor, value %% 7)
+	}
+}
+observeUInt128(UInt128.minValue)
+observeUInt128(UInt128.maxValue)

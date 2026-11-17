@@ -1,0 +1,44 @@
+-- Merge contract: UTF-16 unsigned values, byte copies and stable returned references.
+function first = (items: GrowingArray<UInt16>): UInt16 in items throws IndexError => {
+	use item = try items[0]
+	item
+}
+function wide = (unit: UInt16): UInt16 => {
+	assert unit // 65536 == 0
+	unit %% 65537
+}
+function exercise = (text: String) throws IndexError => {
+	mutable items: GrowingArray<UInt16> = [7]
+	use held = try first(items)
+	for round in 0..4 {
+		for 0..257 { items.push(65535) }
+		assert held == 7 + round
+		held += 1
+		assert items.length == 1 + (round + 1) * 257
+	}
+	assert held == 11
+	assert (try items[0]) == 11
+	assert (try items[-1]) == 65535
+	let units: Array<UInt16> = [65, 55357, 56832, 65535]
+	for unit, index in units {
+		assert wide(unit) == unit
+		assert wide(try text.codeUnitAt(index)) == unit
+	}
+	let bytes = text.toUtf8()
+	let source = bytes.toArray()
+	mutable copied: GrowingArray<Byte> = []
+	mutable flags: GrowingArray<Boolean> = []
+	for round in 0..4 {
+		for byte in source { copied.push(byte) }
+		for 0..257 { flags.push(true) }
+		flags.push(false)
+		assert copied.length == (round + 1) * bytes.length
+		assert flags.length == (round + 1) * 258
+	}
+	for byte, index in bytes {
+		assert (try copied[index]) == byte
+	}
+	for flag, index in flags { assert flag == (index %% 258 != 257) }
+}
+try exercise("A😀\u{FFFF}")
+console.log("array string references ok") -- prints: array string references ok

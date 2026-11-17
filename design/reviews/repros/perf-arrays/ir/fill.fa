@@ -1,0 +1,6 @@
+function fill = (items: Array<Boolean>, count: Integer) mutates items => {
+	for 0..count { items.push(true) }
+}
+mutable flags: Array<Boolean> = []
+fill(flags, arguments.length)
+console.log(flags.length)

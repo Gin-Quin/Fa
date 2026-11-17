@@ -1,0 +1,24 @@
+use { sleep } = std.time
+async function append = (items: GrowingArray<Integer>, value: Integer) mutates items.length => {
+	await sleep(1)
+	items.push(value)
+}
+async function exercise = () => {
+	mutable items: GrowingArray<Integer> = []
+	for round in 0..3 {
+		items = []
+		items.reserve(128)
+		for i in 0..130 { await append(items, i) }
+		assert items.length == 130
+		assert items[-1] == 129
+		mutable total = 0
+		for item, i in items {
+			if i %% 64 == 0 { await sleep(1) }
+			item += 1
+			total += item
+		}
+		assert total == 8515
+	}
+	console.log("async fallbacks ok")
+}
+await exercise()

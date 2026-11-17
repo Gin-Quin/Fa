@@ -1299,6 +1299,104 @@ console.log(items.length)
 	}
 
 	#[test]
+	fn positive_constant_remainders_keep_the_guarded_reciprocal_path() {
+		let source = r#"
+let modulus = 1_000_000_007
+function moduleConstant = (value: Integer): Integer => {
+	mutable result = value
+	for i in 0..4 { result = (result + i) %% modulus }
+	result
+}
+function localConstant = (value: Integer): Integer => {
+	let divisor: Integer = 7
+	mutable result = value
+	for i in 0..4 { result = (result + i) %% divisor }
+	result
+}
+function negative = (value: Integer): Integer => {
+	let divisor = -7
+	mutable result = value
+	for i in 0..4 { result = (result + i) %% divisor }
+	result
+}
+function quotient = (value: Integer): Integer => {
+	let divisor = 7
+	mutable result = value
+	for i in 0..4 { result = (result + i) // divisor }
+	result
+}
+function general = (value: Integer, divisor: Integer): Integer throws DivisionByZero => {
+	mutable result = value
+	for i in 0..4 { result = try (result + i) %% divisor }
+	result
+}
+function mutableDivisor = (value: Integer): Integer => {
+	mutable divisor = 7
+	mutable result = value
+	for i in 0..4 { result = result %% divisor
+	divisor += 1 }
+	result
+}
+function innerConstant = (value: Integer): Integer => {
+	mutable result = value
+	for i in 0..4 { let divisor = 7
+	result = result %% divisor }
+	result
+}
+function minusOne = (value: Integer): Integer => {
+	let divisor = -1
+	mutable result = value
+	for i in 0..4 { result = result %% divisor }
+	result
+}
+console.log(moduleConstant(-17), localConstant(-17), negative(-17), quotient(-17), general(-17, 0) catch _error => 99, mutableDivisor(-17), innerConstant(-17), minusOne(-17))
+"#;
+		for target in [Target::Native, Target::NativeFreestanding, Target::Wasm] {
+			let ir = ir_at_target(
+				&format!("constant-remainder-{target:?}"),
+				source,
+				false,
+				OptLevel::O0,
+				target,
+			);
+			for name in ["fa.moduleConstant", "fa.localConstant"] {
+				let body = function(&ir, name);
+				assert_eq!(
+					body.contains("invariant_divisor:"),
+					target != Target::Wasm,
+					"{body}"
+				);
+				if target != Target::Wasm {
+					assert!(
+						body.contains("icmp sge i64"),
+						"negative values need the fallback: {body}"
+					);
+					assert!(body.contains("mul i128"), "the unsigned reciprocal: {body}");
+				}
+				assert!(body.contains("srem i64"), "the signed fallback: {body}");
+			}
+			for name in [
+				"fa.negative",
+				"fa.quotient",
+				"fa.general",
+				"fa.mutableDivisor",
+				"fa.innerConstant",
+				"fa.minusOne",
+			] {
+				let body = function(&ir, name);
+				assert!(!body.contains("invariant_divisor:"), "{body}");
+				assert!(!body.contains("mul i128"), "{body}");
+			}
+			let general = function(&ir, "fa.general");
+			assert_eq!(
+				count(general, "call ptr @fa_error_division_by_zero()"),
+				1,
+				"{general}"
+			);
+		}
+	}
+
+	#[test]
 	fn divisions_check_the_divisor_and_the_minimum_only_when_needed() {
 		let ir = ir_of(
 			"divisions",
@@ -2068,6 +2166,108 @@ console.log(text.replace("é", "x").padStart(5, "0"))
 	}
 
 	#[test]
+	fn boolean_fills_require_a_constant_single_byte_and_no_other_effect() {
+		let source = r#"
+let disabled = false
+function yes = (items: Array<Boolean>, n: Integer) mutates items => {
+	for 0..n { items.push(true) }
+}
+function no = (items: GrowingArray<Boolean>, n: Integer) mutates items => {
+	for -2..=n { items.push(false) }
+}
+function named = (items: Array<Boolean>, n: Integer) mutates items => {
+	for 0..n { items.push(disabled) }
+}
+function dynamic = (items: Array<Boolean>, n: Integer, value: Boolean) mutates items => {
+	for 0..n { items.push(value) }
+}
+function indexed = (items: Array<Boolean>, n: Integer) mutates items => {
+	for index in 0..n { items.push(index == 0) }
+}
+function effects = (items: Array<Boolean>, n: Integer) mutates items => {
+	for 0..n {
+		items.push(true)
+		items.push(false)
+	}
+}
+function wide = (items: Array<UInt16>, n: Integer) mutates items => {
+	for 0..n { items.push(1) }
+}
+function optional = (items: Array<Boolean?>, n: Integer) mutates items => {
+	for 0..n { items.push(true) }
+}
+mutable items: Array<Boolean> = []
+mutable stable: GrowingArray<Boolean> = []
+mutable words: Array<UInt16> = []
+mutable maybe: Array<Boolean?> = []
+yes(items, arguments.length)
+no(stable, arguments.length)
+named(items, arguments.length)
+dynamic(items, arguments.length, arguments.length == 0)
+indexed(items, arguments.length)
+effects(items, arguments.length)
+wide(words, arguments.length)
+optional(maybe, arguments.length)
+console.log(items, stable, words, maybe)
+"#;
+		for target in [Target::Native, Target::NativeFreestanding, Target::Wasm] {
+			let ir = ir_at_target(
+				&format!("boolean-fills-{}", target.name()),
+				source,
+				true,
+				OptLevel::O0,
+				target,
+			);
+			let yes = function(&ir, "fa.yes");
+			assert_eq!(count(yes, "@fa_array_fill("), 1, "{yes}");
+			assert!(yes.contains("i32 1)"), "{yes}");
+			assert!(!yes.contains("for_body:"), "{yes}");
+			let no = function(&ir, "fa.no");
+			assert_eq!(count(no, "@fa_segmented_fill("), 1, "{no}");
+			assert!(no.contains("i32 0, i32 6)"), "{no}");
+			assert!(!no.contains("for_body:"), "{no}");
+			for name in ["named", "dynamic", "indexed", "effects", "wide", "optional"] {
+				let body = function(&ir, &format!("fa.{name}"));
+				assert!(!body.contains("@fa_array_fill("), "{body}");
+				assert!(body.contains("for_body:"), "{body}");
+			}
+		}
+	}
+
+	#[test]
+	fn boolean_fills_cover_generic_captured_and_coroutine_bodies() {
+		let ir = ir_of(
+			"boolean-fills-call-boundaries",
+			include_str!("../../cli/tests/programs/boolean-fill.fa"),
+		);
+		// Both concrete generic layouts and the captured function must batch.
+		let generic: Vec<_> = ir
+			.split("define ")
+			.filter(|body| {
+				body.lines()
+					.next()
+					.is_some_and(|line| line.contains("@fa.generic"))
+			})
+			.collect();
+		assert_eq!(generic.len(), 2, "{ir}");
+		for body in generic {
+			assert_eq!(count(body, "@fa_array_fill("), 2, "{body}");
+		}
+		let captured = function(&ir, "fa.build");
+		assert_eq!(count(captured, "@fa_array_fill("), 1, "{captured}");
+		let asynchronous = ir_of(
+			"boolean-fills-coroutine-fallback",
+			include_str!("programs/async-boolean-fill.fa"),
+		);
+		assert!(!asynchronous.contains("@fa_array_fill("), "{asynchronous}");
+		assert!(
+			!asynchronous.contains("@fa_segmented_fill("),
+			"{asynchronous}"
+		);
+		assert!(asynchronous.contains("for_body:"), "{asynchronous}");
+	}
+
+	#[test]
 	fn consecutive_pushes_keep_the_header_in_registers() {
 		// only the cold paths that grow the array read it again (enough
 		// pushes for `many` to stay a function of its own)
@@ -2087,6 +2287,310 @@ console.log(text.replace("é", "x").padStart(5, "0"))
 			.sum();
 		// the slot, the length, the capacity and the items, once
 		assert_eq!(hot, 4, "{many}");
+	}
+
+	#[test]
+	fn exact_array_extents_require_a_closed_never_resized_family() {
+		let literal =
+			"[{ value = 1.0 }, { value = 2.0 }, { value = 3.0 }, { value = 4.0 }, { value = 5.0 }]";
+		let source = |initializer: &str, extra: &str| {
+			format!(
+				"type Cell = {{ value: Float }}\nfunction extent = (items: Array<Cell>): Integer => items.length\nmutable cells: Array<Cell> = {initializer}\n{extra}\nconsole.log(extent(cells))\n"
+			)
+		};
+		for target in [Target::Native, Target::NativeFreestanding, Target::Wasm] {
+			let ir = ir_at_target(
+				&format!("array-extent-{}", target.name()),
+				&source(
+					literal,
+					"cells.reserve(100)\nfor cell in cells { cell.value += 0.25 }",
+				),
+				false,
+				OptLevel::O0,
+				target,
+			);
+			let body = function(&ir, "fa.extent");
+			assert!(body.contains("ret i64 5"), "{body}");
+		}
+		for (name, initializer, extra) in [
+			("push", literal.to_string(), "cells.push({ value = 6.0 })"),
+			("replace", literal.to_string(), "cells = [{ value = 6.0 }]"),
+			(
+				"second",
+				literal.to_string(),
+				"let other: Array<Cell> = []\nconsole.log(extent(other))",
+			),
+			(
+				"function-value",
+				literal.to_string(),
+				"let _stored = extent",
+			),
+			(
+				"initializer-call",
+				"[{ value = Float(arguments.length) }]".to_string(),
+				"",
+			),
+		] {
+			let ir = ir_of(
+				&format!("array-extent-reject-{name}"),
+				&source(&initializer, extra),
+			);
+			let body = function(&ir, "fa.extent");
+			assert!(!body.contains("ret i64 5"), "{name}: {body}");
+			assert!(body.contains("length"), "{name}: {body}");
+		}
+		// Native array spreads are still unsupported; check their withheld
+		// extent directly in the analyzer rather than asking native to emit one.
+		let mut session = Session::new();
+		let file = session.set_source("main", Arc::from(source(&format!("[...{literal}]"), "")));
+		session.analyze_file(file);
+		let analysis = session.analysis(file);
+		let facts = fa_analyzer::proofs::index_facts(
+			session.tree(file),
+			analysis,
+			session.types(),
+			fa_analyzer::proofs::ProofScope::WholeFile,
+			false,
+		);
+		assert!((0..analysis.symbols.symbols().len()).all(|symbol| {
+			facts
+				.fixed_array_length(fa_analyzer::ids::SymbolId(symbol as u32))
+				.is_none()
+		}));
+		let defaults = source("[{}, {}, {}, {}, {}]", "").replace(
+			"type Cell = { value: Float }",
+			"type Cell = { value: Float = Float(arguments.length) }",
+		);
+		let ir = ir_of("array-extent-reject-defaults", &defaults);
+		let body = function(&ir, "fa.extent");
+		assert!(body.contains("length"), "{body}");
+		let ir = ir_at(
+			"array-extent-nbody",
+			include_str!("../../../benchmarks/nbody/main.fa"),
+			false,
+			OptLevel::O0,
+		);
+		let body = function(&ir, "fa.advance");
+		assert!(
+			!body
+				.lines()
+				.any(|line| line.contains(" = load i64,") && line.contains("%length")),
+			"{body}"
+		);
+		assert!(body.contains(", 5"), "{body}");
+		let ir = optimized_ir(
+			"array-extent-nbody-optimized",
+			include_str!("../../../benchmarks/nbody/main.fa"),
+		);
+		for flag in [" fast ", " reassoc ", " contract ", " afn "] {
+			assert!(!ir.contains(flag), "unexpected FP flag {flag}: {ir}");
+		}
+	}
+
+	#[test]
+	fn range_reversal_retains_the_checked_swap_loop() {
+		let body = "let left = try items[low]\nlet right = try items[high]\ntry items[low] = right\ntry items[high] = left\nlow += 1\nhigh -= 1";
+		let source = |item: &str, body: &str| {
+			format!(
+				"function reverse = (items: Array<{item}>, start: Integer, end: Integer) throws IndexError mutates items => {{\nmutable low = start\nmutable high = end\nwhile low < high {{ {body} }}\n}}\nmutable items: Array<{item}> = []\ntry reverse(items, arguments.length, 100)\n"
+			)
+		};
+		for target in [Target::Native, Target::NativeFreestanding, Target::Wasm] {
+			let ir = ir_at_target(
+				&format!("reversal-{}", target.name()),
+				&source("Integer", body),
+				false,
+				OptLevel::O0,
+				target,
+			);
+			let reverse = function(&ir, "fa.reverse");
+			assert!(!reverse.contains("reverse_range:"), "{reverse}");
+			assert_eq!(count(reverse, "@fa_error_index("), 4, "{reverse}");
+		}
+		for (name, item, body) in [
+			("managed", "String", body.to_string()),
+			(
+				"extra-effect",
+				"Integer",
+				format!("{body}\nconsole.log(low)"),
+			),
+			(
+				"different-step",
+				"Integer",
+				body.replace("low += 1", "low += 2"),
+			),
+		] {
+			let ir = ir_of(&format!("reversal-reject-{name}"), &source(item, &body));
+			assert!(!ir.contains("reverse_range:"), "{name}: {ir}");
+		}
+		let ir = ir_at(
+			"reversal-fannkuch",
+			include_str!("../../../benchmarks/fannkuch-redux/main.fa"),
+			false,
+			OptLevel::O0,
+		);
+		assert!(!ir.contains("reverse_range:"), "{ir}");
+	}
+
+	#[test]
+	fn narrow_arithmetic_holds_operands_and_intermediate_values() {
+		let source = "function rest = (value: UInt32): UInt32 => value %% 7\nfunction quotient = (value: UInt8): Integer => value // 65537\nfunction largeDivisor = (value: UInt16): Integer => value %% 65537\nfunction intermediate = (value: UInt16): Integer => value * 2 * 0\nfunction small = (value: UInt8): Integer => (value %% 7) + 1\nconsole.log(rest(UInt32.maxValue), quotient(255), largeDivisor(65535), intermediate(65535), small(255))\n";
+		for target in [Target::Native, Target::NativeFreestanding, Target::Wasm] {
+			for checks in [false, true] {
+				let ir = ir_at_target(
+					&format!("arithmetic-width-{}-{checks}", target.name()),
+					source,
+					checks,
+					OptLevel::O0,
+					target,
+				);
+				for (name, operation) in [
+					("fa.rest", "urem i32"),
+					("fa.quotient", "udiv i32"),
+					("fa.largeDivisor", "urem i32"),
+				] {
+					let body = function(&ir, name);
+					assert!(body.contains(operation), "{body}");
+					assert!(!body.contains("to i16"), "{body}");
+				}
+				let body = function(&ir, "fa.intermediate");
+				assert!(
+					body.contains(if checks { "mul nuw i32" } else { "mul i32" }),
+					"{body}"
+				);
+				let body = function(&ir, "fa.small");
+				assert!(
+					body.contains("urem i16"),
+					"small operands still narrow: {body}"
+				);
+			}
+		}
+	}
+
+	#[test]
+	fn growing_bulk_appends_refresh_the_enclosing_push_cache() {
+		let source = include_str!("../../cli/tests/programs/growing-bulk-caches.fa");
+		for target in [Target::Native, Target::NativeFreestanding, Target::Wasm] {
+			let ir = ir_at_target(
+				&format!("growing-bulk-cache-{}", target.name()),
+				source,
+				true,
+				OptLevel::O0,
+				target,
+			);
+			for (name, append) in [
+				("fa.fillBoolean", "@fa_segmented_fill("),
+				("fa.fillUInt8", "@fa_segmented_fill("),
+				("fa.fillInt8", "@fa_segmented_fill("),
+				("fa.copyArrayEach", "@fa_segmented_append("),
+				("fa.copyArrayRange", "@fa_segmented_append("),
+				("fa.copyGrowingArrayEach", "@fa_segmented_extend_to("),
+				("fa.copyGrowingArrayRange", "@fa_segmented_extend_to("),
+			] {
+				let body = function(&ir, name);
+				assert!(body.contains("push_cursor"), "{body}");
+				let after = body.split(append).nth(1).expect("a bulk append");
+				let block = after.lines().skip(1).take(9).collect::<Vec<_>>().join("\n");
+				assert_eq!(count(&block, " = load "), 3, "length, cursor, end: {block}");
+				assert_eq!(count(&block, "store "), 3, "length, cursor, end: {block}");
+			}
+		}
+	}
+
+	#[test]
+	fn growing_header_changes_withhold_loop_caches() {
+		for (name, change) in [
+			("reset", "items = []"),
+			("replace", "items = [1, 2, 3]"),
+			("reserve", "items.reserve(4096)"),
+			("call", "grow(items)"),
+			(
+				"capture",
+				"function observe = (): Integer => items.length\nconsole.log(observe())",
+			),
+			("callback", "apply(items, grow)"),
+		] {
+			let source = format!(
+				"function grow = (items: GrowingArray<Integer>) mutates items => items.push(9)\nfunction apply = (items: GrowingArray<Integer>, action: (values: GrowingArray<Integer>) => Void mutates values) mutates items => action(items)\nfunction run = () => {{\nmutable items: GrowingArray<Integer> = [0]\nfor 0..2 {{\nfor 0..2 {{ {change} }}\nitems.push(7)\nconsole.log(items.length)\n}}\n}}\nrun()\n"
+			);
+			let ir = ir_of(&format!("growing-cache-reject-{name}"), &source);
+			let body = function(&ir, "fa.run");
+			assert!(!body.contains("push_cursor"), "{name}: {body}");
+			assert!(!body.contains("push_length"), "{name}: {body}");
+		}
+	}
+
+	#[test]
+	fn growing_scans_have_a_counted_inner_loop_per_segment() {
+		let source = "function sum = (items: GrowingArray<Integer>): Integer => { mutable total = 0\nfor item in items { total += item }\ntotal }\nmutable items: GrowingArray<Integer> = []\nfor i in 0..arguments.length { items.push(i) }\nconsole.log(sum(items))\n";
+		for target in [Target::Native, Target::NativeFreestanding, Target::Wasm] {
+			let ir = ir_at_target(
+				&format!("growing-segment-scan-{}", target.name()),
+				source,
+				false,
+				OptLevel::O0,
+				target,
+			);
+			let sum = function(&ir, "fa.sum");
+			assert_eq!(count(sum, "@fa_segmented_run("), 1, "{sum}");
+			let inner = sum
+				.split("for_segment_item:")
+				.nth(1)
+				.expect("a counted inner loop");
+			assert!(!inner.contains("@fa_segmented_run("), "{inner}");
+			assert!(!inner.contains("next_segment"), "{inner}");
+			assert!(sum.contains("segment_limit"), "{sum}");
+		}
+		let ir = optimized_ir("growing-vector-scan", source);
+		assert!(ir.contains("vector.body"), "{ir}");
+	}
+
+	#[test]
+	fn growing_private_loop_facts_require_an_unexposed_stable_owner() {
+		let prefix = "mutable items: GrowingArray<Integer> = []\nfor i in 0..arguments.length { items.push(i) }\n";
+		let indexed = "mutable total = 0\nfor i in 0..arguments.length { total += try items[i] }\nconsole.log(total, items.length)\n";
+		for target in [Target::Native, Target::NativeFreestanding, Target::Wasm] {
+			let ir = ir_at_target(
+				&format!("growing-loop-facts-{}", target.name()),
+				&format!(
+					"function run = (count: Integer) throws IndexError => {{\n{}{} }}\ntry run(arguments.length)\n",
+					prefix.replace("arguments.length", "count"),
+					indexed.replace("arguments.length", "count")
+				),
+				false,
+				OptLevel::O0,
+				target,
+			);
+			assert!(ir.contains("push_cursor"), "{ir}");
+			let loops: Vec<_> = ir
+				.split("for_body")
+				.filter(|block| block.contains("segment_code"))
+				.collect();
+			assert!(!loops.is_empty(), "{ir}");
+			// Lookup invariants are SSA values loaded in the preheader, even
+			// at O0; directory entries and element bytes are still live loads.
+			let lookup = ir
+				.split("index_segmented:")
+				.nth(1)
+				.expect("a segmented lookup")
+				.split("index_item:")
+				.next()
+				.unwrap();
+			assert!(!lookup.contains("segment_k = load"), "{lookup}");
+			assert!(!lookup.contains("segments = load ptr"), "{lookup}");
+		}
+		for (name, body) in [
+			("replace", "items = [3, 4]\nconsole.log(try items[0])"),
+			("reserve", "items.reserve(10)\nconsole.log(try items[0])"),
+			(
+				"capture",
+				"function change = () mutates items => { items = [3, 4] }\nchange()\nconsole.log(try items[0])",
+			),
+		] {
+			let source = format!("{prefix}for 0..2 {{ {body} }}\n");
+			let ir = ir_of(&format!("growing-facts-reject-{name}"), &source);
+			assert!(ir.contains("segment_k"), "{name}: {ir}");
+		}
 	}
 
 	#[test]

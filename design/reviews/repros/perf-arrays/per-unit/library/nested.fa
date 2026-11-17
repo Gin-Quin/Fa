@@ -1,0 +1,13 @@
+-- The nested-cache defect also occurs when this private owner is compiled per unit.
+export function = () => {
+	mutable flags: GrowingArray<Boolean> = []
+	for round in 0..2 {
+		for 0..3 { flags.push(true) }
+		assert flags.length == round * 4 + 3
+		flags.push(false)
+		assert flags.length == (round + 1) * 4
+	}
+	mutable count = 0
+	for flag in flags { if flag { count += 1 } }
+	assert count == 6
+}

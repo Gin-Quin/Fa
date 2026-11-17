@@ -1,0 +1,27 @@
+use { sleep } = std.time
+type Cell = { value: Float }
+async function fixed = (): Integer => {
+	mutable items: Array<Cell> = [
+		{ value = 1.0 }, { value = 2.0 }, { value = 3.0 }
+		{ value = 4.0 }, { value = 5.0 }
+	]
+	await sleep(1)
+	for item in items { item.value += 0.25 }
+	await sleep(1)
+	items.length
+}
+async function generic = <Tag>(tag: Tag): Integer => {
+	mutable items: Array<{ value: Float, tag: Tag }> = [
+		{ value = 1.0, tag }, { value = 2.0, tag }, { value = 3.0, tag }
+		{ value = 4.0, tag }, { value = 5.0, tag }
+	]
+	await sleep(1)
+	items.push({ value = 6.0, tag })
+	await sleep(1)
+	items.length
+}
+assert (await fixed()) == 5
+assert (await generic(true)) == 6
+assert (await generic(17)) == 6
+assert (await generic("an owned asynchronous tag beyond inline storage")) == 6
+console.log("async array extents ok") -- prints: async array extents ok

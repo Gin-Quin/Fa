@@ -7,7 +7,8 @@ type Labeled<label: String> = {
 		return "{label}: {self.name}"
 	}
 }
-async function describe = <Item: { describe: async (self) => String }>(item: Item): String => await item.describe()
+async function describe = <Item: { describe: async (self) => String }>(item: Item): String =>
+	await item.describe()
 let value = Labeled<"async"> { name = "Ada" }
 console.log(await describe(value))
 -- prints: async: Ada

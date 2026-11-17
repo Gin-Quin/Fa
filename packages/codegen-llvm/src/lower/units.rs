@@ -938,11 +938,6 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			let has_default = defaults.get(position).copied().unwrap_or(false);
 			if by_pointer[position] {
-				if has_default && !borrowed[position] {
-					return Err(
-						self.unsupported(node.index(), "a changed parameter with a default value")
-					);
-				}
 				types.push(self.pointer_type().into());
 			} else {
 				types.push(self.llvm_type(repr).into());

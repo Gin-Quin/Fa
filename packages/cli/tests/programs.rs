@@ -858,6 +858,33 @@ fn runnable_case(text: &str) -> bool {
 	annotated
 }
 
+/// Use the same foreign context as `fa run`; otherwise printing resource
+/// cases silently disappear from this harness before reaching a backend.
+fn analyze_case(path: &Path, text: &str) -> (fa_analyzer::Session, fa_analyzer::ids::FileId) {
+	if path
+		.file_stem()
+		.is_some_and(|name| name.to_string_lossy().ends_with(".foreign"))
+	{
+		let mut session = fa_analyzer::Session::new();
+		let file = session.set_source("main.foreign", std::sync::Arc::from(text));
+		session.analyze_file(file);
+		(session, file)
+	} else {
+		fa_analyzer::analyze_source(text)
+	}
+}
+
+#[test]
+fn runnable_foreign_cases_keep_their_resource_context() {
+	let source = include_str!("../../analyzer/tests/cases/ownership-default-resources.foreign.fa");
+	let (session, file) = analyze_case(Path::new("defaults.foreign.fa"), source);
+	assert!(
+		session.diagnostics(file).is_empty(),
+		"{:?}",
+		session.diagnostics(file)
+	);
+}
+
 #[test]
 fn analyzer_cases_print_what_they_say() {
 	if !has_bun() {
@@ -877,7 +904,7 @@ fn analyzer_cases_print_what_they_say() {
 		if !runnable_case(&text) {
 			continue;
 		}
-		let (mut session, file) = fa_analyzer::analyze_source(&text);
+		let (mut session, file) = analyze_case(&path, &text);
 		let errors = session
 			.diagnostics(file)
 			.iter()

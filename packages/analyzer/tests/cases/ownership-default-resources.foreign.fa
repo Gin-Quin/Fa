@@ -3,15 +3,37 @@ type Resource = {
 	name: String
 	function destroy = (self) => { console.log("drop {self.name}") }
 }
-function choose = (source: Resource, flag: Boolean, value: Resource = if flag { source } else { Resource { name = "fresh" } }) => {
+function choose = (
+	source: Resource
+	flag: Boolean
+	value: Resource = if flag { source } else { Resource { name = "fresh" } }
+) => {
 	console.log(value.name)
 }
-function show = (value: Resource = Resource { name = "literal" }) => { console.log(value.name) }
-function blockDefault = (value: Resource = do {
-	let local = Resource { name = "block" }
-	local
-}) => { console.log(value.name) }
-function fallback = (source: Resource?, value: Resource = source ?? Resource { name = "fallback" }) => { console.log(value.name) }
+function show = (value: Resource = { name = "literal" }) => { console.log(value.name) }
+function blockDefault = (
+	value: Resource = do {
+		let local = Resource { name = "block" }
+		local
+	}
+) => { console.log(value.name) }
+function fallback = (
+	source: Resource?
+	value: Resource = source ?? Resource { name = "fallback" }
+) => { console.log(value.name) }
+function lookup = (
+	source: Map<String, Resource>
+	key: String
+	value: Resource = source.get(key) ?? Resource { name = "missing" }
+) => { console.log(value.name) }
+type DefaultError = Errors { Failed }
+function fail = (): Integer throws DefaultError => throw DefaultError.Failed
+function laterFailure = (
+	value: Resource = { name = "before failure" }
+	later: Integer = try fail()
+) throws DefaultError => {
+	console.log(value.name, later)
+}
 function run = () => {
 	let held = Resource { name = "existing" }
 	function label = (value: Resource = held) => { console.log(value.name) }
@@ -26,6 +48,13 @@ function run = () => {
 	blockDefault()
 	fallback(held)
 	fallback(none)
+	let entries: Map<String, Resource> = [("held", Resource { name = "map" })]
+	lookup(entries, "held")
+	lookup(entries, "absent")
+	do { laterFailure() } catch _error => console.log("caught fresh default")
+	do { laterFailure(held) } catch _error => console.log("caught borrowed default")
+	function optional = (value: Resource? = held) => { console.log(value?.name) }
+	optional()
 }
 run()
 -- prints: existing
@@ -43,4 +72,12 @@ run()
 -- prints: existing
 -- prints: fallback
 -- prints: drop fallback
+-- prints: map
+-- prints: missing
+-- prints: drop missing
+-- prints: drop before failure
+-- prints: caught fresh default
+-- prints: caught borrowed default
+-- prints: existing
+-- prints: drop map
 -- prints: drop existing

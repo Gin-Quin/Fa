@@ -421,6 +421,17 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn a_borrowed_conditional_default_needs_no_collection_copy() {
+		let source = include_str!("../../analyzer/tests/cases/ownership-default-borrows.fa");
+		for target in [Target::Native, Target::Wasm] {
+			let ir = ir_at_target("borrowed-default", source, true, OptLevel::O0, target);
+			let body = function(&ir, "fa.grow");
+			assert!(!body.contains("@fa.copy"), "{target:?}: {body}");
+			assert!(!body.contains("@fa.convert_copy"), "{target:?}: {body}");
+		}
+	}
+
+	#[test]
 	fn an_owned_async_environment_is_retained_before_suspending() {
 		let source = include_str!("programs/async-ownership-environments.fa");
 		for (name, target) in [

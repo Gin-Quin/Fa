@@ -94,6 +94,26 @@ fn stores_inside_a_borrowing_default_still_follow_ownership() {
 }
 
 #[test]
+fn a_local_built_by_a_default_moves_out_of_its_inner_scope() {
+	let source = "function size = (items: Array<Integer> = do { let created = [1, 2]\ncreated }): Integer => items.length\nconsole.log(size())\n";
+	assert_clean(source);
+	let (session, file) = analyze_source(source);
+	let created = node(&session, file, "created");
+	assert!(
+		session
+			.analysis(file)
+			.has_flags(created, crate::analysis::NodeFlags::MOVE)
+	);
+}
+
+#[test]
+fn structure_field_defaults_keep_the_partial_move_refusal() {
+	let source = "function size = (input: Array<Integer> = do { let holder = { items = [1] }\nholder.items }): Integer => input.length\nconsole.log(size())\n";
+	assert_eq!(codes(source), ["MEM004"]);
+	assert_clean(&source.replace("\nholder.items", "\ncopy holder.items"));
+}
+
+#[test]
 fn a_default_keeps_its_source_live_only_when_omitted() {
 	assert_eq!(
 		codes(

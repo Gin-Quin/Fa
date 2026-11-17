@@ -1,12 +1,45 @@
-function grow = (source: Array<Integer>, choose: Boolean, values: Array<Integer> = if choose { source } else { [10] }): Integer mutates values => {
- values.push(2)
- values.length
+function color = (
+	kind: Integer
+	label: String = when kind is {
+		0 => "red"
+		1 => "tan"
+		2 => "sky"
+		else => "???"
+	}
+): String => label
+function grow = (
+	source: Array<Integer>
+	choose: Boolean
+	values: Array<Integer> = if choose { source } else { [10] }
+): Integer mutates values => {
+	values.push(2)
+	values.length
 }
 function run = (): String => {
- mutable source = [1]
- let first = grow(source, true)
- let second = grow(source, false)
- "{source} {first} {second}"
+	assert color(0) == "red"
+	assert color(1) == "tan"
+	assert color(2) == "sky"
+	assert color(3) == "???"
+	mutable source = [1]
+	let first = grow(source, true)
+	let second = grow(source, false)
+	"{source} {first} {second}"
 }
 static compiled = @run()
 console.log(compiled, run()) -- prints: [1, 2] 2 2 [1, 2] 2 2
+
+function indexed = (): String throws IndexError => {
+	mutable cursor = 0
+	let values = [3, 7]
+	function next = (): Integer => {
+		let previous = cursor
+		cursor += 1
+		previous
+	}
+	function read = (value: Integer = try values[next()]): Integer throws IndexError => value
+	let first = try read()
+	let second = try read()
+	"{first} {second} {cursor}"
+}
+static indexedCompiled = @indexed()
+console.log(indexedCompiled, try indexed()) -- prints: 3 7 2 3 7 2

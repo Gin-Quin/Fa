@@ -117,7 +117,13 @@ impl Walker<'_> {
 				}
 				let mut pending = vec![default];
 				while let Some(value) = pending.pop() {
-					if let Some(inputs) = crate::lower::copies::result_inputs(&self.tree, value) {
+					let inputs = match self.view(value) {
+						View::Loop { .. } => {
+							Some(self.a.loop_results.get(&value).cloned().unwrap_or_default())
+						}
+						_ => crate::lower::copies::result_inputs(&self.tree, value),
+					};
+					if let Some(inputs) = inputs {
 						pending.extend(inputs);
 					} else if crate::lower::copies::argument_local_root(
 						&self.tree, &self.a, default, value,

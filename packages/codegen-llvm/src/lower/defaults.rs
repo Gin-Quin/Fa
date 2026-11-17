@@ -2,6 +2,9 @@
 //! Only result paths participate; stores computing an argument keep their
 //! ordinary ownership rules.
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use fa_analyzer::ids::NodeId;
 use fa_analyzer::syntax::View;
 use inkwell::values::PointerValue;
@@ -10,13 +13,14 @@ use super::values::{Repr, Val};
 use super::{Lowering, Slot};
 use crate::error::Error;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct DefaultInput<'ctx> {
 	root: NodeId,
 	value: Slot<'ctx>,
 	address: Slot<'ctx>,
 	owned: Option<PointerValue<'ctx>>,
 	control: bool,
+	selections: Rc<Cell<u64>>,
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
@@ -44,6 +48,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			address,
 			owned,
 			control: false,
+			selections: Rc::new(Cell::new(0)),
 		};
 		let mut pending = vec![root];
 		while let Some(node) = pending.pop() {
@@ -61,7 +66,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				node,
 				DefaultInput {
 					control: children.is_some(),
-					..input
+					..input.clone()
 				},
 			);
 			pending.extend(children.into_iter().flatten());
@@ -122,26 +127,35 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(Some(self.load(place)?))
 	}
 
+	pub(super) fn default_selection(&self, node: NodeId) -> Option<u64> {
+		self.frame()
+			.default_inputs
+			.get(&node)
+			.map(|input| input.selections.get())
+	}
+
 	pub(super) fn finish_default_input(
 		&mut self,
 		node: NodeId,
 		value: Val<'ctx>,
+		before: Option<u64>,
 	) -> Result<Val<'ctx>, Error> {
-		let Some(input) = self.frame().default_inputs.get(&node).copied() else {
+		let Some(input) = self.frame().default_inputs.get(&node).cloned() else {
 			return Ok(value);
 		};
 		if value.repr == Repr::Never {
 			return Ok(value);
 		}
-		if input.control {
+		if input.control && before != Some(input.selections.get()) {
 			// Control-flow joins contain the selected value's bits, but ownership
 			// remains with its original place or the guarded default temporary.
 			self.unregister(value);
 			return Ok(value);
 		}
 		let place = self.frame_mut().default_places.remove(&node);
-		let mut fresh = self.is_temporary(value);
-		let value = if fresh {
+		let temporary = self.is_temporary(value);
+		let mut fresh = temporary && place.is_none();
+		let value = if temporary {
 			self.take(value, None)?
 		} else if fa_analyzer::lower::copies::argument_local_root(
 			self.tree,
@@ -198,19 +212,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					},
 					None => None,
 				};
-				self.select_default_input(input, node, inner, place, fresh)?;
+				self.select_default_input(&input, node, inner, place, fresh)?;
 			}
 			self.branch_to(end)?;
 			self.builder.position_at_end(end);
 		} else {
-			self.select_default_input(input, node, value, place, fresh)?;
+			self.select_default_input(&input, node, value, place, fresh)?;
 		}
 		Ok(value)
 	}
 
 	fn select_default_input(
 		&self,
-		input: DefaultInput<'ctx>,
+		input: &DefaultInput<'ctx>,
 		node: NodeId,
 		value: Val<'ctx>,
 		place: Option<Slot<'ctx>>,
@@ -230,6 +244,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				input.value.pointer
 			}
 		};
+		input.selections.set(input.selections.get() + 1);
 		self.builder.build_store(input.address.pointer, pointer)?;
 		if let Some(owned) = input.owned {
 			self.builder.build_store(

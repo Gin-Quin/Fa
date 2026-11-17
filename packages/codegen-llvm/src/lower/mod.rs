@@ -1622,12 +1622,6 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					borrowed[position] = true;
 				}
 				if by_pointer[position] {
-					if param.default.is_some() && !borrowed[position] {
-						return Err(self.unsupported(
-							param.node.index(),
-							"a changed parameter with a default value",
-						));
-					}
 					// a borrowed parameter with a default: the caller's place,
 					// or null and a false flag for the default (a lambda's
 					// callers give every argument)
@@ -2718,8 +2712,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// (`coercions`): the range check of a `SINK_CHECK` root, `Float32` →
 	/// `Float`, `Integer` ↔ `Int64`.
 	pub(crate) fn expr(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
+		let before = self.default_selection(node);
 		let value = self.checked_expr(node)?;
-		self.finish_default_input(node, value)
+		self.finish_default_input(node, value, before)
 	}
 
 	fn checked_expr(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {

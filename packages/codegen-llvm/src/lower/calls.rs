@@ -395,7 +395,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						arguments.push(self.context.bool_type().const_int(1, false).into());
 					}
 				}
-				Argument::Default if has_default && function.borrowed[position] => {
+				Argument::Default if has_default && function.by_pointer[position] => {
 					arguments.push(self.pointer_type().const_null().into());
 					arguments.push(self.context.bool_type().const_zero().into());
 				}

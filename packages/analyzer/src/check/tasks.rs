@@ -917,9 +917,23 @@ impl Walker<'_> {
 			}
 		}
 		// a method of a worker: it waits for the worker's thread
-		if let View::Access { target, .. } = self.view(callee)
+		if let View::Access { target, members } | View::OptionalAccess { target, members } =
+			self.view(callee)
+			&& let Some(member) = members.last()
 			&& matches!(
-				self.s.types.kind(self.type_of(self.strip_groups(target))),
+				self.s.types.kind(
+					self.a
+						.optional_receivers
+						.get(&member)
+						.copied()
+						.unwrap_or_else(|| {
+							members
+								.len()
+								.checked_sub(2)
+								.and_then(|index| members.get(index))
+								.map_or_else(|| self.type_of(target), |node| self.type_of(node))
+						})
+				),
 				TypeKind::Sync(SyncKind::Worker, _)
 			) {
 			return Target::Worker;

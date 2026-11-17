@@ -899,9 +899,14 @@ impl<'s> Generator<'s> {
 			.chain_calls
 			.iter()
 			.rev()
-			.find(|call| call.callee == n && call.member.is_none())
+			.find(|call| call.callee == n)
 		{
-			return call.receiver_type;
+			return self
+				.analysis
+				.optional_results
+				.get(&n)
+				.copied()
+				.unwrap_or(call.receiver_type);
 		}
 		self.analysis.type_of(n)
 	}

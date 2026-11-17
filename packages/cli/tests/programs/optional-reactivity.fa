@@ -1,0 +1,13 @@
+-- Optional reads retain reactive dependencies on their present branch.
+type Counter = { reactive count: Integer }
+reactive current: Counter? = none
+watch {
+	console.log(current?.count)
+}
+current = Counter { count = 1 }
+current.count = 2
+current = none
+-- prints: none
+-- prints: 1
+-- prints: 2
+-- prints: none

@@ -11,10 +11,13 @@ export type<label: String> = {
 export async function = <Item: { describe: async (self) => String }>(value: Item?): String? => await value?.describe()
 -- file: application/main.fa
 async function direct = (value: library.Person<"direct">?): String? => await value?.describe()
+async function relay = (value: library.Person<"relayed">?): String? => await library.invoke(value)
 export async function = () => {
 	let value = library.Person<"imported"> { name = "Ada" }
 	console.log(await library.invoke(value)) -- prints: imported: Ada
 	console.log(await library.invoke<library.Person<"imported">>(none)) -- prints: none
 	console.log(await direct(none)) -- prints: none
 	console.log(await direct(library.Person { name = "Bo" })) -- prints: direct: Bo
+	console.log(await relay(none)) -- prints: none
+	console.log(await relay(library.Person { name = "Cy" })) -- prints: relayed: Cy
 }

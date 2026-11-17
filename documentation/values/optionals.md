@@ -170,5 +170,6 @@ Many collection operations come in both forms: `items[index]` throws `IndexError
 
 ### JavaScript
 
-- `none` is `undefined`. Since `T??` is `T?`, there is a single absence and no optional is ever boxed: `?.` and `??` are the JavaScript operators, and an absent optional field is written explicitly as `undefined` to keep the shape of the object stable. No other Fa value is `null` or `undefined`.
+- `none` is `undefined`. Since `T??` is `T?`, there is a single absence and no optional is ever boxed. `??` uses the JavaScript operator. An absent optional field is written explicitly as `undefined` to keep the shape of the object stable. No other Fa value is `null` or `undefined`.
+- `?.` guards the complete remaining chain, including statements lifted from arguments, builtin helpers and awaited calls. The receiver is evaluated once; the present branch uses the ordinary member and call lowering, including generic method dictionaries, reactive reads and worker messages. The analyzer retains the present receiver and result types separately from the chain's added absence, so an actually nullable method result still needs its own guard. Pure continuations use a conditional expression; continuations with statements use an `if` and a result variable, without an added runtime closure.
 :::

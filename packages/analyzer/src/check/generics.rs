@@ -876,6 +876,17 @@ impl Walker<'_> {
 			TypeKind::Param(param) if bindings.params.contains(&param) => {
 				bindings.origins.entry(param).or_insert(origin);
 			}
+			TypeKind::Union(list) => {
+				let members = self.s.types.list_items(list);
+				if members.len() == 2 && members.contains(&TypeId::NONE) {
+					let present = members
+						.iter()
+						.copied()
+						.find(|&ty| ty != TypeId::NONE)
+						.expect("an optional has a present member");
+					self.infer_type_origin(present, origin, bindings);
+				}
+			}
 			TypeKind::Object(shape) => {
 				let fields = self.s.types.shape_fields(shape).to_vec();
 				for field in fields {

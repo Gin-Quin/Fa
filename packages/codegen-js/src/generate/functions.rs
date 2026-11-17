@@ -772,7 +772,8 @@ impl Generator<'_> {
 					.insert(0, Some(receiver.text.clone()));
 				let hidden = self.signature_hidden_arguments(callee, n);
 				values.splice(0..0, hidden);
-				let result = self.finish_call(n, None, function.text, values);
+				let external = self.external_suspending(callee);
+				let result = self.finish_call_of(n, None, external, function.text, values);
 				self.after_call_drop(n, result, drop)
 			}
 			Callee::Value if self.constraint_method_call(callee).is_some() => {

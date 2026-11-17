@@ -45,6 +45,7 @@ fn files(source: &str) -> Vec<(String, String)> {
 #[test]
 fn written_method_origins_survive_erasure_on_all_javascript_targets() {
 	let fixtures = [
+		include_str!("../../analyzer/tests/cases/review/optional-worker-calls.fa"),
 		include_str!("../../analyzer/tests/cases/review/optional-call-imports.fa"),
 		include_str!("../../analyzer/tests/cases/review/written-method-origins.fa"),
 		include_str!("../../analyzer/tests/cases/review/written-method-generic-owners.fa"),

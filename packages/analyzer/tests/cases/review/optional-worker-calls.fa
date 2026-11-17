@@ -1,0 +1,17 @@
+-- Optional worker calls use the normal worker message ABI.
+-- file: library/Multiplier.worker.fa
+export type = {
+	factor: Integer
+	function multiply = (self, value: Integer): Integer => self.factor * value
+}
+-- file: application/main.fa
+use { Multiplier } = library
+async function call = (present: Boolean) => {
+	mutable worker = if present { Multiplier { factor = 2 } } else { none }
+	console.log(await worker?.multiply(3))
+	if worker is not none { worker.stop() }
+}
+export async function = () => {
+	await call(false) -- prints: none
+	await call(true) -- prints: 6
+}

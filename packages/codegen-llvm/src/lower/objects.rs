@@ -60,6 +60,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.map(|index| index as u64 + 1)
 	}
 
+	/// Runtime errors and source-built errors share the ordinary object layout.
+	/// Declaration order is retained separately when formatting their fields.
+	fn builtin_error_fields(&self, nominal: NominalId) -> Option<Vec<(&'static str, TypeId)>> {
+		let id = self.builtin_error_id(nominal)?;
+		let mut fields = ERRORS[id as usize - 1].fields.to_vec();
+		fields.sort_unstable_by_key(|(name, _)| *name);
+		Some(fields)
+	}
+
 	/// The global id of a member of a named union (registered for printing).
 	pub(crate) fn member_id(&self, nominal: NominalId, index: u16) -> u64 {
 		let mut ids = self.union_ids.borrow_mut();
@@ -109,6 +118,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::F32 => TypeId::FLOAT32,
 			Repr::Percentage => TypeId::PERCENTAGE,
 			Repr::Str => TypeId::STRING,
+			Repr::Bytes => TypeId::BYTES,
 			Repr::Object(ty) => ty,
 			_ => return None,
 		})
@@ -718,7 +728,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let frame = self.frame();
 		if let Some(&(block, slot, mark)) = frame.catches.last() {
 			self.drop_to(mark)?;
-			self.builder.build_store(slot, error)?;
+			if let Some(slot) = slot {
+				self.builder.build_store(slot, error)?;
+			} else {
+				self.call_drop(&self.builder, Repr::Union, error.into())?;
+			}
 			self.builder.build_unconditional_branch(block)?;
 		} else if self.frame().throws {
 			self.drop_to(0)?;
@@ -759,8 +773,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		name: &str,
 		arguments: &[BasicMetadataValueEnum<'ctx>],
 	) -> Result<(), Error> {
+		self.raise_runtime_with(name, |_| Ok(arguments.to_vec()))
+	}
+
+	/// Build diagnostic-only arguments only when the handler observes them.
+	pub(crate) fn raise_runtime_with(
+		&mut self,
+		name: &str,
+		arguments: impl FnOnce(&mut Self) -> Result<Vec<BasicMetadataValueEnum<'ctx>>, Error>,
+	) -> Result<(), Error> {
+		// IndexError construction has no observable effect when the local
+		// handler never reads its payload. User expressions are evaluated
+		// before this call; retain all cleanups before entering the handler.
+		if name == "fa_error_index"
+			&& let Some(&(block, None, mark)) = self.frame().catches.last()
+		{
+			self.drop_to(mark)?;
+			self.builder.build_unconditional_branch(block)?;
+			self.continue_unreachable();
+			return Ok(());
+		}
+		let arguments = arguments(self)?;
 		let function = self.runtime.function(name)?;
-		let error = self.call_value(function, arguments)?.into_pointer_value();
+		let error = self.call_value(function, &arguments)?.into_pointer_value();
 		self.raise(error)
 	}
 
@@ -771,9 +806,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		expression: NodeId,
 		handler: NodeId,
 	) -> Result<Val<'ctx>, Error> {
-		// printed by `console.log`, a `catch` has no type: its operand's
+		// Unconstrained console arguments can have no inferred catch type.
+		// Preserve both branches, rather than assuming the handler has the
+		// successful operand's representation (e.g. String catch => Integer).
 		let repr = if self.type_of(node) == TypeId::UNKNOWN {
-			self.node_repr(expression)?
+			let success = self.node_repr(expression)?;
+			let failure = self.node_repr(handler)?;
+			let empty_array = |node| matches!(self.view(self.ungrouped(node)), View::Array { items } if items.iter().next().is_none());
+			if success == failure || failure == Repr::Never || empty_array(handler) {
+				success
+			} else if success == Repr::Never || empty_array(expression) {
+				failure
+			} else if let (Repr::Int(a), Repr::Int(b)) = (success, failure) {
+				Repr::Int(a.common(b))
+			} else {
+				Repr::Union
+			}
 		} else {
 			self.node_repr(node)?
 		};
@@ -782,13 +830,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else {
 			None
 		};
-		let error_slot = self.alloca(Repr::Union, "caught")?;
+		let binding = self.analysis.symbols.symbol_of_decl(node);
+		let observes_error = binding.is_some_and(|symbol| !self.uses_of(symbol).is_empty());
+		let error_slot = observes_error
+			.then(|| self.alloca(Repr::Union, "caught"))
+			.transpose()?;
 		let handler_block = self.append_block("catch");
 		let end = self.append_block("end_catch");
 		let mark = self.mark();
 		self.frame_mut()
 			.catches
-			.push((handler_block, error_slot.pointer, mark));
+			.push((handler_block, error_slot.map(|slot| slot.pointer), mark));
 		let owned = slot.is_some();
 		let target = slot.map(|slot| slot.repr);
 		let value = self.region(target, expression, |this| this.expr(expression));
@@ -804,9 +856,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let handled = self.region(target, handler, |this| {
 			// the handler owns the error
 			let scope = this.mark();
-			let error = this.load(error_slot)?;
-			let error = this.fresh(error);
-			if let Some(symbol) = this.analysis.symbols.symbol_of_decl(node) {
+			if let Some(error_slot) = error_slot {
+				let error = this.load(error_slot)?;
+				let error = this.fresh(error);
+				let symbol = binding.expect("an observed error binding");
 				let binding = this.slot_of(symbol, node)?;
 				let error = this.take(error, None)?;
 				this.store(binding, error, node)?;
@@ -1608,21 +1661,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				return self.array_method(target, "Array#joinedLength", &arguments);
 			}
 		}
-		// `codes.length` of a local standing for `text.codePoints()`, and
-		// `text.bytes().length`
-		if members.len() == 1
-			&& self.tree.text(first.index()) == "length"
-			&& let Some(call) = self.virtual_code_points_call(target).or_else(|| {
-				self.code_points_call(target)
-					.filter(|&call| self.is_bytes_call(call))
-			}) {
-			let text = self.receiver(call)?;
-			if text.repr == Repr::Never {
-				return Ok(text);
-			}
-			let count = self.text_view_length(call, text)?;
-			return Ok(Val::new(Repr::Int(super::values::IntRepr::I64), count));
+		if let Some(value) = self.text_count_prefix(node, target, first)? {
+			return self.apply_members(
+				node,
+				value,
+				self.type_of(first),
+				members.skip(1),
+				members.len() - 1,
+			);
 		}
+
 		// `value?.a.b`: the members after an optional access continue its chain
 		if let View::OptionalAccess {
 			target: inner,
@@ -2005,14 +2053,49 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		ty
 	}
 
+	/// A direct or virtual text collection followed by `length`. Flattened
+	/// method receivers must consume this fact before evaluating the array.
+	fn text_count_prefix(
+		&mut self,
+		node: NodeId,
+		target: NodeId,
+		first: NodeId,
+	) -> Result<Option<Val<'ctx>>, Error> {
+		if self.tree.text(first.index()) != "length" {
+			return Ok(None);
+		}
+		let call = self.virtual_code_points_call(target).or_else(|| {
+			self.code_points_call(target).filter(|&call| {
+				self.is_bytes_call(call)
+					|| self.analysis.has_flags(node, NodeFlags::CODE_POINT_COUNT)
+					|| self.analysis.has_flags(first, NodeFlags::CODE_POINT_COUNT)
+			})
+		});
+		let Some(call) = call else {
+			return Ok(None);
+		};
+		let text = self.receiver(call)?;
+		if text.repr == Repr::Never {
+			return Ok(Some(text));
+		}
+		let count = self.text_view_length(call, text)?;
+		Ok(Some(Val::new(
+			Repr::Int(super::values::IntRepr::I64),
+			count,
+		)))
+	}
+
 	/// The receiver of a method call `a.b.method(…)`: `a.b`.
 	pub(crate) fn receiver(&mut self, call: NodeId) -> Result<Val<'ctx>, Error> {
 		if let Some(value) = self.pending_receiver.take() {
 			return Ok(value);
 		}
-		let View::Call { callee, .. } = self.view(call) else {
+		let View::Call { mut callee, .. } = self.view(call) else {
 			return Err(self.unsupported(call.index(), "this method call"));
 		};
+		while let View::Group(inner) = self.view(callee) {
+			callee = inner;
+		}
 		let View::Access { target, members } = self.view(callee) else {
 			return Err(self.unsupported(call.index(), "this method call"));
 		};
@@ -2024,7 +2107,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		{
 			return self.load(slot);
 		}
-		// `self.text.bytes()`: the field read once by the method (`frozen.rs`)
+		if count > 0
+			&& let Some(first) = members.first()
+			&& let Some(value) = self.text_count_prefix(callee, target, first)?
+		{
+			return self.apply_members(
+				callee,
+				value,
+				self.type_of(first),
+				members.skip(1),
+				count - 1,
+			);
+		}
+
+		// `self.text.toUtf8()`: the field read once by the method (`frozen.rs`)
 		if count >= 1
 			&& let Some(first) = members.first()
 			&& let Some((mut value, mut current_type)) = self.frozen_value(target, first)
@@ -2116,6 +2212,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Ok(slot)
 			}
 			View::Group(inner) => self.place(inner),
+			View::Index { target, index } if self.analysis.key_reads.contains(&node) => {
+				self.key_place(node, target, index)
+			}
 			View::Index { target, index } => match self.tuple_place(node, target, index)? {
 				Some(slot) => Ok(slot),
 				None if matches!(self.node_repr(target)?, Repr::Map(_)) => {
@@ -2328,9 +2427,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		members.sort_by_key(|(_, id)| *id);
 		members.dedup_by_key(|(_, id)| *id);
 		for ((nominal, index), id) in members {
-			let fields: Vec<Repr> = match self.builtin_error_id(nominal) {
-				Some(error) => ERRORS[error as usize - 1]
-					.fields
+			let fields: Vec<Repr> = match self.builtin_error_fields(nominal) {
+				Some(fields) => fields
 					.iter()
 					.map(|(_, ty)| self.repr_of(*ty, 0))
 					.collect::<Result<_, _>>()?,
@@ -2482,9 +2580,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		members.sort_by_key(|(_, id)| *id);
 		members.dedup_by_key(|(_, id)| *id);
 		for ((nominal, index), id) in members {
-			let fields: Vec<Repr> = match self.builtin_error_id(nominal) {
-				Some(error) => ERRORS[error as usize - 1]
-					.fields
+			let fields: Vec<Repr> = match self.builtin_error_fields(nominal) {
+				Some(fields) => fields
 					.iter()
 					.map(|(_, ty)| self.repr_of(*ty, 0))
 					.collect::<Result<_, _>>()?,
@@ -2637,8 +2734,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.map(|id| ERRORS[id as usize - 1].fields)
 				.filter(|fields| !fields.is_empty());
 			if let Some(fields) = builtin_fields {
-				// the box of the runtime: the id, then the fields
-				let reprs: Vec<Repr> = fields
+				// Storage is sorted by name; output follows declaration order.
+				let layout = self.builtin_error_fields(nominal).expect("a builtin error");
+				let reprs: Vec<Repr> = layout
 					.iter()
 					.map(|(_, ty)| self.repr_of(*ty, 0))
 					.collect::<Result<_, _>>()?;
@@ -2646,7 +2744,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				types.extend(reprs.iter().map(|repr| self.llvm_type(*repr)));
 				let ty = self.context.struct_type(&types, false);
 				let box_pointer = value.value.expect("a box").into_pointer_value();
-				for (position, ((field, _), repr)) in fields.iter().zip(reprs).enumerate() {
+				for (position, (field, _)) in fields.iter().enumerate() {
+					let index = layout
+						.iter()
+						.position(|(name, _)| name == field)
+						.expect("a payload field");
+					let repr = reprs[index];
 					let prefix = if position == 0 {
 						format!(" {{ {field} = ")
 					} else {
@@ -2656,7 +2759,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.append_value(prefix, node)?;
 					let pointer =
 						self.builder
-							.build_struct_gep(ty, box_pointer, position as u32 + 1, "")?;
+							.build_struct_gep(ty, box_pointer, index as u32 + 1, "")?;
 					let loaded = self.load(Slot { pointer, repr })?;
 					self.append_nested(loaded, node)?;
 				}

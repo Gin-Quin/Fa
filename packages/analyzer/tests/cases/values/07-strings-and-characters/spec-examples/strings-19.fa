@@ -1,0 +1,4 @@
+-- Specification example: strings 19
+for character, index in "a😀b" {
+	console.log("{index}: {character}") -- "0: a", "1: 😀", "3: b"
+}

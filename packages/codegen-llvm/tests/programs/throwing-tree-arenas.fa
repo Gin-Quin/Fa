@@ -1,10 +1,10 @@
 type Failure = Errors { Stop }
 type Expression = Union {
-	Leaf = { symbol: Character }
+	Leaf = { symbol: String }
 	Branch = { left: Expression, right: Expression }
 }
 
-function build = (depth: Integer, symbol: Character, fail: Boolean): Expression throws Failure => {
+function build = (depth: Integer, symbol: String, fail: Boolean): Expression throws Failure => {
 	if depth == 0 {
 		if fail { throw Failure.Stop }
 		return Expression.Leaf { symbol }
@@ -14,7 +14,7 @@ function build = (depth: Integer, symbol: Character, fail: Boolean): Expression 
 	Expression.Branch { left, right }
 }
 
-function count = (expression: Expression, expected: Character): Integer => when expression is {
+function count = (expression: Expression, expected: String): Integer => when expression is {
 	Expression.Leaf as { symbol } => {
 		assert symbol == expected
 		1

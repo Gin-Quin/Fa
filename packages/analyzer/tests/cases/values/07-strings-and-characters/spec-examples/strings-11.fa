@@ -1,0 +1,3 @@
+-- Specification example: strings 11
+assert "héllo".utf8Length() == 6
+assert "😀".utf8Length() == 4

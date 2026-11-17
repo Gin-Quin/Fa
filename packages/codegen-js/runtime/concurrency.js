@@ -18,10 +18,39 @@
 // that isn't cross-origin isolated) the program stops with what to do
 // (`faNeedSharedMemory`): Bun and Node always have it.
 //
-// Each helper starts at a `// @fa-helper <name> deps: <names>` line and ends at
-// the next one: `fa-codegen-js` extracts only the helpers a program uses.
-
+// Shared serialization preserves Bytes across workers.
+import { faIsBytes } from "./collections.js";
 import { faStop } from "./stops.js";
+import { faUtf8Decoder, faUtf8Encoder } from "./strings.js";
+
+// @fa-helper faSharedText deps: faIsBytes
+/** The internal shared-memory format preserves binary values and none.
+ * @param {any} value @returns {string}
+ */
+export function faSharedText(value) {
+	return JSON.stringify(value, (_, item) =>
+		typeof item === "bigint"
+			? { $b: item.toString() }
+			: item === undefined
+				? { $n: 0 }
+				: faIsBytes(item)
+					? { $bytes: Array.from(item) }
+					: item,
+	);
+}
+
+// @fa-helper faSharedParse deps: faUtf8Decoder
+/** @param {Uint8Array} bytes @returns {any} */
+export function faSharedParse(bytes) {
+	return JSON.parse(faUtf8Decoder.decode(bytes), (_, item) => {
+		if (item !== null && typeof item === "object") {
+			if ("$b" in item) return BigInt(item.$b);
+			if ("$n" in item) return undefined;
+			if ("$bytes" in item) return Uint8Array.from(item.$bytes);
+		}
+		return item;
+	});
+}
 
 // @fa-helper faSharedHandle
 /** Shared synchronization handles are leaves of structural value copies. */
@@ -192,7 +221,7 @@ export class FaGuard {
 	}
 }
 
-// @fa-helper FaMutex deps: FaGuard faNeedSharedMemory faSharedHandle
+// @fa-helper FaMutex deps: FaGuard faNeedSharedMemory faSharedHandle faSharedText faSharedParse faUtf8Encoder
 /**
  * A `Mutex(T)`: the value, and whether a guard holds it.
  */
@@ -246,9 +275,7 @@ export class FaMutex {
 	 * @returns {string}
 	 */
 	text(value) {
-		return JSON.stringify(value, (_, item) =>
-			typeof item === "bigint" ? { $b: item.toString() } : item === undefined ? { $n: 0 } : item,
-		);
+		return faSharedText(value);
 	}
 
 	/** Writes the value into shared memory (the lock is held). */
@@ -256,7 +283,7 @@ export class FaMutex {
 		const cell = /** @type {Int32Array} */ (this.cell);
 		const text = this.text(this.value);
 		const bytes = /** @type {Uint8Array} */ (this.bytes);
-		const { read, written } = new TextEncoder().encodeInto(text, bytes);
+		const { read, written } = faUtf8Encoder.encodeInto(text, bytes);
 		if (read < text.length) {
 			throw new RangeError("the value of a mutex shared with a worker is too large");
 		}
@@ -268,13 +295,7 @@ export class FaMutex {
 		const cell = /** @type {Int32Array} */ (this.cell);
 		const shared = /** @type {Uint8Array} */ (this.bytes);
 		const bytes = shared.slice(0, Atomics.load(cell, 1));
-		this.value = JSON.parse(new TextDecoder().decode(bytes), (_, item) => {
-			if (item !== null && typeof item === "object") {
-				if ("$b" in item) return BigInt(item.$b);
-				if ("$n" in item) return undefined;
-			}
-			return item;
-		});
+		this.value = faSharedParse(bytes);
 	}
 
 	/** @returns {boolean} whether this thread took the shared lock */
@@ -332,7 +353,7 @@ export function faUnlock(guard) {
 	}
 }
 
-// @fa-helper FaChannel deps: faNeedSharedMemory faSharedHandle
+// @fa-helper FaChannel deps: faNeedSharedMemory faSharedHandle faSharedText faSharedParse faUtf8Encoder
 /**
  * A `Channel(T)`: a queue, bounded by its capacity (`Infinity` without one).
  * Given to a worker (`share`), its queue moves into shared memory: the
@@ -486,13 +507,7 @@ export class FaChannel {
 		const cell = /** @type {Int32Array} */ (this.cell);
 		const shared = /** @type {Uint8Array} */ (this.bytes);
 		const bytes = shared.slice(0, Atomics.load(cell, 2));
-		return JSON.parse(new TextDecoder().decode(bytes), (_, item) => {
-			if (item !== null && typeof item === "object") {
-				if ("$b" in item) return BigInt(item.$b);
-				if ("$n" in item) return undefined;
-			}
-			return item;
-		});
+		return faSharedParse(bytes);
 	}
 
 	/**
@@ -501,11 +516,9 @@ export class FaChannel {
 	 */
 	write(items) {
 		const cell = /** @type {Int32Array} */ (this.cell);
-		const text = JSON.stringify(items, (_, item) =>
-			typeof item === "bigint" ? { $b: item.toString() } : item === undefined ? { $n: 0 } : item,
-		);
+		const text = faSharedText(items);
 		const bytes = /** @type {Uint8Array} */ (this.bytes);
-		const { read, written } = new TextEncoder().encodeInto(text, bytes);
+		const { read, written } = faUtf8Encoder.encodeInto(text, bytes);
 		if (read < text.length) {
 			throw new RangeError("the values in a channel shared with a worker are too large");
 		}

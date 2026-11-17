@@ -870,6 +870,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 			},
 		));
+		if self.reference_buffer_repr(ty).is_some() {
+			types.push(self.pointer_type().into());
+		}
 		self.function_type_of(types, true, ret, throws).0
 	}
 
@@ -968,7 +971,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mark = self.mark();
 		self.frame_mut()
 			.catches
-			.push((handler, error_slot.pointer, mark));
+			.push((handler, Some(error_slot.pointer), mark));
 		let result = call(self);
 		self.frame_mut().catches.pop();
 		let result = result?;
@@ -1074,6 +1077,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.unwrap_or((self.pointer_type().const_null(), self.usize.const_zero()));
 			lowered.insert(1, pointer.into());
 			lowered.insert(2, bytes.into());
+		}
+		if let Some(repr) = self.reference_buffer_repr(ty) {
+			lowered.push(self.allocate_reference_buffer(repr)?.into());
 		}
 		let fn_type = self.indirect_reference_type(ty, &params, ret, throws);
 		let call = self

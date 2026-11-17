@@ -490,15 +490,15 @@ fn built_in_defaults_may_be_omitted() {
 }
 
 #[test]
-fn a_string_where_a_character_is_expected() {
+fn strings_flow_without_character_coercion() {
 	assert_eq!(
-		codes("function f = (c: Character) => c\nlet s: String = \"ab\"\nf(s)\n"),
-		["E-STR-8"]
+		codes("function f = (c: String) => c\nlet s: String = \"ab\"\nf(s)\n"),
+		Vec::<&str>::new()
 	);
-	let (session, file) = analyze_source("let c: Character = \"a\"\nlet s: String = c\n");
+	let (session, file) = analyze_source("let c: String = \"a\"\nlet s: String = c\n");
 	assert!(session.diagnostics(file).is_empty());
 	let read = node(&session, file, "c");
-	assert_eq!(session.analysis(file).coercion(read), Some(TypeId::STRING));
+	assert_eq!(session.analysis(file).coercion(read), None);
 }
 
 #[test]

@@ -1,0 +1,2 @@
+-- Specification example: strings 01
+let greeting = "Hello"

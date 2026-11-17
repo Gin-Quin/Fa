@@ -387,7 +387,6 @@ impl Walker<'_> {
 			| TypeKind::FloatLit(..)
 			| TypeKind::String
 			| TypeKind::StringLit(_)
-			| TypeKind::Character
 			| TypeKind::None
 			| TypeKind::Rec(_) => None,
 			TypeKind::Object(shape) => {

@@ -78,6 +78,7 @@ pub(crate) enum Argument {
 pub(crate) enum Step {
 	Field(Arc<str>),
 	Index(Node),
+	Key(Node),
 }
 
 #[derive(Clone)]
@@ -110,6 +111,7 @@ pub(crate) enum Op {
 	Loop(Node),
 	While(Node, Node),
 	For {
+		utf8: bool,
 		item: Option<Slot>,
 		index: Option<Slot>,
 		iterable: Node,
@@ -209,6 +211,7 @@ impl<'a> Builder<'a> {
 				.map(|step| match step {
 					ir::Step::Field(name) => Step::Field(Arc::clone(name)),
 					ir::Step::Index(index) => Step::Index(self.add(index)),
+					ir::Step::Key(key) => Step::Key(self.add(key)),
 				})
 				.collect(),
 		}
@@ -252,6 +255,19 @@ impl<'a> Builder<'a> {
 					iterable,
 					body,
 				} => Op::For {
+					utf8: false,
+					item: *item,
+					index: *index,
+					iterable: self.add(iterable),
+					body: self.add(body),
+				},
+				ir::Expr::ForUtf8 {
+					item,
+					index,
+					iterable,
+					body,
+				} => Op::For {
+					utf8: true,
 					item: *item,
 					index: *index,
 					iterable: self.add(iterable),

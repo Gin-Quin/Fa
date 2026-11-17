@@ -3,5 +3,5 @@ export type = {
 	text: String
 	at: Integer
 
-	function current = (self): Byte => self.text.bytes().get(self.at) ?? 0
+	function current = (self): Byte => self.text.toUtf8().get(self.at) ?? 0
 }

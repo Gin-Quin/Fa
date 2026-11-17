@@ -1,7 +1,7 @@
--- Constant alphabets retain Character semantics for non-ASCII and multi-byte graphemes.
+-- Constant alphabets retain String semantics for non-ASCII and multi-byte graphemes.
 let digits = "0123456789"
-function digit = (c: Character): Integer => digits.indexOf(c) ?? -1
-function lastDigit = (c: Character): Integer => digits.lastIndexOf(c) ?? -1
+function digit = (c: String): Integer => digits.indexOf(c) ?? -1
+function lastDigit = (c: String): Integer => digits.lastIndexOf(c) ?? -1
 console.log(digit("0"), digit("9"), digit("/"), digit(":"), digit("é"), digit("1\u{301}"))
 -- prints: 0 9 -1 -1 -1 -1
 console.log(lastDigit("7"), lastDigit("🇫🇷"))
@@ -20,7 +20,7 @@ console.log(text)
 mutable unicode = "é"
 unicode += "{piece}🇫🇷"
 console.log(unicode, unicode.length)
--- prints: ébc🇫🇷 4
+-- prints: ébc🇫🇷 7
 
 -- Borrowed structural views and temporary aggregate arguments don't mutate or consume inputs.
 type Data = { a: Integer, b: String, extra: Integer }

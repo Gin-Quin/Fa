@@ -1,0 +1,19 @@
+-- Constants and run-time cuts keep identical UTF-16 units, recursively.
+static high = "😀"[0]
+static low = "😀"[1..]
+static paired = high + low
+static nested = { items = [high, low], text = "a" + high + "b" }
+static lookup: Map<String, String> = [(high, low)]
+static distinct: Set<String> = [high, low]
+type Piece = Union { Cut = { text: String } }
+static piece = Piece.Cut { text = high }
+function check = (text: String): Void throws IndexError => {
+	let first = try text[0]
+	let last = try text[1..]
+	console.log(high, low, high.length, low.length, high.isWellFormed()) -- prints: � � 1 1 false
+	console.log(high == first, low == last, paired == text) -- prints: true true true
+	console.log((try nested.items[0]) == first, (try nested.items[1]) == last, nested.text.length) -- prints: true true 3
+	console.log(lookup.get(first) == last, distinct.size) -- prints: true 2
+	when piece is { Piece.Cut as item => console.log(item.text == first) } -- prints: true
+}
+try check("😀")

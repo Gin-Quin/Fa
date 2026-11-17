@@ -1,0 +1,2 @@
+static half = "😀"[0]
+type Invalid = half -- error: TY008

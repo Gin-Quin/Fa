@@ -145,7 +145,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			let cap_ptr = b.build_struct_gep(self.string_type, slot, 2, "")?;
 			let cap = b.build_load(self.usize, cap_ptr, "")?.into_int_value();
-			let kind = b.build_and(cap, self.simple_flag().const_not(), "")?;
+			let kind = b.build_and(cap, self.string_flags().const_not(), "")?;
 			let nonzero =
 				b.build_int_compare(inkwell::IntPredicate::NE, kind, self.usize.const_zero(), "")?;
 			let heap = b.build_int_compare(
@@ -495,7 +495,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				continue;
 			}
 			match self.types().kind(at) {
-				TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => {}
+				TypeKind::String | TypeKind::StringLit(_) => {}
 				TypeKind::Object(_) if self.destroy_function(at).is_none() => {
 					stack.extend(self.types().fields_of(at).iter().map(|f| f.ty));
 				}

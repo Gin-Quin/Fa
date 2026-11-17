@@ -1,0 +1,9 @@
+-- Specification example: operations 5
+let text = "hello world"
+
+let part = text[0..5]                -- "hello"
+let rest = text[6..]                 -- "world"
+let hasWorld = text.includes("world")
+let starts = text.startsWith("hello")
+let ends = text.endsWith("world")
+let index = text.indexOf("world")    -- 6, an `Integer?`

@@ -1,0 +1,2 @@
+-- Specification example: operations 1
+let greeting = "Hello" + " " + "world"

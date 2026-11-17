@@ -1,0 +1,6 @@
+let text = "ab"[0..=2] -- error: E-NUM-17
+let bytes = Bytes.filled(2)[0..=2] -- error: E-NUM-17
+let items = [1, 2][0..=2] -- error: E-NUM-17
+let empty = ""[0..=0] -- error: E-NUM-17
+static range = 0..=2
+let stored = "ab"[range] -- error: E-NUM-17

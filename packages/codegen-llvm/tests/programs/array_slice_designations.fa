@@ -1,0 +1,13 @@
+function snapshots = (): String throws IndexError => {
+	mutable values = [1, 2, 3]
+	mutable use current = values[0..1]
+	mutable use kept = values[0..1]
+	for index in 0..3 {
+		reuse current = try values[index..index + 1]
+		if index == 0 { reuse kept = current }
+	}
+	try current[0] = 9
+	let saved = kept
+	"{kept} {current} {values} {saved}"
+}
+console.log(try snapshots()) -- prints: [1] [9] [1, 2, 9] [1]

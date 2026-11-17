@@ -107,8 +107,8 @@ pub enum TypeTest {
 	Float,
 	/// A string.
 	String,
-	/// A character.
-	Character,
+	/// Binary data, distinct from an array.
+	Bytes,
 	/// An array.
 	Array,
 	/// A map.
@@ -160,6 +160,8 @@ pub enum Step {
 	Field(Arc<str>),
 	/// `[index]` (or `[key]` of a map).
 	Index(Expr),
+	/// The checked dotted field path of a key-set loop.
+	Key(Expr),
 }
 
 /// An assignable place: a local and the steps below it.
@@ -222,6 +224,13 @@ pub enum Expr {
 	/// `for item, index in iterable { … }`: arrays, sets, maps (tuples of
 	/// key and value), ranges, strings (characters).
 	For {
+		item: Option<Slot>,
+		index: Option<Slot>,
+		iterable: Box<Expr>,
+		body: Box<Expr>,
+	},
+	/// A direct loop over `text.toUtf8()`, encoding one scalar at a time.
+	ForUtf8 {
 		item: Option<Slot>,
 		index: Option<Slot>,
 		iterable: Box<Expr>,

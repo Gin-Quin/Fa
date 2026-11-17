@@ -1,0 +1,53 @@
+-- kind: test
+use { Json, JsonError } = std.json
+
+type User = { name: String, enabled: Boolean = true, count: Integer = "日😀".length }
+type Animal = Union { Cat = { name: String }, Unknown }
+type Color = Enum { red, blue }
+type Code = Enum { first = 7, second = 9 }
+
+function user = (input: Bytes): User throws JsonError => try Json.parse(input)
+function array = (input: Bytes): Array<String> throws JsonError => try Json.parse(input)
+function dictionary = (input: Bytes): Map<String, String> throws JsonError => try Json.parse(input)
+function animal = (input: Bytes): Animal throws JsonError => try Json.parse(input)
+function color = (input: Bytes): Color throws JsonError => try Json.parse(input)
+function code = (input: Bytes): Code throws JsonError => try Json.parse(input)
+function rejects = (input: Bytes): Boolean => {
+	let _user = user(input) catch _error => return true
+	false
+}
+function noDefault = (): String => {
+	assert false
+	"unreachable"
+}
+type Explicit = { name: String = noDefault() }
+function explicit = (input: Bytes): Explicit throws JsonError => try Json.parse(input)
+
+static parsed = @user("{{\"name\":\"é日😀\"}}".toUtf8())
+static strings = @array("[\"é\",\"日\",\"😀\",\"\\ud800\"]".toUtf8())
+static map = @dictionary("{{\"é\":\"日😀\",\"\\ud800\":\"half\"}}".toUtf8())
+static cat = @animal("{{\"type\":\"Cat\",\"name\":\"日😀\"}}".toUtf8())
+static blue = @color("\"blue\"".toUtf8())
+static number = @code("9".toUtf8())
+static wrongType = @rejects("{{\"name\":0}}".toUtf8())
+static invalidUtf8 = @rejects(Bytes.from([255]))
+static malformed = @rejects("{{\"name\":".toUtf8())
+static given = @explicit("{{\"name\":\"é日😀\"}}".toUtf8())
+
+@test "JSON reads bytes directly and preserves string units" {
+	assert parsed.name == "é日😀" and parsed.enabled and parsed.count == 3
+	assert strings.get(0) == "é" and strings.get(1) == "日" and strings.get(2) == "😀"
+	assert strings.get(3) == "\u{10000}"[0]
+	assert map.get("é") == "日😀" and map.get("\u{10000}"[0]) == "half"
+	assert cat == Animal.Cat { name = "日😀" }
+	assert blue == Color.blue and number == Code.second
+	assert wrongType and invalidUtf8 and malformed and given.name == "é日😀"
+}
+
+function captured = (name: String): String => {
+	type Local = { value: String = name }
+	let local: Local = Json.parse("{{}}".toUtf8()) catch _error => Local { value = "" }
+	local.value
+}
+static capturedDefault = @captured("é日😀")
+@test "JSON field defaults keep their lexical values" { assert capturedDefault == "é日😀" }

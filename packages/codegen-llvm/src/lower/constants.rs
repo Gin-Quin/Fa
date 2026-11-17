@@ -14,6 +14,42 @@ use crate::lower::Lowering;
 use crate::lower::values::{IntRepr, Repr, Val};
 
 impl<'ctx> Lowering<'_, 'ctx> {
+	/// Preserve every UTF-16 unit of a compile-time value. Ordinary literals
+	/// keep their UTF-8 fast path; lone surrogates use canonical WTF-8.
+	pub(crate) fn text_constant(&mut self, text: &fa_interpreter::text::Text) -> Val<'ctx> {
+		if let Some(text) = text.as_str() {
+			return self.string_constant(text);
+		}
+		let mut bytes = Vec::with_capacity(text.utf8_len());
+		for point in char::decode_utf16(text.units()) {
+			match point {
+				Ok(point) => {
+					let mut encoded = [0; 4];
+					bytes.extend_from_slice(point.encode_utf8(&mut encoded).as_bytes());
+				}
+				Err(error) => {
+					let unit = error.unpaired_surrogate();
+					bytes.extend_from_slice(&[
+						0xE0 | (unit >> 12) as u8,
+						0x80 | ((unit >> 6) & 63) as u8,
+						0x80 | (unit & 63) as u8,
+					]);
+				}
+			}
+		}
+		let pointer = self.constant_bytes(&bytes);
+		// This tag also denotes counted views. Treating malformed static
+		// data conservatively as borrowed preserves lifetime and copy rules.
+		let bits = self.usize.get_bit_width();
+		let capacity = (1u64 << (bits - 4)) | (1u64 << (bits - 2)) | text.len() as u64;
+		let value = self.string_type.const_named_struct(&[
+			pointer.into(),
+			self.usize.const_int(bytes.len() as u64, false).into(),
+			self.usize.const_int(capacity, false).into(),
+		]);
+		Val::new(Repr::Str, value)
+	}
+
 	/// A literal array's length survives immutable bindings and copies. Its
 	/// receiver is still evaluated normally, including every initializer.
 	pub(crate) fn constant_array_length(&self, mut node: NodeId) -> Option<usize> {
@@ -55,7 +91,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	pub(crate) fn constant_text(&self, mut node: NodeId) -> Option<String> {
 		for _ in 0..32 {
 			if let Some(Value::String(text)) = self.comptime_value(node) {
-				return Some(text.to_string());
+				return text.as_str().map(str::to_string);
 			}
 			match self.view(node) {
 				fa_analyzer::syntax::View::String(text) => return Some(text.to_string()),
@@ -118,7 +154,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				repr,
 				self.context.bool_type().const_int(*value as u64, false),
 			),
-			(Value::String(text), Repr::Str) => self.string_constant(text),
+			(Value::String(text), Repr::Str) => self.text_constant(text),
+			(Value::Bytes(bytes), Repr::Bytes) => {
+				let pointer = self.constant_bytes(bytes);
+				let i64 = self.context.i64_type();
+				let count = i64.const_int(bytes.len() as u64, false);
+				let header = self.context.const_struct(
+					&[
+						pointer.into(),
+						count.into(),
+						count.into(),
+						i64.const_int(super::arrays::ARRAY_STATIC_MARKER, false)
+							.into(),
+					],
+					false,
+				);
+				Val::new(
+					Repr::Bytes,
+					self.readonly_global(header.into(), "fa.bytes.static"),
+				)
+			}
 			(Value::None, Repr::None) => Val::none(),
 			(Value::None, Repr::Optional(_)) => {
 				Val::new(repr, super::zero_of(self.llvm_type(repr)))
@@ -403,7 +458,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			(Value::Integer(integer), TypeKind::Int(_)) => types
 				.as_int(ty)
 				.is_some_and(|int| int.min <= *integer && *integer <= int.max),
-			(Value::String(text), TypeKind::StringLit(sym)) => types.syms.resolve(sym) == &**text,
+			(Value::String(text), TypeKind::StringLit(sym)) => {
+				text.as_str() == Some(types.syms.resolve(sym))
+			}
 			(Value::Boolean(value), TypeKind::BoolLit(literal)) => *value == literal,
 			(Value::None, kind) => kind == TypeKind::None,
 			(Value::Object(object), TypeKind::Object(_)) => {

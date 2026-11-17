@@ -1,4 +1,4 @@
--- a string literal pattern on a `Character` compares the character
+-- a string literal pattern on a `String` compares the character
 let text = "a)b+"
 for c in text.characters() {
 	if c is ")" {

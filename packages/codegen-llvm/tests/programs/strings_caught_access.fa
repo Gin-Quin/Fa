@@ -1,0 +1,28 @@
+-- A small method may handle errors locally when expanded into its caller.
+type Reader = {
+	text: String
+	position: Integer
+	function current = (self): UInt16 => self.text.codeUnitAt(self.position) catch _error => 0
+	function sum = (self): Integer mutates self => {
+		mutable total = 0
+		while self.current() != 0 {
+			total += self.current()
+			self.position += 1
+		}
+		total
+	}
+}
+mutable ascii = Reader { text = "abc", position = 0 }
+mutable unicode = Reader { text = "é😀", position = 0 }
+console.log(ascii.sum(), unicode.sum()) -- prints: 294 112422
+
+-- Observed errors retain their payload; ignored user errors are dropped.
+function inspect = (text: String, index: Integer): String => {
+	let unit = text.codeUnitAt(index) catch error => return "{error}"
+	"{unit}"
+}
+console.log(inspect("a", 2)) -- prints: IndexError { index = 2, length = 1 }
+type Failed = Errors { Payload = { text: String } }
+function fail = (text: String): Integer throws Failed => throw Failed.Payload { text }
+function handled = (text: String): Integer => fail(text) catch _error => 7
+console.log(handled("owned payload".repeat(20))) -- prints: 7

@@ -75,6 +75,11 @@ impl<'t> NodeList<'t> {
 		NodeList(self.0.get(count..).unwrap_or(&[]))
 	}
 
+	/// The first `count` nodes.
+	pub fn take(self, count: usize) -> NodeList<'t> {
+		NodeList(&self.0[..count.min(self.0.len())])
+	}
+
 	/// The nodes, in source order.
 	pub fn iter(self) -> impl DoubleEndedIterator<Item = NodeId> + ExactSizeIterator + 't {
 		self.0.iter().copied().map(id)

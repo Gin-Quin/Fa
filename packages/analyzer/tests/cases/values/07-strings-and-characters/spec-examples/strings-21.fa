@@ -1,0 +1,10 @@
+-- Specification example: strings 21
+let lines = ["hello", "world"]
+mutable output = String.from("", capacity = 4096) -- room for 4096 bytes
+
+for line in lines {
+	output += line
+	output += "\n"
+}
+
+output.reserve(1024) -- room for 1024 more bytes than its current byte length

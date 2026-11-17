@@ -11,6 +11,7 @@ use crate::code::{Argument, Code, Item, Node, Op, Part, Place, Step};
 use crate::eval::{self, Error, Eval, Flow, Interpreter};
 use crate::ir::{ArithOp, CompareOp, FnKey, GlobalKey, Num, Slot, TypeTest};
 use crate::references::{Key, Reference};
+use crate::text::Text;
 use crate::value::{Closure, Member, MemberKind, Object, Value, equals};
 use crate::{builtins, memory};
 
@@ -105,6 +106,21 @@ enum Iteration {
 		keys: Vec<Value>,
 		position: usize,
 	},
+	Utf8 {
+		text: Text,
+		offset: usize,
+		buffer: [u8; 4],
+		position: usize,
+		length: usize,
+	},
+	Text {
+		text: Text,
+		offset: usize,
+	},
+	Bytes {
+		bytes: Arc<Vec<u8>>,
+		offset: usize,
+	},
 	Range {
 		current: I256,
 		end: Option<I256>,
@@ -148,7 +164,7 @@ enum Continuation {
 	Loop(Node),
 	WhileCondition(Node, Node),
 	WhileBody(Node, Node),
-	ForIterable(Option<Slot>, Option<Slot>, Node),
+	ForIterable(Option<Slot>, Option<Slot>, Node, bool),
 	ForBody(For),
 	Catch(Option<Slot>, Node),
 	Function,
@@ -329,11 +345,15 @@ impl<'i, 'h> Machine<'i, 'h> {
 				self.evaluate_after(*condition, Continuation::WhileCondition(*condition, *body))
 			}
 			Op::For {
+				utf8,
 				item,
 				index,
 				iterable,
 				body,
-			} => self.evaluate_after(*iterable, Continuation::ForIterable(*item, *index, *body)),
+			} => self.evaluate_after(
+				*iterable,
+				Continuation::ForIterable(*item, *index, *body, *utf8),
+			),
 			Op::Break(value) => match value {
 				Some(value) => self.evaluate_after(*value, Continuation::Unary(Unary::Break)),
 				None => Err(Flow::Break(Value::None)),
@@ -447,7 +467,9 @@ impl<'i, 'h> Machine<'i, 'h> {
 				parts
 					.iter()
 					.map(|part| match part {
-						Part::Text(text) => Input::Constant(Value::String(Arc::clone(text))),
+						Part::Text(text) => {
+							Input::Constant(Value::String(Text::from(Arc::clone(text))))
+						}
 						Part::Value(node) => Input::Expr(*node),
 					})
 					.collect(),
@@ -526,7 +548,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 			.steps
 			.iter()
 			.filter_map(|step| match step {
-				Step::Index(node) => Some(Input::Expr(*node)),
+				Step::Index(node) | Step::Key(node) => Some(Input::Expr(*node)),
 				_ => None,
 			})
 			.collect();
@@ -567,22 +589,27 @@ impl<'i, 'h> Machine<'i, 'h> {
 				fields: names.into_iter().zip(values).collect(),
 			}))),
 			Finish::Template => {
-				let pieces: Vec<Arc<str>> = values
+				for value in &values {
+					if !matches!(value, Value::String(_)) {
+						self.interpreter.reserve_text(value.text_size())?;
+					}
+				}
+				let pieces: Vec<Text> = values
 					.into_iter()
 					.map(|value| match value {
 						Value::String(text) => text,
-						other => Arc::from(other.to_text()),
+						other => other.to_text_value(),
 					})
 					.collect();
-				let size = pieces
+				let bytes = pieces
 					.iter()
-					.fold(0usize, |size, piece| size.saturating_add(piece.len()));
-				self.interpreter.reserve_text(size)?;
-				let mut text = String::with_capacity(size);
-				for piece in pieces {
-					text.push_str(&piece);
+					.fold(0usize, |n, p| n.saturating_add(p.utf8_len()));
+				let units = pieces.iter().fold(0usize, |n, p| n.saturating_add(p.len()));
+				self.interpreter.reserve_text(bytes)?;
+				if pieces.iter().any(|p| !p.is_well_formed()) {
+					self.interpreter.reserve(units.saturating_mul(10))?;
 				}
-				Self::done(Value::String(Arc::from(text)))
+				Self::done(Value::String(Text::concat(&pieces)))
 			}
 			Finish::Range(inclusive) => {
 				let mut values = values.into_iter();
@@ -643,6 +670,84 @@ impl<'i, 'h> Machine<'i, 'h> {
 		}
 	}
 
+	/// Preflight copy-on-write and borrowed-slice buffers before changing a
+	/// place. Parent copies make their owned children shared as well.
+	fn reserve_edit(&self, place: &ResolvedPlace) -> Result<(), Error> {
+		let mut current = &self.frames[place.frame].locals[place.slot as usize];
+		let mut shared = false;
+		let mut view: Option<(usize, usize)> = None;
+		let mut bytes = 0usize;
+		for step in &place.keys {
+			while let Value::Member(member) = current {
+				shared |= Arc::strong_count(member) > 1;
+				let Some(data) = &member.data else {
+					break;
+				};
+				current = data;
+			}
+			match (current, step) {
+				(Value::Object(object), Key::Field(name)) => {
+					if shared || Arc::strong_count(object) > 1 {
+						bytes = bytes.saturating_add(
+							object
+								.fields
+								.len()
+								.saturating_mul(std::mem::size_of::<(Arc<str>, Value)>()),
+						);
+						shared = true;
+					}
+					let Some(field) = object.get(name) else {
+						break;
+					};
+					current = field;
+				}
+				(Value::Array(items) | Value::Tuple(items), Key::Index(key)) => {
+					let (start, length) = view.unwrap_or((0, items.len()));
+					if shared || Arc::strong_count(items) > 1 {
+						bytes = bytes.saturating_add(memory::values_size(length));
+						shared = true;
+					}
+					if let Value::Range {
+						start: from,
+						end,
+						inclusive,
+					} = key
+					{
+						let (from, to) = builtins::slice_bounds(*from, *end, *inclusive, length)?;
+						bytes = bytes.saturating_add(memory::values_size(to - from));
+						view = Some((start + from, to - from));
+						shared = true;
+					} else if let Some(index) = key.as_int() {
+						current = &items[start + builtins::position(index, length)?];
+						view = None;
+					} else {
+						break;
+					}
+				}
+				(Value::Bytes(data), Key::Index(key)) => {
+					let (start, length) = view.unwrap_or((0, data.len()));
+					if view.is_none() && (shared || Arc::strong_count(data) > 1) {
+						bytes = bytes.saturating_add(data.len());
+					}
+					if let Value::Range {
+						start: from,
+						end,
+						inclusive,
+					} = key
+					{
+						let (from, to) = builtins::slice_bounds(*from, *end, *inclusive, length)?;
+						bytes = bytes.saturating_add(to - from);
+						view = Some((start + from, to - from));
+					} else {
+						break;
+					}
+				}
+				_ => break,
+			}
+		}
+		self.interpreter.reserve(bytes)
+	}
+
 	fn slot_reference(&self, slot: Slot) -> Reference {
 		if let Value::Reference(reference) = &self.frame().locals[slot as usize] {
 			return (**reference).clone();
@@ -692,7 +797,11 @@ impl<'i, 'h> Machine<'i, 'h> {
 		for key in &reference.keys {
 			value = match key {
 				Key::Field(name) => builtins::field(&value, name)?,
-				Key::Index(index) => builtins::index(&value, index)?,
+				Key::Index(index) => {
+					self.interpreter
+						.reserve(builtins::index_size(&value, index)?)?;
+					builtins::index(&value, index)?
+				}
 			};
 		}
 		Ok(value)
@@ -704,19 +813,12 @@ impl<'i, 'h> Machine<'i, 'h> {
 		f: impl FnOnce(&mut Value, &mut Interpreter<'h>) -> Result<R, Error>,
 	) -> Result<R, Error> {
 		let reference = self.canonical_reference(reference)?;
-		let mut value = self.frames[reference.frame]
+		self.reserve_edit(&reference)?;
+		let value = self.frames[reference.frame]
 			.locals
 			.get_mut(reference.slot as usize)
 			.ok_or_else(|| Error::Stop("an invalid compile-time reference slot".into()))?;
-		for key in &reference.keys {
-			value = match key {
-				Key::Field(name) => builtins::field_mut(value, name).map_err(Error::from)?,
-				Key::Index(index) => {
-					builtins::index_mut(value, index.clone()).map_err(Error::from)?
-				}
-			};
-		}
-		f(value, self.interpreter)
+		Self::edit_keys(value, &reference.keys, self.interpreter, f)
 	}
 
 	fn resolve_place(&mut self, place: Place, keys: Vec<Value>) -> Result<Reference, Flow> {
@@ -725,6 +827,23 @@ impl<'i, 'h> Machine<'i, 'h> {
 		for step in place.steps {
 			let key = match step {
 				Step::Field(name) => Key::Field(name),
+				Step::Key(_) => {
+					let key = keys.next().expect("an evaluated field path");
+					let path = key
+						.as_str()
+						.ok_or_else(|| Error::Stop("expected a checked field path".into()))?;
+					self.interpreter.reserve(
+						path.len().saturating_add(
+							path.split('.')
+								.count()
+								.saturating_mul(std::mem::size_of::<Key>()),
+						),
+					)?;
+					for name in path.split('.') {
+						resolved = resolved.child(Key::Field(Arc::from(name)));
+					}
+					continue;
+				}
 				Step::Index(_) => {
 					let mut key = keys.next().expect("an evaluated index");
 					if let Some(index) = key.as_int().filter(|index| *index < I256::ZERO)
@@ -810,6 +929,39 @@ impl<'i, 'h> Machine<'i, 'h> {
 				}
 			}
 			_ => Err(Error::Unsupported(format!("a reference from `{path}`")).into()),
+		}
+	}
+
+	fn edit_keys<R>(
+		current: &mut Value,
+		keys: &[Key],
+		interpreter: &mut Interpreter<'h>,
+		action: impl FnOnce(&mut Value, &mut Interpreter<'h>) -> Result<R, Error>,
+	) -> Result<R, Error> {
+		let Some((key, rest)) = keys.split_first() else {
+			return action(current, interpreter);
+		};
+		match key {
+			Key::Field(name) => Self::edit_keys(
+				builtins::field_mut(current, name).map_err(Error::from)?,
+				rest,
+				interpreter,
+				action,
+			),
+			Key::Index(key)
+				if matches!(current, Value::Bytes(_)) || matches!(key, Value::Range { .. }) =>
+			{
+				let mut selected = builtins::index(current, key)?;
+				let result = Self::edit_keys(&mut selected, rest, interpreter, action)?;
+				builtins::set_index(current, key, selected)?;
+				Ok(result)
+			}
+			Key::Index(key) => Self::edit_keys(
+				builtins::index_mut(current, key.clone()).map_err(Error::from)?,
+				rest,
+				interpreter,
+				action,
+			),
 		}
 	}
 
@@ -902,9 +1054,21 @@ impl<'i, 'h> Machine<'i, 'h> {
 		arguments: Vec<Value>,
 		finish: CallbackFinish,
 	) -> Result<Action, Flow> {
-		if let Some(receiver) = arguments.first() {
+		if path == "Json.parse"
+			&& let Some(input) = arguments.first()
+		{
+			let length = match input {
+				Value::Bytes(b) => b.len(),
+				Value::String(t) => t.utf8_len(),
+				_ => 0,
+			};
+			self.interpreter.reserve(length.saturating_mul(64))?;
+		}
+		if path != "Json.parse"
+			&& let Some(receiver) = arguments.first()
+		{
 			self.interpreter
-				.reserve(memory::values_size(builtins::count(receiver).unwrap_or(0)))?;
+				.reserve(builtins::iteration_size(receiver))?;
 		}
 		self.callback(Callback::new(path, arguments)?, None, finish)
 	}
@@ -957,7 +1121,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 		value: Option<Value>,
 		finish: CallbackFinish,
 	) -> Result<Action, Flow> {
-		match callback.advance(value)? {
+		match callback.advance(value, self.interpreter)? {
 			Progress::Call {
 				function,
 				arguments,
@@ -1103,12 +1267,10 @@ impl<'i, 'h> Machine<'i, 'h> {
 					}
 					Continuation::Gather(mut gather) => {
 						if gather.spread {
-							self.interpreter.reserve(memory::values_size(
-								gather
-									.values
-									.len()
-									.saturating_add(builtins::count(&value).unwrap_or(0)),
-							))?;
+							self.interpreter.reserve(
+								memory::values_size(gather.values.len())
+									.saturating_add(builtins::iteration_size(&value)),
+							)?;
 							gather
 								.values
 								.extend(builtins::iterate(&value)?.into_iter().map(Some));
@@ -1125,7 +1287,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 							Self::done(Value::None)
 						}
 					}
-					Continuation::ForIterable(item, index, body) => {
+					Continuation::ForIterable(item, index, body, utf8) => {
 						let values = match value {
 							Value::Reference(owner) => {
 								let value = self.read_reference(&owner)?;
@@ -1148,6 +1310,13 @@ impl<'i, 'h> Machine<'i, 'h> {
 									position: 0,
 								}
 							}
+							Value::String(text) if utf8 => Iteration::Utf8 {
+								text,
+								offset: 0,
+								buffer: [0; 4],
+								position: 0,
+								length: 0,
+							},
 							Value::Range {
 								start,
 								end,
@@ -1166,6 +1335,8 @@ impl<'i, 'h> Machine<'i, 'h> {
 									position: 0,
 								}
 							}
+							Value::String(text) => Iteration::Text { text, offset: 0 },
+							Value::Bytes(bytes) => Iteration::Bytes { bytes, offset: 0 },
 							other => Iteration::Values {
 								values: Arc::new(builtins::iterate(&other)?),
 								position: 0,
@@ -1238,11 +1409,16 @@ impl<'i, 'h> Machine<'i, 'h> {
 			Binary::Equals(negated) => Value::Boolean(equals(&left, &right) != negated),
 			Binary::Compare(op) => Value::Boolean(eval::compare(op, &left, &right)?),
 			Binary::IsIn(negated) => Value::Boolean(builtins::includes(&right, &left)? != negated),
-			Binary::Index => builtins::index(&left, &right)?,
+			Binary::Index => {
+				self.interpreter
+					.reserve(builtins::index_size(&left, &right)?)?;
+				builtins::index(&left, &right)?
+			}
 		})
 	}
 
 	fn for_next(&mut self, mut state: For) -> Result<Action, Flow> {
+		let mut width = 1;
 		let value = match &mut state.values {
 			Iteration::Borrowed {
 				owner,
@@ -1255,6 +1431,41 @@ impl<'i, 'h> Machine<'i, 'h> {
 				*position += 1;
 				Value::Reference(Arc::new(owner.child(Key::Index(key.clone()))))
 			}
+			Iteration::Utf8 {
+				text,
+				offset,
+				buffer,
+				position,
+				length,
+			} => {
+				if *position == *length {
+					let Some(code) = text.next_scalar(offset) else {
+						return Self::done(Value::None);
+					};
+					*length = char::from_u32(code)
+						.unwrap_or(char::REPLACEMENT_CHARACTER)
+						.encode_utf8(buffer)
+						.len();
+					*position = 0;
+				}
+				let value = Value::int(i64::from(buffer[*position]));
+				*position += 1;
+				value
+			}
+			Iteration::Text { text, offset } => match text.next_point(offset) {
+				Some((text, units)) => {
+					width = units as i64;
+					Value::String(text)
+				}
+				None => return Self::done(Value::None),
+			},
+			Iteration::Bytes { bytes, offset } => match bytes.get(*offset) {
+				Some(byte) => {
+					*offset += 1;
+					Value::int(i64::from(*byte))
+				}
+				None => return Self::done(Value::None),
+			},
 			Iteration::Values { values, position } => match values.get(*position) {
 				Some(value) => {
 					*position += 1;
@@ -1292,7 +1503,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 		if let Some(slot) = state.index {
 			self.locals()[slot as usize] = Value::int(state.position);
 		}
-		state.position += 1;
+		state.position += width;
 		self.evaluate_after(state.body, Continuation::ForBody(state))
 	}
 }

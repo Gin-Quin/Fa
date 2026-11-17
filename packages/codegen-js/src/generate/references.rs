@@ -69,7 +69,7 @@ impl Generator<'_> {
 				Expr::primary(format!("{value}{suffix}"))
 			}
 			ConstValue::Float(bits) => js::float_literal(f64::from_bits(bits)),
-			ConstValue::String(name) | ConstValue::Character(name) => {
+			ConstValue::String(name) => {
 				Expr::primary(js::string_literal(self.types.syms.resolve(name)))
 			}
 			ConstValue::BigInt(name) => {
@@ -520,7 +520,8 @@ impl Generator<'_> {
 			Key::Index(key) | Key::Entry(key) | Key::Dynamic(key) | Key::Set(key) => {
 				Some((parts.container.clone()?, key.clone()))
 			}
-			Key::Whole(_, None) | Key::Value(_) | Key::Choice { .. } => None,
+			Key::Value(value) => Some((value.clone(), Expr::primary("null"))),
+			Key::Whole(_, None) | Key::Choice { .. } => None,
 		}
 	}
 
@@ -931,8 +932,15 @@ impl Generator<'_> {
 			return;
 		};
 		let ty = self.analysis.symbols.symbol(symbol).ty;
-		if self.is_object_reference(ty) {
-			let value = self.expr(value);
+		let byte_slice = self.without_none(ty) == TypeId::BYTES
+			&& matches!(self.view(self.strip_reference(value)), View::Index { index, .. } if self.type_of(index) == TypeId::RANGE);
+		if self.is_object_reference(ty) || byte_slice {
+			let value = match self.view(self.strip_reference(value)) {
+				View::Index { target, index } => self
+					.native_slice(self.strip_reference(value), target, index, true)
+					.unwrap_or_else(|| self.expr(value)),
+				_ => self.expr(value),
+			};
 			let name = self.declare(symbol);
 			let keyword = if self.is_module_value(symbol) || self.guard_binding(&name) {
 				""
@@ -962,6 +970,11 @@ impl Generator<'_> {
 				"const "
 			};
 			self.out.line(format!("{keyword}{name} = {};", value.text));
+			// A string slice is an immutable JS value, but a mutable use
+			// still needs its local slot when `reuse` selects another slice.
+			if mutable {
+				self.references.insert(symbol, Reference::Object);
+			}
 			return;
 		}
 		// The location survives the statement's temporary-resource cleanup.
@@ -1121,7 +1134,12 @@ impl Generator<'_> {
 		};
 		match self.references.get(&symbol).cloned() {
 			Some(Reference::Object) => {
-				let value = self.expr(value);
+				let value = match self.view(self.strip_reference(value)) {
+					View::Index { target, index } => self
+						.native_slice(self.strip_reference(value), target, index, true)
+						.unwrap_or_else(|| self.expr(value)),
+					_ => self.expr(value),
+				};
 				let name = self.declare(symbol);
 				self.out.line(format!("{name} = {};", value.text));
 			}
@@ -1264,7 +1282,9 @@ impl Generator<'_> {
 			View::Index { target, index } => {
 				let target_ty = self.type_of(target);
 				if self.type_of(index) == TypeId::RANGE || self.kind(target_ty) == Kind::Text {
-					let value = self.expr(node);
+					let value = self
+						.native_slice(node, target, index, true)
+						.unwrap_or_else(|| self.expr(node));
 					return Some(simple(None, Key::Value(value)));
 				}
 				let values = self.in_order(&[target, index], |g, part| g.expr(part));

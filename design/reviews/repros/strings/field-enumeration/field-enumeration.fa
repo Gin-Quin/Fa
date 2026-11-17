@@ -1,0 +1,55 @@
+-- Field enumeration belongs to the type, independently of literal spelling.
+let first: { a: Integer, z: Integer } = { z = 9, a = 1 }
+let second: { a: Integer, z: Integer } = { a = 2, z = 8 }
+console.log(first) -- prints: { a = 1, z = 9 }
+console.log(second) -- prints: { a = 2, z = 8 }
+console.log({ z = first, a = second }) -- prints: { a = { a = 2, z = 8 }, z = { a = 1, z = 9 } }
+type Declared = { b: Integer, a: Integer }
+console.log(Declared { a = 3, b = 7 }) -- prints: { b = 7, a = 3 }
+type Node = { z: Integer, next: Node? }
+console.log(Node { next = Node { next = none, z = 2 }, z = 1 }) -- prints: { z = 1, next = { z = 2, next = none } }
+
+function names = (schema: Schema): String => when schema is {
+	Schema.Named as named => names(named.definition)
+	Schema.Object as object => object.properties.map((property) => property.name).join(",")
+	else => "none"
+}
+static anonymousNames = @names(@typeToSchema({ z: Integer, a: Integer }))
+static declaredNames = @names(@typeToSchema(Declared))
+static unicode = @parseJson("{{\"ﬀ\": 2, \"𐐀\": 1}}")
+static unicodeNames = @names(@typeToSchema(Type<unicode>))
+console.log(unicode) -- prints: { 𐐀 = 1, ﬀ = 2 }
+static unicodePrinted = "{unicode}"
+console.log(unicodePrinted) -- prints: { 𐐀 = 1, ﬀ = 2 }
+console.log(anonymousNames, declaredNames, unicodeNames) -- prints: a,z b,a 𐐀,ﬀ
+
+function keys = <Item, fields: Keys<Item>>(_value: Item) => {
+	@for key in fields { console.log(key) }
+}
+keys<Type<first>, { z, a }>(first)
+keys<Type<second>, { a, z }>(second)
+-- prints: a
+-- prints: z
+-- prints: a
+-- prints: z
+
+function mark = (label: String, value: Integer): Integer => {
+	console.log(label)
+	value
+}
+console.log({ z = mark("first", 9), a = mark("second", 1) })
+-- prints: first
+-- prints: second
+-- prints: { a = 1, z = 9 }
+
+function printed = (): String => "{ { z = 9, a = 1 } }"
+static compileTime = @printed()
+console.log(compileTime) -- prints: { a = 1, z = 9 }
+
+console.log(@typeToString({ z: Integer, a: Integer })) -- prints: { a: Integer, z: Integer }
+console.log(@typeToString({ a: Integer, z: Integer })) -- prints: { a: Integer, z: Integer }
+type Original = { z: Integer, c: String, b: Integer, a: String }
+static pickedNames = @names(@typeToSchema(Pick<Original, { z, b, a }>))
+console.log(pickedNames) -- prints: a,b,z
+let picked: Pick<Original, { z, b, a }> = { z = 9, b = 2, a = "a" }
+console.log(picked) -- prints: { a = "a", b = 2, z = 9 }

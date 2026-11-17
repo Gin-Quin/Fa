@@ -1,0 +1,19 @@
+-- skip-target: bun, node, web, wasm
+-- Parallel readers of one shared heap Unicode string: breadcrumbs are built lazily under a lock.
+function make = (count: Integer<min = 0>): String => "é日😀a".repeat(count)
+let text = make(500)
+let positions = [0, 63, 64, 65, 127, 128, 1000, 2047, 2048, 2499, 1, 2, 3, 4, 5, 6, 7, 8]
+mutable sums: Array<Integer> = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+for parallel(threads = 4) start, slot in positions {
+	mutable sum = 0
+	for step in 0..200 {
+		let index = (start * 7 + step * 13) %% 2500
+		sum += text.codeUnitAt(index) catch _ => -1000000
+		sum += text[index..index + 1].length catch _ => -1000000
+	}
+	sums[slot] = sum
+}
+mutable total = 0
+for value in sums { total += value }
+console.log(total, text.length)
+-- prints: 99798480 2500

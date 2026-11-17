@@ -101,7 +101,21 @@ impl Generator<'_> {
 				}
 			}
 			Value::Float(value) | Value::Percentage(value) => js::float_literal(*value),
-			Value::String(text) => Expr::constant(js::string_literal(text), Prec::Primary),
+			Value::Bytes(bytes) => Expr::primary(format!(
+				"new Uint8Array([{}])",
+				bytes
+					.iter()
+					.map(u8::to_string)
+					.collect::<Vec<_>>()
+					.join(", ")
+			)),
+			Value::String(text) => Expr::constant(
+				text.as_str().map_or_else(
+					|| js::string_literal_units(text.units()),
+					js::string_literal,
+				),
+				Prec::Primary,
+			),
 			// an empty pool, set or map (a field default of a type of another
 			// file): an empty collection of its class
 			Value::Array(items)

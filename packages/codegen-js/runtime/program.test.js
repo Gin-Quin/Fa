@@ -34,14 +34,15 @@ function errorOf(run) {
 /**
  * Runs a module importing the runtime in a child process.
  * @param {string} code its body; `$` is the runtime directory
+ * @param {string} [engine] the JavaScript engine to run
  * @returns {{ code: number, stdout: string, stderr: string }}
  */
-function runProgram(code) {
+function runProgram(code, engine = process.execPath) {
 	const directory = mkdtempSync(join(tmpdir(), "fa-runtime-"));
 	try {
 		const file = join(directory, "program.mjs");
 		writeFileSync(file, code.replaceAll("$/", `${import.meta.dir}/`));
-		const result = Bun.spawnSync([process.execPath, file], { stdout: "pipe", stderr: "pipe" });
+		const result = Bun.spawnSync([engine, file], { stdout: "pipe", stderr: "pipe" });
 		return {
 			code: result.exitCode ?? -1,
 			stdout: result.stdout.toString(),
@@ -196,5 +197,52 @@ describe("the entry point", () => {
 		expect(result.stderr).toContain("TypeError");
 		expect(result.stderr.startsWith("error: ")).toBe(false);
 		expect(result.stderr.startsWith("stop: ")).toBe(false);
+	});
+});
+
+describe("allocation failures", () => {
+	test("Node size failures from string and byte operations become stops", () => {
+		for (const expression of [
+			'"abc".repeat(600000000)',
+			'"abc".padStart(1200000000, "é")',
+			'"abc".padEnd(1200000000, "😀")',
+			"new Uint8Array(Number.MAX_SAFE_INTEGER)",
+		]) {
+			const result = runProgram(
+				`
+				import { faRun } from "$/main.js";
+				faRun(() => { ${expression}; });
+			`,
+				`${process.env.HOME}/.local/bin/node`,
+			);
+			expect(result).toEqual({ code: 101, stdout: "", stderr: "stop: out of memory\n" });
+		}
+	});
+	for (const message of [
+		"Invalid string length",
+		"Invalid array length",
+		"Invalid typed array length: 9007199254740991",
+		"Array buffer allocation failed",
+		"Out of memory",
+	]) {
+		test(`${message} is an allocation stop`, () => {
+			const result = runProgram(`
+				import { faRun, faReport } from "$/main.js";
+				import { faCaught } from "$/errors.js";
+				faRun(() => {
+					try { throw new RangeError(${JSON.stringify(message)}); }
+					catch (error) { faCaught(error); }
+				});
+			`);
+			expect(result).toEqual({ code: 101, stdout: "", stderr: "stop: out of memory\n" });
+		});
+	}
+	test("an unrelated RangeError retains its host report", () => {
+		const result = runProgram(`
+			import { faRun } from "$/main.js";
+			faRun(() => { throw new RangeError("foreign range"); });
+		`);
+		expect(result.code).toBe(1);
+		expect(result.stderr).toContain("RangeError: foreign range");
 	});
 });

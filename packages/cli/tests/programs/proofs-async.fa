@@ -91,7 +91,7 @@ async function current = (text: String): Byte mutates cursor, cursorPhase => {
 	cursorPhase = 1
 	await sleep(5)
 	while cursorPhase != 2 { await Task.yield() }
-	text.bytes().get(cursor.position) ?? 0
+	text.toUtf8().get(cursor.position) ?? 0
 }
 start do {
 	while cursorPhase != 1 { await Task.yield() }
@@ -109,7 +109,7 @@ async function at = (text: String): Byte mutates positionPhase => {
 		positionPhase = 1
 		await sleep(5)
 		while positionPhase != 2 { await Task.yield() }
-		return text.bytes().get(position) ?? 0
+		return text.toUtf8().get(position) ?? 0
 	}
 	0
 }

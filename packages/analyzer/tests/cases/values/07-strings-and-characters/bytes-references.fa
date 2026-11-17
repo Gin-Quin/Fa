@@ -1,0 +1,6 @@
+mutable bytes = Bytes.from([1, 2, 3])
+use part = bytes[0..2]
+bytes[2] = 4
+console.log(part)
+bytes = Bytes.filled(3)
+console.log(part) -- error: E-DECL-16

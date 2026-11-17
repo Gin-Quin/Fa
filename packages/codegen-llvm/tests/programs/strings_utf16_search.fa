@@ -1,0 +1,14 @@
+let text = String.from("aé😀e\u{301}z")
+let pair = String.from("😀")
+let high = try pair[0]
+let low = try pair[1]
+console.log(text.indexOf("😀"), text.lastIndexOf("😀"), text.indexOf("e"), text.indexOf("\u{301}")) -- prints: 2 2 4 5
+console.log(text.includes("e"), text.includes("\u{301}"), text.includes(high), text.includes(low)) -- prints: true true true true
+console.log(text.indexOf(high), text.indexOf(low), text.indexOf(low + "e"), text.indexOf("é" + high)) -- prints: 2 3 3 1
+console.log(text.startsWith("aé" + high), text.endsWith(low + "e\u{301}z"), pair.startsWith(high), pair.endsWith(low)) -- prints: true true true true
+let twice = pair + pair
+console.log(twice.lastIndexOf(high), twice.lastIndexOf(low), twice.lastIndexOf(pair)) -- prints: 2 3 2
+console.log(text.indexOf(""), text.lastIndexOf(""), text.includes(""), text.startsWith(""), text.endsWith("")) -- prints: 0 7 true true true
+console.log(text.indexOf(pair.repeat(10)), text.startsWith(low), text.endsWith(high)) -- prints: none false false
+let overlap = String.from("aaa")
+console.log(overlap.indexOf("aa"), overlap.lastIndexOf("aa")) -- prints: 0 1

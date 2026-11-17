@@ -1,0 +1,8 @@
+-- Specification example: operations 10
+let items = [1, 2, 3]
+mutable output = String.from("", capacity = items.length * 8)
+
+for item in items {
+	output += item.toString()
+	output += "\n"
+}

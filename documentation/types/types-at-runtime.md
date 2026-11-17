@@ -102,6 +102,8 @@ A named union or enumeration is described by `Schema.Named`, whose definition is
 
 ## `TypeFromSchema<Schema>: Type`
 
+When known at compile time or reconstructed as a type, `Schema.StringLiteral` must contain a well-formed string: a literal type cannot hold a lone surrogate. A compile-time string value with a lone surrogate has the type `String`, without an exact literal type. Using it as a literal type, including through `TypeFromSchema` or a `static` used as a type, is an error: use `String`, or make the value well-formed first.
+
 The inverse: a type function that builds a type from a schema known at compile time. A `Schema.Named` gives a type distinct from every other one, like any named type; applying the same declaration to equal schemas gives the same type, so builds stay deterministic. Combined with `@typeToSchema` and an ordinary function called at compile time, it lets you transform types programmatically.
 
 ```fa
@@ -145,6 +147,8 @@ This works because the members of a union are always [distinguishable at runtime
 
 Reflection is only needed when you want the *shape* of a type as data: for schema validation, serialization, or generating a form from a type. For that, use `@typeToSchema`.
 
+A runtime `Schema.StringLiteral` is ordinary data and may carry an unknown `String`, including a lone surrogate. Known compile-time construction and reconstruction with `TypeFromSchema` enforce the well-formed literal-type rule.
+
 ## Stored links in reflection
 
 Reflection retains a field's storage kind (ordinary, relation or explicit link), exact symbolic owner path and list shape. It also preserves InlineArray capacity and GrowingPool/GrowingArray Index. A link is never expanded into an owned recursive field. `Schema.Reference` still means a recursive **type name**, not a pool element reference. `TypeFromSchema` rejects unresolved or escaping owner paths instead of manufacturing an unbound link.
@@ -167,6 +171,7 @@ You can build a complete immutable graph at compile time under the same rules as
 ### Type reconstruction
 
 - `TypeFromSchema` builds every schema member except `Schema.Fields`; pinned enumeration values other than their positions remain unsupported. A named union or enumeration takes the enclosing `Schema.Named` name, or the name of the applying declaration. A reference to an enclosing named schema builds a recursive type. A schema that is the value of a generic type function is evaluated for each application; an error is `TF004` at that application, with its `message`.
+- `Schema.StringLiteral` requires a well-formed UTF-8 payload. A compile-time string containing a lone surrogate widens to `String`; when a literal type is required, reject it with the fix to use `String` or make the value well-formed. Check schema construction, reconstruction (including nested and generic schemas), and a static value used as a type. Never use lossy decoding to manufacture a literal type.
 
 
 ### Link metadata and constants

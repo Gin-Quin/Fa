@@ -1,4 +1,4 @@
-// helpers: FaStop, faStop, faOverflow, faCheckInteger, faCheckRange, faIsSimpleText, faSegmenter, faCharacters, faStringLength, faPadding, faStringPadStart, faSortIntegers, faSortFloats, faStringCompare, faCompare, faArraySortInPlace, faSortStrings, faQuote, faFormatArray
+// helpers: FaStop, faStop, faOverflow, faCheckInteger, faCheckRange, faSortIntegers, faSortFloats, faSortStrings, faQuote, faFormatArray
 
 const format = (value) => faFormatArray(value, String);
 const format$1 = (value) => faFormatArray(value, faQuote);
@@ -56,7 +56,7 @@ function eighth(a) {
 }
 
 function padded(i, label) {
-	console.log(`${String(i).padStart(8, "0")} ${`${i}:${faCheckInteger(i * 2, "performance.fa:60:51")}`.padEnd(10, ".")} ${faStringPadStart(label, 10)}`);
-	console.log(faStringPadStart(String(i), 8, "é"));
+	console.log(`${String(i).padStart(8, "0")} ${`${i}:${faCheckInteger(i * 2, "performance.fa:60:51")}`.padEnd(10, ".")} ${label.padStart(10)}`);
+	console.log(String(i).padStart(8, "é"));
 }
 

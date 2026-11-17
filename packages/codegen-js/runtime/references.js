@@ -25,6 +25,8 @@ export function faReferenceResult(container, key) {
  */
 export function faReferenceRead(container, key) {
 	if (container === undefined) return undefined;
+	// Read-only string units and slice views carry their value directly.
+	if (key === null) return container;
 	const tag = container[Symbol.toStringTag];
 	if (container instanceof Set || tag === "fa:Set") return key;
 	return container instanceof Map || tag === "fa:ValuePool" || tag === "fa:HashMap"

@@ -129,6 +129,135 @@ impl Walker<'_> {
 		TypeId::VOID
 	}
 
+	/// A slice is a range view, not a replaceable collection header. Item
+	/// writes add an index step and therefore remain ordinary assignments.
+	pub(super) fn is_slice_assignment_target(&self, target: NodeId) -> bool {
+		let target = self.strip_groups(target);
+		let slice_place = |place| {
+			let entry = self.places.get(place);
+			if matches!(entry.step, Some(Step::Index(_))) && self.type_of(target) == TypeId::BYTES && entry.parent.and_then(|parent| self.place_type(parent)) == Some(TypeId::BYTES) { return true; }
+			matches!(
+				self.places.get(place).step,
+				Some(Step::All | Step::Range(..) | Step::Characters)
+			)
+		};
+		match self.view(target) {
+			View::Name(_) => self.reference_target_matches(target, slice_place),
+			View::Index {
+				target: owner,
+				index,
+			} => {
+				self.type_of(self.strip_groups(index)) == TypeId::RANGE
+					&& matches!(
+						self.s.types.kind(self.type_of(self.strip_groups(owner))),
+						TypeKind::Collection(CollKind::Array, ..)
+							| TypeKind::Bytes | TypeKind::String
+							| TypeKind::StringLit(_)
+					)
+			}
+			_ => false,
+		}
+	}
+
+	fn reference_target_matches(
+		&self,
+		target: NodeId,
+		mut matches: impl FnMut(PlaceId) -> bool,
+	) -> bool {
+		let Resolution::Local(symbol) = self.a.resolution(self.strip_groups(target)) else {
+			return false;
+		};
+		if let Some(state) = self.body.flow.ref_state(symbol) {
+			return self
+				.facts
+				.refs
+				.get(state)
+				.places
+				.iter()
+				.copied()
+				.any(|mut place| {
+					for _ in 0..=self.reference_parameters.len() {
+						if matches(place) { return true; }
+						let Some(owner) = self.places.get(place).parent.is_none().then(|| self.place_symbol(place)).flatten().and_then(|symbol| self.reference_parameters.get(&symbol)) else { return false; };
+						place = *owner;
+					}
+					false
+				});
+		}
+		self.aliases.get(&symbol).copied().is_some_and(&mut matches)
+	}
+
+	/// A String's units are read-only, including through aliases of a unit.
+	pub(super) fn is_string_item_assignment_target(&self, target: NodeId) -> bool {
+		let target = self.strip_groups(target);
+		match self.view(target) {
+			View::Index {
+				target: owner,
+				index,
+			} => {
+				self.type_of(self.strip_groups(index)) != TypeId::RANGE
+					&& crate::builtins::strings::is_string_like(
+						&self.s.types,
+						self.type_of(self.strip_groups(owner)),
+					)
+			}
+			View::Name(_) => self.reference_target_matches(target, |place| {
+				let place = self.places.get(place);
+				matches!(place.step, Some(Step::Index(_)))
+					&& place
+						.parent
+						.and_then(|p| self.place_type(p))
+						.is_some_and(|ty| {
+							crate::builtins::strings::is_string_like(&self.s.types, ty)
+						})
+			}),
+			_ => false,
+		}
+	}
+
+	/// Check both selection and calls: saving a bound method must not make
+	/// a structural operation on a view legal. This runs on every flow visit.
+	pub(super) fn reject_slice_structural_method(&mut self, callee: NodeId) -> bool {
+		let callee = self.strip_groups(callee);
+		let View::Access { members, .. } = self.view(callee) else {
+			return false;
+		};
+		let Some(member) = members.last() else {
+			return false;
+		};
+		let Resolution::Builtin(builtin) = self.a.resolution(member) else {
+			return false;
+		};
+		let path = crate::builtins::get(builtin).path;
+		if !matches!(
+			path,
+			"String#reserve"
+				| "Array#push"
+				| "Array#insert"
+				| "Array#delete"
+				| "Array#take"
+				| "Array#pop"
+				| "Array#clear"
+				| "Array#reserve"
+				| "Array#deleteWhere"
+		) {
+			return false;
+		}
+		let Some(receiver) = self.callee_receiver_node(callee) else {
+			return false;
+		};
+		if !self.is_slice_assignment_target(receiver) {
+			return false;
+		}
+		let diagnostic = self.diagnostic(
+			&crate::diagnostics::codes::advanced::REF016,
+			callee,
+			"a slice view has no structural operations: change the owner, then `reuse` the view",
+		);
+		self.report_flow(diagnostic);
+		true
+	}
+
 	/// A reference annotation, optionally parenthesized/optional. Containers
 	/// of references are storage, not a dependent reference parameter/result.
 	pub(super) fn reference_annotation(&self, n: NodeId) -> Option<NodeId> {
@@ -171,7 +300,7 @@ impl Walker<'_> {
 			self.signature_path(owner).filter(|(_, ty)| {
 				matches!(
 					self.s.types.kind(*ty),
-					TypeKind::Collection(..) | TypeKind::String
+					TypeKind::Collection(..) | TypeKind::String | TypeKind::Bytes
 				)
 			})
 		} else {
@@ -363,6 +492,8 @@ impl Walker<'_> {
 			matches!(
 				self.s.types.kind(ty),
 				TypeKind::Collection(CollKind::Set | CollKind::GrowingSet, ..)
+					| TypeKind::String
+					| TypeKind::StringLit(_)
 			)
 		}) {
 			return Some(ReferenceLayout::General);
@@ -613,6 +744,10 @@ impl Walker<'_> {
 			if let Some(path) = self.effect_path(place) {
 				summary.push(crate::analysis::ReferenceOrigin {
 					path,
+					slice: matches!(
+						self.places.get(place).step,
+						Some(Step::Range(..) | Step::All | Step::Characters)
+					),
 					descendant: false,
 					readonly: origins.readonly || self.readonly_place(place),
 				});
@@ -624,6 +759,7 @@ impl Walker<'_> {
 			{
 				summary.push(crate::analysis::ReferenceOrigin {
 					path,
+					slice: false,
 					descendant: true,
 					readonly: origins.readonly,
 				});
@@ -789,6 +925,20 @@ impl Walker<'_> {
 							formal: None,
 						});
 					} else {
+						let place = if origin.slice {
+							self.places.get(place).parent.map_or(place, |parent| {
+								self.places.child(
+									parent,
+									Step::Range(
+										crate::flow::Identity::Unknown,
+										crate::flow::Identity::Unknown,
+										false,
+									),
+								)
+							})
+						} else {
+							place
+						};
 						result.places.push(place);
 					}
 				}
@@ -882,10 +1032,7 @@ impl Walker<'_> {
 	/// A representative for the alias declaration's runtime type metadata.
 	/// Validity and ownership always use `reference_origins` instead.
 	pub(super) fn reference_place(&mut self, value: NodeId) -> Option<PlaceId> {
-		let mut node = self.strip_groups(value);
-		while let View::Try(inner) = self.view(node) {
-			node = self.strip_groups(inner);
-		}
+		let node = self.reference_operand(value);
 		if !matches!(
 			self.view(node),
 			View::Name(_) | View::Access { .. } | View::Index { .. } | View::Call { .. }
@@ -926,6 +1073,14 @@ impl Walker<'_> {
 				);
 			}
 		}
+	}
+
+	fn reference_operand(&self, value: NodeId) -> NodeId {
+		let mut value = self.strip_groups(value);
+		while let View::Try(inner) = self.view(value) {
+			value = self.strip_groups(inner);
+		}
+		value
 	}
 
 	/// The place a call of a built-in returning a reference designates
@@ -1709,11 +1864,13 @@ impl Walker<'_> {
 					pending.push((self.s.types.payload(nominal, index), reached))
 				}
 				TypeKind::String | TypeKind::StringLit(_) => {
-					if property == ReferenceReach::Owned
-						&& self.s.types.satisfies(TypeId::STRING, referent)
+					if self.s.types.satisfies(TypeId::STRING, referent)
 					{
 						return true;
 					}
+				}
+				TypeKind::Bytes => {
+					if property == ReferenceReach::Owned && (self.s.types.satisfies(TypeId::BYTE, referent) || self.s.types.satisfies(TypeId::BYTES, referent)) { return true; }
 				}
 				TypeKind::Param(_) | TypeKind::Unknown => {
 					if reached || property == ReferenceReach::Owned {
@@ -1795,6 +1952,7 @@ impl Walker<'_> {
 					match self.s.types.kind(ty) {
 						TypeKind::Collection(CollKind::Map, value, _) => value,
 						TypeKind::Collection(_, item, _) => item,
+						TypeKind::Bytes => TypeId::BYTE,
 						TypeKind::String => TypeId::STRING,
 						_ => return None,
 					}
@@ -1813,7 +1971,6 @@ impl Walker<'_> {
 			| TypeKind::FloatLit(..)
 			| TypeKind::Boolean
 			| TypeKind::BoolLit(_)
-			| TypeKind::Character
 			| TypeKind::Percentage
 			| TypeKind::Enum(..)
 			| TypeKind::EnumMember(..)

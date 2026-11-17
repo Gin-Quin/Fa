@@ -1,3 +1,2 @@
--- error: E-STR-9
--- brief: ⇒ E-STR-9
-let letters: Character = "ab"
+mutable bytes = Bytes.filled(2)
+bytes.push(1) -- error: E-OBJ-5

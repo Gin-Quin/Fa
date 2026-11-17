@@ -32,6 +32,8 @@ pub mod json;
 mod machine;
 pub mod memory;
 pub mod references;
+mod strings;
+pub mod text;
 pub mod types;
 pub mod value;
 

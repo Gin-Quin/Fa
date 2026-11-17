@@ -19,7 +19,7 @@ pub const MEMBERS: &[&str] = &[
 	"Reference",
 	"Boolean",
 	"String",
-	"Character",
+	"Bytes",
 	"Percentage",
 	"BigInt",
 	"None",

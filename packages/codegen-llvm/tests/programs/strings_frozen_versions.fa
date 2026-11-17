@@ -1,0 +1,32 @@
+-- asynchronous: false
+-- overflow-checks: false
+type Cursor = {
+	text: String
+	position: Integer
+	function sum = (self, accumulated: Integer): Integer throws IndexError mutates self => {
+		if self.position >= self.text.length { return accumulated }
+		let unit = try self.text.codeUnitAt(self.position)
+		self.position += 1
+		try self.sumNext(accumulated + unit)
+	}
+	function sumNext = (self, accumulated: Integer): Integer throws IndexError mutates self => {
+		if self.position >= self.text.length { return accumulated }
+		let unit = try self.text.codeUnitAt(self.position)
+		self.position += 1
+		try self.sum(accumulated + unit)
+	}
+	function tail = (self, accumulated: Integer): Integer mutates self => {
+		if self.position >= self.text.length { return accumulated }
+		let unit = self.text.codeUnitAt(self.position) catch _error => 0
+		self.position += 1
+		self.tail(accumulated + unit)
+	}
+}
+function total = (text: String): Integer throws IndexError => {
+	mutable cursor = Cursor { text, position = 0 }
+	try cursor.sum(0)
+}
+console.log(try total("abc"), try total("aé😀")) -- prints: 294 112519
+let longText = "a".repeat(20000)
+mutable cursor = Cursor { text = longText, position = 0 }
+console.log(cursor.tail(0)) -- prints: 1940000

@@ -1,0 +1,13 @@
+-- string.md: `text.codePoints().length` counts the code points without building the array.
+-- Regression: every direct form must count without allocating an array.
+function direct = (text: String): Integer => text.codePoints().length
+function bound = (text: String): Integer => {
+	let count = text.codePoints().length
+	count
+}
+function formatted = (text: String): String => "{text.codePoints().length}"
+function compared = (text: String): Boolean => text.codePoints().length > 3
+function method = (text: String): String => text.codePoints().length.toString()
+let sample = "héllo 😀".repeat(3)
+console.log(direct(sample), bound(sample), formatted(sample), compared(sample), method(sample))
+-- prints: 21 21 21 true 21

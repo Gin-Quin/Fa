@@ -1,0 +1,33 @@
+let source: Array<Byte> = [1, 2, 3]
+let from = Bytes.from(items = source)
+console.log(from[2], from[-3]) -- no-check
+let pastFrom = from[3] -- error: E-NUM-17
+let filled = Bytes.filled(value = 255, length = 2)
+console.log(filled[1], filled[-2]) -- no-check
+let pastFilled = filled[2] -- error: E-NUM-17
+let encoded = "é中😀".toUtf8()
+console.log(encoded[8], encoded[-9]) -- no-check
+let pastEncoded = encoded[9] -- error: E-NUM-17
+let empty = Bytes.filled(0)
+let pastEmpty = empty[-1] -- error: E-NUM-17
+function bounded = (length: Integer<min = 2, max = 4>) => {
+	let bytes = Bytes.filled(length)
+	console.log(bytes[1], bytes[-2]) -- no-check
+	let pastLongest = bytes[4] -- error: E-NUM-17
+	let maybePast = bytes[2] -- error: E-ERR-3
+}
+mutable changed = Bytes.filled(3)
+changed[0] = 7
+console.log(changed[2]) -- no-check
+changed = Bytes.filled(1)
+let pastChanged = changed[2] -- error: E-NUM-17
+let copied = Bytes.from(source)
+mutable original = source
+original.push(4)
+console.log(copied[-1]) -- no-check
+let pastCopy = copied[3] -- error: E-NUM-17
+-- An encoding's byte index cannot prove a code-unit index of its source.
+for byte, index in "😀".toUtf8() {
+	let notAUnitIndex = "😀"[index] -- error: E-ERR-3
+	console.log(byte)
+}

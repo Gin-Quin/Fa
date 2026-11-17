@@ -492,10 +492,30 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						.builder
 						.build_extract_value(loaded.into_struct_value(), 2, "")?
 						.into_int_value();
+					let encoded = self
+						.call_value(
+							self.runtime.function("fa_string_encoded_length")?,
+							&[bytes.into(), length.into(), capacity.into()],
+						)?
+						.into_int_value();
 					let length64 = self
 						.builder
-						.build_int_z_extend_or_bit_cast(length, i64, "")?;
-					// one byte of length below 127, else a 0xFF and a word
+						.build_int_z_extend_or_bit_cast(encoded, i64, "")?;
+					let units = self
+						.call_value(
+							self.runtime.function("fa_string_length")?,
+							&[bytes.into(), length.into(), capacity.into()],
+						)?
+						.into_int_value();
+					let metadata = self
+						.call_value(
+							self.runtime.function("fa_string_view_count_size")?,
+							&[units.into(), capacity.into()],
+						)?
+						.into_int_value();
+					let metadata = self
+						.builder
+						.build_int_z_extend_or_bit_cast(metadata, i64, "")?;
 					let short = self.builder.build_int_compare(
 						IntPredicate::ULT,
 						length64,
@@ -511,11 +531,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let size = self
 						.builder
 						.build_int_add(header.into_int_value(), length64, "")?;
+					let size = self.builder.build_int_add(size, metadata, "")?;
 					variable = Some(match variable {
 						Some(sum) => self.builder.build_int_add(sum, size, "")?,
 						None => size,
 					});
-					values.push((leaf.repr, loaded, Some((bytes, length, capacity, short))));
+					values.push((
+						leaf.repr,
+						loaded,
+						Some((bytes, length, encoded, capacity, units, short)),
+					));
 				} else {
 					fixed += self.leaf_size(leaf.repr);
 					values.push((leaf.repr, loaded, None));
@@ -554,9 +579,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						cursor =
 							self.packed_offset(cursor, i64.const_int(self.leaf_size(repr), false))?;
 					}
-					Some((bytes, length, capacity, short)) => {
-						cursor =
-							self.packed_store_string(cursor, bytes, length, capacity, short)?;
+					Some((bytes, length, encoded, capacity, units, short)) => {
+						cursor = self.packed_store_string(
+							cursor,
+							bytes,
+							(length, encoded),
+							capacity,
+							units,
+							short,
+						)?;
 					}
 				}
 			}
@@ -577,16 +608,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		})
 	}
 
-	/// Writes a string's length (with its `SIMPLE` flag in the low bit) and
-	/// bytes at `cursor`; the address after them.
+	/// Writes encoded byte length/ASCII, the Unicode-only unit count, then
+	/// canonical bytes at `cursor`; returns the address after them.
 	fn packed_store_string(
 		&self,
 		cursor: PointerValue<'ctx>,
 		bytes: PointerValue<'ctx>,
-		length: IntValue<'ctx>,
+		lengths: (IntValue<'ctx>, IntValue<'ctx>),
 		capacity: IntValue<'ctx>,
+		units: IntValue<'ctx>,
 		short: IntValue<'ctx>,
 	) -> Result<PointerValue<'ctx>, Error> {
+		let (length, encoded) = lengths;
 		let i8 = self.context.i8_type();
 		let usize = self.usize;
 		let simple = self.builder.build_and(capacity, self.simple_flag(), "")?;
@@ -596,8 +629,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let simple = self.builder.build_int_z_extend(simple, usize, "")?;
 		let word = self
 			.builder
-			.build_left_shift(length, usize.const_int(1, false), "")?;
+			.build_left_shift(encoded, usize.const_int(1, false), "")?;
 		let word = self.builder.build_or(word, simple, "")?;
+
 		let short_block = self.append_block("packed_short");
 		let long_block = self.append_block("packed_long");
 		let join = self.append_block("packed_string");
@@ -630,10 +664,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let destination = self.builder.build_phi(self.pointer_type(), "")?;
 		destination.add_incoming(&[(&short_bytes, short_block), (&long_bytes, long_block)]);
 		let destination = destination.as_basic_value().into_pointer_value();
-		self.builder
-			.build_memcpy(destination, 1, bytes, 1, length)
-			.map_err(|e| Error::Llvm(e.to_string()))?;
-		self.packed_offset(destination, length)
+		let destination = self
+			.call_value(
+				self.runtime.function("fa_string_write_view_count")?,
+				&[destination.into(), units.into(), capacity.into()],
+			)?
+			.into_pointer_value();
+		self.builder.build_call(
+			self.runtime.function("fa_string_copy_block")?,
+			&[
+				destination.into(),
+				bytes.into(),
+				length.into(),
+				capacity.into(),
+			],
+			"",
+		)?;
+		self.packed_offset(destination, encoded)
 	}
 
 	/// Reads a string written by [`Self::packed_store_string`] at `cursor`:
@@ -667,40 +714,52 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.expect("a load")
 			.set_alignment(1)
 			.map_err(|e| Error::Llvm(e.to_string()))?;
+		let long_word = load.into_int_value();
 		let word_size = u64::from(usize.get_bit_width() / 8);
 		let long_bytes = self.packed_offset(cursor, usize.const_int(1 + word_size, false))?;
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(join);
+		// Merge the encoded word before decoding. Keeping the masks after
+		// the phi exposes the byte length and ASCII flag before metadata is read.
 		let word = self.builder.build_phi(usize, "")?;
-		word.add_incoming(&[(&short_word, short_block), (&load, long_block)]);
-		let word = word.as_basic_value().into_int_value();
+		word.add_incoming(&[(&short_word, short_block), (&long_word, long_block)]);
 		let bytes = self.builder.build_phi(self.pointer_type(), "")?;
 		bytes.add_incoming(&[(&short_bytes, short_block), (&long_bytes, long_block)]);
 		let bytes = bytes.as_basic_value().into_pointer_value();
+		let word = word.as_basic_value().into_int_value();
 		let length = self
 			.builder
 			.build_right_shift(word, usize.const_int(1, false), false, "")?;
-		// a view (`KIND_MASK`), with the `SIMPLE` flag of the low bit
-		let simple = self
-			.builder
-			.build_and(word, usize.const_int(1, false), "")?;
-		let simple = self.builder.build_left_shift(
-			simple,
+		let ascii = self.builder.build_left_shift(
+			word,
 			usize.const_int(u64::from(usize.get_bit_width() - 1), false),
 			"",
 		)?;
-		let capacity = self.builder.build_or(simple, self.string_kind_mask(), "")?;
-		let mut value = self.string_type.get_undef();
-		for (index, part) in [BasicValueEnum::from(bytes), length.into(), capacity.into()]
-			.into_iter()
-			.enumerate()
-		{
-			value = self
-				.builder
-				.build_insert_value(value, part, index as u32, "")?
-				.into_struct_value();
-		}
-		let after = self.packed_offset(bytes, length)?;
+		let slot = self.alloca(Repr::Str, "packed_view")?;
+		let after = self
+			.call_value(
+				self.runtime.function("fa_string_read_packed_view")?,
+				&[
+					bytes.into(),
+					length.into(),
+					ascii.into(),
+					slot.pointer.into(),
+				],
+			)?
+			.into_pointer_value();
+		let loaded = self.load(slot)?.value.expect("a view").into_struct_value();
+		let capacity = self
+			.builder
+			.build_extract_value(loaded, 2, "")?
+			.into_int_value();
+		// Make the external representation explicit after the helper's join.
+		let capacity =
+			self.builder
+				.build_and(capacity, self.string_inline_flag().const_not(), "")?;
+		let value = self
+			.builder
+			.build_insert_value(loaded, capacity, 2, "")?
+			.into_struct_value();
 		Ok((value.into(), after))
 	}
 

@@ -116,3 +116,14 @@ test("primitive pool borrowing reads the direct slot array without a lookup", ()
 	}
 	expect(pool.$slots.length).toBe(1);
 });
+
+test("byte item locators write through views and read-only results keep their value", () => {
+	const bytes = Uint8Array.from([1, 2, 3]);
+	const view = bytes.subarray(1);
+	faReferenceSet(view, 0, 9);
+	expect(faReferenceRead(bytes, 1)).toBe(9);
+	expect(faReferenceRead("😀", null)).toBe("😀");
+	expect(faReferenceRead("", null)).toBe("");
+	expect(faReferenceRead(view, null)).toBe(view);
+	expect(faReferenceRead(undefined, null)).toBeUndefined();
+});

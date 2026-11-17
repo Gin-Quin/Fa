@@ -1119,6 +1119,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				Ok(equal)
 			}
+			Repr::Bytes if op.is_none() => {
+				let right = self.convert(right, Repr::Bytes, node.index())?;
+				let equal = self
+					.call_value(
+						self.runtime.function("fa_bytes_equal")?,
+						&[
+							left.value.expect("Bytes").into(),
+							right.value.expect("Bytes").into(),
+						],
+					)?
+					.into_int_value();
+				Ok(self.builder.build_int_compare(
+					IntPredicate::NE,
+					equal,
+					equal.get_type().const_zero(),
+					"",
+				)?)
+			}
 			Repr::Array(item_type) if op.is_none() => {
 				self.arrays_equal(left, right, item_type, node)
 			}
@@ -1293,6 +1311,34 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		right: NodeId,
 		negated: bool,
 	) -> Result<Val<'ctx>, Error> {
+		for (indexed, literal) in [(left, right), (right, left)] {
+			if let Some(indexed) = self.string_unit_node(indexed)
+				&& let Some(text) = self.constant_text(literal)
+				&& text.encode_utf16().count() == 1
+			{
+				let expected = text.encode_utf16().next().expect("one code unit");
+				let unit = self.string_unit_index(indexed)?;
+				if unit.repr == Repr::Never {
+					return Ok(unit);
+				}
+				let predicate = if negated {
+					IntPredicate::NE
+				} else {
+					IntPredicate::EQ
+				};
+				return Ok(Val::new(
+					Repr::Bool,
+					self.builder.build_int_compare(
+						predicate,
+						unit.int(),
+						self.context
+							.i16_type()
+							.const_int(u64::from(expected), false),
+						"",
+					)?,
+				));
+			}
+		}
 		let a = self.expr(left)?;
 		let b = self.expr(right)?;
 		if a.repr == Repr::Never || b.repr == Repr::Never {

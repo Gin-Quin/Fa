@@ -168,6 +168,21 @@ impl<'a> Lowerer<'a> {
 	pub fn function(mut self, node: NodeId) -> Option<Function> {
 		self.compile_time = false;
 		self.globals = true;
+		if let Some(expression) = super::json::default_node(node) {
+			let captures: Vec<Slot> = self
+				.default_captures(expression)
+				.into_iter()
+				.map(|symbol| self.bind(symbol))
+				.collect();
+			let body = self.expr(expression);
+			return Some(Function {
+				name: "<JSON field default>".into(),
+				params: Vec::new(),
+				captures,
+				slots: self.next,
+				body,
+			});
+		}
 		let info = self.a.function(node)?.clone();
 		if info
 			.sig
@@ -204,27 +219,12 @@ impl<'a> Lowerer<'a> {
 		generics.extend(info.generics.iter().copied());
 		for param in generics {
 			let data = self.types().param(param);
-			if !data.value {
+			if !data.value && !self.a.key_set_params.contains_key(&param) {
 				continue;
 			}
-			let name = data.name;
-			let declaration = owner
-				.filter(|owner| self.a.type_decls[owner].generics.contains(&param))
-				.unwrap_or(info.declaration.unwrap_or(node));
-			let span = self.tree.spans[declaration.index()];
-			let symbol =
-				self.a
-					.symbols
-					.symbols()
-					.iter()
-					.position(|symbol| {
-						symbol.kind == SymbolKind::Static
-							&& symbol.name == name
-							&& self.tree.spans.get(symbol.decl_node.index()).is_some_and(
-								|declared| span.start <= declared.start && declared.end <= span.end,
-							)
-					})
-					.map(SymbolId::new);
+			let symbol = self
+				.a
+				.value_parameter_symbol(self.types(), self.tree, node, param);
 			let slot = match symbol {
 				Some(symbol) => self.bind(symbol),
 				None => self.temp(),
@@ -292,6 +292,46 @@ impl<'a> Lowerer<'a> {
 		})
 	}
 
+	/// The free values of a field default, in a stable order shared by its
+	/// synthetic function and the closure constructed at a JSON call.
+	fn default_captures(&self, expression: NodeId) -> Vec<SymbolId> {
+		let mut nodes = FxHashSet::default();
+		let mut pending = vec![expression];
+		while let Some(node) = pending.pop() {
+			if nodes.insert(node) {
+				pending.extend(syntax::children(self.tree, node));
+			}
+		}
+		let mut captures = Vec::new();
+		for &node in &nodes {
+			if !matches!(syntax::view(self.tree, node), View::Name(_)) {
+				continue;
+			}
+			let Resolution::Local(symbol) = self.a.resolution(node) else {
+				continue;
+			};
+			let data = self.a.symbols.symbol(symbol);
+			if nodes.contains(&data.decl_node) || self.is_module_level(symbol) {
+				continue;
+			}
+			match data.kind {
+				SymbolKind::Function => {
+					if let Some(info) = self.a.function(data.decl_node) {
+						captures.extend(info.captures.iter().copied());
+					}
+				}
+				SymbolKind::Static
+				| SymbolKind::Type
+				| SymbolKind::TypeParameter
+				| SymbolKind::Namespace => {}
+				_ => captures.push(symbol),
+			}
+		}
+		captures.sort_unstable_by_key(|symbol| symbol.0);
+		captures.dedup();
+		captures
+	}
+
 	fn bind(&mut self, symbol: SymbolId) -> Slot {
 		let slot = self.next;
 		self.next += 1;
@@ -319,6 +359,22 @@ impl<'a> Lowerer<'a> {
 
 	fn impure(&self, what: impl Into<String>) -> Expr {
 		Expr::Impure(Arc::from(what.into()))
+	}
+
+	/// Locale comparison reads machine data at evaluation time, without
+	/// changing the runtime purity rules for reactive expressions.
+	fn builtin_impurity(&self, path: &str) -> Option<Expr> {
+		if path == "String.compareLocale" {
+			Some(
+				self.impure(
+					"the machine's locale data (`String.compareLocale`; call it at runtime)",
+				),
+			)
+		} else if builtins::std_library::impurity(path).is_some() {
+			Some(self.impure(path))
+		} else {
+			None
+		}
 	}
 
 	// ── numbers ──────────────────────────────────────────────────────────
@@ -436,7 +492,7 @@ impl<'a> Lowerer<'a> {
 			TypeKind::Float(_) | TypeKind::FloatLit(..) => TypeTest::Float,
 			TypeKind::String => TypeTest::String,
 			TypeKind::StringLit(text) => TypeTest::Literal(Value::string(types.syms.resolve(text))),
-			TypeKind::Character => TypeTest::Character,
+			TypeKind::Bytes => TypeTest::Bytes,
 			TypeKind::Object(_) => TypeTest::Object,
 			TypeKind::Tuple(list) => TypeTest::Tuple(types.list_items(list).len()),
 			TypeKind::Union(list) => TypeTest::Union(
@@ -584,10 +640,9 @@ impl<'a> Lowerer<'a> {
 					"Float.epsilon" => Expr::Const(Value::Float(f64::EPSILON)),
 					_ => match self.literal_of(n) {
 						Some(value) => Expr::Const(value),
-						None if builtins::std_library::impurity(path).is_some() => {
-							self.impure(path)
-						}
-						None => self.unsupported(format!("`{path}`")),
+						None => self
+							.builtin_impurity(path)
+							.unwrap_or_else(|| self.unsupported(format!("`{path}`"))),
 					},
 				}
 			}
@@ -1259,6 +1314,19 @@ impl<'a> Lowerer<'a> {
 				match read {
 					Expr::Global(key) => Expr::BorrowGlobal(key),
 					other @ (Expr::Impure(_) | Expr::Unsupported(_)) => other,
+					Expr::Const(value) => {
+						let slot = self.temp();
+						Expr::Block(vec![
+							Expr::Let(slot, Expr::Const(value).boxed()),
+							Expr::Borrow(
+								Place {
+									slot,
+									steps: Vec::new(),
+								},
+								false,
+							),
+						])
+					}
 					_ => self.unsupported("a reference to this constant"),
 				}
 			}
@@ -1476,9 +1544,20 @@ impl<'a> Lowerer<'a> {
 		if parallel {
 			return self.unsupported("`for parallel`");
 		}
-		let iterable = match (compile_time, self.a.unrolled.get(&n)) {
-			(true, Some(items)) => Expr::Const(Value::array(items.clone())),
-			_ if self.place(iterable).is_some()
+		let unrolled = compile_time
+			.then(|| self.a.unrolled.get(&n).cloned())
+			.flatten();
+		let utf8_source =
+			if unrolled.is_none() && self.a.has_flags(iterable, NodeFlags::UTF8_ITERATION) {
+				self.string_call_receiver(iterable)
+			} else {
+				None
+			};
+		let utf8 = utf8_source.is_some();
+		let iterable = match unrolled {
+			Some(items) => Expr::Const(Value::array(items)),
+			None if utf8 => utf8_source.expect("a UTF-8 iteration source"),
+			None if self.place(iterable).is_some()
 				&& matches!(self.types().kind(self.a.type_of(iterable)), TypeKind::Collection(kind, ..) if !matches!(kind, CollKind::Map | CollKind::GrowingMap))
 				&& pattern
 					.and_then(|pattern| self.a.symbols.symbol_of_decl(pattern))
@@ -1491,7 +1570,7 @@ impl<'a> Lowerer<'a> {
 			{
 				self.borrow_value(iterable)
 			}
-			_ => self.expr(iterable),
+			None => self.expr(iterable),
 		};
 		let (item, prologue) = match pattern {
 			Some(pattern) => match syntax::view(self.tree, pattern) {
@@ -1521,11 +1600,20 @@ impl<'a> Lowerer<'a> {
 			Some(prologue) => Expr::Block(vec![prologue, body]),
 			None => body,
 		};
-		Expr::For {
-			item,
-			index: index_slot,
-			iterable: iterable.boxed(),
-			body: body.boxed(),
+		if utf8 {
+			Expr::ForUtf8 {
+				item,
+				index: index_slot,
+				iterable: iterable.boxed(),
+				body: body.boxed(),
+			}
+		} else {
+			Expr::For {
+				item,
+				index: index_slot,
+				iterable: iterable.boxed(),
+				body: body.boxed(),
+			}
 		}
 	}
 
@@ -1578,7 +1666,7 @@ impl<'a> Lowerer<'a> {
 	/// An assignable place: a local and the fields and items below it.
 	fn place(&mut self, n: NodeId) -> Option<Place> {
 		match syntax::view(self.tree, n) {
-			View::Group(inner) => self.place(inner),
+			View::Group(inner) | View::Try(inner) => self.place(inner),
 			View::Name(_) => match self.a.resolution(n) {
 				Resolution::Local(symbol) => {
 					if let Some(place) = self.aliases.get(&symbol) {
@@ -1606,11 +1694,46 @@ impl<'a> Lowerer<'a> {
 			View::Index { target, index } => {
 				let mut place = self.place(target)?;
 				let index = self.expr(index);
-				place.steps.push(Step::Index(index));
+				place.steps.push(if self.a.key_reads.contains(&n) {
+					Step::Key(index)
+				} else {
+					Step::Index(index)
+				});
 				Some(place)
 			}
 			_ => None,
 		}
+	}
+
+	fn strip_groups(&self, mut node: NodeId) -> NodeId {
+		while let View::Group(inner) = syntax::view(self.tree, node) {
+			node = inner;
+		}
+		node
+	}
+
+	/// The receiver prefix, including flattened field chains and grouped
+	/// direct callees. Share it with the allocation-free string views.
+	fn call_receiver(&mut self, callee: NodeId) -> Option<Expr> {
+		let callee = self.strip_groups(callee);
+		let (target, members, optional) = match syntax::view(self.tree, callee) {
+			View::Access { target, members } => (target, members, false),
+			View::OptionalAccess { target, members } => (target, members, true),
+			_ => return None,
+		};
+		Some(self.access(
+			callee,
+			target,
+			members.take(members.len().saturating_sub(1)),
+			optional,
+		))
+	}
+
+	fn string_call_receiver(&mut self, call: NodeId) -> Option<Expr> {
+		let View::Call { callee, .. } = syntax::view(self.tree, self.strip_groups(call)) else {
+			return None;
+		};
+		self.call_receiver(callee)
 	}
 
 	/// `a.b.c`, `a?.b?.c`.
@@ -1621,8 +1744,20 @@ impl<'a> Lowerer<'a> {
 		members: syntax::NodeList<'_>,
 		optional: bool,
 	) -> Expr {
+		let counted = self.a.has_flags(n, NodeFlags::CODE_POINT_COUNT)
+			|| members
+				.first()
+				.is_some_and(|first| self.a.has_flags(first, NodeFlags::CODE_POINT_COUNT));
+		let count = if counted {
+			self.string_call_receiver(target)
+				.map(|text| Expr::Builtin("String#codePointCount", vec![text]))
+		} else {
+			None
+		};
+		let counted = count.is_some();
 		// a member whose value the analysis knows (`Int8.maxValue`)
-		if let Some(value) = self.literal_of(n)
+		if !counted
+			&& let Some(value) = self.literal_of(n)
 			&& matches!(
 				members.last().map(|member| self.a.resolution(member)),
 				Some(Resolution::Builtin(_))
@@ -1649,12 +1784,14 @@ impl<'a> Lowerer<'a> {
 					}),
 				_ => false,
 			};
-		let mut current = if static_target {
+		let mut current = if let Some(count) = count {
+			Some(count)
+		} else if static_target {
 			None
 		} else {
 			Some(self.expr(target))
 		};
-		for (index, member) in members.iter().enumerate() {
+		for (index, member) in members.iter().enumerate().skip(usize::from(counted)) {
 			let resolution = self.a.resolution(member);
 			let name: Arc<str> = match syntax::view(self.tree, member) {
 				View::Name(name) => Arc::from(self.tree.name(name)),
@@ -1771,6 +1908,13 @@ impl<'a> Lowerer<'a> {
 
 	/// A call, from its `CallInfo`.
 	fn call(&mut self, n: NodeId, callee: NodeId, arguments: syntax::NodeList<'_>) -> Expr {
+		let application = self.strip_groups(callee);
+		let mut callee = application;
+		while self.a.has_flags(callee, NodeFlags::GENERIC_APPLICATION)
+			&& let View::Call { callee: inner, .. } = syntax::view(self.tree, callee)
+		{
+			callee = self.strip_groups(inner);
+		}
 		let Some(info) = self.a.call(n).cloned() else {
 			if self.a.has_flags(n, NodeFlags::GENERIC_APPLICATION) {
 				let value = self.expr(callee);
@@ -1778,33 +1922,10 @@ impl<'a> Lowerer<'a> {
 			}
 			return self.unsupported(format!("`{}`", self.text(callee)));
 		};
-		// the receiver of a method: the callee without its last member
-		let receiver = |lowerer: &mut Self| -> Option<Expr> {
-			match syntax::view(lowerer.tree, callee) {
-				View::Access { target, members } | View::OptionalAccess { target, members } => {
-					if members.len() == 1 {
-						Some(lowerer.expr(target))
-					} else {
-						let mut value = lowerer.expr(target);
-						for member in members.iter().take(members.len() - 1) {
-							let View::Name(name) = syntax::view(lowerer.tree, member) else {
-								return None;
-							};
-							value = Expr::Field(
-								value.boxed(),
-								Arc::from(lowerer.tree.name(name)),
-								false,
-							);
-						}
-						Some(value)
-					}
-				}
-				_ => None,
-			}
-		};
+
 		match info.callee {
 			Callee::Function(declaration) => {
-				let mut args = self.generic_arguments(n, callee, self.file, declaration);
+				let mut args = self.generic_arguments(n, application, self.file, declaration);
 				args.extend(self.arguments(&info.arguments, Some(callee)));
 				let symbol = self.a.symbols.symbol_of_decl(declaration);
 				let captures = self
@@ -1824,8 +1945,8 @@ impl<'a> Lowerer<'a> {
 			}
 			Callee::Builtin(id) => {
 				let path = builtins::get(id).path;
-				if builtins::std_library::impurity(path).is_some() {
-					return self.impure(path);
+				if let Some(impure) = self.builtin_impurity(path) {
+					return impure;
 				}
 				if Self::builtin_borrows(path) {
 					let values = info
@@ -1848,7 +1969,7 @@ impl<'a> Lowerer<'a> {
 							None => return self.unsupported(format!("`{path}` on this value")),
 						}
 					} else {
-						match receiver(self) {
+						match self.call_receiver(callee) {
 							Some(value) => values.push(value),
 							None => return self.unsupported(format!("`{path}`")),
 						}
@@ -1887,6 +2008,51 @@ impl<'a> Lowerer<'a> {
 						Argument::Receiver(_) => {}
 						Argument::Default | Argument::Missing => values.push(Expr::none()),
 					}
+				}
+				if path == "Json.stringify"
+					&& let Some(Argument::Given(argument)) = info.arguments.first()
+				{
+					let (schema, _) = super::json::schema(
+						self.types(),
+						self.a,
+						self.file,
+						self.a.type_of(*argument),
+					);
+					values.push(self.json_schema(&schema));
+				}
+				if path == "Json.parse" {
+					let (schema, defaults) =
+						super::json::schema(self.types(), self.a, self.file, self.a.type_of(n));
+					let mut expressions = Vec::new();
+					let input = self.temp();
+					expressions.push(Expr::Let(input, values.remove(0).boxed()));
+					values.push(Expr::Local(input));
+					let mut closures = Vec::new();
+					for key in defaults {
+						let expression =
+							super::json::default_node(NodeId(key.1)).expect("a JSON default key");
+						let mut captures = Vec::new();
+						for symbol in self.default_captures(expression) {
+							let read = self.read_symbol(expression, symbol);
+							let slot = self.temp();
+							expressions.push(Expr::Let(slot, read.boxed()));
+							captures.push(slot);
+						}
+						closures.push(Item::One(Expr::Closure {
+							borrowed: false,
+							function: key,
+							captures,
+						}));
+					}
+					values.push(Expr::Builtin(
+						"$Json.bindDefaults",
+						vec![self.json_schema(&schema), Expr::Array(closures)],
+					));
+					values.push(Expr::Const(Value::Boolean(crate::comptime::is_js_target(
+						&self.session.comptime.target,
+					))));
+					expressions.push(Expr::Builtin(path, values));
+					return Expr::Block(expressions);
 				}
 				// the paths of the flags, by bit
 				if path == "Fields#toStringArray"
@@ -1931,7 +2097,7 @@ impl<'a> Lowerer<'a> {
 			Callee::Value => {
 				let mut args = self.arguments(&info.arguments, Some(callee));
 				if let Some((file, node)) = self.callee_function(callee) {
-					let mut hidden = self.generic_arguments(n, callee, file, node);
+					let mut hidden = self.generic_arguments(n, application, file, node);
 					hidden.append(&mut args);
 					return Expr::CallFunction(fn_key(file, node), hidden);
 				}
@@ -2061,17 +2227,114 @@ impl<'a> Lowerer<'a> {
 				self.types().list_items(owner.arguments).iter().copied(),
 			);
 		}
-		generics
-			.iter()
+		let generics = generics
+			.into_iter()
 			.enumerate()
-			.filter(|(_, param)| self.types().param(**param).value)
-			.map(|(index, _)| {
+			.filter_map(|(index, param)| {
+				let key_set = analysis.key_set_params.contains_key(&param);
+				(self.types().param(param).value || key_set).then_some((index, key_set))
+			})
+			.collect::<Vec<_>>();
+		generics
+			.into_iter()
+			.map(|(index, key_set)| {
 				Arg::Value(bindings.get(index).map_or_else(
 					|| self.unsupported("an unresolved compile-time value parameter"),
-					|&ty| self.generic_value(ty),
+					|&ty| {
+						if key_set {
+							self.key_argument(ty)
+						} else {
+							self.generic_value(ty)
+						}
+					},
 				))
 			})
 			.collect()
+	}
+
+	/// Substitute VM value parameters only along the schema's dynamic paths.
+	/// Static subtrees stay shared constants, including lazy field defaults.
+	fn json_schema(&self, schema: &Value) -> Expr {
+		fn dynamic(lowerer: &Lowerer<'_>, value: &Value) -> Option<Expr> {
+			match value {
+				Value::Member(member) => Some(Expr::Member {
+					name: Arc::clone(&member.name),
+					kind: member.kind,
+					data: Some(dynamic(lowerer, member.data.as_ref()?)?.boxed()),
+				}),
+				Value::Object(object) => {
+					let capacity = object.get("$capacityType").and_then(Value::as_int);
+					let mut changed = capacity.is_some();
+					let fields = object
+						.fields
+						.iter()
+						.filter(|(name, _)| name.as_ref() != "$capacityType")
+						.map(|(name, value)| {
+							let value = if name.as_ref() == "capacity"
+								&& let Some(ty) = capacity
+							{
+								lowerer.generic_value(TypeId(ty.as_u32()))
+							} else if let Some(expression) = dynamic(lowerer, value) {
+								changed = true;
+								expression
+							} else {
+								Expr::Const(value.clone())
+							};
+							(Arc::clone(name), value)
+						})
+						.collect();
+					changed.then_some(Expr::Object(fields))
+				}
+				Value::Array(items) => {
+					let mut changed = false;
+					let items = items
+						.iter()
+						.map(|value| {
+							Item::One(if let Some(expression) = dynamic(lowerer, value) {
+								changed = true;
+								expression
+							} else {
+								Expr::Const(value.clone())
+							})
+						})
+						.collect();
+					changed.then_some(Expr::Array(items))
+				}
+				_ => None,
+			}
+		}
+		dynamic(self, schema).unwrap_or_else(|| Expr::Const(schema.clone()))
+	}
+
+	fn key_argument(&self, binding: TypeId) -> Expr {
+		match self.types().kind(binding) {
+			TypeKind::Param(parameter) => {
+				self.value_slots.get(&parameter).copied().map(Expr::Local)
+			}
+			TypeKind::Tuple(list) => match self.types().list_items(list) {
+				&[fields, bits] => {
+					self.types()
+						.as_int(bits)
+						.and_then(|int| int.literal())
+						.map(|bits| {
+							Expr::Const(Value::array(
+								self.types()
+									.fields_leaves(fields)
+									.iter()
+									.enumerate()
+									.filter(|(index, _)| {
+										(bits >> *index as u32) & I256::ONE == I256::ONE
+									})
+									.map(|(_, path)| Value::string(path))
+									.collect(),
+							))
+						})
+				}
+				_ => None,
+			},
+			_ => None,
+		}
+		.unwrap_or_else(|| self.unsupported("this key-set argument"))
 	}
 
 	fn generic_value(&self, ty: TypeId) -> Expr {
@@ -2105,9 +2368,23 @@ impl<'a> Lowerer<'a> {
 	}
 
 	fn arguments(&mut self, arguments: &[Argument], callee: Option<NodeId>) -> Vec<Arg> {
+		let references: Vec<_> = callee
+			.and_then(|callee| match self.types().kind(self.a.type_of(callee)) {
+				TypeKind::Function(sig) => Some(
+					self.types()
+						.params(self.types().sig(sig).params)
+						.iter()
+						.map(|param| param.reference.is_some())
+						.collect(),
+				),
+				_ => None,
+			})
+			.unwrap_or_default();
+		let skip = arguments.len().saturating_sub(references.len());
 		let mut args = Vec::with_capacity(arguments.len());
-		for argument in arguments {
+		for (position, argument) in arguments.iter().enumerate() {
 			args.push(match argument {
+				Argument::Given(value) if !position.checked_sub(skip).and_then(|position| references.get(position)).copied().unwrap_or(false) && matches!(self.types().kind(self.a.type_of(*value)), TypeKind::String | TypeKind::StringLit(_)) => { Arg::Value(self.expr(*value)) }
 				Argument::Given(value) => {
 					let mut node = *value;
 					while let View::Group(inner) | View::Try(inner) = syntax::view(self.tree, node) { node = inner; }
@@ -2128,25 +2405,7 @@ impl<'a> Lowerer<'a> {
 						args.push(Arg::Value(Expr::Borrow(place, false)));
 						continue;
 					}
-					let receiver =
-						callee.and_then(|callee| match syntax::view(self.tree, callee) {
-							View::Access { target, members }
-							| View::OptionalAccess { target, members } => {
-								let mut value = self.expr(target);
-								for member in members.iter().take(members.len().saturating_sub(1)) {
-									let View::Name(name) = syntax::view(self.tree, member) else {
-										return None;
-									};
-									value = Expr::Field(
-										value.boxed(),
-										Arc::from(self.tree.name(name)),
-										false,
-									);
-								}
-								Some(value)
-							}
-							_ => None,
-						});
+					let receiver = callee.and_then(|callee| self.call_receiver(callee));
 					Arg::Value(receiver.unwrap_or_else(|| self.unsupported("this receiver")))
 				}
 			});

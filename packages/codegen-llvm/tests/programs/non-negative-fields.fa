@@ -6,7 +6,7 @@ type Cursor = {
 	text: String
 	position: Integer
 
-	function current = (self): Byte => self.text.bytes().get(self.position) ?? 0
+	function current = (self): Byte => self.text.toUtf8().get(self.position) ?? 0
 
 	function advance = (self) mutates self => {
 		self.position += 1
@@ -25,7 +25,7 @@ console.log(seen) -- prints: 97,98,99,
 type Back = { text: String, position: Integer }
 mutable back = Back { text = "xyz", position = 0 }
 back.position -= 1
-console.log(back.text.bytes().get(back.position) ?? 0) -- prints: 122
+console.log(back.text.toUtf8().get(back.position) ?? 0) -- prints: 122
 
 -- a negative store
 type Store = { items: Array<Integer>, at: Integer }

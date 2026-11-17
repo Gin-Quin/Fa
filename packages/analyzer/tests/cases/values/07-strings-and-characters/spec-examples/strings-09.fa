@@ -1,0 +1,9 @@
+-- Specification example: strings 09
+-- warning: W-NUM-2
+-- warning: W-NUM-2
+-- warning: W-NUM-2
+-- warning: W-NUM-2
+assert "héllo".length == 5
+assert "日本語".length == 3
+assert "😀".length == 2  -- one code point, a surrogate pair
+assert "🇫🇷".length == 4 -- two code points, one flag on screen

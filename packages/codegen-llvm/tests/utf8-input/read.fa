@@ -1,0 +1,9 @@
+use { File } = std.fs
+
+let path = try arguments[0]
+let text = File.readText(path) catch error => {
+	console.log(error.path == path, error.message.includes("UTF-8"))
+	console.log(error)
+	"invalid"
+}
+console.log(text.length, text.isWellFormed(), text)

@@ -7,11 +7,10 @@
 // representation is enough to decide (`==` doesn't depend on Fa types that
 // share a representation).
 
-import { FaHashMap, FaSet } from "./collections.js";
+import { FaHashMap, faIsBytes, FaSet } from "./collections.js";
 import { faSides } from "./relations.js";
-import { faStringCompare } from "./strings.js";
 
-// @fa-helper faDeepEquals deps: FaHashMap FaSet faSides
+// @fa-helper faDeepEquals deps: FaHashMap FaSet faSides faBytesEqual faIsBytes
 /**
  * Deep structural equality of two Fa values. Numbers compare with `===`
  * (NaN is never equal, `-0` equals `0`), or with SameValueZero when
@@ -54,6 +53,10 @@ export function faDeepEquals(a, b, sameValueZero) {
 		}
 		if (typeX !== "object" || typeY !== "object" || x === null || y === null) {
 			return false;
+		}
+		if (faIsBytes(x) || faIsBytes(y)) {
+			if (!(faIsBytes(x) && faIsBytes(y)) || !faBytesEqual(x, y)) return false;
+			continue;
 		}
 		if (Array.isArray(x)) {
 			if (!Array.isArray(y) || x.length !== y.length) {
@@ -284,18 +287,18 @@ export function faHash(value) {
 	}
 }
 
-// @fa-helper faCompare deps: faStringCompare
+// @fa-helper faCompare
 /**
  * The natural order (`sort()` without a comparator, D35): numbers and
- * bigints by value (NaN counts as equal to everything), strings by code
- * point, arrays (tuples) lexicographically.
+ * bigints by value (NaN counts as equal to everything), strings by UTF-16 code
+ * unit, arrays (tuples) lexicographically.
  * @param {unknown} a
  * @param {unknown} b
  * @returns {number}
  */
 export function faCompare(a, b) {
 	if (typeof a === "string" && typeof b === "string") {
-		return faStringCompare(a, b);
+		return a < b ? -1 : a > b ? 1 : 0;
 	}
 	if (Array.isArray(a) && Array.isArray(b)) {
 		const length = Math.min(a.length, b.length);
@@ -310,4 +313,14 @@ export function faCompare(a, b) {
 	const x = /** @type {number} */ (a);
 	const y = /** @type {number} */ (b);
 	return x < y ? -1 : x > y ? 1 : 0;
+}
+
+// @fa-helper faBytesEqual
+/** @param {Uint8Array} a @param {Uint8Array} b @returns {boolean} */
+export function faBytesEqual(a, b) {
+	if (a.length !== b.length) return false;
+	for (let index = 0; index < a.length; index++) {
+		if (a[index] !== b[index]) return false;
+	}
+	return true;
 }

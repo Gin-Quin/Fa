@@ -1,3 +1,2 @@
--- brief: → `5 1 1`
-console.log("héllo".length, "🇫🇷".length, "e\u{301}".length)
--- prints: 5 1 1
+console.log("héllo".length, "🇫🇷".length, "e\u{301}".length, "héllo".utf8Length(), "😀".utf8Length())
+-- prints: 5 4 2 6 4

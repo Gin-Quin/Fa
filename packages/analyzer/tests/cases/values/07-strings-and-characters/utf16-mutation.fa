@@ -1,0 +1,14 @@
+-- An indexed String is a value; subsequent writes cannot change its unit.
+mutable text = "a😀"
+let unit = text[0]
+let half = text[1]
+text = "b"
+console.log(unit == "a", half.length, half.isWellFormed()) -- prints: true 1 false
+let matched = when text[0] is {
+	"b" => {
+		text = "c"
+		"before"
+	}
+	else => "other"
+}
+console.log(matched, text) -- prints: before c

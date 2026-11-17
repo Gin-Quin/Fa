@@ -393,6 +393,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				arguments.push(pointer.into());
 			}
 		}
+		if let Some(repr) = function.reference_buffer {
+			arguments.push(self.allocate_reference_buffer(repr)?.into());
+		}
 		let return_slot = if function.return_slot {
 			let slot = self.call_return_slot(node, ret)?;
 			arguments.insert(usize::from(function.lambda), slot.pointer.into());
@@ -658,9 +661,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// The receiver of a method call (`pair` in `pair.swap()`, `a.b` in
 	/// `a.b.c()`).
 	pub(super) fn method_receiver(&self, call: NodeId) -> Option<NodeId> {
-		let View::Call { callee, .. } = self.view(call) else {
+		let View::Call { mut callee, .. } = self.view(call) else {
 			return None;
 		};
+		while let View::Group(inner) = self.view(callee) {
+			callee = inner;
+		}
 		let View::Access { target, members } = self.view(callee) else {
 			return None;
 		};
@@ -722,20 +728,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		match path {
 			// `collection.parallel()`: the collection, which the operation reads
+			_ if path.starts_with("Bytes") => self.bytes_builtin(node, path, info),
 			"Collection#parallel" => self.receiver(node),
 			// tasks (tasks.rs)
 			"Task.yield" | "Task.all" | "Task.any" | "Task.settled" | "Task#cancel"
 			| "std.time.sleep" => self.task_builtin(node, path, info),
 			"Subscription#stop" => self.stop_subscription(node),
 			// std.time, std.fs, std.net (io.rs)
-			"std.time.monotonic" | "std.time.now" | "File.read" | "File.readBytes"
-			| "File.write" | "TcpListener#accept" | "TcpListener#close" | "TcpStream.connect"
-			| "TcpStream#read" | "TcpStream#write" | "TcpStream#close" => self.io_builtin(node, path, info),
+			"std.time.monotonic" | "std.time.now" | "File.readText" | "File.read"
+			| "File.writeText" | "File.write" | "TcpListener#accept" | "TcpListener#close"
+			| "TcpStream.connect" | "TcpStream#read" | "TcpStream#write" | "TcpStream#close" => {
+				self.io_builtin(node, path, info)
+			}
 			// std.json (json.rs)
 			"Json.parse" | "Json.stringify" => self.json_builtin(node, path, info),
 			// capacity (capacity.rs)
 			_ if path.ends_with("#reserve") => self.reserve_call(node, info),
 			"String.from" => self.string_from(node, info),
+			"String.fromUtf8" | "String.fromUtf8Lossy" => {
+				self.string_decode_bytes(node, info, path.ends_with("Lossy"))
+			}
 			"console.log" | "console.error" => {
 				let mut values = Vec::new();
 				for argument in &info.arguments {
@@ -1647,6 +1659,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Ok(Val::new(Repr::Bool, empty))
 			}
 			"String#toString" => Ok(receiver),
+			"String#codeUnitAt" => self.string_unit_at(node, receiver, arguments[0]),
+			"String#utf8Length" => Ok(Val::new(
+				Repr::Int(IntRepr::I64),
+				self.byte_length(receiver)?,
+			)),
+			"String#isWellFormed" => {
+				call.push(self.string_capacity(receiver)?.into());
+				boolean(self, "fa_string_is_well_formed", &call)
+			}
 			"String#includes" | "String#startsWith" | "String#endsWith" => {
 				string_argument(self, 0, &mut call)?;
 				let name = match path {
@@ -1747,6 +1768,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				};
 				let function = self.runtime.function(name)?;
 				let invocation = self.builder.build_call(function, &call, "")?;
+				if name.contains("_views")
+					&& info
+						.arguments
+						.iter()
+						.find_map(|argument| match argument {
+							Argument::Given(node) => self.literal_shape(*node),
+							_ => None,
+						})
+						.is_some_and(|(length, ascii)| length != 0 && ascii)
+				{
+					// A nonempty ASCII separator cannot cut a surrogate pair.
+					// Any input edge still needs another constructor, which keeps
+					// the program-wide capability enabled independently.
+					invocation.add_attribute(
+						inkwell::attributes::AttributeLoc::Function,
+						self.context
+							.create_string_attribute(super::CANONICAL_SPLIT, ""),
+					);
+				}
 				if name.ends_with("_into") && self.recursive_collection_frame() {
 					// The split helper has bounded scanning/construction scratch.
 					// Keep that scratch in one transient helper frame, rather than
@@ -1762,17 +1802,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.expect("an array result");
 				Ok(self.fresh(Val::new(self.node_repr(node)?, array)))
 			}
-			"String#bytes" => {
-				// a copy of the UTF-8 bytes
-				let byte = Repr::Int(IntRepr {
-					bits: 8,
-					signed: false,
-				});
-				let count = self.byte_length(receiver)?;
-				let array = self.new_array(byte, count, count)?;
-				let (items, _) = self.array_parts(array)?;
-				self.builder.build_memcpy(items, 1, bytes, 1, length)?;
-				Ok(self.fresh(Val::new(self.node_repr(node)?, array)))
+			"String#toUtf8" => {
+				let (source, moved) =
+					self.conversion_source(receiver, self.method_receiver(node))?;
+				let source = self.string_snapshot(source)?;
+				let bytes = self.call_value(
+					self.runtime.function("fa_string_to_utf8")?,
+					&[
+						source.pointer.into(),
+						self.context
+							.i32_type()
+							.const_int(moved as u64, false)
+							.into(),
+					],
+				)?;
+				Ok(self.fresh(Val::new(Repr::Bytes, bytes)))
 			}
 			"String#get" => {
 				let index = self.convert(arguments[0], Repr::Int(IntRepr::I64), node.index())?;
@@ -1807,7 +1851,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 	}
 
-	/// Searching a constant consecutive ASCII alphabet for one Character is
+	/// Searching a constant consecutive ASCII alphabet for a one-unit string literal is
 	/// a subtraction and a range test, rather than a loop over the alphabet.
 	fn alphabet_index(
 		&mut self,
@@ -1822,7 +1866,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		else {
 			return Ok(None);
 		};
-		if self.type_of(*argument) != TypeId::CHARACTER {
+		if !matches!(self.types().kind(self.type_of(*argument)), fa_analyzer::types::TypeKind::StringLit(text) if self.types().syms.resolve(text).encode_utf16().count() == 1)
+		{
 			return Ok(None);
 		}
 		let View::Call { callee, .. } = self.view(node) else {
@@ -1845,7 +1890,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(None);
 		}
 		let (bytes, length) = self.string_parts(search)?;
-		// A Character has at least one byte, including for a long grapheme.
+		// The nonempty one-unit literal has at least one byte.
 		let byte = self
 			.builder
 			.build_load(self.context.i8_type(), bytes, "")?

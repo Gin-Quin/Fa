@@ -548,6 +548,7 @@ impl Walker<'_> {
 		}
 		let result = member.unwrap_or(object);
 		self.memo(n, |w| {
+
 			let type_name = w.display(object);
 			let mut given: Vec<Sym> = Vec::new();
 			for field in fields {
@@ -652,6 +653,7 @@ impl Walker<'_> {
 					fields: values,
 				},
 			);
+			w.check_literal_schema_constructor(n, result);
 			result
 		});
 	}
@@ -881,6 +883,7 @@ impl Walker<'_> {
 			}
 		});
 		self.revalidate_fields(target, members);
+		self.reject_slice_structural_method(n);
 		// a field moved out of its local (foreign.rs)
 		self.check_moved_fields(n, target, false);
 		ty
@@ -1056,7 +1059,11 @@ impl Walker<'_> {
 		} else if let Some(function) = self.type_function(ty, &text) {
 			self.associated_function_type(function, first, ty)
 		} else {
-			let message = format!("`{}` has no member or function `{text}`", self.display(ty));
+			let message = format!(
+				"`{}` has no member or function `{text}`{}",
+				self.display(ty),
+				self.removed_type_member_hint(ty, &text)
+			);
 			let diagnostic = self.diagnostic(&E_OBJ_5, first, message);
 			self.report(diagnostic);
 			return TypeId::UNKNOWN;
@@ -1181,8 +1188,8 @@ impl Walker<'_> {
 			types.kind(receiver),
 			TypeKind::Sync(..) | TypeKind::Task(..)
 		);
-		if range
-			|| subscription
+		if receiver == TypeId::BYTES
+			|| range || subscription
 			|| foreign
 			|| sync || builtins::numbers::number_owner(types, receiver).is_some()
 		{
@@ -1390,9 +1397,17 @@ impl Walker<'_> {
 	/// `E-OBJ-5`: no such field or method.
 	pub(super) fn no_member(&mut self, member: NodeId, receiver: TypeId, text: &str) {
 		let shown = self.display(self.s.types.widen(receiver));
-		let message = if crate::builtins::strings::is_string_like(&self.s.types, receiver) {
+		let message = if crate::builtins::strings::is_string_like(&self.s.types, receiver)
+			&& text == "bytes"
+		{
+			"`bytes()` was replaced by `toUtf8()`, which returns `Bytes`: use `text.toUtf8()` to encode UTF-8".to_string()
+		} else if crate::builtins::strings::is_string_like(&self.s.types, receiver) {
 			format!(
-				"a `{shown}` has no field or method `{text}`: see the string methods (`length`, `includes`, `split`…); no method changes a string"
+				"a `{shown}` has no field or method `{text}`: see the string methods (`length`, `includes`, `split`…); use assignment or `+=` to change the text (`reserve` only changes storage)"
+			)
+		} else if receiver == TypeId::BYTES {
+			format!(
+				"a `Bytes` has no field or method `{text}`: its length is fixed; build an `Array<Byte>` and convert it with `Bytes.from(items)` to grow binary data"
 			)
 		} else {
 			format!("a `{shown}` has no field or method `{text}`")
@@ -1589,7 +1604,13 @@ impl Walker<'_> {
 			None => {
 				let index_ty = self.check(index, Some(TypeId::INTEGER));
 				let ty = self.memo(n, |w| w.index_type(n, target, root.ty, index, index_ty));
-				self.check_index_bounds(n, target, index);
+				// A string unit is never an assignment target. Its rejection
+				// must not also ask the caller to handle a bounds error.
+				if !crate::builtins::strings::is_string_like(&self.s.types, root.ty)
+					|| index_ty == TypeId::RANGE
+				{
+					self.check_index_bounds(n, target, index);
+				}
 				ty
 			}
 		};
@@ -1638,7 +1659,7 @@ impl Walker<'_> {
 	}
 
 	/// The type of `target[index]` (type part): the item of an array, the
-	/// value of a map (whose key the caller sinks), a `Character` of a string.
+	/// value of a map (whose key the caller sinks), a one-unit `String` from a string.
 	pub(super) fn index_type(
 		&mut self,
 		n: NodeId,
@@ -1662,7 +1683,7 @@ impl Walker<'_> {
 		// `items[1..3]`, `text[..5]`: a slice (values brief §12)
 		if index_ty == TypeId::RANGE {
 			return match self.s.types.kind(target_ty) {
-				TypeKind::Collection(CollKind::Array, ..) => target_ty,
+				TypeKind::Collection(CollKind::Array, ..) | TypeKind::Bytes => target_ty,
 				TypeKind::String | TypeKind::StringLit(_) => TypeId::STRING,
 				_ => {
 					let message = format!("a `{}` can't be sliced", self.display(target_ty));
@@ -1683,6 +1704,7 @@ impl Walker<'_> {
 				item,
 				_,
 			) => item,
+			TypeKind::Bytes => TypeId::BYTE,
 			TypeKind::CArray(item, _) => item,
 			TypeKind::Collection(kind @ (CollKind::Set | CollKind::GrowingSet), ..) => {
 				let message = format!(
@@ -1693,7 +1715,7 @@ impl Walker<'_> {
 				self.report(diagnostic);
 				TypeId::UNKNOWN
 			}
-			TypeKind::String | TypeKind::StringLit(_) => TypeId::CHARACTER,
+			TypeKind::String | TypeKind::StringLit(_) => TypeId::STRING,
 			TypeKind::Collection(kind, item, _) if super::pools::pool_owner(kind).is_some() => {
 				self.pool_index_type(n, kind, item)
 			}

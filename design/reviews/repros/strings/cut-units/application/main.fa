@@ -1,0 +1,14 @@
+use { units, middle, parts, keep } = library
+export function = (_arguments: Array<String>): Integer throws IndexError => {
+	let text = "é".repeat(30) + "😀".repeat(3) + "z"
+	console.log(middle(text, 31, 34) catch _ => "error")
+	console.log(middle(text, 30, 35) catch _ => "error")
+	for part in parts(text, "😀"[1]) { console.log(units(part)) }
+	let stored = keep { label = try text[31..33] }
+	console.log(units(stored.label))
+	let source = String.from(text)
+	use view = try source[29..32]
+	let held = keep { label = view }
+	console.log(units(held.label), units(view + "😀"[1]))
+	0
+}

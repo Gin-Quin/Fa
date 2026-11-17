@@ -243,7 +243,7 @@ impl Merger<'_> {
 			| K::BigInt
 			| K::Percentage
 			| K::String
-			| K::Character
+			| K::Bytes
 			| K::CString
 			| K::Range
 			| K::Subscription => kind,
@@ -341,7 +341,6 @@ impl Merger<'_> {
 		}
 		let data = self.view.consts.resolve(value.0).map(|data| match data {
 			ConstValue::String(sym) => ConstValue::String(self.sym(sym)),
-			ConstValue::Character(sym) => ConstValue::Character(self.sym(sym)),
 			ConstValue::BigInt(sym) => ConstValue::BigInt(self.sym(sym)),
 			ConstValue::EnumMember(nominal, index) => {
 				ConstValue::EnumMember(self.nominal(nominal), index)

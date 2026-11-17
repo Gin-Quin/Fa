@@ -41,7 +41,7 @@ pub(crate) enum NumKind {
 	BigInt,
 	/// `Percentage`.
 	Percentage,
-	/// `String` or `Character` (`+` concatenates).
+	/// `String` (`+` concatenates).
 	Text,
 	/// A type being recovered from: no further diagnostic.
 	Recovering,
@@ -122,7 +122,7 @@ impl Walker<'_> {
 			TypeKind::Float(bits) | TypeKind::FloatLit(bits, _) => NumKind::Float(bits),
 			TypeKind::BigInt | TypeKind::BigIntLit(_) => NumKind::BigInt,
 			TypeKind::Percentage => NumKind::Percentage,
-			TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => NumKind::Text,
+			TypeKind::String | TypeKind::StringLit(_) => NumKind::Text,
 			TypeKind::Never => NumKind::Recovering,
 			_ => NumKind::Other,
 		}
@@ -1465,7 +1465,11 @@ impl Walker<'_> {
 		target: NodeId,
 		value: NodeId,
 	) -> TypeId {
-		let mut place = self.check_place(target);
+		let (mut place, rejected) = self.assignment_place(target);
+		if rejected {
+			self.check(value, None);
+			return self.memo(n, |_| TypeId::VOID);
+		}
 		// the target is read first: an optional narrowed here has its narrowed type
 		let name = self.strip_groups(target);
 		let mut narrowed_field = None;

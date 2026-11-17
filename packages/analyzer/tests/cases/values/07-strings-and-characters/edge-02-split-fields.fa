@@ -1,0 +1,7 @@
+function rule = (text: String): String => "{text.split("")} | {text.split(",")}"
+static empty = @rule("")
+static fields = @rule(",a,,")
+static missing = @rule("ab")
+console.log(empty, rule("") == empty) -- prints: [] | [""] true
+console.log(fields, rule(",a,,") == fields) -- prints: [",", "a", ",", ","] | ["", "a", "", ""] true
+console.log(missing, rule("ab") == missing) -- prints: ["a", "b"] | ["ab"] true

@@ -1,0 +1,6 @@
+-- skip-target: native-freestanding
+-- Json.stringify must preserve lone surrogates at compile time too.
+use { Json } = std.json
+function quote = (): String => Json.stringify("😀"[0])
+static result = @quote()
+console.log(result, result.length) -- prints: "\ud83d" 8

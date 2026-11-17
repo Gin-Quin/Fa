@@ -150,11 +150,13 @@
 //!   (`PathStep::Capacity`, `flow::Step::Capacity`) on the collections whose
 //!   elements never move: it invalidates nothing there. JavaScript: `reserve`
 //!   does nothing, `capacity` is the `length` (or `size`).
-//! - Text: `characters()` keeps the type `Array(Character)`; its native
-//!   representation is a view of the string's bytes when the array is only
-//!   read (indexed, measured, iterated, a `let` only read), like `bytes()`
-//!   and `codePoints()`: the backend decides from the syntax, as it does
-//!   for them. An `Array(Character)` the program keeps and changes is built.
+//! - Text: `characters(): Array<String>` segments graphemes; string indexing
+//!   is a one-unit `String` (`STRING_CODE_UNIT`), iteration visits code points
+//!   with UTF-16 positions. `CODE_POINT_COUNT` marks a direct
+//!   `codePoints().length`; `UTF8_ITERATION` marks a direct `toUtf8()` call
+//!   in a `for`. These operations need no intermediate string/collection.
+//!   `Bytes` is a distinct fixed-length type (`TypeId::BYTES`), with the
+//!   array rules for bounds, slices, references and item writes.
 //! - [`Analysis::is_non_escaping`] (`non_escaping`): the `let` / `mutable`
 //!   locals of blocks and functions whose value never outlives the frame of
 //!   their function (never returned, thrown, stored, moved into a detached
@@ -404,9 +406,10 @@
 //! | --- | --- | --- | --- |
 //! | `std.time.sleep` | `sleep` | native, bun, node | `(milliseconds: Integer)` |
 //! | `std.time.monotonic` | (no wait) | every target | `(): Integer`, nanoseconds of a monotonic clock |
-//! | `File.read` | `File.read` | all but web | `(path: String): String throws FileError` |
-//! | `File.readBytes` | `File.readBytes` | all but web | `(path: String): Array(Byte) throws FileError` |
-//! | `File.write` | `File.write` | all but web | `(path: String, text: String) throws FileError` (creates or replaces) |
+//! | `File.readText` | `File.readText` | all but web | `(path: String): String throws FileError` |
+//! | `File.read` | `File.read` | all but web | `(path: String): Bytes throws FileError` |
+//! | `File.writeText` | `File.writeText` | all but web | `(path: String, text: String) throws FileError` |
+//! | `File.write` | `File.write` | all but web | `(path: String, bytes: Bytes) throws FileError` |
 //! | `TcpListener#accept` | `TcpListener.accept` | native | `(): TcpStream throws NetError` |
 //! | `TcpStream.connect` | `TcpStream.connect` | native | `(host: String, port: Integer): TcpStream throws NetError` |
 //! | `TcpStream#read` | `TcpStream.read` | native | `(buffer: Array(Byte)): Integer throws NetError` |
@@ -566,8 +569,19 @@ bitflags! {
 		/// only calls. Additional errors supplied by its caller propagate past
 		/// this function's catches (callbacks.rs).
 		const CALLBACK_CALL = 1 << 18;
+		/// A string index yields exactly one UTF-16 unit. Backends can compare
+		/// it with a literal (including a `when` pattern) without building a string.
+		const STRING_CODE_UNIT = 1 << 19;
+		/// The `length` access of a direct `String#codePoints` call; count
+		/// code points in its receiver without allocating the array.
+		/// A flattened longer access carries the bit on its `length` member.
+		const CODE_POINT_COUNT = 1 << 20;
+		/// A direct `String#toUtf8` call used only as a `for` iterable;
+		/// use the target's direct encoding loop (a native cursor, or one
+		/// bulk encoding followed by indexed iteration on JavaScript).
+		const UTF8_ITERATION = 1 << 21;
 		/// An inline append needs its capacity guard.
-		const CAPACITY_CHECK = 1 << 19;
+		const CAPACITY_CHECK = 1 << 22;
 	}
 }
 
@@ -607,7 +621,7 @@ pub struct Analysis {
 	pub arith: FxHashMap<NodeId, ArithEntry>,
 	/// The implicit conversion of a value at its sink, by value node: the
 	/// target type of a union injection, `Integer` ↔ `Int64`, `Float32` →
-	/// `Float`, `Character` → `String`, and of a `SINK_CHECK` range check.
+	/// `Float`, and of a `SINK_CHECK` range check.
 	pub coercions: FxHashMap<NodeId, TypeId>,
 	/// The nodes whose value is another node's, copied to their own type:
 	/// `pick(value, { foo })`, `omit(value, { foo })` (the backends copy the
@@ -1268,6 +1282,8 @@ pub struct TypeDecl {
 /// Portable evaluated result provenance, expressed in the callee's formal roots.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct ReferenceOrigin {
+	/// The final projection is a slice view, rather than one element.
+	pub slice: bool,
 	pub path: crate::ids::PathId,
 	pub descendant: bool,
 	pub readonly: bool,
@@ -1584,6 +1600,43 @@ pub struct CallInfo {
 }
 
 impl Analysis {
+	/// The static symbol read by a function's compile-time value parameter.
+	pub fn value_parameter_symbol(
+		&self,
+		types: &crate::types::TypeStore,
+		tree: &fa_parser::TypedSyntaxTree,
+		function: NodeId,
+		param: ParamId,
+	) -> Option<SymbolId> {
+		let name = types.param(param).name;
+		// the declaration holds the generic parameters, not the lambda
+		let declaration = self
+			.function(function)
+			.and_then(|info| info.declaration)
+			.unwrap_or(function);
+		let owner = self
+			.function_owners
+			.get(&function)
+			.copied()
+			.filter(|owner| {
+				self.type_decls
+					.get(owner)
+					.is_some_and(|info| info.generics.contains(&param))
+			})
+			.unwrap_or(declaration);
+		let span = tree.spans[owner.index()];
+		self.symbols
+			.symbols()
+			.iter()
+			.position(|symbol| {
+				symbol.kind == crate::symbols::SymbolKind::Static && symbol.name == name && {
+					let declared = tree.spans[symbol.decl_node.index()];
+					span.start <= declared.start && declared.end <= span.end
+				}
+			})
+			.map(SymbolId::new)
+	}
+
 	/// An empty analysis of a file with `nodes` nodes.
 	pub fn new(file: FileId, nodes: usize) -> Self {
 		Self {

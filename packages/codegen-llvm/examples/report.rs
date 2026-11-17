@@ -4,6 +4,7 @@
 //!
 //! ```bash
 //! cargo run -p fa-codegen-llvm --release --example report
+//! cargo run -p fa-codegen-llvm --release --example report -- --sizes-only
 //! ```
 
 #[cfg(not(fa_llvm))]
@@ -72,6 +73,11 @@ mod with_llvm {
 					);
 				}
 			}
+		}
+		// Size audits need no timed program runs, which may require a
+		// different CPU affinity from compiler and linker processes.
+		if std::env::args().any(|argument| argument == "--sizes-only") {
+			return Ok(());
 		}
 
 		println!("\n## Run times, best of {RUNS} (milliseconds, process included)\n");

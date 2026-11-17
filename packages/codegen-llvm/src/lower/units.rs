@@ -900,6 +900,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					.collect()
 			})
 			.unwrap_or_default();
+		let reference_buffer = self.reference_buffer_for_signature(sig);
 		let ret = if sig.reference.is_some() {
 			Repr::Pointer
 		} else {
@@ -958,6 +959,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			types.push(self.pointer_type().into());
 		}
 		let throws = sig.throws != TypeId::NEVER || callback_errors;
+		if reference_buffer.is_some() {
+			types.push(self.pointer_type().into());
+		}
 		let (fn_type, return_slot, return_collection) =
 			self.function_type_of(types, false, ret, throws);
 		let value = match self.module.get_function(&name) {
@@ -1004,6 +1008,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			borrowed,
 			ret,
 			return_slot,
+			reference_buffer,
 			return_collection,
 			throws,
 			lambda: false,

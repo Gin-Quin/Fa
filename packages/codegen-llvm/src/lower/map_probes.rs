@@ -279,7 +279,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| TypeKind::BigIntLit(_)
 			| TypeKind::String
 			| TypeKind::StringLit(_)
-			| TypeKind::Character
+			| TypeKind::Bytes
 			| TypeKind::Percentage
 			| TypeKind::Enum(..)
 			| TypeKind::EnumMember(..)

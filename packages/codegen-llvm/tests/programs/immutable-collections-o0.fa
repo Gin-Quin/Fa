@@ -129,7 +129,7 @@ function splitLocal = (text: String, separator: String): Integer => {
 	sum
 }
 console.log(splitLocal("a bb ccc", " "), splitLocal("é 🌻", " "), splitLocal("abc", ""))
--- prints: 9 4 6
+-- prints: 9 5 6
 function splitReturned = (text: String): Array<String> => {
 	let words = text.split(" ")
 	words

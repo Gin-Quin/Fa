@@ -1,0 +1,48 @@
+let pair = String.from("😀")
+let high = try pair[0]
+let low = try pair[1]
+let units = ("a" + pair + "é").split("")
+console.log(units.length) -- prints: 4
+for unit in units {
+	console.log(unit.length, unit.isWellFormed(), try unit.codeUnitAt(0))
+}
+-- prints: 1 true 97
+-- prints: 1 false 55357
+-- prints: 1 false 56832
+-- prints: 1 true 233
+
+let text = String.from("é,,😀,z,")
+let fields = text.split(",")
+console.log(fields.length) -- prints: 5
+for field in fields { console.log(field.length, field.isWellFormed()) }
+-- prints: 1 true
+-- prints: 0 true
+-- prints: 2 true
+-- prints: 1 true
+-- prints: 0 true
+console.log(text.split(",").filter((field) => field != "").length) -- prints: 3
+let whole = text.split(";")
+console.log(whole.length, try whole[0].length) -- prints: 1 8
+use empty = try text[0..0]
+console.log(empty.split("").length, empty.split(",").length) -- prints: 0 1
+
+let twice = pair + pair
+for field in twice.split(low) {
+	console.log(field.length, field.isWellFormed(), field.codeUnitAt(0) catch _ => 0)
+}
+-- prints: 1 false 55357
+-- prints: 1 false 55357
+-- prints: 0 true 0
+for field in twice.split(low + high) {
+	console.log(field.length, field.isWellFormed(), try field.codeUnitAt(0))
+}
+-- prints: 1 false 55357
+-- prints: 1 false 56832
+
+let separated = pair.replaceAll("", "-")
+console.log(separated == "-" + high + "-" + low + "-", separated.length, separated.isWellFormed()) -- prints: true 5 false
+console.log(pair.replaceAll("", "") == pair, pair.replaceAll("", "").isWellFormed()) -- prints: true true
+console.log(twice.replaceAll(low + high, "") == pair, twice.replaceAll(low + high, "").isWellFormed()) -- prints: true true
+console.log(pair.replace(high, "H") == "H" + low, pair.replace(low, "L") == high + "L") -- prints: true true
+console.log(twice.replaceAll(high, "") == low + low) -- prints: true
+console.log(String.from("é-😀").replace("-", "$&")) -- prints: é$&😀

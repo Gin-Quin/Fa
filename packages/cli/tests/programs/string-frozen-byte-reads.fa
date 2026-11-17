@@ -1,0 +1,28 @@
+-- asynchronous: false
+-- overflow-checks: false
+type ByteCursor = {
+	text: String
+	function sum = (self, index: Integer, remaining: Integer, accumulated: Integer): Integer => {
+		if remaining <= 0 { return accumulated }
+		let byte = self.text.toUtf8().get(index)
+		let value = if byte is not none { Integer(byte) } else { 256 }
+		self.next(index + 1, remaining - 1, accumulated + value)
+	}
+	function next = (self, index: Integer, remaining: Integer, accumulated: Integer): Integer => {
+		if remaining <= 0 { return accumulated }
+		let byte = self.text.toUtf8().get(index)
+		let value = if byte is not none { Integer(byte) } else { 256 }
+		self.sum(index + 1, remaining - 1, accumulated + value)
+	}
+}
+function total = (text: String, start: Integer, count: Integer): Integer => {
+	let cursor = ByteCursor { text }
+	cursor.sum(start, count, 0)
+}
+console.log(total("abc", 0, 3), total("é😀", 0, 6), total("", 0, 2)) -- prints: 294 1043 512
+console.log(total("abc", -1, 2), total("abc", 2, 3), total("abc", -4, 1)) -- prints: 196 611 256
+let pair = String.from("😀")
+use high = try pair[0..1]
+use low = try pair[1..2]
+console.log(total(high, 0, 3), total(low, 0, 3)) -- prints: 619 619
+console.log(total("a".repeat(1000), 0, 1000)) -- prints: 97000

@@ -1,3 +1,2 @@
--- error: E-STR-9
--- brief: ⇒ E-STR-9
-let e: Character = ""
+mutable bytes = Bytes.from([1, 2])
+bytes.reserve(3) -- error: E-OBJ-5

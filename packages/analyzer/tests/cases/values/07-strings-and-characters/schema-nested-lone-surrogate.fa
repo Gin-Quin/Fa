@@ -1,0 +1,2 @@
+function tuple = (text: String): Schema => Schema.Tuple { items = [Schema.StringLiteral { value = text }] }
+type Invalid = TypeFromSchema<@tuple("😀"[0])> -- error: TF042

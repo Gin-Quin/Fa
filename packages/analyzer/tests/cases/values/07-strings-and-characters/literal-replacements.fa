@@ -1,0 +1,20 @@
+-- The replacement is text, never JavaScript's replacement-pattern language.
+assert "a-b".replace("-", "$&") == "a$&b"
+console.log("a-b".replace("-", "$$")) -- prints: a$$b
+console.log("a-b".replace("-", "$&")) -- prints: a$&b
+console.log("a-b".replace("-", "$`")) -- prints: a$`b
+console.log("a-b".replace("-", "$'")) -- prints: a$'b
+console.log("a-b-c".replaceAll("-", "$&")) -- prints: a$&b$&c
+function replace = (replacement: String) => "a-b-c".replace("-", replacement)
+function replaceAll = (replacement: String) => "a-b-c".replaceAll("-", replacement)
+console.log(replace("$&"), replaceAll("$$")) -- prints: a$&b-c a$$b$$c
+static first = @replace("$&")
+static every = @replaceAll("$$")
+console.log(first, every) -- prints: a$&b-c a$$b$$c
+mutable order = ""
+function record = (tag: String, value: String): String mutates order => {
+	order += tag
+	value
+}
+let result = record("receiver", "a-b-c").replaceAll(record("/search", "-"), record("/replacement", "$&"))
+console.log(result, order) -- prints: a$&b$&c receiver/search/replacement

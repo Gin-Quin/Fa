@@ -32,6 +32,7 @@ const AWAIT_YIELD: u64 = 2;
 const FILE_READ: u64 = 0;
 const FILE_READ_BYTES: u64 = 1;
 const FILE_WRITE: u64 = 2;
+const FILE_WRITE_BYTES: u64 = 3;
 
 /// What the destroy edge of an awaited operation does.
 #[derive(Copy, Clone)]
@@ -125,7 +126,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.into_int_value();
 				Ok(Val::new(Repr::Int(IntRepr::I64), now))
 			}
-			"File.read" | "File.readBytes" | "File.write" => {
+			"File.readText" | "File.read" | "File.writeText" | "File.write" => {
 				let Some(job) = self.file_job(node, path, info)? else {
 					return Ok(Val::never());
 				};
@@ -274,6 +275,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let (path_bytes, path_length) = self.string_parts(file)?;
 		let (kind, bytes, length) = match path {
 			"File.write" => {
+				let Some(&bytes) = values.get(1) else {
+					return Err(self.unsupported(node.index(), path));
+				};
+				let array = self.bytes_as_array(bytes)?;
+				let (items, length) =
+					self.array_parts(array.value.expect("byte header").into_pointer_value())?;
+				let length = self
+					.builder
+					.build_int_truncate_or_bit_cast(length, self.usize, "")?;
+				(FILE_WRITE_BYTES, items, length)
+			}
+			"File.writeText" => {
 				let Some(&text) = values.get(1) else {
 					return Err(self.unsupported(node.index(), path));
 				};
@@ -281,7 +294,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				(FILE_WRITE, bytes, length)
 			}
 			_ => (
-				if path == "File.read" {
+				if path == "File.readText" {
 					FILE_READ
 				} else {
 					FILE_READ_BYTES
@@ -314,8 +327,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		job: PointerValue<'ctx>,
 	) -> Result<Val<'ctx>, Error> {
 		let repr = match path {
-			"File.read" => Repr::Str,
-			"File.readBytes" => self.node_repr(node)?,
+			"File.readText" => Repr::Str,
+			"File.read" => self.node_repr(node)?,
 			_ => Repr::Void,
 		};
 		let slot = if repr == Repr::Void {
@@ -416,7 +429,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let pointer = self.pointer_type();
 		let null = pointer.const_null();
 		match name {
-			"File.read" | "File.readBytes" | "File.write" => {
+			"File.readText" | "File.read" | "File.writeText" | "File.write" => {
 				let Some(job) = self.file_job(call, name, &info)? else {
 					return Ok(Val::never());
 				};

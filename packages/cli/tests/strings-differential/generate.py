@@ -1,0 +1,887 @@
+#!/usr/bin/env python3
+"""Deterministic Fa/JavaScript differential corpus (no compiler in the oracle).
+
+Run: python3 generate.py OUTPUT_DIRECTORY [BUN]
+The regular CLI program test invokes this generator. See README.md for coverage.
+"""
+
+import json
+from pathlib import Path
+import random
+import subprocess
+import sys
+
+
+SEED = 0xFA1616
+FULL = "--full" in sys.argv
+PROBE_FORMS = []
+
+
+def literal(text):
+    """Fa literals cannot spell surrogates; obtain those by cutting a scalar."""
+    parts = []
+    current = ""
+    for char in text:
+        code = ord(char)
+        if 0xD800 <= code <= 0xDFFF:
+            if current:
+                parts.append(quoted(current))
+                current = ""
+            scalar = 0x10000 + ((code - 0xD800) << 10) if code < 0xDC00 else 0x10000 + code - 0xDC00
+            parts.append(f'"\\u{{{scalar:X}}}"[{0 if code < 0xDC00 else 1}]')
+        else:
+            current += char
+    if current or not parts:
+        parts.append(quoted(current))
+    return " + ".join(parts)
+
+
+def quoted(text):
+    result = '"'
+    for char in text:
+        result += {"\"": '\\"', "\\": "\\\\", "{": "{{", "}": "}}"}.get(char, f"\\u{{{ord(char):X}}}" if ord(char) < 32 or ord(char) > 126 else char)
+    return result + '"'
+
+
+PRELUDE = r'''
+function units = (text: String): String => {
+    mutable result: Array<String> = []
+    for point in text {
+        for index in 0..point.length { result.push(point.codeUnitAt(index).toString() catch _ => "unexpected-index-error") }
+    }
+    result.join(",")
+}
+function strings = (values: Array<String>): String => {
+    mutable result: Array<String> = []
+    for value in values { result.push("[" + units(value) + "]") }
+    result.join(",")
+}
+function identity = <Item>(value: Item): Item => value
+function probe = (text: String, needle: String): String throws IndexError => {
+    mutable rows: Array<String> = []
+    rows.push("{text.length}:{text.isEmpty()}:{text.isWellFormed()}:{text.utf8Length()}")
+    rows.push(units(text.toString()))
+    for index in [-text.length - 1, -text.length, -1, 0, 1, text.length - 1, text.length] {
+        let item = text.get(index)
+        rows.push(if item is none { "none" } else { units(item) })
+        rows.push(text.codeUnitAt(index).toString() catch _ => "error")
+        rows.push(units(text[index]) catch _ => "error")
+    }
+    for start in [0, text.length // 2, text.length] {
+        for end in [0, text.length // 2, text.length] {
+            rows.push(units(try text[start..end]))
+        }
+    }
+    rows.push(units(text[..]))
+    rows.push(units(try text[-text.length..]))
+    rows.push(units(try text[..-text.length]))
+    if text.length > 0 {
+        rows.push(units(text[0..=-1]))
+        rows.push(units(text[-1..]))
+    }
+    for range in [-text.length-1..0, 0..text.length+1, text.length..text.length, -1..0, -text.length..=-text.length, 0..=text.length, text.length..=0, 0..=-1] {
+        rows.push(units(text[range]) catch _ => "error")
+    }
+    mutable points: Array<String> = []
+    for point, index in text { points.push("{index}:[{units(point)}]") }
+    rows.push(points.join(","))
+    rows.push("{text.codePoints()}")
+    rows.push(text.codePoints().length.toString())
+    rows.push("{(text.codePoints)().length}:{identity(text).codePoints().length}:{text.codePoints().length > 1}")
+    rows.push(strings(text.characters()))
+    rows.push("{text == needle}:{text != needle}:{text < needle}:{text <= needle}:{text > needle}:{text >= needle}")
+    rows.push(units(text + needle))
+    mutable appended = text
+    appended += needle
+    rows.push(units(appended))
+    mutable doubled = text
+    doubled += doubled
+    rows.push(units(doubled))
+    rows.push("{text.includes(needle)}:{text.startsWith(needle)}:{text.endsWith(needle)}:{text.indexOf(needle) ?? -1}:{text.lastIndexOf(needle) ?? -1}")
+    rows.push(strings(text.split(needle)))
+    rows.push(units(text.split(needle).join(needle)))
+    rows.push(units(text.replace(needle, "$&")))
+    rows.push(units(text.replaceAll(needle, "$&")))
+    rows.push(units(text.replace(needle, needle)))
+    rows.push(units(text.replaceAll(needle, needle)))
+    for width in [-1, 0, text.length, text.length + 1, text.length + 3] {
+        rows.push(units(text.padStart(width, needle)))
+        rows.push(units(text.padEnd(width, needle)))
+    }
+    rows.push(units(text.repeat(0)))
+    rows.push(units(text.repeat(2)))
+    rows.push(units(text.trim()))
+    rows.push(units(text.trimStart()))
+    rows.push(units(text.trimEnd()))
+    rows.push(units(text.toUpperCase()))
+    rows.push(units(text.toLowerCase()))
+    rows.push(units("<{text}>"))
+    let bytes = text.toUtf8()
+    rows.push("{bytes.length}:{bytes.isEmpty()}:{bytes.toString()}:{bytes == Bytes.from(bytes.toArray())}")
+    rows.push(units(String.fromUtf8(bytes) catch _ => "UNEXPECTED"))
+    rows.push(units(String.fromUtf8Lossy(bytes)))
+    mutable encoded: Array<Byte> = []
+    for byte in text.toUtf8() { encoded.push(byte) }
+    mutable grouped: Array<Byte> = []
+    for byte, index in (identity(text).toUtf8)() {
+        if index < 0 { continue }
+        grouped.push(byte)
+    }
+    rows.push("{grouped}")
+    rows.push("{encoded}")
+    for index in [-bytes.length - 1, -1, 0, bytes.length] {
+        let byte = bytes.get(index)
+        rows.push(if byte is none { "999" } else { byte.toString() })
+        rows.push(bytes[index].toString() catch _ => "error")
+    }
+    rows.push(bytes[..].toString())
+    rows.push((try bytes[bytes.length..0]).toString())
+    rows.push((try bytes[-bytes.length..]).toString())
+    if bytes.length > 0 { rows.push(bytes[0..=-1].toString()) }
+    rows.join("|")
+}
+'''
+
+REPRESENTATIONS = r'''
+type Stored = { text: String }
+type Payload = Union { Leaf = { text: String }, Branch = { left: Payload, right: Payload } }
+function ownerProbe = (text: String, needle: String): String throws IndexError => try probe(String.from(text, capacity = 8192), needle)
+function viewProbe = (text: String, needle: String): String throws IndexError => {
+    let source = "^" + text + "!"
+    use view = try source[1..-1]
+    try probe(view, needle)
+}
+function splitProbe = (text: String, needle: String): String throws IndexError => {
+    mutable result = ""
+    for part in text.split("\u{10FFFF}\u{10FFFF}") { result = try probe(part, needle) }
+    result
+}
+function fieldProbe = (text: String, needle: String): String throws IndexError => {
+    let object = Stored { text = text }
+    try probe(object.text, needle)
+}
+function arrayProbe = (text: String, needle: String): String throws IndexError => {
+    let items = [text]
+    try probe(items[0], needle)
+}
+function poolProbe = (text: String, needle: String): String throws IndexError => {
+    mutable pool: Pool<Stored> = []
+    use item = pool.add(Stored { text = text })
+    try probe(item.text, needle)
+}
+function payloadProbe = (node: Payload, needle: String): String throws IndexError => when node is {
+    Payload.Leaf as leaf => try probe(leaf.text, needle)
+    Payload.Branch as branch => try payloadProbe(branch.left, needle)
+}
+function compactProbe = (text: String, needle: String): String throws IndexError => {
+    let tree = Payload.Branch { left = Payload.Leaf { text = text }, right = Payload.Leaf { text = text } }
+    try payloadProbe(tree, needle)
+}
+function frameProbe = (text: String, needle: String): String throws IndexError => {
+    mutable built = ""
+    for unit in text.split("") { built += unit }
+    try probe(built, needle)
+}
+function reservedProbe = (text: String, needle: String): String throws IndexError => {
+    mutable built = String.from("", capacity = 8192)
+    for unit in text.split("") { built += unit }
+    try probe(built, needle)
+}
+'''
+
+ORACLE = r'''
+const data = JSON.parse(await Bun.stdin.text());
+const enc = new TextEncoder();
+const decoder = new TextDecoder("utf-8", {ignoreBOM:true});
+const fatal = new TextDecoder("utf-8", {ignoreBOM:true, fatal:true});
+const segmenter = new Intl.Segmenter("und", {granularity:"grapheme"});
+const units = s => Array.from({length:s.length}, (_,i) => s.charCodeAt(i)).join(",");
+const strings = a => a.map(s => "["+units(s)+"]").join(",");
+const array = a => "[" + Array.from(a).join(", ") + "]";
+function probe(text, needle) {
+    const rows = [];
+    rows.push(`${text.length}:${text.length===0}:${text.isWellFormed()}:${enc.encode(text).length}`);
+    rows.push(units(text));
+    for (let index of [-text.length-1,-text.length,-1,0,1,text.length-1,text.length]) {
+        const i = index < 0 ? text.length+index : index;
+        const valid = i>=0 && i<text.length;
+        rows.push(valid ? units(text[i]) : "none");
+        rows.push(valid ? String(text.charCodeAt(i)) : "error");
+        rows.push(valid ? units(text[i]) : "error");
+    }
+    for (const start of [0,Math.floor(text.length/2),text.length])
+        for (const end of [0,Math.floor(text.length/2),text.length]) rows.push(units(text.slice(start,end)));
+    rows.push(units(text), units(text), "");
+    if (text.length>0) rows.push(units(text),units(text.slice(-1)));
+    for(const [a,b,inclusive] of [[-text.length-1,0,false],[0,text.length+1,false],[text.length,text.length,false],[-1,0,false],[-text.length,-text.length,true],[0,text.length,true],[text.length,0,true],[0,-1,true]]) {
+        const valid=a>=-text.length&&a<=text.length&&b>=-text.length&&b<=text.length-(inclusive?1:0);
+        const start=a<0?a+text.length:a;
+        const end=(b<0?b+text.length:b)+(inclusive?1:0);
+        rows.push(valid?units(text.slice(start,Math.max(start,end))):"error");
+    }
+    let index=0; const points=[];
+    for (const point of text) { points.push(`${index}:[${units(point)}]`); index+=point.length; }
+    rows.push(points.join(","), array(Array.from(text,s=>s.codePointAt(0))), String(Array.from(text).length));
+    rows.push(`${Array.from(text).length}:${Array.from(text).length}:${Array.from(text).length>1}`);
+    rows.push(strings(Array.from(segmenter.segment(text),x=>x.segment)));
+    rows.push(`${text===needle}:${text!==needle}:${text<needle}:${text<=needle}:${text>needle}:${text>=needle}`);
+    rows.push(units(text+needle),units(text+needle),units(text+text));
+    rows.push(`${text.includes(needle)}:${text.startsWith(needle)}:${text.endsWith(needle)}:${text.indexOf(needle)}:${text.lastIndexOf(needle)}`);
+    rows.push(strings(text.split(needle)),units(text.split(needle).join(needle)));
+    rows.push(units(text.replace(needle,()=>"$&")),units(text.replaceAll(needle,()=>"$&")));
+    rows.push(units(text.replace(needle,()=>needle)),units(text.replaceAll(needle,()=>needle)));
+    for (const width of [-1,0,text.length,text.length+1,text.length+3]) rows.push(units(text.padStart(Math.max(width,0),needle)),units(text.padEnd(Math.max(width,0),needle)));
+    rows.push(units(text.repeat(0)),units(text.repeat(2)),units(text.trim()),units(text.trimStart()),units(text.trimEnd()),units(text.toUpperCase()),units(text.toLowerCase()),units(`<${text}>`));
+    const bytes=enc.encode(text);
+    rows.push(`${bytes.length}:${bytes.length===0}:${array(bytes)}:true`,units(fatal.decode(bytes)),units(decoder.decode(bytes)),array(bytes));
+    rows.push(array(bytes));
+    for (const index of [-bytes.length-1,-1,0,bytes.length]) {
+        const i=index<0?bytes.length+index:index;
+        const valid=i>=0&&i<bytes.length;
+        rows.push(valid?String(bytes[i]):"999",valid?String(bytes[i]):"error");
+    }
+    rows.push(array(bytes),"[]",array(bytes));
+    if (bytes.length>0) rows.push(array(bytes));
+    return rows.join("|");
+}
+for (const [text,needle] of data) console.log(probe(text,needle));
+'''
+
+STORAGE = r'''
+type Box = { text: String }
+type Tree = Union { Leaf = { text: String }, Branch = { left: Tree, right: Tree } }
+function shape = (text: String): String => "{text.length}:{text.utf8Length()}:{text.isWellFormed()}:[{units(text)}]"
+function treeShape = (tree: Tree): String => when tree is {
+    Tree.Leaf as leaf => shape(leaf.text)
+    Tree.Branch as branch => treeShape(branch.left) + ";" + treeShape(branch.right)
+}
+function storage = (text: String): String throws IndexError => {
+    mutable rows: Array<String> = []
+    rows.push(shape(text))
+    let owner = String.from(text, capacity = 8192)
+    rows.push(shape(owner))
+    let container = "^" + text + "!"
+    use view = try container[1..-1]
+    rows.push(shape(view))
+    for part in text.split("\u{10FFFF}\u{10FFFF}") { rows.push(shape(part)) }
+    let box = Box { text = text }
+    rows.push(shape(box.text))
+    let array = [text]
+    rows.push(shape(array[0]))
+    mutable pool: Pool<Box> = []
+    use item = pool.add(Box { text = text })
+    rows.push(shape(item.text))
+    let tree = Tree.Branch { left = Tree.Leaf { text = text }, right = Tree.Leaf { text = text } }
+    rows.push(treeShape(tree))
+    mutable packed: Array<Tree> = []
+    packed.push(Tree.Leaf { text = text })
+    for node in packed { rows.push(treeShape(node)) }
+    mutable frame = ""
+    mutable reserved = String.from("", capacity = 8192)
+    reserved.reserve(text.utf8Length())
+    mutable lengths: Array<String> = []
+    for unit in text.split("") {
+        frame += unit
+        reserved += unit
+        lengths.push("{frame.length}:{reserved.length}")
+        if frame.length > 64 {
+            lengths.push(frame.codeUnitAt(63).toString())
+            lengths.push((try reserved.codeUnitAt(64)).toString())
+        }
+    }
+    rows.push(shape(frame))
+    rows.push(shape(reserved))
+    rows.push(lengths.join(","))
+    let map: Map<String, Integer> = [(text, 1), (view, 2)]
+    let set: Set<String> = [text, view, owner]
+    rows.push("{map.size}:{map.get(owner) ?? 0}:{set.size}:{set.includes(owner)}")
+    mutable sorted = [text, "\u{FFFF}", "\u{10000}", "", "a", "😀"[0], "😀"[1]]
+    rows.push(strings(sorted.sort()))
+    rows.join("|")
+}
+'''
+
+
+HEAVY_LITERAL = 2000
+
+
+def shards(cases, shard_size):
+    """Index ranges of the shards. A case with a literal beyond 4 KiB
+    takes seconds to evaluate at compile time in a debug build: it gets a
+    shard of its own, to stay within the runner's 20-second budget."""
+    start = 0
+    for index, case in enumerate(cases):
+        heavy = any(len(argument) > HEAVY_LITERAL for argument in case)
+        if heavy or index - start == shard_size:
+            if index > start:
+                yield range(start, index)
+            start = index
+        if heavy:
+            yield range(index, index + 1)
+            start = index + 1
+    if start < len(cases):
+        yield range(start, len(cases))
+
+
+def write_cases(output, name, prelude, cases, references, function, shard_size=12, compile_time=True):
+    for number, indices in enumerate(shards(cases, shard_size)):
+        source = prelude
+        for index in indices:
+            args = ", ".join(cases[index])
+            if compile_time:
+                source += f'\nstatic result{index} = @{function}({args})\n'
+                source += f'console.log("{index} static " + result{index})\n-- prints: {index} static {references[index]}\n'
+            runtime_function = ["probe","ownerProbe","viewProbe","splitProbe","fieldProbe","arrayProbe","poolProbe","compactProbe","frameProbe","reservedProbe"][PROBE_FORMS[index] % 10] if function == "probe" else function
+            source += f'console.log("{index} runtime " + (try {runtime_function}({args})))\n-- prints: {index} runtime {references[index]}\n'
+        (output / f"{name}-{number:02}.fa").write_text(source)
+
+
+def byte_cases(output, bun):
+    invalid = [[0x80], [0xBF], [0xC0,0xAF], [0xC1,0xBF], [0xC2], [0xDF],
+               [0xE0,0x80,0xAF], [0xED,0xA0,0x80], [0xED,0xBF,0xBF],
+               [0xE1], [0xE2,0x82], [0xF0], [0xF0,0x9F], [0xF0,0x9F,0x92],
+               [0xF0,0x80,0x80,0xAF], [0xF4,0x90,0x80,0x80], [0xF5,0x80,0x80,0x80],
+               [0xF8,0x88,0x80,0x80,0x80], [0xFC], [0xFE], [0xFF], [0xE1,0x80,0x41], [0xC2,0x41], [0xF0,0x9F,0x41], [0xF0,0x9F,0x92,0x41]]
+    inputs = [[0x61] * prefix + value for prefix in [0, 1, 15, 16, 31, 32] for value in invalid]
+    if not FULL:
+        inputs = [([0x61] * [0, 1, 15, 16, 31, 32][i % 6]) + value for i, value in enumerate(invalid)]
+    inputs += [[], [0], [0xEF,0xBB,0xBF], [0xF4,0x8F,0xBF,0xBF], [0xED,0x9F,0xBF], [0xE0,0xA0,0x80]]
+    oracle = r'''
+const inputs=JSON.parse(await Bun.stdin.text());
+const decoder=new TextDecoder("utf-8",{ignoreBOM:true});
+const units=s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i)).join(",");
+for(const bytes of inputs) console.log(units(decoder.decode(new Uint8Array(bytes))));
+'''
+    lossy = subprocess.run([bun,"-e",oracle], input=json.dumps(inputs),text=True,capture_output=True,check=True).stdout.splitlines()
+    references = []
+    for value, text in zip(inputs, lossy):
+        try:
+            value_text = bytes(value).decode("utf-8")
+            strict = ",".join(str(int.from_bytes(value_text.encode("utf-16-le")[i:i+2],"little")) for i in range(0,len(value_text.encode("utf-16-le")),2))
+        except UnicodeDecodeError as error:
+            strict = f"error:{error.start}"
+        references.append(text + "|" + strict)
+    prelude = PRELUDE.split("function probe",1)[0] + r'''
+function decode = (bytes: Bytes): String => {
+    let lossy = units(String.fromUtf8Lossy(bytes))
+    let strict = units(String.fromUtf8(bytes)) catch error => "error:{error.position}"
+    lossy + "|" + strict
+}
+'''
+    write_cases(output,"decode",prelude,[("Bytes.from(["+",".join(map(str,value))+"])",) for value in inputs],references,"decode",32)
+    buffers=inputs[::6]+[[0x9F,0x98], [0xF0,0x9F,0x98], list(range(256))]
+    buffer_prelude=PRELUDE.split("function probe",1)[0]+r'''
+function buffer = (data: Bytes): String throws IndexError => {
+    mutable original = copy data
+    let previous = copy original
+    mutable use view = original[..]
+    if view.length > 0 { view[0] = 255 }
+    let changed = original.toString()
+    reuse view = try original[original.length..0]
+    let empty = view.toString()
+    mutable rows = [changed, empty, previous.toString(), "{previous == data}", Bytes.filled(data.length, 17).toString(), Bytes.filled(0).toString()]
+    rows.push("{original == previous}:{Bytes.filled(data.length, 17) == data}:{Bytes.filled(data.length + 1, 17) == data}:{data.isEmpty()}:{data.toArray().length}")
+    for range in [-data.length-1..0, 0..data.length+1, data.length..data.length, -1..0, -data.length..=-data.length, 0..=data.length, data.length..=0, 0..=-1] {
+        rows.push(data[range].toString() catch _ => "error")
+    }
+    rows.join("|")
+}
+'''
+    buffer_reference=[]
+    for data in buffers:
+        changed=data.copy()
+        if changed:changed[0]=255
+        array=lambda value:"["+", ".join(map(str,value))+"]"
+        rows=[array(changed),"[]",array(data),"true",array([17]*len(data)),"[]"]
+        rows.append(f"{str(changed==data).lower()}:{str([17]*len(data)==data).lower()}:false:{str(not data).lower()}:{len(data)}")
+        n=len(data)
+        for a,b,inclusive in [(-n-1,0,False),(0,n+1,False),(n,n,False),(-1,0,False),(-n,-n,True),(0,n,True),(n,0,True),(0,-1,True)]:
+            valid=-n<=a<=n and -n<=b<=n-int(inclusive)
+            start=a+n if a<0 else a
+            end=(b+n if b<0 else b)+int(inclusive)
+            rows.append(array(data[start:max(start,end)]) if valid else "error")
+        buffer_reference.append("|".join(rows))
+    write_cases(output,"bytes-storage",buffer_prelude,[("Bytes.from(["+",".join(map(str,data))+"])",) for data in buffers],buffer_reference,"buffer",32)
+    return len(inputs)
+
+
+def json_cases(output,bun):
+    values=subjects()
+    oracle=r'''
+const values=JSON.parse(await Bun.stdin.text());
+const units=s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i)).join(",");
+for(const value of values) { const json=JSON.stringify(value); console.log(units(json)+"|"+units(JSON.parse(json))+"|"+units(JSON.parse(json))); }
+'''
+    reference=subprocess.run([bun,"-e",oracle],input=json.dumps(values,ensure_ascii=True),text=True,capture_output=True,check=True).stdout.splitlines()
+    prelude='-- skip-target: native-freestanding\nuse { Json, JsonError } = std.json\n'+PRELUDE.split("function probe",1)[0]+r'''
+function jsonProbe = (text: String): String throws JsonError => {
+    let json = Json.stringify(text)
+    let parsed: String = try Json.parse(json)
+    let parsedBytes: String = try Json.parse(json.toUtf8())
+    units(json) + "|" + units(parsed) + "|" + units(parsedBytes)
+}
+function parsed = (json: String): String throws JsonError => {
+    let text: String = try Json.parse(json)
+    units(text)
+}
+'''
+    write_cases(output,"json-runtime",prelude,[(literal(text),) for text in values],reference,"jsonProbe",32,False)
+    # Separate parse and round-trip shards keep failures attributable.
+    write_cases(output,"json-comptime",prelude,[(literal(text),) for text in values],reference,"jsonProbe",16)
+    source=prelude
+    for index,text in enumerate(values):
+        document=json.dumps(text,ensure_ascii=True,separators=(",",":"))
+        encoded=text.encode("utf-16-le",errors="surrogatepass")
+        want=",".join(str(int.from_bytes(encoded[i:i+2],"little")) for i in range(0,len(encoded),2))
+        source+=f'\nstatic parsed{index} = @parsed({literal(document)})\nconsole.log(parsed{index})\n-- prints: {want}\n'
+    (output/"json-parse.fa").write_text(source)
+    union=prelude+r'''
+function unionParse = (input: String | Bytes): String throws JsonError => {
+    let value: String = try Json.parse(input)
+    units(value)
+}
+static fromText = @unionParse("\"é\"")
+static fromBytes = @unionParse("\"😀\"".toUtf8())
+console.log(fromText, fromBytes) -- prints: 233 55357,56832
+console.log(try unionParse("\"é\""), try unionParse("\"😀\"".toUtf8())) -- prints: 233 55357,56832
+function rejected = (input: String | Bytes): Boolean => {
+    let text: String = Json.parse(identity(input)) catch _ => return true
+    text.length < 0
+}
+function failures = (): String => {
+    let malformed = rejected("{{")
+    let invalidUtf8 = rejected(Bytes.from([255]))
+    let wrongText = rejected("1")
+    let wrongBytes = rejected("1".toUtf8())
+    "{malformed}:{invalidUtf8}:{wrongText}:{wrongBytes}"
+}
+static invalid = @failures()
+console.log(invalid) -- prints: true:true:true:true
+console.log(failures()) -- prints: true:true:true:true
+'''
+    (output/"json-union.fa").write_text(union)
+
+
+def edge_cases(output,bun):
+    cases=[]
+    values=[]
+    for prefix in ([0,8,19,20,21,22,23,60,61,62,63,64,65,127,4095] if FULL else [0,23,64]):
+        source="a"*prefix+"😀é日😀z"
+        for start,end in [(prefix,prefix+1),(prefix+1,prefix+2),(prefix+1,prefix+5)]:
+            encoded=source.encode("utf-16-le")
+            text=encoded[start*2:end*2].decode("utf-16-le",errors="surrogatepass")
+            needle="\ude00" if start%2 else "\ud83d"
+            cases.append((literal(source),str(start),str(end),literal(needle)))
+            values.append((text,needle))
+    references=subprocess.run([bun,"-e",ORACLE],input=json.dumps(values,ensure_ascii=True),text=True,capture_output=True,check=True).stdout.splitlines()
+    references=[value+"|1:2:1:true" for value in references]
+    prelude=PRELUDE+r'''
+function cutProbe = (source: String, start: Integer, end: Integer, needle: String): String throws IndexError => {
+    use part = try source[start..end]
+    let owner = String.from(part)
+    let map: Map<String, Integer> = [(part, 1), (owner, 2)]
+    let set: Set<String> = [part, owner]
+    (try probe(part, needle)) + "|{map.size}:{map.get(part) ?? 0}:{set.size}:{set.includes(part)}"
+}
+'''
+    write_cases(output,"cut-views",prelude,cases,references,"cutProbe",32)
+    return len(cases)
+
+
+def all_subjects():
+    values = ["", "a", "abc", "aaa", ",a,,", "é", "日", "😀", "é日😀a", "\ufffd", "\ufeff", "\0", "e\u0301", "👩🏽\u200d💻", "🇫🇷", "ΟΣ", "AΣ\u0301", "ßİıI", "\ufeff \t\r\na\u00a0\u3000", "\x85\u200ba\x85\u200b"]
+    values += ["a" * n + "😀é日" for n in [8, 9, 10, 19, 20, 21, 22, 23, 24, 60, 61, 62, 63, 64, 65, 126, 127, 128]]
+    values += ["é" * n + "😀z" for n in [10, 11, 30, 31, 32, 62, 63, 64, 65]]
+    values += ["\ud83d", "\ude00", "\ud83dabc", "abc\ude00", "a\ud83db", "a\ude00b", "\ude00\ud83d", "\ud83d\ud83d", "\ude00\ude00"]
+    values += ["\u007f", "\u0080", "\u07ff", "\u0800", "\uffff", "\U00010000", "\U0010ffff", "\ud800", "\udbff", "\udc00", "\udfff"]
+    whitespace="".join(map(chr,[*range(9,14),32,160,5760,*range(8192,8203),8232,8233,8239,8287,12288,65279]))
+    values += [whitespace+"x"+whitespace, "a" * 4097, "é日😀" * 700]
+    values.append("\u007f\u0080\u07ff\u0800\uffff\U00010000\U0010ffff")
+    return values
+
+
+def subjects():
+    if FULL:
+        return all_subjects()
+    # One fixed representative per semantic class; boundary magnitudes are
+    # sampled in the dedicated cut/storage shards rather than multiplying probe.
+    return ["", "abc", "aaa", "é", "日", "😀", "e\u0301", "👩🏽\u200d💻", "ΟΣ", "ßİıI",
+            "\ufeff \t\r\na\u00a0\u3000", "\x85\u200ba\x85\u200b", "\0", "\ud83d", "\ude00",
+            "a\ud83db", "a\ude00b", "\ud83dabc", "abc\ude00", "\ud83d\ud83d", "\ude00\ude00", "\ude00\ud83d", "a" * 9 + "😀é日", "a" * 23 + "😀é日", "a" * 64 + "😀é日", "é" * 65 + "😀z",
+            "\u007f\u0080\u07ff\u0800\uffff\U00010000\U0010ffff"]
+
+
+
+def copy_cases(output, bun):
+    # Cross source forms with every owning destination. In particular an empty
+    # reserved owner is not interchangeable with an immortal empty literal.
+    values = subjects() + (["a" * 4097, "é日😀" * 700] if not FULL else [])
+    prelude = PRELUDE.split("function probe", 1)[0] + r"""
+type CopyBox = { text: String }
+type CopyTree = Union { Leaf = { text: String }, Branch = { left: CopyTree, right: CopyTree } }
+function shape = (text: String): String => "{text.length}:{text.utf8Length()}:{text.isWellFormed()}:[{units(text)}]"
+function copies = (text: String, capacity: Integer<min = 0>): String => {
+    mutable source = String.from(text, capacity = capacity)
+    let saved = source
+    let box = CopyBox { text = source }
+    let array = [source, source]
+    mutable pool: Pool<CopyBox> = []
+    use item = pool.add(CopyBox { text = source })
+    let tree = CopyTree.Branch { left = CopyTree.Leaf { text = source }, right = CopyTree.Leaf { text = source } }
+    let map: Map<String, Integer> = [(source, 7)]
+    let set: Set<String> = [source, saved]
+    let generic = identity(source)
+    source += "x"
+    let left = when tree is { CopyTree.Branch as branch => when branch.left is { CopyTree.Leaf as leaf => shape(leaf.text), else => "wrong" }, else => "wrong" }
+    [shape(saved), shape(box.text), shape(array[0]), shape(array[1]), shape(item.text), left, shape(generic), "{map.get(saved) ?? 0}:{set.size}:{set.includes(saved)}", shape(source)].join("|")
+}
+"""
+    oracle = r"""
+const values=JSON.parse(await Bun.stdin.text());
+const enc=new TextEncoder();
+const units=s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i)).join(",");
+const shape=s=>`${s.length}:${enc.encode(s).length}:${s.isWellFormed()}:[${units(s)}]`;
+for(const [text,capacity] of values) console.log([...Array(7).fill(shape(text)),"7:1:true",shape(text+"x")].join("|"));
+"""
+    capacities = [0, 11, 12, 23, 24, 64, 4096] if FULL else [24, 4096]
+    pairs = [(text, capacity) for text in values for capacity in capacities]
+    references = subprocess.run([bun,"-e",oracle],input=json.dumps(pairs,ensure_ascii=True),text=True,capture_output=True,check=True).stdout.splitlines()
+    write_cases(output,"copies",prelude,[(literal(t),str(c)) for t,c in pairs],references,"copies",32,False)
+
+
+def json_composites(output, bun):
+    prelude = '-- skip-target: native-freestanding\nuse { Json, JsonError } = std.json\n' + PRELUDE.split("function probe",1)[0] + r"""
+type Record = { text: String, missing: String? }
+type Message = Union { Text = String, Row = { text: String }, Tagged = { type: String, text: String }, Empty, Literal = "literal" }
+type Failure = Errors { Missing, Detail = { text: String } }
+type Color = Enum { red, blue }
+type Status = Enum { ok = 200, failed = 500 }
+type Flags = Fields { first, nested { second, third }, single { child } }
+type Node = { text: String, children: Array<Node> }
+function read = (input: String | Bytes): Record throws JsonError => try Json.parse(identity(input))
+type Twin = Union { Row = { value: String } }
+type TaggedEnvelope = { items: Array<Message.Row | Twin.Row>, maybe: (Message.Row | Twin.Row)? }
+function tagged = (value: Message.Row | Twin.Row): String => Json.stringify(value)
+type Forward = { kind: "forward", z: String, a: String }
+type Reverse = { a: String, z: String, kind: "reverse" }
+function variant = (value: Forward | Reverse): String => Json.stringify(value)
+function distinct = (value: { z: String } | { a: String }): String => Json.stringify(value)
+function outside = (text: String): Node => Node { text = text, children = [Node { text = text, children = [] }] }
+function scoped = (text: String): String => {
+    type Node = { item: String, next: Node? }
+    let inside = Node { item = text, next = Node { item = text, next = none } }
+    type Envelope = { outside: Type<outside(text)>, inside: Type<inside> }
+    Json.stringify(Envelope { outside = outside(text), inside = inside })
+}
+function composite = (text: String): String throws JsonError => {
+    mutable rows: Array<String> = []
+    let record = Record { text = text, missing = none }
+    let map: Map<String, String?> = [(text, text), ("omitted", none)]
+    rows.push(units(Json.stringify(record)))
+    rows.push(units(Json.stringify([text, none, "x"])))
+    rows.push(units(Json.stringify(map)))
+    rows.push(units(Json.stringify(Message.Text(text))))
+    rows.push(units(Json.stringify(Message.Row { text = text })))
+    rows.push(units(Json.stringify(Message.Tagged { type = "data", text = text })))
+    rows.push(units(Json.stringify(Message.Empty)))
+    rows.push(units(Json.stringify(Message.Literal)))
+    rows.push(units(Json.stringify(Failure.Detail { text = text })))
+    rows.push(units(Json.stringify(Failure.Missing)))
+    rows.push(units(Json.stringify(Color.blue)))
+    rows.push(units(Json.stringify(Status.failed)))
+    rows.push(units(Json.stringify(Flags { first, nested { third }, single { child } })))
+    rows.push(units(Json.stringify(Node { text = text, children = [Node { text = text, children = [] }] })))
+    rows.push(units(scoped(text)))
+    rows.push(units(tagged(Message.Row { text = text })))
+    rows.push(units(tagged(Twin.Row { value = text })))
+    rows.push(units(Json.stringify(TaggedEnvelope { items = [Message.Row { text = text }, Twin.Row { value = text }], maybe = Twin.Row { value = text } })))
+    rows.push(units(Json.stringify(TaggedEnvelope { items = [], maybe = none })))
+    rows.push(units(variant(Forward { kind = "forward", z = text, a = "a" })))
+    rows.push(units(variant(Reverse { a = "a", z = text, kind = "reverse" })))
+    rows.push(units(distinct({ z = text })))
+    rows.push(units(distinct({ a = text })))
+    let optional: Record? = record
+    rows.push(units(Json.stringify(optional)))
+    let enumeration: Status | String = Status.failed
+    rows.push(units(Json.stringify(enumeration)))
+    let fromText: Record = try read(Json.stringify(record))
+    let fromBytes: Record = try read(Json.stringify(record).toUtf8())
+    rows.push(units(fromText.text))
+    rows.push(units(fromBytes.text))
+    rows.join("|")
+}
+"""
+    oracle = r"""
+const texts=JSON.parse(await Bun.stdin.text());
+const units=s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i)).join(",");
+for(const text of texts) {
+const map=Object.fromEntries([[text,text]]);
+const values=[{text},[text,null,"x"],map,{type:"Text",value:text},{type:"Row",text},{type:"Tagged",value:{type:"data",text}},{type:"Empty"},"literal",{type:"Detail",text},{type:"Missing"},"blue",500,["first","nested.third","single.child"],{text,children:[{text,children:[]}]},{outside:{text,children:[{text,children:[]}]},inside:{item:text,next:{item:text}}},{type:"Row",text},{type:"Row",value:text},{items:[{type:"Row",text},{type:"Row",value:text}],maybe:{type:"Row",value:text}},{items:[]},{kind:"forward",z:text,a:"a"},{a:"a",z:text,kind:"reverse"},{z:text},{a:text},{text},500];
+console.log([...values.map(v=>units(JSON.stringify(v))),units(text),units(text)].join("|"));
+}
+"""
+    values = subjects()
+    references = subprocess.run([bun,"-e",oracle],input=json.dumps(values,ensure_ascii=True),text=True,capture_output=True,check=True).stdout.splitlines()
+    write_cases(output,"json-composites",prelude,[(literal(t),) for t in values],references,"composite",16)
+
+
+
+
+
+def field_cases(output, bun):
+    # Same anonymous type, different spellings; declared order; nested and
+    # recursive values; two unrelated recursive types with the same name.
+    prelude = '-- skip-target: native-freestanding\nuse { Json } = std.json\n' + PRELUDE.split("function probe",1)[0] + r"""
+type Declared = { b: String, a: String }
+type Colliding = { z: String, a: String }
+type Forward = { kind: "forward", z: String, a: String }
+type Reverse = { a: String, z: String, kind: "reverse" }
+function variant = (value: Forward | Reverse): String => Json.stringify(value)
+function distinct = (value: { z: String } | { a: String }): String => Json.stringify(value)
+type Node = { z: String, next: Node? }
+function outside = (text: String): Node => Node { next = Node { next = none, z = text }, z = text }
+function schemaNames = (schema: Schema): String => when schema is {
+    Schema.Named as named => schemaNames(named.definition)
+    Schema.Object as object => object.properties.map((property) => property.name).join(",")
+    else => "none"
+}
+static names = @schemaNames(@typeToSchema({ z: String, a: String }))
+static spelling = @typeToString({ z: String, a: String })
+function keys = <Item, fields: Keys<Item>>(value: Item, suffix: String = ""): String => {
+    mutable names: Array<String> = []
+    @for key in fields { names.push(key + "=[" + units(value[key]) + "]") }
+    names.join(",") + suffix
+}
+function deepKeys = <Item, fields: DeepKeys<Item>>(value: Item): String => {
+    mutable names: Array<String> = []
+    @for key in fields { names.push(key + "=[" + units(value[key]) + "]") }
+    names.join(",")
+}
+function fieldProbe = (text: String): String => {
+    let left = { z = text, a = "a" }
+    let right = { a = "a", z = text }
+    let nested = { z = left, a = right }
+    let declared = Declared { a = "a", b = text }
+    type Node = { text: String, next: Node? }
+    let inside = Node { next = Node { next = none, text = text }, text = text }
+    let pair = { outside = outside(text), inside = inside }
+    let printed = "{left}".startsWith("{{ a = ") and "{right}".startsWith("{{ a = ") and "{nested}".startsWith("{{ a = {{ a = ") and "{declared}".startsWith("{{ b = ") and "{pair}".startsWith("{{ inside = {{ text = ")
+    let reflected = spelling + ":" + names + ":" + keys<Type<left>, { z, a }>(left) + ":" + keys<Type<right>, { a, z }>(right) + ":" + deepKeys<Type<nested>, { z { z, a }, a { z, a } }>(nested)
+    ["{printed}", reflected, units(Json.stringify(left)), units(Json.stringify(right)), units(Json.stringify(nested)), units(Json.stringify(declared)), units(Json.stringify(pair)), units(Json.stringify([copy pair, pair])), units(variant(Forward { a = "a", z = text, kind = "forward" })), units(variant(Reverse { kind = "reverse", z = text, a = "a" })), units(distinct({ z = text })), units(distinct({ a = text }))].join("|")
+}
+"""
+    oracle = r"""
+const units=s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i)).join(",");
+for(const text of JSON.parse(await Bun.stdin.text())) {
+    const left={a:"a",z:text},right={a:"a",z:text},nested={a:right,z:left},declared={b:text,a:"a"};
+    const pair={inside:{text,next:{text}},outside:{z:text,next:{z:text}}};
+    console.log(["true",`{ a: String, z: String }:a,z:a=[97],z=[${units(text)}]:a=[97],z=[${units(text)}]:a.a=[97],a.z=[${units(text)}],z.a=[97],z.z=[${units(text)}]`,...[left,right,nested,declared,pair,[pair,pair],{kind:"forward",z:text,a:"a"},{a:"a",z:text,kind:"reverse"},{z:text},{a:text}].map(value=>units(JSON.stringify(value)))].join("|"));
+}
+"""
+    values = subjects()
+    references = subprocess.run([bun,"-e",oracle],input=json.dumps(values,ensure_ascii=True),text=True,capture_output=True,check=True).stdout.splitlines()
+    write_cases(output,"field-enumeration",prelude,[(literal(text),) for text in values],references,"fieldProbe",16)
+    # Printing, reflection and key enumeration also concern freestanding.
+    basic = prelude.split('    ["{printed}", reflected,', 1)[0] + '    "{printed}|" + reflected\n}\n'
+    basic = "\n".join(line for line in basic.splitlines() if not line.startswith(("-- skip-target:", "use { Json }", "function variant =", "function distinct ="))) + "\n"
+    basic_reference = ["|".join(row.split("|", 2)[:2]) for row in references]
+    write_cases(output,"field-order",basic,[(literal(text),) for text in values],basic_reference,"fieldProbe",16)
+
+def key_read_cases(output, bun):
+    # Exercise keyed places independently of the deferred enumeration order.
+    prelude = PRELUDE.split("function probe", 1)[0] + r"""
+type Leaf = { z: String, a: String }
+type Root = { right: Leaf, left: Leaf }
+function keys = <Item, fields: DeepKeys<Item>>(value: Item): String => {
+    mutable rows: Array<String> = []
+    @for key in fields { rows.push(key + "=[" + units(value[key]) + "]") }
+    rows.sort().join("|")
+}
+function keyProbe = (text: String): String => {
+    let owned = String.from(text, capacity = 4096)
+    let source = Root { right = Leaf { a = "a", z = owned }, left = Leaf { z = owned, a = "a" } }
+    keys<Root, { right { z, a }, left { a, z } }>(source)
+}
+"""
+    oracle = r"""
+const units=s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i)).join(",");
+for(const text of JSON.parse(await Bun.stdin.text())) console.log(["left.a=[97]",`left.z=[${units(text)}]`,"right.a=[97]",`right.z=[${units(text)}]`].join("|"));
+"""
+    values = subjects()
+    references = subprocess.run([bun,"-e",oracle],input=json.dumps(values,ensure_ascii=True),text=True,capture_output=True,check=True).stdout.splitlines()
+    write_cases(output,"key-reads",prelude,[(literal(text),) for text in values],references,"keyProbe",16)
+
+
+def split_cases(output, bun):
+    needles = ["", "\ud83d", "\ude00", ","]
+    pairs = [(text, needles[index % 4]) for index, text in enumerate(subjects())]
+    pairs += [("é" * 80 + "😀x", needle) for needle in needles]
+    prelude = PRELUDE.split("function probe", 1)[0] + r"""
+function splitForms = (text: String, needle: String): String => {
+    let source = String.from(text, capacity = 4096)
+    let parts = source.split(needle)
+    let filtered = source.split(needle).filter((part) => not part.isEmpty())
+    mutable rows: Array<String> = []
+    for part in parts { rows.push("[" + units(part) + "]") }
+    rows.join(",") + "|" + strings(filtered)
+}
+"""
+    oracle = r"""
+const units=s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i)).join(",");
+const strings=a=>a.map(s=>"["+units(s)+"]").join(",");
+for(const [text,needle] of JSON.parse(await Bun.stdin.text())) {
+    const parts=text.split(needle);
+    console.log(strings(parts)+"|"+strings(parts.filter(s=>s.length!==0)));
+}
+"""
+    references = subprocess.run([bun,"-e",oracle],input=json.dumps(pairs,ensure_ascii=True),text=True,capture_output=True,check=True).stdout.splitlines()
+    write_cases(output,"split-storage",prelude,[(literal(text),literal(needle)) for text,needle in pairs],references,"splitForms",16)
+
+def region_slice_cases(output, bun):
+    # Keep this separate from split/view helpers: otherwise their capability
+    # masks a missing capability for slices stored in recursive regions.
+    prelude = PRELUDE.split("function probe", 1)[0] + r"""
+type SliceTree = Union { Leaf = { text: String }, List = { items: Array<SliceTree> } }
+function sliceLeaf = (text: String, start: Integer, end: Integer): SliceTree => SliceTree.Leaf {
+    text = text[start..end] catch _ => ""
+}
+function treeUnits = (tree: SliceTree): String => when tree is {
+    SliceTree.Leaf as { text } => "{text.length}:[" + units(text) + "]"
+    SliceTree.List as { items } => {
+        mutable rows: Array<String> = []
+        for item in items { rows.push(treeUnits(item)) }
+        rows.join(",")
+    }
+}
+function regionProbe = (text: String): String => {
+    let source = String.from(text, capacity = 4096)
+    mutable rows: Array<String> = []
+    for start in [0, if text.length > 0 { 1 } else { 0 }, if text.length > 1 { text.length - 1 } else { 0 }] {
+        let end = if text.length - start > 3 { start + 3 } else { text.length }
+        let leaf = sliceLeaf(source, start, end)
+        let duplicate = leaf
+        let tree = SliceTree.List { items = [leaf, duplicate] }
+        let copied = tree
+        rows.push(treeUnits(tree) + ";" + treeUnits(copied))
+    }
+    rows.join("|")
+}
+"""
+    oracle = r"""
+const units=s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i)).join(",");
+for(const text of JSON.parse(await Bun.stdin.text())) {
+    const rows=[];
+    for(const start of [0,text.length>0?1:0,text.length>1?text.length-1:0]) {
+        const part=text.slice(start,Math.min(start+3,text.length));
+        const leaf=`${part.length}:[${units(part)}]`;
+        rows.push(`${leaf},${leaf};${leaf},${leaf}`);
+    }
+    console.log(rows.join("|"));
+}
+"""
+    values = subjects()
+    references = subprocess.run([bun,"-e",oracle],input=json.dumps(values,ensure_ascii=True),text=True,capture_output=True,check=True).stdout.splitlines()
+    write_cases(output,"region-slices",prelude,[(literal(text),) for text in values],references,"regionProbe",16)
+
+
+def large_cases(output, bun):
+    # The quick tier includes the large payload classes at compile time too,
+    # without repeating every expensive conversion of the semantic probe.
+    values = ["a" * 4097, "é日😀" * 700]
+    prelude = r"""
+function extent = (text: String): String => "{text.length}:{text.utf8Length()}:{text.isWellFormed()}:{text.codePoints().length}:{text.toUtf8().length}:{text.codeUnitAt(64) catch _ => 0}"
+"""
+    oracle = r"""
+const enc=new TextEncoder();
+for(const text of JSON.parse(await Bun.stdin.text())) console.log(`${text.length}:${enc.encode(text).length}:${text.isWellFormed()}:${Array.from(text).length}:${enc.encode(text).length}:${text.charCodeAt(64)}`);
+"""
+    references = subprocess.run([bun,"-e",oracle],input=json.dumps(values,ensure_ascii=True),text=True,capture_output=True,check=True).stdout.splitlines()
+    write_cases(output,"large",prelude,[(literal(text),) for text in values],references,"extent",2)
+
+def allocation_cases(output):
+    for name, expr in [("repeat",'"abc".repeat(n)'), ("pad-start",'"abc".padStart(n, "é")'), ("pad-end",'"abc".padEnd(n, "😀")'), ("bytes",'Bytes.filled(n)')]:
+        (output/f"allocation-{name}.fa").write_text(f'function size = (n: Integer<min = 0>): Integer => {expr}.length\nconsole.log(size(9007199254740991))\n-- exit: 101\n-- stderr: stop: out of memory\n')
+
+
+def main():
+    output = Path(sys.argv[1])
+    output.mkdir(parents=True, exist_ok=True)
+    bun = sys.argv[2] if len(sys.argv) > 2 else str(Path.home() / ".bun/bin/bun")
+    rng = random.Random(SEED)
+    global PROBE_FORMS
+    needles = ["", "a", "aa", ",", "é", "日", "😀", "\ud83d", "\ude00", "\ude00\ud83d", "\uffff", "\0", "$&", "longer-than-most-inputs"]
+    cases = []
+    for index, text in enumerate(all_subjects()[:70]):
+        # Every subject meets empty, surrogate-edge, and sampled ordinary needles.
+        for needle in ["", "\ud83d", "\ude00", needles[rng.randrange(len(needles))]]:
+            cases.append((text, needle))
+    # The decided edges that the sampled needles may miss (points 1 to 4).
+    cases += [("aaa", "aa"), ("aaaa", "aa"), ("", ","), ("", ""), ("x", "😀"), ("😀", ""),
+              ("a,b,,c", ","), ("abc", "abcd"), ("ab", "longer-than-most-inputs"), ("😀😀", "\ude00\ud83d")]
+    fixed_indices = list(range(len(cases) - 10, len(cases)))
+    # Append additional subjects after the original corpus, retaining every
+    # reviewed subject/needle/storage triple and its original index.
+    for text in all_subjects()[70:]:
+        for needle in ["", "\ud83d", "\ude00", needles[rng.randrange(len(needles))]]:
+            cases.append((text, needle))
+    PROBE_FORMS = list(range(len(cases)))
+    if not FULL:
+        # Select subject/needle/storage triples from the complete seeded corpus.
+        sample = random.Random(SEED)
+        chosen = [sample.choice([i for i, pair in enumerate(cases) if pair[0] == text and i not in fixed_indices]) for text in subjects()]
+        chosen += fixed_indices
+        PROBE_FORMS = chosen
+        cases = [cases[i] for i in chosen]
+    assert len({index % 10 for index in PROBE_FORMS}) == 10
+    reference = subprocess.run([bun, "-e", ORACLE], input=json.dumps(cases, ensure_ascii=True), text=True, capture_output=True, check=True).stdout.splitlines()
+    write_cases(output,"semantic",PRELUDE+REPRESENTATIONS,[(literal(text),literal(needle)) for text,needle in cases],reference,"probe",32 if FULL else 6)
+    storage_oracle = r'''
+const subjects=JSON.parse(await Bun.stdin.text());
+const enc=new TextEncoder();
+const units=s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i)).join(",");
+const shape=s=>`${s.length}:${enc.encode(s).length}:${s.isWellFormed()}:[${units(s)}]`;
+for(const text of subjects) {
+    const value=shape(text); const rows=Array(7).fill(value);
+    rows.push(value+";"+value,value,value,value);
+    const lengths=[];
+    for(let n=1;n<=text.length;n++) {
+        lengths.push(`${n}:${n}`);
+        if(n>64) lengths.push(String(text.charCodeAt(63)),String(text.charCodeAt(64)));
+    }
+    rows.push(lengths.join(","),"1:2:1:true");
+    rows.push([text,"\uffff","\u{10000}","","a","😀"[0],"😀"[1]].sort().map(s=>"["+units(s)+"]").join(","));
+    console.log(rows.join("|"));
+}
+'''
+    storage_reference = subprocess.run([bun,"-e",storage_oracle],input=json.dumps(subjects(),ensure_ascii=True),text=True,capture_output=True,check=True).stdout.splitlines()
+    prelude = PRELUDE.split("function probe",1)[0] + STORAGE
+    prelude += r'''
+use { sleep } = std.time
+async function crossing = (text: String): String throws IndexError => {
+    let held = String.from(text, capacity = 8192)
+    await sleep(0)
+    try storage(held)
+}
+'''
+    write_cases(output,"storage",prelude,[(literal(text),) for text in subjects()],storage_reference,"storage",12,False)
+    for number, indices in enumerate(shards([(literal(text),) for text in subjects()], 12)):
+        path=output / f"storage-{number:02}.fa"
+        with path.open("a") as source:
+            for index in indices:
+                source.write(f'console.log("{index} await " + (try await crossing({literal(subjects()[index])})))\n-- prints: {index} await {storage_reference[index]}\n')
+    copy_cases(output,bun)
+    json_composites(output,bun)
+    allocation_cases(output)
+    large_cases(output,bun)
+    split_cases(output,bun)
+    region_slice_cases(output,bun)
+    field_cases(output,bun)
+    key_read_cases(output,bun)
+    decoded = byte_cases(output,bun)
+    json_cases(output,bun)
+    cuts=edge_cases(output,bun)
+    (output / "manifest.json").write_text(json.dumps({"seed": SEED, "subjects": len(subjects()), "tier": "full" if FULL else "quick", "pairs": len(cases), "decoders":decoded,"cut_views":cuts,"oracle": "Bun direct JavaScript"}, indent=2) + "\n")
+
+
+if __name__ == "__main__":
+    main()

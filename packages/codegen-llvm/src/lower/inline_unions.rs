@@ -68,7 +68,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| TypeKind::Percentage
 			| TypeKind::String
 			| TypeKind::StringLit(_)
-			| TypeKind::Character
 			| TypeKind::Enum(..)
 			| TypeKind::EnumMember(..) => true,
 			TypeKind::Int(int) => self.types().int(int).storage.bits() <= 64,

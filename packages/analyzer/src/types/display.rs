@@ -101,7 +101,7 @@ impl TypeStore {
 			TypeKind::Percentage => out.push_str("Percentage"),
 			TypeKind::String => out.push_str("String"),
 			TypeKind::StringLit(sym) => write_quoted(out, self.syms.resolve(sym)),
-			TypeKind::Character => out.push_str("Character"),
+			TypeKind::Bytes => out.push_str("Bytes"),
 			TypeKind::Object(shape) => {
 				if let Some(nominal) = self.shape(shape).nominal {
 					out.push_str(self.decl_name(self.nominal(nominal).key));
@@ -393,9 +393,7 @@ impl TypeStore {
 			ConstValue::Float(bits) => {
 				let _ = write!(out, "{:?}", f64::from_bits(bits));
 			}
-			ConstValue::String(sym) | ConstValue::Character(sym) => {
-				write_quoted(out, self.syms.resolve(sym))
-			}
+			ConstValue::String(sym) => write_quoted(out, self.syms.resolve(sym)),
 			ConstValue::BigInt(sym) => {
 				let _ = write!(out, "{}n", self.syms.resolve(sym));
 			}

@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: FN050
 -- brief: ✗ pu-2: FN050
 function logSquare = (x: Integer) => console.log(x * x)

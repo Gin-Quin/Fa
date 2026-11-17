@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- error: E-OBJ-14
 -- brief: ⇒ E-OBJ-14
 type Point = { x: Integer, y: Integer }

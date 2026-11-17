@@ -1,0 +1,6 @@
+-- E-OBJ-14 names the declared return type, and the field values are still
+-- checked: the parameter is used, an error in a value is reported (review M2).
+type Point = { x: Integer, y: Integer }
+function make = (v: Integer): Point => { x = v, y = 0 } -- error: E-OBJ-14
+function broken = (v: Integer): Point => { x = undefinedThing + v, y = 0 } -- error: E-OBJ-14, error: E-DECL-1
+console.log(make(1).x)

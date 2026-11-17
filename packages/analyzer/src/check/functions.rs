@@ -723,7 +723,12 @@ impl Walker<'_> {
 			self.quiet -= u32::from(quiet);
 		}
 		let body_ty = if block_body {
-			self.check_block_body(body, mode, owner)
+			// `=> { x = v, y = 0 }` meant as an object (objects.rs)
+			if self.report_object_like_block(body, returns) {
+				TypeId::UNKNOWN
+			} else {
+				self.check_block_body(body, mode, owner)
+			}
 		} else {
 			self.check_expression_body(body, mode)
 		};

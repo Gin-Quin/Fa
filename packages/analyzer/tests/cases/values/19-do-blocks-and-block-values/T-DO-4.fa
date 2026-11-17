@@ -1,7 +1,7 @@
--- pending: M1 (imported from the values brief)
+-- corrected: the block's only value is `none`, which needs an annotation (E-DECL-11)
 -- brief: → `4 none`
 function f = (n: Array<Integer>): Integer? => {
-let result = do {
+let result: Integer? = do {
 for x in n { if x %% 2 == 0 { return x } }
 none
 }

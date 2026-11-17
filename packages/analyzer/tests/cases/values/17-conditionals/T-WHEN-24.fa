@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- error: E-WHEN-5
 -- brief: ⇒ E-WHEN-5
 function f = (t: Tuple<Integer, Integer>) => when t is { (1, 2) => 1

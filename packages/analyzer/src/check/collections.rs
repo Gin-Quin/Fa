@@ -12,7 +12,8 @@ use crate::analysis::{Argument, CallInfo, Callee, NodeFlags};
 use crate::builtins::{self, array::is_removal};
 use crate::check::Walker;
 use crate::check::objects::MemberKind;
-use crate::diagnostics::codes::types::{CL005, CL006, CL007, CL010, CL031, CL040, FN023, WCL001};
+use crate::diagnostics::codes::types::{CL005, CL006, CL007, CL010, CL040, FN023, WCL001};
+use crate::diagnostics::codes::values::E_DECL_3;
 use crate::ids::{NodeId, SymbolId, TypeId};
 use crate::symbols::{Resolution, SymbolKind};
 use crate::syntax::{self, NodeList, View};
@@ -844,7 +845,7 @@ impl Walker<'_> {
 		let message = format!(
 			"`{name}` is a key or an element of a set: it can't be modified; delete it and add the new value"
 		);
-		let diagnostic = self.diagnostic(&CL031, target, message);
+		let diagnostic = self.diagnostic(&E_DECL_3, target, message);
 		self.report(diagnostic);
 		true
 	}

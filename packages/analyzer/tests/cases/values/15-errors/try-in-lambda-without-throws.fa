@@ -1,0 +1,10 @@
+-- A lambda can't propagate an error where its function type has no `throws`
+-- (the retired E-ERR-5). A parameter only called during the call takes any
+-- effect: the call throws what the callback throws (functions/defining-functions).
+type E = Errors { A }
+function f = (): Integer throws E => throw E.A
+function apply = (g: () => Integer): Integer => g()
+console.log(apply(() => try f()) catch error => 0)
+-- a stored function type without `throws` refuses the lambda
+type Button = { onClick: () => Integer }
+let button = Button { onClick = () => try f() } -- error: E-TYPE-1

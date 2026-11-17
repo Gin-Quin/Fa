@@ -1,0 +1,9 @@
+-- pending: no engine lowers a tuple binding in a `when` arm yet (compile-time evaluation, JavaScript, LLVM)
+-- The data of a tuple member bound with `as (a, b)` (T-WHEN-4).
+type Shape = Union { Point, Segment = Tuple<Integer, Integer> }
+function length = (shape: Shape): Integer => when shape is {
+	Shape.Point => 0
+	Shape.Segment as (start, end) => end - start
+}
+console.log(length(Shape.Segment((2, 7))), length(Shape.Point))
+-- prints: 5 0

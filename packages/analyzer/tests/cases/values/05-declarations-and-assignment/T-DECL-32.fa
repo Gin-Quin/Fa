@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- error: E-DECL-13
 -- brief: ⇒ E-DECL-13
 function f = (input: { a: Integer }) mutates input => {

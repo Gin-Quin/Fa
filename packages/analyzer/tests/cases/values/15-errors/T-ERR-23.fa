@@ -1,5 +1,5 @@
--- pending: M1 (imported from the values brief)
 -- error: E-BOOL-1
+-- error: E-ERR-3 (the brief: "and E-ERR-3")
 -- brief: ⇒ E-BOOL-1 (and E-ERR-3)
 type E = Errors { A }
 function f = (): Integer throws E => throw E.A

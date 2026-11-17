@@ -2493,7 +2493,7 @@ impl Walker<'_> {
 				self.place_text(base)
 			);
 			let diagnostic =
-				self.diagnostic(&crate::diagnostics::codes::types::CL031, node, message);
+				self.diagnostic(&crate::diagnostics::codes::values::E_DECL_3, node, message);
 			self.report_flow(diagnostic);
 			return false;
 		}

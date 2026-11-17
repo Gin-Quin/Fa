@@ -1,0 +1,12 @@
+-- Neighbours of T-CMP-29: the qualified member is valid, the unqualified one is
+-- TY057 (E-CMP-9), also for an error type declared in another file.
+-- file: library/errors.fa
+export type = Errors { NotFound, Timeout }
+-- file: application/main.fa
+use ApiError = library.errors
+export function = () => {
+	let error: ApiError = ApiError.Timeout
+	console.log(error is ApiError.NotFound)
+	console.log(error is NotFound) -- error: TY057
+	let bad = error is not Timeout -- error: TY057
+}

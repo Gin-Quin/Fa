@@ -107,7 +107,11 @@ enum Bracket {
 
 enum StringFrame {
 	String,
-	Interpolation { depth: u32 },
+	/// `open` is the offset of its `{`.
+	Interpolation {
+		depth: u32,
+		open: usize,
+	},
 }
 
 struct Lexer<'a> {
@@ -555,6 +559,29 @@ impl Lexer<'_> {
 		}
 	}
 
+	/// `E-STR-6` at the `{` of the first interpolation that is never closed (its closing quote
+	/// was read as the start of a nested string), else `E-LEX-6` at the quote.
+	fn report_unclosed_string(&mut self, start: usize) {
+		let interpolation = self.string_frames.iter().find_map(|frame| match frame {
+			StringFrame::Interpolation { open, .. } => Some(*open),
+			StringFrame::String => None,
+		});
+		match interpolation {
+			Some(open) => self.error_with_code(
+				"E-STR-6",
+				"This `{` starts an interpolation that is never closed: end it with `}`, or write `{{` for a literal brace",
+				open,
+				open + 1,
+			),
+			None => self.error_with_code(
+				"E-LEX-6",
+				"This string is never closed: end it with `\"`",
+				start,
+				start + 1,
+			),
+		}
+	}
+
 	/// Read a string literal, including the nested strings of its interpolations, like
 	/// `"Name: {user.name ?? "anonymous"}"`.
 	fn string(&mut self) -> TokenKind {
@@ -563,12 +590,7 @@ impl Lexer<'_> {
 			Some(end) => self.offset = end,
 			None => {
 				self.offset = self.end;
-				self.error_with_code(
-					"E-LEX-6",
-					"This string is never closed: end it with `\"`",
-					start,
-					start + 1,
-				);
+				self.report_unclosed_string(start);
 			}
 		}
 		TokenKind::String
@@ -596,7 +618,10 @@ fn scan_string(
 /// Return the offset after the `}` that closes an interpolation whose content starts at
 /// `start` (right after its `{`), or `None` if it is never closed.
 pub(crate) fn find_interpolation_end(bytes: &[u8], start: usize, end: usize) -> Option<usize> {
-	let mut frames = vec![StringFrame::Interpolation { depth: 0 }];
+	let mut frames = vec![StringFrame::Interpolation {
+		depth: 0,
+		open: start.saturating_sub(1),
+	}];
 	scan_frames(bytes, start, end, &mut frames)
 }
 
@@ -623,12 +648,15 @@ fn scan_frames(
 					if index + 1 < end && bytes[index + 1] == b'{' {
 						index += 1;
 					} else {
-						frames.push(StringFrame::Interpolation { depth: 0 });
+						frames.push(StringFrame::Interpolation {
+							depth: 0,
+							open: index,
+						});
 					}
 				}
 				_ => {}
 			},
-			Some(StringFrame::Interpolation { depth }) => match byte {
+			Some(StringFrame::Interpolation { depth, .. }) => match byte {
 				b'"' => frames.push(StringFrame::String),
 				b'{' => *depth += 1,
 				b'}' => {

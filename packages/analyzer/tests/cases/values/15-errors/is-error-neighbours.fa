@@ -1,0 +1,8 @@
+-- Neighbours of T-ERR-25: `is Error` decided at compile time is W-ERR-4 when
+-- always true; on a union with a non-error member it is a real test.
+type E = Errors { A }
+function always = (e: E): Boolean => e is Error -- warning: W-ERR-4
+function never = (e: E): Boolean => e is not Error -- error: E-CMP-7
+function test = (value: E | Integer): Boolean => value is Error
+function generic = <Failure: E>(failure: Failure): Boolean => failure is Error -- warning: W-ERR-4
+console.log(always(E.A), never(E.A), test(1), generic(E.A))

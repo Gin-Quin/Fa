@@ -905,6 +905,11 @@ impl Walker<'_> {
 				self.narrow_to_text_literal(&mut when_true, &mut when_false, value, literal);
 				(when_true, when_false)
 			}
+			// `error is NotFound`: members are qualified (`TY057`, patterns.rs)
+			View::Name(name) if self.report_unqualified_member(pattern, name, value) => {
+				self.memo(pattern, |_| TypeId::UNKNOWN);
+				(self.body.flow.fork(), self.body.flow.fork())
+			}
 			// `x is passing` with a range value: `E-CMP-5`
 			View::Name(name) if self.names_range_value(name) => {
 				let text = self.tree.name(name).to_string();
@@ -989,7 +994,7 @@ impl Walker<'_> {
 	}
 
 	/// Whether a name is a local value holding a `Range` (`x is passing`).
-	fn names_range_value(&mut self, name: crate::syntax::Name) -> bool {
+	pub(super) fn names_range_value(&mut self, name: crate::syntax::Name) -> bool {
 		let sym = self.s.types.syms.intern(self.tree.name(name));
 		self.a
 			.symbols

@@ -64,7 +64,7 @@ impl Row {
 			codes.push("MEM004");
 		}
 		if self.set() && self.0[5] == 1 {
-			codes.push("CL031");
+			codes.push("E-DECL-3");
 		}
 		let unstable_growth = matches!(self.0[0], 0 | 8 | 9);
 		let invalidates = matches!(self.0[3], 2 | 4 | 5 | 6 | 7 | 8)
@@ -515,7 +515,7 @@ fn generated_reference_matrix() {
 		(
 			"readonly-results",
 			include_str!("../../../analyzer/tests/cases/references/review2-set-reference-write.fa"),
-			&["CL031", "EFF011"][..],
+			&["E-DECL-3", "EFF011"][..],
 		),
 		(
 			"owner-metadata",

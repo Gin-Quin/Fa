@@ -633,17 +633,26 @@ impl Walker<'_> {
 		let expected = (!self.s.types.is_recovering(place.ty)).then_some(place.ty);
 		let actual = self.check(value, expected);
 		self.sink(value, actual, place.ty);
+		let parameter = !rejected
+			&& !place.below
+			&& place.symbol.is_some_and(|symbol| {
+				matches!(
+					self.a.symbols.symbol(symbol).kind,
+					SymbolKind::Parameter { .. } | SymbolKind::SelfParameter
+				)
+			});
+		// an undeclared name (`E-DECL-1`, maybe a typo of the mutated one)
+		let undeclared = place.symbol.is_none() && matches!(self.view(name), View::Name(_));
+		// the parameter's `mutates` is not reported unused as well (EFF011)
+		if (parameter || undeclared)
+			&& let Some(cx) = self.body.functions.last_mut()
+		{
+			cx.uncovered = true;
+		}
 		let ty = self.memo(n, |w| {
 			if rejected {
 				return TypeId::VOID;
 			}
-			let parameter = !place.below
-				&& place.symbol.is_some_and(|symbol| {
-					matches!(
-						w.a.symbols.symbol(symbol).kind,
-						SymbolKind::Parameter { .. } | SymbolKind::SelfParameter
-					)
-				});
 			if parameter {
 				// E-DECL-13: a parameter is never replaced, even with `mutates`
 				let text = w.tree.text(target.index()).to_string();

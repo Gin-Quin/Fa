@@ -2827,3 +2827,26 @@ A rejected `key` option does not contextualize or check its callback: no valid c
 
 The wasm regression also exposed the same classification error in the analyzer: after checking a generic application it recorded a blocking call of the underlying function. Generic applications now skip the runtime-call hook, while ordinary invocations still contribute their async/blocking summaries. A wasm-targeted negative fixture accepts creating/awaiting the function value and still rejects a real blocking invocation (CONC010).
 
+## Analyzer pending cases, first lot (2026-11-17)
+
+Values and control-flow brief, branch `analyzer/pending-a`.
+
+- **Syntax rules come from the parser with their code.** `E-WHEN-4` (a guard, skipped up to `=>`), `E-WHEN-7` (`when` without subject), `E-CMP-10` (`as` after `is`, the binding skipped), `E-OPT-5` (`?[`, `?(` written together) and `E-STR-6` (the `{` of the first interpolation never closed, instead of "string never closed") are parser diagnostics, like `E-WHEN-6` and `E-STR-5`.
+- **E-ERR-5 is retired.** Each context it named has a specific code that is emitted and tested: `REA004` (`watch`), `REA002` (`derived`), `CONC016` (a detached task). A lambda given to a parameter only called during the call passes its errors to the call (functions/defining-functions); stored in a function type without `throws`, it is a type mismatch (`E-TYPE-1`).
+- **CL031 and CL032 are aliases** of `E-DECL-3` (a set element or a map key is read-only: a case of writing a read-only place) and `E-LOOP-3` (an index binding on a collection without positions): the types brief and the values brief named the same conditions.
+- **W-ERR-4** replaces `W-CMP-1` for an `is Error` that is always true; never true stays `E-CMP-7`.
+- **W-BOOL-1 on `assert`** only when the facts make the condition always false and it is not a literal: `assert false` is a deliberate stop, and an assertion always true is what a test checks.
+- **A repeated integer literal pattern is W-WHEN-1** whatever the facts (the other integers are still judged by the values left).
+- **An invalid `break`/`continue`** (`E-LOOP-12`, `E-LOOP-13`) has a recovering type, not `Never`: the code after it is not also reported unreachable.
+- **Assigning a parameter** (`EFF006`, `E-DECL-13`) marks the function's effects as not covered: its `mutates` is not also reported unused (`EFF011`).
+- **E-OBJ-14**: a function body block whose statements are all assignments to undeclared names (`{ x = v, y = 0 }`, read as `x = v, y = 0`) is reported once on the block, and the block is not checked further.
+- **E-CMP-5 in `when`**: a range value used as a pattern, as for `is`. **TY057 (E-CMP-9) after `is`**: an unqualified member, as in `when`.
+
+### Review fixes (2026-11-17, decided by the lead)
+
+- **Nested literal lengths**: the length of a nested literal is known at every depth (`[[1, 2], [3, 4]]` has 2 items of 2 items each) as long as the value keeps its literal type; `let [[a, b], [c, d]] = m` needs no `try` (values/numbers rule 3). Not implemented yet: T-DST-13 is pending.
+- **W-LEX-1 is retired**: the blank line is the documented way to write a comment that is not documentation.
+- **Tuple bindings of `when` arms**: the analyzer accepts and checks them; the printing cases stay pending until every engine lowers them (no skip list for it).
+- **E-OBJ-14** is reported alone only where the block can't be meant as a block: the comma form, or a function whose return type is an object type (named in the fix). A block assigning undeclared names otherwise keeps `E-DECL-1` on each name, with the object hint in its message. The field values are always checked.
+- **An invalid `break`/`continue`** ends its path, vacuously (`FlowState::impossible`): the narrowing after it holds, and the code after it is not reported unreachable.
+

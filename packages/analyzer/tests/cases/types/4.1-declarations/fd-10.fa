@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- error: EF010
 -- brief: ✗ fd-10: EF010
 type ApiError = Errors { Timeout }

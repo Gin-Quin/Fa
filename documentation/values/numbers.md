@@ -205,7 +205,7 @@ To decide whether an index is in bounds, a divisor is non-zero or an operation c
 
 1. **One interval per integer place.** It comes from the type of the place, from the value it was initialized with or assigned (a literal is an exact value) and from interval arithmetic on the operators.
 2. **Conditions refine the interval** in the branches of `if`, `while` and `when`: a comparison with a constant or with a place whose interval is known, an `is` with a range, and `==` or `!=` with a literal. An excluded value (`if divisor != 0`) is kept as such.
-3. **Lengths.** The length of a collection is known from its literal (`[1, 2, 3]` has 3 items), and the length of a string from its literal (`"Fa"` has 2 characters), until the collection or the string is mutated. These relational facts are kept:
+3. **Lengths.** The length of a collection is known from its literal (`[1, 2, 3]` has 3 items), and the length of a string from its literal (`"Fa"` has 2 characters), until the collection or the string is mutated. The rule holds for nested literals: `[[1, 2], [3, 4]]` has 2 items of 2 items each, as long as the value keeps the type of its literal. These relational facts are kept:
 	- `index < collection.length` inside `for index in 0..collection.length` and `for item, index in collection`,
 	- `index < collection.length` after a guard `if index < collection.length` (or in the `else` of its negation); the guarded expression may be a place or a place plus or minus a constant (`index + 1 < items.length`),
 	- equal lengths for the collections created from the same length: a copy, or `map` over a collection.

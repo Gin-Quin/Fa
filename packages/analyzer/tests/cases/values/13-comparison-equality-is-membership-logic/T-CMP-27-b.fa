@@ -1,4 +1,5 @@
--- pending: M1 (imported from the values brief)
 -- warning: W-CMP-1
+-- context: the declarations of the first half of the brief's test
 -- brief: ⇒ W-CMP-1
+let n = 5
 let y = n is Integer

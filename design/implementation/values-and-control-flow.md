@@ -163,7 +163,7 @@ Source: `getting-started/syntax-basics`.
 | E-LEX-4 | `!` not followed by `=` (`!x`, `x!`) | Fa has no `!`: use `not` for booleans, `is not none` or `??` for optionals |
 | E-LEX-5 | `else` at the start of a line | write `} else {` on one line (parser today silently produces garbage: an `if` then a dangling block) |
 | E-LEX-6 | unterminated string or block comment | — |
-| W-LEX-1 | a comment above a declaration separated by a blank line *and* starting with `---` (probably meant as documentation) | optional lint, low priority |
+| (retired) | a comment above a declaration separated by a blank line and starting with `---`: the blank line is the documented way to write a comment that is not documentation (getting-started/syntax-basics), so no warning (decided by the lead, 2026-11-17) | — |
 
 ### Runtime semantics
 
@@ -1426,7 +1426,7 @@ Uncovered: `E-ERR-3` ("`loadScore` can fail with `ApiError`. Use `try` to propag
 | E-ERR-2 | `throw` of an error type the function doesn't declare |
 | E-ERR-3 | failing expression not covered by `try` or `catch` |
 | E-ERR-4 | `try` propagating errors the function doesn't declare |
-| E-ERR-5 | `try`/`throw` in a context that can't propagate (a `watch` block, a detached `start do`, a function type without `throws` for a lambda) |
+| (retired) | `try`/`throw` in a context that can't propagate: each context has its own code, `REA004` (a `watch` block), `REA002` (a `derived` value), `CONC016` (a detached task), and the function type of a lambda without `throws` is a type mismatch of the lambda (2026-11-17, analyzer pending cases) |
 | E-ERR-6 | `try` and `catch` on the same expression (`try a catch e => b`, `try (a catch …)`), or a `try` anywhere inside the left operand of a `catch` in the same body [D-23] |
 | E-ERR-7 | an error type in a return type or a value union (`: Integer \| ApiError`): "errors are declared with `throws`" |
 | E-ERR-8 | `await try f()`: "write `try await f()`" |

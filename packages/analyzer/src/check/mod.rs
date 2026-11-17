@@ -414,6 +414,9 @@ pub struct Walker<'s> {
 	pub(crate) constraint_depth: u32,
 	/// The type diagnostics reported on nodes checked more than once.
 	pub(crate) reported_once: rustc_hash::FxHashSet<(NodeId, &'static str)>,
+	/// The undeclared names assigned by a block after `=>` that may have been
+	/// meant as an object: their `E-DECL-1` adds the hint (objects.rs).
+	pub(crate) object_hint_names: rustc_hash::FxHashSet<NodeId>,
 	/// The `state` literal of a `WorkerPool` (`WorkerPool(T) { state = T { … } }`)
 	/// is being checked: a worker type's literal builds the state, not a worker.
 	pub(crate) pool_state: Option<NodeId>,
@@ -624,6 +627,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		decls_by_type: FxHashMap::default(),
 		nominal_names: FxHashMap::default(),
 		reported_once: rustc_hash::FxHashSet::default(),
+		object_hint_names: rustc_hash::FxHashSet::default(),
 		pool_state: None,
 		readonly_elements: rustc_hash::FxHashSet::default(),
 		rec_references: FxHashMap::default(),
@@ -974,8 +978,9 @@ impl Walker<'_> {
 		{
 			*slot = ty;
 		}
-		if ty == TypeId::NEVER {
-			// the code after a `Never` expression is unreachable
+		if ty == TypeId::NEVER && self.body.flow.reachable {
+			// the code after a `Never` expression is unreachable (an invalid
+			// `break` already made it so, vacuously: control.rs)
 			self.body.flow.set_unreachable();
 		}
 		self.record_value_origins(n);

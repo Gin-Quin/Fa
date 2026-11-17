@@ -202,11 +202,11 @@ fn loops_over_sets_and_maps() {
 	assert_eq!(symbol_type(&session, file, "tag"), "String");
 	assert_eq!(
 		codes("mutable s: Set<String> = []\nfor tag in s {\n\ttag = \"x\"\n}\n"),
-		["CL031"]
+		["E-DECL-3"]
 	);
 	assert_eq!(
 		codes("mutable m: Map<String, Integer> = []\nfor (key, value) in m {\n\tkey = \"x\"\n}\n"),
-		["CL031"]
+		["E-DECL-3"]
 	);
 }
 
@@ -230,7 +230,7 @@ fn iterators_are_typed_and_tracked() {
 	);
 	assert_eq!(
 		codes("let s: Set<Integer> = [1]\nfor x, i in s {\n\tconsole.log(x)\n}\n"),
-		["CL032"]
+		["E-LOOP-3"]
 	);
 }
 

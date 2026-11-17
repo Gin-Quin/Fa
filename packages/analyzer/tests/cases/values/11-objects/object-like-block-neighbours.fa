@@ -1,0 +1,13 @@
+-- Neighbours of T-OBJ-36: after `=>`, braces are a block. Assigning a declared
+-- variable there is valid; fields of an undeclared object
+-- written with commas are E-OBJ-14, once; a single name is E-DECL-1 with a hint.
+type Point = { x: Integer, y: Integer }
+mutable total = 0
+let points = [1, 2].map((v) => Point { x = v, y = 0 })
+let sums = [1, 2].map((v) => {
+	total = total + v
+	v
+})
+let one = [1].map((v) => { x = v }) -- error: E-DECL-1 (with the object hint: one name may be a typo)
+function generic = <Item>(item: Item) => { first = item, second = item } -- error: E-OBJ-14
+console.log(points, sums, total, one)

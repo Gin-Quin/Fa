@@ -849,7 +849,7 @@ impl Walker<'_> {
 					"{shown} has no positions: its elements have no index (only an `Array`, a `GrowingArray`, an `OrderedColumnar` and a `String` have one)"
 				);
 				let diagnostic =
-					w.diagnostic(&crate::diagnostics::codes::types::CL032, iterable, message);
+					w.diagnostic(&E_LOOP_3, iterable, message);
 				w.report(diagnostic);
 			}
 			if let Some(index) = index.filter(|index| !index.is_empty()) {
@@ -1246,8 +1246,12 @@ impl Walker<'_> {
 			if state.reachable {
 				cx.breaks.push(state);
 			}
+			self.body.flow.set_unreachable();
+			return TypeId::NEVER;
 		}
-		self.body.flow.set_unreachable();
+		// a `break` without a loop (`E-LOOP-12`, `E-LOOP-13`) still ends the
+		// path, vacuously: the code after it is not reported unreachable
+		self.body.flow = FlowState::impossible();
 		TypeId::NEVER
 	}
 
@@ -1271,7 +1275,12 @@ impl Walker<'_> {
 				.continues
 				.push(state);
 		}
-		self.body.flow.set_unreachable();
+		// as for `break`: an invalid `continue` ends the path vacuously
+		if valid {
+			self.body.flow.set_unreachable();
+		} else {
+			self.body.flow = FlowState::impossible();
+		}
 		TypeId::NEVER
 	}
 

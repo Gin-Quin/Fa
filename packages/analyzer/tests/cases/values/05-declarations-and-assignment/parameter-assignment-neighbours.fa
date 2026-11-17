@@ -1,0 +1,15 @@
+-- Neighbours of T-DECL-32: a parameter is never replaced (EFF006, E-DECL-13),
+-- and its `mutates` is then not reported unused as well; changing its inside is valid.
+type Box = { a: Integer }
+function replace = (input: Box) mutates input => {
+	input = Box { a = 1 } -- error: EFF006
+}
+function change = (input: Box) mutates input => {
+	input.a = 1
+}
+function generic = <Item: Box>(input: Item) mutates input => {
+	input = input -- error: EFF006
+}
+mutable box = Box { a = 0 }
+change(box)
+console.log(box.a)

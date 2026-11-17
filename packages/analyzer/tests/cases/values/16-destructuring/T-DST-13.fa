@@ -1,4 +1,4 @@
--- pending: M2 (imported from the values brief)
+-- pending: the lengths of nested literals are not tracked yet (values/numbers, rule 3: `[[1, 2], [3, 4]]` has 2 items of 2 items each): the inner patterns ask for `try`
 -- brief: → `5`
 let m = [[1, 2], [3, 4]]
 let [[a, b], [c, d]] = m

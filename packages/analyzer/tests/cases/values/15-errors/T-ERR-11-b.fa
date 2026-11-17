@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- warning: W-BOOL-1
 -- brief: ⇒ stop (`assertion failed: 1 + 1 == 3`, exit 101) — also W-BOOL-1 (constant)
 assert 1 + 1 == 3

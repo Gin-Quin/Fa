@@ -35,6 +35,56 @@ fn rules_of_the_specification_carry_their_code() {
 }
 
 #[test]
+fn values_and_control_flow_rules_carry_their_code() {
+	let codes = |source: &str| -> Vec<Option<&'static str>> {
+		parse(source)
+			.diagnostics
+			.iter()
+			.map(|diagnostic| diagnostic.code)
+			.collect()
+	};
+	// a guard: the branch is kept, without its guard
+	assert_eq!(
+		codes("when v is {\n\tInteger as n if n > 0 => 1\n\telse => 2\n}"),
+		[Some("E-WHEN-4")]
+	);
+	assert_eq!(
+		codes("when v is { 1 if ready => 1, else => 2 }"),
+		[Some("E-WHEN-4")]
+	);
+	assert_eq!(codes("when { s > 2 => 1 }"), [Some("E-WHEN-7")]);
+	assert_eq!(codes("if v is Integer as n { }"), [Some("E-CMP-10")]);
+	assert_eq!(codes("let s = scores?[0]"), [Some("E-OPT-5")]);
+	assert_eq!(codes("callback?()"), [Some("E-OPT-5")]);
+	assert_eq!(codes("let name = \"Hello {name\""), [Some("E-STR-6")]);
+	assert_eq!(codes("let name = \"Hello {name}"), [Some("E-LEX-6")]);
+	// spaced or valid: no error
+	assert!(codes("let t: Integer? = none").is_empty());
+	assert!(codes("let x = user?.scores.get(0)").is_empty());
+	assert!(codes("when v is { Integer as n => n }").is_empty());
+}
+
+#[test]
+fn values_and_control_flow_rules_say_how_to_fix_the_code() {
+	assert_error_message(
+		"when v is { Integer as n if n > 0 => 1, else => 2 }",
+		"test the condition with an `if` inside the branch",
+	);
+	assert_error_message(
+		"when { s > 2 => 1 }",
+		"write `if ... { ... } else if ... { ... }`",
+	);
+	assert_error_message("if v is Integer as n { }", "`is` narrows `v` itself");
+	assert_error_message("let x = s?[0]", "write `s?.get(...)`");
+	assert_error_message("let s = \"a {b\"", "never closed: end it with `}`");
+	// the statement after the guard is still parsed
+	assert_eq!(
+		error_count("when v is { 1 if ok => 1, else => 2 }\nlet a = 1"),
+		1
+	);
+}
+
+#[test]
 fn statement_after_an_error_is_parsed() {
 	let tree = parse("let = 1\nlet b = 2");
 	assert!(tree.has_errors());
@@ -423,7 +473,7 @@ fn parallel_loops() {
 
 #[test]
 fn when_needs_a_value_is_and_branches() {
-	assert_error_message("when { }", "Expected a value after `when`");
+	assert_error_message("when { }", "A `when` needs a subject");
 	assert_error_message("when x { }", "Expected `is` after the value of `when`");
 	assert_error_message("when x is 1", "Expected `{` after `when ... is`");
 	assert_error_message("when x is { 1 \"a\" }", "Expected `=>` after the pattern");
@@ -551,7 +601,8 @@ fn malformed_escapes_are_reported() {
 #[test]
 fn malformed_interpolations_are_reported() {
 	assert_error_message("\"{a b}\"", "a string interpolates one expression");
-	assert_error_message("x = \"{a\"", "This string is never closed");
+	assert_error_message("x = \"{a\"", "an interpolation that is never closed");
+	assert_error_message("x = \"{a}", "This string is never closed");
 	assert_statement("\"{{}}\"", "\"{{}}\"");
 	assert_statement("\"a {b} c {d}\"", "\"a {b} c {d}\"");
 }

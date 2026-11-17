@@ -1,0 +1,12 @@
+-- Expected output is only none: absent receivers must skip argument evaluation.
+type Person = {
+	name: String
+	function greet = (self, suffix: String): String => self.name + suffix
+}
+function greet = (person: Person?): String? => person?.greet(
+	if true {
+		console.log("argument")
+		"!"
+	} else { "?" }
+)
+console.log(greet(none))

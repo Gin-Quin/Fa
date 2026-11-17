@@ -1,0 +1,6 @@
+-- Accepted by the analyzer; the JavaScript backend currently refuses this.
+mutable values: Pool<Integer> = [1, 1]
+use first = values.add(2)
+use second = values.add(3)
+values.delete(if arguments.length == 0 { first } else { second })
+console.log(values.size)

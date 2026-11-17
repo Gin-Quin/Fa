@@ -54,6 +54,12 @@ impl Walker<'_> {
 			self.sink(value, actual, declared);
 		}
 		let place = self.reference_place(value);
+		// An alias snapshots every possible target of a reseated reference,
+		// including whether one branch designates a slice rather than its owner.
+		let targets = self
+			.read_local(self.reference_operand(value))
+			.and_then(|source| self.body.flow.ref_state(source))
+			.map(|state| self.facts.refs.get(state).places.clone());
 		let kind = if mutable {
 			SymbolKind::MutableUse
 		} else {
@@ -91,7 +97,11 @@ impl Walker<'_> {
 		if let Some(place) = place {
 			self.aliases.insert(symbol, place);
 			if self.body.flow.reachable {
-				let state = self.facts.refs.state(RefState::valid(place));
+				let mut state = RefState::valid(place);
+				if let Some(targets) = targets {
+					state.places = targets;
+				}
+				let state = self.facts.refs.state(state);
 				self.body.flow.set_ref_state(symbol, state);
 				// the narrowing of the place, as a fact of the alias
 				let declared_ty = self.a.symbols.symbol(symbol).ty;
@@ -110,6 +120,126 @@ impl Walker<'_> {
 			}
 		}
 		TypeId::VOID
+	}
+
+	/// A slice is a range view, not a replaceable collection header. Item
+	/// writes add an index step and therefore remain ordinary assignments.
+	pub(super) fn is_slice_assignment_target(&self, target: NodeId) -> bool {
+		let target = self.strip_groups(target);
+		let slice_place = |place| {
+			matches!(
+				self.places.get(place).step,
+				Some(Step::All | Step::Range(..) | Step::Characters)
+			)
+		};
+		match self.view(target) {
+			View::Name(_) => self.reference_target_matches(target, slice_place),
+			View::Index {
+				target: owner,
+				index,
+			} => {
+				self.type_of(self.strip_groups(index)) == TypeId::RANGE
+					&& matches!(
+						self.s.types.kind(self.type_of(self.strip_groups(owner))),
+						TypeKind::Collection(CollKind::Array, ..)
+							| TypeKind::Bytes | TypeKind::String
+							| TypeKind::StringLit(_)
+					)
+			}
+			_ => false,
+		}
+	}
+
+	fn reference_target_matches(
+		&self,
+		target: NodeId,
+		mut matches: impl FnMut(PlaceId) -> bool,
+	) -> bool {
+		let Resolution::Local(symbol) = self.a.resolution(self.strip_groups(target)) else {
+			return false;
+		};
+		if let Some(state) = self.body.flow.ref_state(symbol) {
+			return self
+				.facts
+				.refs
+				.get(state)
+				.places
+				.iter()
+				.copied()
+				.any(matches);
+		}
+		self.aliases.get(&symbol).copied().is_some_and(&mut matches)
+	}
+
+	/// A String's units are read-only, including through aliases of a unit.
+	pub(super) fn is_string_item_assignment_target(&self, target: NodeId) -> bool {
+		let target = self.strip_groups(target);
+		match self.view(target) {
+			View::Index {
+				target: owner,
+				index,
+			} => {
+				self.type_of(self.strip_groups(index)) != TypeId::RANGE
+					&& crate::builtins::strings::is_string_like(
+						&self.s.types,
+						self.type_of(self.strip_groups(owner)),
+					)
+			}
+			View::Name(_) => self.reference_target_matches(target, |place| {
+				let place = self.places.get(place);
+				matches!(place.step, Some(Step::Index(_)))
+					&& place
+						.parent
+						.and_then(|p| self.place_type(p))
+						.is_some_and(|ty| {
+							crate::builtins::strings::is_string_like(&self.s.types, ty)
+						})
+			}),
+			_ => false,
+		}
+	}
+
+	/// Check both selection and calls: saving a bound method must not make
+	/// a structural operation on a view legal. This runs on every flow visit.
+	pub(super) fn reject_slice_structural_method(&mut self, callee: NodeId) -> bool {
+		let callee = self.strip_groups(callee);
+		let View::Access { members, .. } = self.view(callee) else {
+			return false;
+		};
+		let Some(member) = members.last() else {
+			return false;
+		};
+		let Resolution::Builtin(builtin) = self.a.resolution(member) else {
+			return false;
+		};
+		let path = crate::builtins::get(builtin).path;
+		if !matches!(
+			path,
+			"String#reserve"
+				| "Array#push"
+				| "Array#insert"
+				| "Array#delete"
+				| "Array#take"
+				| "Array#pop"
+				| "Array#clear"
+				| "Array#reserve"
+				| "Array#deleteWhere"
+		) {
+			return false;
+		}
+		let Some(receiver) = self.callee_receiver_node(callee) else {
+			return false;
+		};
+		if !self.is_slice_assignment_target(receiver) {
+			return false;
+		}
+		let diagnostic = self.diagnostic(
+			&crate::diagnostics::codes::advanced::REF016,
+			callee,
+			"a slice view has no structural operations: change the owner, then `reuse` the view",
+		);
+		self.report_flow(diagnostic);
+		true
 	}
 
 	/// The owner of a reference return type `T in owner`: its path must
@@ -191,14 +321,21 @@ impl Walker<'_> {
 
 	/// The place a `use` designates: a place expression (through `try`).
 	fn reference_place(&mut self, value: NodeId) -> Option<PlaceId> {
-		let value = self.strip_groups(value);
+		let value = self.reference_operand(value);
 		let tree = Arc::clone(&self.tree);
 		match syntax::view(&tree, value) {
-			View::Try(inner) => self.reference_place(inner),
 			View::Name(_) | View::Access { .. } | View::Index { .. } => self.place_of(value),
 			View::Call { callee, arguments } => self.returned_reference(callee, arguments),
 			_ => None,
 		}
+	}
+
+	fn reference_operand(&self, value: NodeId) -> NodeId {
+		let mut value = self.strip_groups(value);
+		while let View::Try(inner) = self.view(value) {
+			value = self.strip_groups(inner);
+		}
+		value
 	}
 
 	/// The place a call of a built-in returning a reference designates
@@ -850,6 +987,7 @@ impl Walker<'_> {
 					match self.s.types.kind(ty) {
 						TypeKind::Collection(CollKind::Map, value, _) => value,
 						TypeKind::Collection(_, item, _) => item,
+						TypeKind::Bytes => TypeId::BYTE,
 						TypeKind::String => TypeId::STRING,
 						_ => return None,
 					}
@@ -868,7 +1006,6 @@ impl Walker<'_> {
 			| TypeKind::FloatLit(..)
 			| TypeKind::Boolean
 			| TypeKind::BoolLit(_)
-			| TypeKind::Character
 			| TypeKind::Percentage
 			| TypeKind::Enum(..)
 			| TypeKind::EnumMember(..)

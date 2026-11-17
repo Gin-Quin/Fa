@@ -1,0 +1,4 @@
+-- Specification example: strings 12
+let name = "Fa"
+let first = name[0] -- "F"
+assert name[0] == "F"

@@ -191,6 +191,13 @@ The subject type parameter comes before its keys (`<Value, keys: DeepKeys<Value>
 - A field set is a JavaScript number up to 32 flags, and a `BigInt` above, so that the bit operations stay exact.
 - An erased generic function receives its selected paths and a stable instance tag as a hidden value. `Pick`/`Omit` and unrolled bodies use that same value across files. Once callers are known, only units declaring key-loop bodies need another analysis; that checked analysis also generates their JavaScript before it is released.
 
+### Compile-time evaluation
+
+A checked key-set index retains its dotted field path when passed as a borrowed
+argument. The interpreter resolves that path into ordinary field steps before
+reading or writing back the parameter, so nested fields share the existing
+copy-on-write allocation preflight and mutation handling.
+
 ### Native
 
 - **Fields set once.** When every store to an object field is its construction, methods read repeatedly used scalar or string fields once at entry. Small methods on the same receiver expand into the caller to share the read; a parser tests whether `self.text` is inline once per call, not once per byte.

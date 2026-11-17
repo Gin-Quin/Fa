@@ -4,7 +4,7 @@ export type = {
 	text: String
 	position: Integer
 
-	function current = (self): Byte => self.text.bytes().get(self.position) ?? 0
+	function current = (self): Byte => self.text.toUtf8().get(self.position) ?? 0
 
 	function advance = (self) mutates self => {
 		self.position += 1

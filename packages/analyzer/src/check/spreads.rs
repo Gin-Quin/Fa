@@ -120,7 +120,9 @@ impl Walker<'_> {
 			}
 		}
 		self.memo(n, |w| {
-			w.spread_literal_type(n, &parts, target, declared.as_deref())
+			let ty = w.spread_literal_type(n, &parts, target, declared.as_deref());
+			w.check_literal_schema_constructor(n, ty);
+			ty
 		})
 	}
 

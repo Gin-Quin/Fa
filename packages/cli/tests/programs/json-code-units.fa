@@ -1,0 +1,20 @@
+-- skip-target: native-freestanding (std.json requires libc, per lead decision)
+use { Json, JsonError } = std.json
+
+function roundTrip = (text: String): Boolean throws JsonError => {
+	let encoded = Json.stringify(text)
+	let decoded: String = try Json.parse(encoded)
+	encoded.isWellFormed() and decoded == text
+}
+
+let pair = String.from("😀")
+let high = try pair[0]
+let low = try pair[1]
+console.log(Json.stringify(high), Json.stringify(high).length, try roundTrip(high)) -- prints: "\ud83d" 8 true
+console.log(Json.stringify(low), try roundTrip(low), try roundTrip(pair)) -- prints: "\ude00" true true
+use cut = try pair[1..2]
+console.log(Json.stringify(cut), try roundTrip(cut)) -- prints: "\ude00" true
+let joined: String = try Json.parse("\"\\ud83d\\ude00\"")
+console.log(joined == pair, joined.length, joined.isWellFormed()) -- prints: true 2 true
+let mixed: "😀" = try Json.parse("\"" + high + "\\ude00\"")
+console.log(mixed == pair, Json.stringify(high + "x" + low)) -- prints: true "\ud83dx\ude00"

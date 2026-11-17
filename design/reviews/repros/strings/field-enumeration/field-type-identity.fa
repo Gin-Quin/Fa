@@ -1,0 +1,13 @@
+-- Enumeration order must distinguish declared types from anonymous shapes.
+type A = { z: Integer, a: Integer }
+type B = { a: Integer, z: Integer }
+function formatted = (): String => {
+	let anonymous = { z = 9, a = 1 }
+	let first = A { a = 1, z = 9 }
+	let second = B { z = 9, a = 1 }
+	let converted: B = first
+	"{anonymous}|{first}|{second}|{converted}"
+}
+static compiled = @formatted()
+console.log(compiled) -- prints: { a = 1, z = 9 }|{ z = 9, a = 1 }|{ a = 1, z = 9 }|{ a = 1, z = 9 }
+console.log(formatted()) -- prints: { a = 1, z = 9 }|{ z = 9, a = 1 }|{ a = 1, z = 9 }|{ a = 1, z = 9 }

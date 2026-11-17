@@ -24,6 +24,7 @@ mod appends;
 mod arith;
 mod arrays;
 mod big_integers;
+mod bytes;
 pub(crate) mod c_library;
 mod calls;
 mod capacity;
@@ -111,6 +112,7 @@ use values::{IntRepr, Repr, Val};
 
 /// LLVM's number for the `fastcc` calling convention.
 pub(crate) const FAST_CALLING_CONVENTION: u32 = 8;
+pub(super) const CANONICAL_SPLIT: &str = "fa.string.canonical-split";
 
 type CallbackInstanceKey<'ctx> = (FunctionValue<'ctx>, Vec<(usize, TypeId)>);
 type InstanceKey = (
@@ -217,7 +219,7 @@ struct Frame<'ctx> {
 	loops: Vec<LoopFrame<'ctx>>,
 	/// The handlers of the enclosing `catch`es, innermost last, the slot of
 	/// their error, and the depth of the cleanup stack around them.
-	catches: Vec<(BasicBlock<'ctx>, PointerValue<'ctx>, usize)>,
+	catches: Vec<(BasicBlock<'ctx>, Option<PointerValue<'ctx>>, usize)>,
 	/// Whether the function throws (returns its errors).
 	throws: bool,
 	/// Its requirements (hidden parameters, pointers to what provides
@@ -349,6 +351,10 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The `mutable use` references: the slot holding the address of the
 	/// place they designate, and its representation.
 	references: FxHashMap<SymbolId, (PointerValue<'ctx>, Repr)>,
+	/// Descriptor snapshots per binding and compiled function instance;
+	/// module-level designations use no function key.
+	content_view_slots:
+		FxHashMap<(SymbolId, Option<inkwell::values::FunctionValue<'ctx>>), Slot<'ctx>>,
 	/// The places of the `provide` statements lowered so far.
 	provided: FxHashMap<NodeId, Slot<'ctx>>,
 	/// The receiver of the method call being lowered when it is already
@@ -584,6 +590,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			pending_receiver: None,
 			provided: FxHashMap::default(),
 			references: FxHashMap::default(),
+			content_view_slots: FxHashMap::default(),
 			saved_cleanups: Vec::new(),
 			owned_locals: FxHashMap::default(),
 			drop_functions: std::cell::RefCell::new(FxHashMap::default()),
@@ -805,6 +812,62 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.define_equal_box()?;
 		self.define_format_union()?;
 		self.define_boxes()?;
+		// The capability is program-wide, including late generic/callback
+		// instances. Separately compiled units and C libraries conservatively
+		// accept virtual views from other code; closed programs can erase it.
+		let virtual_views = !self.whole_program
+			|| self.c_library.is_some()
+			|| ["fa_string_slice_view", "fa_string_slice_region"]
+				.into_iter()
+				.filter_map(|name| self.module.get_function(name))
+				.any(|function| {
+					inkwell::values::BasicValue::get_first_use(
+						&function.as_global_value().as_pointer_value(),
+					)
+					.is_some()
+				}) || [
+			"fa_string_split_views",
+			"fa_string_split_nonempty_views",
+			"fa_string_split_views_into",
+		]
+		.into_iter()
+		.filter_map(|name| self.module.get_function(name))
+		.any(|function| {
+			use inkwell::values::{AnyValueEnum, BasicValue, BasicValueEnum, CallSiteValue};
+
+			let mut next = function
+				.as_global_value()
+				.as_pointer_value()
+				.get_first_use();
+			while let Some(usage) = next {
+				let instruction = match usage.get_user() {
+					AnyValueEnum::InstructionValue(instruction) => Some(instruction),
+					other => BasicValueEnum::try_from(other)
+						.ok()
+						.and_then(|value| value.as_instruction_value()),
+				};
+				if !instruction
+					.and_then(|instruction| CallSiteValue::try_from(instruction).ok())
+					.is_some_and(|call| {
+						call.get_string_attribute(AttributeLoc::Function, CANONICAL_SPLIT)
+							.is_some()
+					}) {
+					return true;
+				}
+				next = usage.get_next_use();
+			}
+			false
+		});
+		if let Some(flag) = self.module.get_global("fa_virtual_string_slices") {
+			flag.set_initializer(
+				&self
+					.context
+					.i32_type()
+					.const_int(virtual_views as u64, false),
+			);
+			flag.set_constant(true);
+			flag.set_linkage(Linkage::Internal);
+		}
 		// the drops at the end of `main` only free memory: the system takes
 		// it back at exit (drops with an effect: `destroy`, thread-safe values)
 		if let Some(flag) = self.module.get_global("fa.drops_at_exit") {
@@ -926,7 +989,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	}
 
 	/// The `SIMPLE` flag of a string's capacity word: the top bit, set when
-	/// every byte is ASCII other than '\r' (one byte per character).
+	/// every byte is ASCII (one byte per code unit).
 	pub(crate) fn simple_flag(&self) -> IntValue<'ctx> {
 		let bits = self.usize.get_bit_width();
 		self.usize.const_int(1 << (bits - 1), false)
@@ -934,21 +997,34 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	pub(crate) fn string_inline_flag(&self) -> IntValue<'ctx> {
 		self.usize
-			.const_int(1 << (self.usize.get_bit_width() - 2), false)
+			.const_int(1 << (self.usize.get_bit_width() - 3), false)
 	}
 
 	pub(crate) fn string_kind_mask(&self) -> IntValue<'ctx> {
 		self.usize
-			.const_int((1 << (self.usize.get_bit_width() - 2)) - 1, false)
+			.const_int((1 << (self.usize.get_bit_width() - 4)) - 1, false)
 	}
 
 	/// The capacity word of a static string (kind 0, with its `SIMPLE` flag).
 	pub(crate) fn static_capacity(&self, text: &str) -> IntValue<'ctx> {
-		if text.bytes().all(|byte| byte < 0x80 && byte != b'\r') {
+		if text.is_ascii() {
 			self.simple_flag()
 		} else {
-			self.usize.const_zero()
+			self.usize.const_int(
+				(1 << (self.usize.get_bit_width() - 4)) | text.encode_utf16().count() as u64,
+				false,
+			)
 		}
+	}
+
+	pub(crate) fn string_surrogates_flag(&self) -> IntValue<'ctx> {
+		self.usize
+			.const_int(1 << (self.usize.get_bit_width() - 2), false)
+	}
+
+	pub(crate) fn string_flags(&self) -> IntValue<'ctx> {
+		self.usize
+			.const_int(3 << (self.usize.get_bit_width() - 2), false)
 	}
 
 	/// The site of a runtime check: two NUL-terminated strings, the subject
@@ -1016,6 +1092,28 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		}
 		let pointer = builder.build_alloca(self.llvm_type(repr), name)?;
 		Ok(Slot { pointer, repr })
+	}
+
+	/// Scratch for a helper builder, always in that builder's function entry.
+	/// This must not allocate repeatedly when the access is inside a loop.
+	pub(crate) fn helper_alloca(
+		&self,
+		builder: &Builder<'ctx>,
+		ty: BasicTypeEnum<'ctx>,
+		name: &str,
+	) -> Result<PointerValue<'ctx>, Error> {
+		let function = builder
+			.get_insert_block()
+			.expect("a block")
+			.get_parent()
+			.expect("a function");
+		let entry = function.get_first_basic_block().expect("an entry");
+		let allocation = self.context.create_builder();
+		match entry.get_first_instruction() {
+			Some(first) => allocation.position_before(&first),
+			None => allocation.position_at_end(entry),
+		}
+		Ok(allocation.build_alloca(ty, name)?)
 	}
 
 	fn load(&self, slot: Slot<'ctx>) -> Result<Val<'ctx>, Error> {
@@ -2460,7 +2558,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				),
 				_ => Val::new(Repr::F64, self.context.f64_type().const_float(value)),
 			},
-			Value::String(text) => self.string_constant(&text),
+			Value::String(text) => self.text_constant(&text),
 			Value::None => Val::none(),
 			value => {
 				let ty = self.type_of(node);
@@ -3333,6 +3431,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			let value = self.expr(iterable)?;
 			return match value.repr {
 				Repr::Str => self.for_characters(node, pattern, has_index, value, body),
+				Repr::Bytes => {
+					let array = self.bytes_as_array(value)?;
+					self.for_items(node, pattern, has_index, iterable, array, body)
+				}
 				Repr::Array(_) | Repr::Growing(_) => {
 					let mut source = iterable;
 					while let View::Group(inner) = self.view(source) {

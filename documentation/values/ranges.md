@@ -108,10 +108,12 @@ Indexing a collection or a string with a range copies the selected items into a 
 
 ```fa
 let subarray = numbers[6..9] -- copies the elements at indices 6, 7 and 8 into a new array
-let substring = text[0..5]   -- copies the first five characters into a new string
+let substring = text[0..5]   -- copies the first five UTF-16 code units into a new string
 ```
 
-Both bounds must be within the collection, from `0` to its length (negative bounds count from the end, as with indices). A slice with an end before its start is empty. When the compiler cannot prove that the range is in bounds, the slice `throws IndexError`, which you must propagate with `try` or handle with `catch`:
+These slice rules are shared by strings, arrays and `Bytes`. Negative endpoints are normalized by adding the length. The start and an exclusive end must be within `0..=length` after normalization. An inclusive end must designate an existing item, within `0..length`: `"ab"[0..=2]` is rejected; use `"ab"[0..2]` instead. A certain invalid bound is a compile error, including an inclusive end equal to length. Otherwise it is checked at runtime.
+
+A start equal to length is valid and gives an empty slice. Reversed normalized bounds give an empty slice, and `[..]` of an empty value succeeds. When the compiler cannot prove that the range is in bounds, the slice `throws IndexError`, which you must propagate with `try` or handle with `catch`:
 
 ```fa
 let data = [1, 2, 3]

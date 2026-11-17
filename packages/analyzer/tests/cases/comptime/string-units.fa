@@ -1,0 +1,88 @@
+-- kind: test
+-- The computed values are consumed inside @test: even malformed constants
+-- must survive in Analysis without requiring a runtime emitter.
+function sameNumber = (a: Integer, b: Integer): Boolean => a == b
+function isNone = (value: String?): Boolean => value == none
+
+static text = "é日😀e\u{301}"
+static length = text.length
+static high = "😀"[0]
+static low = "😀"[-1]
+static cut = "😀"[0..1]
+static rest = text[2..]
+static inclusive = text[..=-1]
+static optional = text.get(-1)
+static missing = text.get(100)
+static numeric = "😀".codeUnitAt(1)
+static wellFormed = high.isWellFormed()
+static joined = high + low
+static copied = String.from(high, capacity = 1024)
+static hasHalf = "é日😀".includes(low)
+static starts = "😀日".startsWith(high)
+static ends = "é😀".endsWith(low)
+static first = text.indexOf("😀")
+static last = "é😀日😀".lastIndexOf(low)
+static parts = text.split("")
+static splitHalf = "😀".split(low)
+static replaced = text.replace(high, "x")
+static replacedAll = "😀".replaceAll("", "x")
+static literalReplacement = "a-b-c".replaceAll("-", "$&")
+static paddedStart = "日".padStart(2, "😀")
+static paddedEnd = "é".padEnd(2, "😀")
+static repeated = (low + high).repeat(2)
+static upper = "é日😀ß".toUpperCase()
+static lower = "É日😀ΟΣ".toLowerCase()
+static trimmed = "\u{FEFF} é日😀 ".trim()
+static trimStart = "\u{FEFF}é日😀 ".trimStart()
+static trimEnd = " é日😀\u{FEFF}".trimEnd()
+static points = text.codePoints()
+static pointCount = text.codePoints().length
+static graphemes = "e\u{301}🇫🇷👩🏽‍💻".characters()
+static encoded = text.toUtf8()
+static utf8Length = text.utf8Length()
+static ordered = "😀" < "\u{E000}"
+static joinedArray = [high, low].join("")
+static identity = high.toString()
+static nested = "{[high]}"
+static empty = "".isEmpty()
+static capacity = text.capacity
+
+function gather = (): Array<(String, Integer)> => {
+	mutable result: Array<(String, Integer)> = []
+	for point, index in "é日😀x" { result.push((point, index)) }
+	result
+}
+function append = (): String => {
+	mutable text = "😀"[0]
+	text += "😀"[1]
+	text
+}
+static walked = @gather()
+static appended = @append()
+
+@test "UTF-16 statics preserve units and joined pairs" {
+	assert sameNumber(length, 6)
+	assert high.length == 1 and not wellFormed
+	assert cut == high and copied == high and identity == high
+	assert nested == "[\"" + high + "\"]"
+	assert (try low.codeUnitAt(0)) == numeric
+	assert joined == "😀" and appended == "😀" and joinedArray == "😀"
+	assert rest == "😀e\u{301}" and inclusive == text
+	assert optional == "\u{301}" and isNone(missing)
+	assert hasHalf and starts and ends
+	assert sameNumber(first, 2) and sameNumber(last, 5)
+	assert parts.length == 6 and parts.get(2) == high and parts.get(3) == low
+	assert splitHalf == [high, ""]
+	assert replaced == "é日x" + low + "e\u{301}"
+	assert replacedAll == "x" + high + "x" + low + "x"
+	assert literalReplacement == "a$&b$&c"
+	assert paddedStart == high + "日" and paddedEnd == "é" + high
+	assert repeated == low + "😀" + high
+	assert upper == "É日😀SS" and lower == "é日😀ος"
+	assert trimmed == "é日😀" and trimStart == "é日😀 " and trimEnd == " é日😀"
+	assert points == [233, 26085, 128512, 101, 769] and sameNumber(pointCount, 5)
+	assert graphemes == ["e\u{301}", "🇫🇷", "👩🏽‍💻"]
+	assert sameNumber(utf8Length, 12) and encoded.length == utf8Length
+	assert ordered and empty and sameNumber(capacity, length)
+	assert walked == [("é", 0), ("日", 1), ("😀", 2), ("x", 4)]
+}

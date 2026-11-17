@@ -149,7 +149,7 @@ fn ordinary_scalars_literals_and_type_level_values() {
 		TypeId::BIG_INT,
 		TypeId::PERCENTAGE,
 		TypeId::STRING,
-		TypeId::CHARACTER,
+		types.string_literal("🙂"),
 		TypeId::RANGE,
 		text,
 		integer,
@@ -597,4 +597,18 @@ fn inline_arrays_inherit_owned_item_categories_without_becoming_heap_collections
 	let owner = field(&mut types, "items", structure);
 	let object = types.object(&[owner], None);
 	assert_eq!(types.ownership(object), Ownership::Structure);
+}
+
+#[test]
+fn strings_are_ordinary_and_bytes_are_structures() {
+	let mut types = TypeStore::new();
+	let bytes = types.intern(TypeKind::Bytes);
+	let data = field(&mut types, "data", bytes);
+	let owner = types.object(&[data], None);
+	let tuple = types.tuple(&[TypeId::STRING, bytes]);
+	let optional = types.union(&[bytes, TypeId::NONE]);
+	for ty in [bytes, owner, tuple, optional] {
+		assert_eq!(types.ownership(ty), Ownership::Structure);
+	}
+	assert_eq!(types.ownership(TypeId::STRING), Ownership::Ordinary);
 }

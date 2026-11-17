@@ -10,7 +10,7 @@ for length in 0..65 {
 	text += "é🇫🇷"
 	assert snapshot == "x".repeat(length)
 	assert text == "x".repeat(length) + "é🇫🇷"
-	assert text.length == length + 2
+	assert text.length == length + 5
 	let pieces = text.split("é")
 	assert pieces.join("é") == text
 	let upper = text.toUpperCase()

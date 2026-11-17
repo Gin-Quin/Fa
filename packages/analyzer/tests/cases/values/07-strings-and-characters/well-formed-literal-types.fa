@@ -1,0 +1,13 @@
+-- Scalar boundaries remain valid String literal types, including non-BMP text.
+type BeforeSurrogates = "\u{D7FF}"
+type AfterSurrogates = "\u{E000}"
+type MaximumScalar = "\u{10FFFF}"
+type Pair = "😀"
+let face: Pair = "😀"
+-- No escape can introduce a lone surrogate into a source literal or its type.
+type HighSurrogate = "\u{D83D}" -- error: E-STR-3
+type LowSurrogate = "\u{DE00}" -- error: E-STR-3
+let high = "\u{D800}" -- error: E-STR-3
+let low = "\u{DFFF}" -- error: E-STR-3
+let nonAsciiByte = "\x80" -- error: E-STR-2
+console.log(face)

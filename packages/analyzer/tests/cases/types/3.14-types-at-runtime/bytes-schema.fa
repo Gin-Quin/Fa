@@ -1,0 +1,5 @@
+assert @typeToSchema(Bytes) == Schema.Bytes
+console.log(@typeToString(Bytes)) -- prints: Bytes
+type Data = TypeFromSchema<Schema.Bytes>
+let bytes: Data = Bytes.from([1, 2]) -- type bytes: Bytes
+console.log(bytes.length) -- prints: 2

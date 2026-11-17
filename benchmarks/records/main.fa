@@ -62,7 +62,7 @@ for 0..passes {
 			Event.Tick => 1
 			Event.Move as move => move.id + move.dx + move.dy
 			-- The first byte of the text (ASCII: its first letter's code).
-			Event.Say as say => say.id + say.text.length + (try say.text.bytes()[0])
+			Event.Say as say => say.id + say.text.length + (try say.text.toUtf8()[0])
 			Event.Quit as quit => quit.id + quit.code
 		}
 	}

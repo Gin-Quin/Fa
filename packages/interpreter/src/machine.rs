@@ -14,6 +14,7 @@ use crate::code::{Argument, Call, Code, Item, Node, Op, Part, Place, Step};
 use crate::eval::{self, Error, Interpreter};
 use crate::ir::{ArithOp, CompareOp, CopyPlan, FnKey, Num, Slot, TypeTest};
 use crate::loans::{Loan, Out, Owner, Step as PlaceStep, View as PlaceView};
+use crate::text::Text;
 use crate::value::{Closure, Member, MemberKind, Object, Value, equals};
 use crate::{builtins, memory};
 
@@ -146,6 +147,21 @@ enum Unary {
 }
 
 enum Iteration {
+	Utf8 {
+		text: Text,
+		offset: usize,
+		buffer: [u8; 4],
+		position: usize,
+		length: usize,
+	},
+	Text {
+		text: Text,
+		offset: usize,
+	},
+	Bytes {
+		bytes: Arc<Vec<u8>>,
+		offset: usize,
+	},
 	Range {
 		current: I256,
 		end: Option<I256>,
@@ -191,10 +207,11 @@ enum Continuation {
 	Gather(Gather),
 	Assign(Loan),
 	PlaceIndex(PlaceEvaluation),
+	PlaceKey(PlaceEvaluation),
 	Loop(Node),
 	WhileCondition(Node, Node),
 	WhileBody(Node, Node),
-	ForIterable(Option<Slot>, Option<Slot>, Node),
+	ForIterable(Option<Slot>, Option<Slot>, Node, bool),
 	ForBody(For),
 	Catch(Option<Slot>, Node),
 	Function,
@@ -482,11 +499,15 @@ impl<'i, 'h> Machine<'i, 'h> {
 				self.evaluate_after(*condition, Continuation::WhileCondition(*condition, *body))
 			}
 			Op::For {
+				utf8,
 				item,
 				index,
 				iterable,
 				body,
-			} => self.evaluate_after(*iterable, Continuation::ForIterable(*item, *index, *body)),
+			} => self.evaluate_after(
+				*iterable,
+				Continuation::ForIterable(*item, *index, *body, *utf8),
+			),
 			Op::Break(value) => match value {
 				Some(value) => self.evaluate_after(*value, Continuation::Unary(Unary::Break)),
 				None => Err(Flow::Break(Value::None.into())),
@@ -594,7 +615,9 @@ impl<'i, 'h> Machine<'i, 'h> {
 				parts
 					.iter()
 					.map(|part| match part {
-						Part::Text(text) => Input::Constant(Value::String(Arc::clone(text))),
+						Part::Text(text) => {
+							Input::Constant(Value::String(Text::from(Arc::clone(text))))
+						}
 						Part::Value(node) => Input::Expr(*node),
 					})
 					.collect(),
@@ -702,6 +725,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 					return self.evaluate_after(node, Continuation::PlaceIndex(state));
 				}
 				Step::Field(name) => self.place_step(&mut state, PlaceStep::Field(name))?,
+				Step::Key(node) => return self.evaluate_after(node, Continuation::PlaceKey(state)),
 			}
 		}
 		match state.action {
@@ -751,6 +775,47 @@ impl<'i, 'h> Machine<'i, 'h> {
 			| PlaceStep::Item(_)
 			| PlaceStep::Entry(_) => {
 				unreachable!("source projections are fields and indices")
+			}
+		}
+		// Freeze a byte view's next index against its original owner. A
+		// write through the view must not materialize a detached slice.
+		if let PlaceStep::Index(key) = &mut step {
+			let previous = state.loan.parent().and_then(|(base, step)| match step {
+				PlaceStep::Index(Value::Range {
+					start,
+					end,
+					inclusive,
+				}) => Some((base, *start, *end, *inclusive)),
+				_ => None,
+			});
+			if let Some((base, start, end, inclusive)) = previous {
+				let length = match self.read_loan(&base)? {
+					PlaceView::Value(Value::Bytes(bytes)) => Some(bytes.len()),
+					PlaceView::Bytes(bytes) => Some(bytes.len()),
+					_ => None,
+				};
+				if let Some(length) = length {
+					let (from, to) = builtins::slice_bounds(start, end, inclusive, length)?;
+					*key = match key {
+						Value::Range {
+							start,
+							end,
+							inclusive,
+						} => {
+							let (left, right) =
+								builtins::slice_bounds(*start, *end, *inclusive, to - from)?;
+							Value::Range {
+								start: Some(I256::from((from + left) as u64)),
+								end: Some(I256::from((from + right) as u64)),
+								inclusive: false,
+							}
+						}
+						_ => Value::Integer(I256::from(
+							(from + builtins::position(builtins::integer(key)?, to - from)?) as u64,
+						)),
+					};
+					state.loan = base;
+				}
 			}
 		}
 		self.interpreter.reserve(Loan::projection_bytes(1))?;
@@ -807,22 +872,27 @@ impl<'i, 'h> Machine<'i, 'h> {
 				fields: names.into_iter().zip(values).collect(),
 			}))),
 			Finish::Template => {
-				let pieces: Vec<Arc<str>> = values
+				for value in &values {
+					if !matches!(value, Value::String(_)) {
+						self.interpreter.reserve_text(value.text_size())?;
+					}
+				}
+				let pieces: Vec<Text> = values
 					.into_iter()
 					.map(|value| match value {
 						Value::String(text) => text,
-						other => Arc::from(other.to_text()),
+						other => other.to_text_value(),
 					})
 					.collect();
-				let size = pieces
+				let bytes = pieces
 					.iter()
-					.fold(0usize, |size, piece| size.saturating_add(piece.len()));
-				self.interpreter.reserve_text(size)?;
-				let mut text = String::with_capacity(size);
-				for piece in pieces {
-					text.push_str(&piece);
+					.fold(0usize, |n, p| n.saturating_add(p.utf8_len()));
+				let units = pieces.iter().fold(0usize, |n, p| n.saturating_add(p.len()));
+				self.interpreter.reserve_text(bytes)?;
+				if pieces.iter().any(|p| !p.is_well_formed()) {
+					self.interpreter.reserve(units.saturating_mul(10))?;
 				}
-				Self::done(Value::String(Arc::from(text)))
+				Self::done(Value::String(Text::concat(&pieces)))
 			}
 			Finish::Range(inclusive) => {
 				let mut values = values.into_iter();
@@ -917,6 +987,63 @@ impl<'i, 'h> Machine<'i, 'h> {
 			};
 		}
 		Ok(current)
+	}
+
+	fn reserve_write(&self, loan: &Loan) -> Result<(), Flow> {
+		let mut view = self.read_loan(&Loan::new(loan.owner))?;
+		let mut shared = false;
+		let mut bytes = 0usize;
+		let steps = loan.steps();
+		for (index, step) in steps.iter().enumerate() {
+			while let PlaceView::Value(Value::Member(member)) = view {
+				if shared || Arc::strong_count(member) > 1 {
+					bytes = bytes.saturating_add(size_of_val(member.as_ref()));
+					shared = true;
+				}
+				let Some(data) = &member.data else { break };
+				view = PlaceView::Value(data);
+			}
+			let allocation = match view {
+				PlaceView::Value(Value::Object(value))
+					if shared || Arc::strong_count(value) > 1 =>
+				{
+					value
+						.fields
+						.len()
+						.saturating_mul(size_of::<(Arc<str>, Value)>())
+				}
+				PlaceView::Value(Value::Array(value) | Value::Tuple(value) | Value::Set(value))
+					if shared || Arc::strong_count(value) > 1 =>
+				{
+					memory::values_size(value.len())
+				}
+				PlaceView::Value(Value::Map(value)) if shared || Arc::strong_count(value) > 1 => {
+					memory::values_size(value.len().saturating_mul(2))
+				}
+				PlaceView::Value(Value::Bytes(value)) if shared || Arc::strong_count(value) > 1 => {
+					value.len()
+				}
+				_ => 0,
+			};
+			shared |= allocation != 0;
+			bytes = bytes.saturating_add(allocation);
+			if index + 1 < steps.len() {
+				view = view.project(step)?;
+			}
+		}
+		Ok(self.interpreter.reserve(bytes)?)
+	}
+
+	fn assign_loan(&mut self, loan: &Loan, value: Value) -> Result<(), Flow> {
+		self.reserve_write(loan)?;
+		if let Some((parent, PlaceStep::Index(key))) = loan.parent()
+			&& let PlaceView::Value(Value::Bytes(_bytes)) = self.read_loan(&parent)?
+		{
+			builtins::set_index(Self::locate(&mut self.frames, &parent)?, key, value)?;
+			return Ok(());
+		}
+		*Self::locate(&mut self.frames, loan)? = value;
+		Ok(())
 	}
 
 	fn call_function(
@@ -1046,6 +1173,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 			Out::Loan(loan) => self.read_loan(loan)?,
 		};
 		let (container, length) = match view {
+			_ if path == "Json.parse" => (Container::Array, 0),
 			PlaceView::Value(Value::Array(items) | Value::Tuple(items)) => {
 				(Container::Array, items.len())
 			}
@@ -1054,7 +1182,20 @@ impl<'i, 'h> Machine<'i, 'h> {
 			_ => return Err(Error::Stop("a callback receiver must be a collection".into()).into()),
 		};
 		let mut arguments: Vec<_> = arguments.collect();
-		if let Some(function) = arguments.first_mut() {
+		if path == "Json.parse" {
+			let input = self.value(receiver.clone())?;
+			let length = match &input {
+				Value::Bytes(bytes) => bytes.len(),
+				Value::String(text) => text.utf8_len(),
+				_ => 0,
+			};
+			self.interpreter.reserve(length.saturating_mul(64))?;
+			arguments = arguments
+				.into_iter()
+				.map(|value| self.value(value).map(Out::Value))
+				.collect::<Result<_, _>>()?;
+			arguments.insert(0, input.into());
+		} else if let Some(function) = arguments.first_mut() {
 			*function = self.value(function.clone())?.into();
 		}
 		let staged = !mutating
@@ -1109,7 +1250,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 		state: CallbackState,
 	) -> Result<Action, Flow> {
 		loop {
-			let progress = match callback.advance(value) {
+			let progress = match callback.advance(value, self.interpreter) {
 				Ok(progress) => progress,
 				Err(error) => {
 					return Ok(Action::Done(
@@ -1269,7 +1410,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 						PlaceView::Entry((key, value)) => {
 							entries.push((key.clone(), value.clone()))
 						}
-						PlaceView::Value(value) => values.push(value.clone()),
+						view => values.push(view.materialize()),
 					}
 				}
 				Ok(match container {
@@ -1469,8 +1610,19 @@ impl<'i, 'h> Machine<'i, 'h> {
 						self.gather_next(gather)
 					}
 					Continuation::Assign(loan) => {
-						*Self::locate(&mut self.frames, &loan)? = self.value(value)?;
+						let value = self.value(value)?;
+						self.assign_loan(&loan, value)?;
 						Self::done(Value::None)
+					}
+					Continuation::PlaceKey(mut state) => {
+						let key = self.value(value)?;
+						let path = key
+							.as_str()
+							.ok_or_else(|| Error::Stop("expected a checked field path".into()))?;
+						for field in path.split('.') {
+							self.place_step(&mut state, PlaceStep::Field(Arc::from(field)))?;
+						}
+						self.place_next(state)
 					}
 					Continuation::PlaceIndex(mut state) => {
 						self.place_step(&mut state, PlaceStep::Index(self.value(value)?))?;
@@ -1483,8 +1635,8 @@ impl<'i, 'h> Machine<'i, 'h> {
 							Self::done(Value::None)
 						}
 					}
-					Continuation::ForIterable(item, index, body) => {
-						self.for_iterable(value, item, index, body)
+					Continuation::ForIterable(item, index, body, utf8) => {
+						self.for_iterable(value, item, index, body, utf8)
 					}
 
 					_ => unreachable!("handled control boundary"),
@@ -1588,7 +1740,11 @@ impl<'i, 'h> Machine<'i, 'h> {
 			Binary::Equals(negated) => Value::Boolean(equals(&left, &right) != negated),
 			Binary::Compare(op) => Value::Boolean(eval::compare(op, &left, &right)?),
 			Binary::IsIn(negated) => Value::Boolean(builtins::includes(&right, &left)? != negated),
-			Binary::Index => builtins::index(&left, &right)?,
+			Binary::Index => {
+				self.interpreter
+					.reserve(builtins::index_size(&left, &right)?)?;
+				builtins::index(&left, &right)?
+			}
 		})
 	}
 
@@ -1663,11 +1819,40 @@ impl<'i, 'h> Machine<'i, 'h> {
 		item: Option<Slot>,
 		index: Option<Slot>,
 		body: Node,
+		utf8: bool,
 	) -> Result<Action, Flow> {
 		let view = match &value {
 			Out::Value(value) => PlaceView::Value(value),
 			Out::Loan(loan) => self.read_loan(loan)?,
 		};
+		let text_values = match view {
+			PlaceView::Value(Value::String(text)) if utf8 => Some(Iteration::Utf8 {
+				text: text.clone(),
+				offset: 0,
+				buffer: [0; 4],
+				position: 0,
+				length: 0,
+			}),
+			PlaceView::Value(Value::String(text)) => Some(Iteration::Text {
+				text: text.clone(),
+				offset: 0,
+			}),
+			PlaceView::Value(Value::Bytes(bytes)) => Some(Iteration::Bytes {
+				bytes: Arc::clone(bytes),
+				offset: 0,
+			}),
+			_ => None,
+		};
+		if let Some(values) = text_values {
+			return self.for_next(For {
+				item,
+				index,
+				position: 0,
+				values,
+				temporary: None,
+				body,
+			});
+		}
 		if let PlaceView::Value(Value::Range {
 			start,
 			end,
@@ -1745,8 +1930,44 @@ impl<'i, 'h> Machine<'i, 'h> {
 	}
 
 	fn for_next(&mut self, mut state: For) -> Result<Action, Flow> {
+		let mut width = 1;
 		let value: Result<Option<Out>, Flow> = (|| {
 			Ok(match &mut state.values {
+				Iteration::Utf8 {
+					text,
+					offset,
+					buffer,
+					position,
+					length,
+				} => {
+					if *position == *length {
+						let Some(code) = text.next_scalar(offset) else {
+							return Ok(None);
+						};
+						*length = char::from_u32(code)
+							.unwrap_or(char::REPLACEMENT_CHARACTER)
+							.encode_utf8(buffer)
+							.len();
+						*position = 0;
+					}
+					let byte = buffer[*position];
+					*position += 1;
+					Some(Value::int(i64::from(byte)).into())
+				}
+				Iteration::Text { text, offset } => match text.next_point(offset) {
+					Some((text, units)) => {
+						width = units as i64;
+						Some(Value::String(text).into())
+					}
+					None => None,
+				},
+				Iteration::Bytes { bytes, offset } => match bytes.get(*offset) {
+					Some(byte) => {
+						*offset += 1;
+						Some(Value::int(i64::from(*byte)).into())
+					}
+					None => None,
+				},
 				Iteration::Values {
 					source,
 					length,
@@ -1805,7 +2026,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 		if let Some(slot) = state.index {
 			self.locals()[slot as usize] = Value::int(state.position).into();
 		}
-		state.position += 1;
+		state.position += width;
 		self.evaluate_after(state.body, Continuation::ForBody(state))
 	}
 }
@@ -1963,7 +2184,7 @@ mod ownership_tests {
 			})
 			.unwrap();
 		machine
-			.for_iterable(Out::Loan(source), Some(1), None, code.body)
+			.for_iterable(Out::Loan(source), Some(1), None, code.body, false)
 			.unwrap();
 		let value = machine
 			.loan(&ResolvedPlace {
@@ -2003,6 +2224,7 @@ mod ownership_tests {
 					Some(0),
 					None,
 					code.body,
+					false,
 				)
 				.unwrap();
 			assert_eq!(machine.frame().locals.len(), 2);

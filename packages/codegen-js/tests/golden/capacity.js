@@ -1,4 +1,4 @@
-// helpers: faSegmenter, faIsSimpleText, faStringLength, faExit, FaStop, faStopMessage, faIsStackOverflow, faWriteError, faIsError, faReport, faRun
+// helpers: faExit, FaStop, faStopMessage, faIsStackOverflow, faWriteError, faIsError, faReport, faRun
 
 function grow(count) {
 	let values = [];
@@ -17,7 +17,7 @@ function main() {
 	room(8);
 	text += "abc";
 	let scores = new Map();
-	console.log(`${grow(3).length} ${faStringLength(text)} ${scores.size}`);
+	console.log(`${grow(3).length} ${text.length} ${scores.size}`);
 }
 
 faRun(main);

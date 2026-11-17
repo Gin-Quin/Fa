@@ -1,0 +1,12 @@
+-- asynchronous: false
+mutable data = Bytes.from([1, 2, 3, 4])
+use middle = data[1..3]
+let saved = copy middle
+data[2] = 9
+console.log(saved, data) -- prints: [2, 3] [1, 2, 9, 4]
+mutable text = String.from("é😀" + "x".repeat(80), capacity = 256)
+use low = try text[2..3]
+let retained = copy low
+text = "changed"
+console.log(retained.length, try retained.codeUnitAt(0), retained.isWellFormed()) -- prints: 1 56832 false
+console.log(retained.toUtf8(), text) -- prints: [239, 191, 189] changed

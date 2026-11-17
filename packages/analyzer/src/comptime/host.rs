@@ -136,15 +136,27 @@ pub fn dependency_sources(
 	let mut sources = Vec::new();
 	for (key, value) in &object.fields {
 		let source = match value {
-			Value::String(text) => DependencySource::Source(text.to_string()),
+			Value::String(text) => DependencySource::Source(
+				text.as_str()
+					.ok_or("a dependency source must be well-formed text")?
+					.to_string(),
+			),
 			Value::Object(fields) => match (fields.get("source"), fields.get("generate")) {
 				(Some(Value::String(source)), Some(generate @ Value::Function(_))) => {
 					DependencySource::Generated {
-						source: source.to_string(),
+						source: source
+							.as_str()
+							.ok_or("a dependency source must be well-formed text")?
+							.to_string(),
 						generate: generate.clone(),
 					}
 				}
-				(Some(Value::String(source)), None) => DependencySource::Source(source.to_string()),
+				(Some(Value::String(source)), None) => DependencySource::Source(
+					source
+						.as_str()
+						.ok_or("a dependency source must be well-formed text")?
+						.to_string(),
+				),
 				_ => {
 					return Err(format!(
 						"the source of `{key}` is a string, or `{{ source = \"https://…\", generate = (content: String): String => … }}`"
@@ -177,7 +189,9 @@ pub fn run_generate(
 			.call_value(generate, vec![Value::string(content)])
 	});
 	match result {
-		Ok(Value::String(text)) => Ok(text.to_string()),
+		Ok(Value::String(text)) => text.as_str().map(str::to_string).ok_or_else(|| {
+			"generated Fa source must be well-formed text: it holds a lone surrogate".to_string()
+		}),
 		Ok(other) => Err(format!("it returned `{}`, not a `String`", other.to_text())),
 		Err(error) => Err(error.message()),
 	}

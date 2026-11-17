@@ -1,0 +1,5 @@
+-- The same defect through a map key (found by the generated storage corpus, subject "").
+let owner = String.from("", capacity = 24)
+let map: Map<String, Integer> = [(owner, 1)]
+console.log(map.size, map.get("") ?? 0)
+-- prints: 1 1

@@ -47,6 +47,9 @@
 #[path = "programs/targets.rs"]
 mod targets;
 
+#[path = "programs/string_differential.rs"]
+mod string_differential;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -360,6 +363,13 @@ fn wait_for_exit(child: &mut Child, timeout: Duration) -> i32 {
 fn resident_kib(pid: u32) -> Option<usize> {
 	#[cfg(target_os = "linux")]
 	{
+		// A newly spawned child can briefly retain this runner's image and
+		// its LLVM heap before exec. Charge the executed program, not that
+		// inherited address space (which may already exceed the child limit).
+		let image = fs::read_link(format!("/proc/{pid}/exe")).ok()?;
+		if image == fs::read_link("/proc/self/exe").ok()? {
+			return None;
+		}
 		let status = fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
 		status.lines().find_map(|line| {
 			line.strip_prefix("VmRSS:")?
@@ -374,6 +384,60 @@ fn resident_kib(pid: u32) -> Option<usize> {
 		let _ = pid;
 		None
 	}
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn resident_memory_is_charged_after_exec() {
+	use std::os::unix::process::CommandExt;
+
+	unsafe extern "C" {
+		fn fork() -> i32;
+		fn pause() -> i32;
+		fn waitpid(pid: i32, status: *mut i32, options: i32) -> i32;
+	}
+	// SAFETY: the child calls only async-signal-safe pause until the parent
+	// kills it; it never touches Rust state inherited from other test threads.
+	let pid = unsafe { fork() };
+	assert!(pid >= 0, "fork the inherited runner image");
+	if pid == 0 {
+		loop {
+			unsafe { pause() };
+		}
+	}
+	let inherited = resident_kib(pid as u32);
+	// SAFETY: this unreaped child is ours and cannot have its PID reused.
+	unsafe {
+		kill(pid, 9);
+		waitpid(pid, std::ptr::null_mut(), 0);
+	}
+	assert!(inherited.is_none(), "charged the runner's inherited heap");
+
+	let mut child = Command::new("sh")
+		.args(["-c", "sleep 60"])
+		.process_group(0)
+		.stdin(Stdio::null())
+		.stdout(Stdio::null())
+		.stderr(Stdio::null())
+		.spawn()
+		.unwrap();
+	let started = Instant::now();
+	let running = loop {
+		if let Some(rss) = resident_kib(child.id()) {
+			break Some(rss);
+		}
+		if started.elapsed() > Duration::from_secs(2) {
+			break None;
+		}
+		std::thread::sleep(Duration::from_millis(5));
+	};
+	// SAFETY: the child was spawned in this new process group and is unreaped.
+	unsafe { kill(-(child.id() as i32), 9) };
+	child.wait().unwrap();
+	assert!(
+		running.is_some_and(|rss| rss > 0),
+		"ignored the executed image"
+	);
 }
 
 #[cfg(target_os = "linux")]

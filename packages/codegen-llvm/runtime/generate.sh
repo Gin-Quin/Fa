@@ -18,6 +18,8 @@ FLAGS=(-Os -std=c11 -ffreestanding -fno-builtin -nostdlib -fno-stack-protector
 	-fno-unwind-tables -fno-asynchronous-unwind-tables -fno-exceptions
 	-fno-ident -Wall -Wextra -Werror -S -emit-llvm)
 
+"${PYTHON:-python3}" "$DIRECTORY/grapheme_tables.py"
+
 # the case tables, from the Unicode tables of Bun (or Node)
 if command -v bun >/dev/null || [ -x "$HOME/.bun/bin/bun" ]; then
 	"$(command -v bun || echo "$HOME/.bun/bin/bun")" "$DIRECTORY/case_tables.js"

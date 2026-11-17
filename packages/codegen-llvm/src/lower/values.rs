@@ -65,6 +65,7 @@ pub enum Scalar {
 	F32,
 	Percentage,
 	Str,
+	Bytes,
 	BigInt,
 	Enum(NominalId),
 	Union,
@@ -91,7 +92,10 @@ impl Scalar {
 	/// when empty) are never null when present. Their optional uses the
 	/// otherwise unused null pointer as its absence tag.
 	pub(crate) fn nullable(self) -> bool {
-		matches!(self, Scalar::Rec(_) | Scalar::Union | Scalar::Array(_))
+		matches!(
+			self,
+			Scalar::Rec(_) | Scalar::Union | Scalar::Array(_) | Scalar::Bytes
+		)
 	}
 
 	pub fn repr(self) -> Repr {
@@ -102,6 +106,7 @@ impl Scalar {
 			Scalar::F32 => Repr::F32,
 			Scalar::Percentage => Repr::Percentage,
 			Scalar::Str => Repr::Str,
+			Scalar::Bytes => Repr::Bytes,
 			Scalar::BigInt => Repr::BigInt,
 			Scalar::Enum(nominal) => Repr::Enum(nominal),
 			Scalar::Union => Repr::Union,
@@ -132,6 +137,7 @@ impl Scalar {
 			Repr::F32 => Scalar::F32,
 			Repr::Percentage => Scalar::Percentage,
 			Repr::Str => Scalar::Str,
+			Repr::Bytes => Scalar::Bytes,
 			Repr::BigInt => Scalar::BigInt,
 			Repr::Enum(nominal) => Scalar::Enum(nominal),
 			Repr::Union => Scalar::Union,
@@ -175,6 +181,8 @@ pub enum Repr {
 	Percentage,
 	/// A string: `{ ptr, usize }`, UTF-8 bytes.
 	Str,
+	/// Fixed-length bytes, distinct from an Array: a pointer to its block header.
+	Bytes,
 	/// A `BigInt`: an `i64` word, inline when odd, else the address of a
 	/// block of limbs (`big_integers.rs`, the runtime's `FaBig`).
 	BigInt,
@@ -312,7 +320,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			TypeKind::Float(FloatBits::F64) | TypeKind::FloatLit(FloatBits::F64, _) => Repr::F64,
 			TypeKind::Float(FloatBits::F32) | TypeKind::FloatLit(FloatBits::F32, _) => Repr::F32,
 			TypeKind::Percentage => Repr::Percentage,
-			TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => Repr::Str,
+			TypeKind::String | TypeKind::StringLit(_) => Repr::Str,
 			TypeKind::BigInt | TypeKind::BigIntLit(_) => Repr::BigInt,
 			TypeKind::None => Repr::None,
 			TypeKind::Enum(nominal, _) | TypeKind::EnumMember(nominal, _) => Repr::Enum(nominal),
@@ -375,6 +383,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					_ => Repr::Rec(target),
 				}
 			}
+			TypeKind::Bytes => Repr::Bytes,
 			TypeKind::Collection(CollKind::InlineArray, ..) => {
 				// Unlike a heap array, this aggregate's layout must remain
 				// concrete after the instance's binding scope ends (thunks,
@@ -608,6 +617,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Enum(_) => self.context.i32_type().into(),
 			Repr::InlineUnion(nominal) => self.inline_union_type(nominal).into(),
 			Repr::Union
+			| Repr::Bytes
 			| Repr::Array(_)
 			| Repr::Rec(_)
 			| Repr::Map(_)

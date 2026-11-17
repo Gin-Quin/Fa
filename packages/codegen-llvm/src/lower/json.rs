@@ -58,14 +58,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		schema.push(0);
 		let schema = self.constant_bytes(&schema);
-		let (bytes, length) = self.string_parts(text)?;
 		let out = self.alloca_type(self.pointer_type().into(), "json")?;
-		let error = self
-			.call_value(
-				self.runtime.function("fa_json_parse")?,
-				&[bytes.into(), length.into(), schema.into(), out.into()],
-			)?
-			.into_pointer_value();
+		let error = self.json_parse_input(text, schema, out)?;
 		self.raise_if_error(error)?;
 		let document = self
 			.builder
@@ -75,6 +69,53 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let value = self.json_value(document, ty, node)?;
 		self.call_runtime("fa_json_free", &[document.into()])?;
 		Ok(self.fresh(value))
+	}
+
+	/// Dispatch an already evaluated String | Bytes without copying its input.
+	fn json_parse_input(
+		&mut self,
+		text: Val<'ctx>,
+		schema: PointerValue<'ctx>,
+		out: PointerValue<'ctx>,
+	) -> Result<PointerValue<'ctx>, Error> {
+		if text.repr == Repr::Union {
+			let is_text = self.box_is(text, TypeId::STRING)?;
+			let string_block = self.append_block("json_text");
+			let bytes_block = self.append_block("json_bytes");
+			let join = self.append_block("json_parsed");
+			self.builder
+				.build_conditional_branch(is_text, string_block, bytes_block)?;
+			self.builder.position_at_end(string_block);
+			let string = self.unbox(text, Repr::Str)?;
+			let string_error = self.json_parse_input(string, schema, out)?;
+			let string_end = self.builder.get_insert_block().expect("JSON text block");
+			self.builder.build_unconditional_branch(join)?;
+			self.builder.position_at_end(bytes_block);
+			let bytes = self.unbox(text, Repr::Bytes)?;
+			let bytes_error = self.json_parse_input(bytes, schema, out)?;
+			let bytes_end = self.builder.get_insert_block().expect("JSON bytes block");
+			self.builder.build_unconditional_branch(join)?;
+			self.builder.position_at_end(join);
+			let error = self.builder.build_phi(self.pointer_type(), "json_error")?;
+			error.add_incoming(&[(&string_error, string_end), (&bytes_error, bytes_end)]);
+			return Ok(error.as_basic_value().into_pointer_value());
+		}
+		let (name, arguments): (&str, Vec<inkwell::values::BasicMetadataValueEnum<'ctx>>) =
+			if text.repr == Repr::Bytes {
+				(
+					"fa_json_parse_bytes",
+					vec![text.value.expect("Bytes").into(), schema.into(), out.into()],
+				)
+			} else {
+				let (bytes, length) = self.string_parts(text)?;
+				(
+					"fa_json_parse",
+					vec![bytes.into(), length.into(), schema.into(), out.into()],
+				)
+			};
+		Ok(self
+			.call_value(self.runtime.function(name)?, &arguments)?
+			.into_pointer_value())
 	}
 
 	fn json_stringify(&mut self, node: NodeId, info: &CallInfo) -> Result<Val<'ctx>, Error> {
@@ -114,7 +155,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		match types.kind(ty) {
 			TypeKind::Boolean => out.push(b'b'),
 			TypeKind::BoolLit(value) => out.push(if value { b'T' } else { b'F' }),
-			TypeKind::String | TypeKind::Character => out.push(b's'),
+			TypeKind::String => out.push(b's'),
 			TypeKind::StringLit(sym) => {
 				let text = types.syms.resolve(sym);
 				out.extend_from_slice(format!("S{};", text.len()).as_bytes());
@@ -578,7 +619,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					_ => Val::new(Repr::F64, value),
 				})
 			}
-			TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => {
+			TypeKind::String | TypeKind::StringLit(_) => {
 				let out = self.alloca(Repr::Str, "json_string")?;
 				self.call_runtime("fa_json_string", &[tree.into(), out.pointer.into()])?;
 				self.load(out)
@@ -923,8 +964,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| TypeKind::Float(_)
 			| TypeKind::FloatLit(..)
 			| TypeKind::String
-			| TypeKind::StringLit(_)
-			| TypeKind::Character => self.json_write_scalar(value, call),
+			| TypeKind::StringLit(_) => self.json_write_scalar(value, call),
 			TypeKind::None => self.json_text("null"),
 			TypeKind::Rec(_) => {
 				let Some(target) = self.types().rec_target(ty) else {
@@ -976,7 +1016,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			Repr::Str => {
 				let (bytes, length) = self.string_parts(value)?;
-				self.call_runtime("fa_b_json_string", &[bytes.into(), length.into()])
+				let capacity = self.string_capacity(value)?;
+				self.call_runtime(
+					"fa_b_json_string_flags",
+					&[bytes.into(), length.into(), capacity.into()],
+				)
 			}
 			_ => Err(self.unsupported(call.index(), "`Json.stringify` of this value")),
 		}
@@ -1023,7 +1067,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.builder.build_conditional_branch(is, taken, next)?;
 					self.builder.position_at_end(taken);
 					let item_repr = self.repr_of(item, call.index())?;
-					let data = self.unbox(value, item_repr)?;
+					let data = self.narrow_to(value, item_repr, call)?;
 					self.json_write(data, item, call)?;
 					self.builder.build_unconditional_branch(join)?;
 					self.builder.position_at_end(next);
@@ -1228,7 +1272,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		match key {
 			Some(key) => {
 				let (bytes, length) = self.string_parts(key)?;
-				self.call_runtime("fa_b_json_string", &[bytes.into(), length.into()])?;
+				let capacity = self.string_capacity(key)?;
+				self.call_runtime(
+					"fa_b_json_string_flags",
+					&[bytes.into(), length.into(), capacity.into()],
+				)?;
 				self.json_text(":")
 			}
 			None => {

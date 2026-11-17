@@ -13,7 +13,10 @@
 //! key and answer), and its cached object is reused only while every one of
 //! them still has the same answer (`units.rs`): an edit that changes a fact
 //! rebuilds only the units that read it, and a cached object never keeps a
-//! layout the program changed. Deterministic: sets of strings, merged in any
+//! layout the program changed. Frozen-field proofs additionally hash the
+//! complete written-field/shape set into object keys: a new wider shape can
+//! invalidate a negative proof without changing any previously queried member.
+//! Deterministic: sets of strings, merged in any
 //! order to the same result.
 //!
 //! A fact kind is a [`FactKind`]: a name, what a unit contributes, and how

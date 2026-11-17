@@ -1,0 +1,49 @@
+-- prints: 5 4 2 2
+-- prints: 1 false true true
+-- prints: 55357 56832
+-- prints: true false true
+-- prints: 2 4 none
+-- prints: 3 ["a", "b"] á a�a
+-- prints: 3 6 9 4 3
+-- prints: 0:a
+-- prints: 1:é
+-- prints: 2:日
+-- prints: 3:😀
+-- prints: 5:b
+-- prints: 2 2
+-- prints: true false
+-- prints: 1
+-- prints: true false
+-- prints: 55357 3
+-- prints: 55357
+let text = "é日😀x"
+console.log(text.length, "🇫🇷".length, "e\u{301}".length, "\r\n".length)
+let face = "😀"
+let high = face[0]
+let low = face[1]
+console.log(high.length, high.isWellFormed(), high + low == face, face[0..1] + face[1..] == face)
+console.log(high.codeUnitAt(0), low.codeUnitAt(0))
+mutable joined = high
+joined += low
+console.log(joined == face, "\u{FFFF}" < "\u{10000}", "😀" < "\u{E000}")
+console.log(text.indexOf("😀"), text.lastIndexOf("x"), text.indexOf("z"))
+console.log("a😀".split("").length, "a,b".split(","), "e\u{301}".replace("e", "a"), ("a" + high).padEnd(3, "a"))
+console.log("abc".utf8Length(), "héllo".utf8Length(), "日本語".utf8Length(), face.utf8Length(), high.utf8Length())
+for point, index in "aé日😀b" { console.log("{index}:{point}") }
+console.log("a😀".codePoints().length, "🇫🇷🇩🇪".characters().length)
+function compare = (text: String, index: Integer) => {
+	console.log((text[index] == "a") catch error => false, ("日" == text[index]) catch error => true)
+}
+compare("a日", 0)
+console.log(when text[0] is { "a" => 0, "é" => 1, else => 2 })
+function invalid = (index: Integer) => {
+	console.log((face.codeUnitAt(index) == 0) catch error => true, face.get(index) is not none)
+}
+invalid(3)
+
+let at = face.codeUnitAt
+console.log(at(0) catch error => 0, at(3) catch error => error.index)
+
+let index = face
+let read = index.codeUnitAt
+console.log(read(0) catch error => 0)

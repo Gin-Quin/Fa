@@ -131,9 +131,22 @@ impl Walker<'_> {
 					return ty;
 				}
 				SymbolKind::TypeParameter => return self.symbol_type(symbol, n),
-				// a `static` value is its literal type (M3: `static` is not analyzed yet)
+				// A `static` value can denote its well-formed literal type.
 				SymbolKind::Static => {
 					let ty = self.symbol_type(symbol, n);
+					let value = self
+						.a
+						.static_values
+						.get(&symbol)
+						.cloned()
+						.or_else(|| self.external_static(symbol));
+					if matches!(value, Some(fa_interpreter::Value::String(text)) if !text.is_well_formed())
+					{
+						let diagnostic =
+							self.diagnostic(&TY008, n, super::schemas::LONE_SURROGATE_TYPE);
+						self.report(diagnostic);
+						return TypeId::UNKNOWN;
+					}
 					return if self.s.types.is_literal(ty) {
 						ty
 					} else {
@@ -193,7 +206,7 @@ impl Walker<'_> {
 		if self.report_std_name(n, text) {
 			return TypeId::UNKNOWN;
 		}
-		let diagnostic = self.diagnostic(&TY007, n, format!("`{text}` is not a type"));
+		let diagnostic = self.diagnostic(&TY007, n, if text == "Character" { "`Character` is no longer a type: use `String` for text, including a single code unit or code point".to_string() } else { format!("`{text}` is not a type") });
 		self.report(diagnostic);
 		TypeId::UNKNOWN
 	}
@@ -785,7 +798,11 @@ impl Walker<'_> {
 						current = ty;
 					}
 					None => {
-						let message = format!("`{}` has no member `{text}`", w.display(current));
+						let message = format!(
+							"`{}` has no member `{text}`{}",
+							w.display(current),
+							w.removed_type_member_hint(current, &text)
+						);
 						let diagnostic = w.diagnostic(&TY007, member, message);
 						w.report(diagnostic);
 						return TypeId::UNKNOWN;

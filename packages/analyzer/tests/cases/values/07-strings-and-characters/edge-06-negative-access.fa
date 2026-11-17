@@ -1,0 +1,13 @@
+function rule = (text: String, index: Integer): String => {
+	let unit = text.get(index)
+	let code = text.codeUnitAt(index) catch error => -1
+	"{unit == none} {unit == text.get(-1)} {code}"
+}
+static last = @rule("é😀", -1)
+static before = @rule("é😀", -4)
+static after = @rule("é😀", 3)
+static first = @rule("é😀", 0)
+console.log(last, rule("é😀", -1) == last) -- prints: false true 56832 true
+console.log(before, rule("é😀", -4) == before) -- prints: true false -1 true
+console.log(after, rule("é😀", 3) == after) -- prints: true false -1 true
+console.log(first, rule("é😀", 0) == first) -- prints: false false 233 true

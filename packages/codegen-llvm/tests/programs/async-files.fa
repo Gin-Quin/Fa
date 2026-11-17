@@ -10,36 +10,36 @@ let path = "/tmp/fa-async-files-test.txt"
 let started = monotonic()
 
 -- blocking
-File.write(path, "first line") catch error => console.log(error)
-console.log(File.read(path) catch error => "") -- prints: first line
+File.writeText(path, "first line") catch error => console.log(error)
+console.log(File.readText(path) catch error => "") -- prints: first line
 
 -- awaited: another task runs while the pool works
 async function ticker = () => {
 	console.log("tick")
 }
 let tick = start ticker()
-await File.write(path, "héllo") catch error => console.log(error)
+await File.writeText(path, "héllo") catch error => console.log(error)
 -- prints: tick
 await tick
-console.log(await File.read(path) catch error => "") -- prints: héllo
+console.log(await File.readText(path) catch error => "") -- prints: héllo
 async function size = (): Integer => {
-	let bytes = await File.readBytes(path) catch error => return -1
+	let bytes = await File.read(path) catch error => return -1
 	bytes.length
 }
 console.log(await size()) -- prints: 6
 
 -- errors
 async function describe = (path: String): String => {
-	let text = await File.read(path) catch error => return "{error}"
+	let text = await File.readText(path) catch error => return "{error}"
 	text
 }
 console.log(await describe("/tmp/fa-no-such-directory/file")) -- prints: FileError { path = "/tmp/fa-no-such-directory/file", message = "No such file or directory" }
-console.log(File.read("/tmp") catch error => "{error}") -- prints: FileError { path = "/tmp", message = "Is a directory" }
+console.log(File.readText("/tmp") catch error => "{error}") -- prints: FileError { path = "/tmp", message = "Is a directory" }
 
 -- many reads at once
 mutable reads: Array<Task<String> throws FileError> = []
 for index in 0..20 {
-	reads.push(start File.read(path))
+	reads.push(start File.readText(path))
 }
 let texts = await Task.all(reads) catch error => []
 console.log(texts.length) -- prints: 20

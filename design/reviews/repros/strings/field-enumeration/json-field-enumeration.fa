@@ -1,0 +1,18 @@
+-- skip-target: native-freestanding
+use { Json } = std.json
+console.log(Json.stringify({ z = 9, a = 1 })) -- prints: {"a":1,"z":9}
+console.log(Json.stringify({ a = 2, z = 8 })) -- prints: {"a":2,"z":8}
+console.log(Json.stringify({ z = { z = 9, a = 1 }, a = { a = 2, z = 8 } })) -- prints: {"a":{"a":2,"z":8},"z":{"a":1,"z":9}}
+
+type Node = { number: Integer, next: Node? }
+function outside = (): Node => Node { number = 1, next = Node { number = 2, next = none } }
+function scoped = (): String => {
+	type Node = { text: String, next: Node? }
+	let inside = Node { text = "a", next = Node { text = "b", next = none } }
+	Json.stringify({ outside = outside(), inside = inside })
+}
+static calculated = @scoped()
+console.log(calculated) -- prints: {"inside":{"text":"a","next":{"text":"b"}},"outside":{"number":1,"next":{"number":2}}}
+console.log(scoped()) -- prints: {"inside":{"text":"a","next":{"text":"b"}},"outside":{"number":1,"next":{"number":2}}}
+static unicode = @parseJson("{{\"ﬀ\": 2, \"𐐀\": 1}}")
+console.log(Json.stringify(unicode)) -- prints: {"𐐀":1,"ﬀ":2}

@@ -34,6 +34,8 @@ mod loans;
 mod machine;
 pub mod memory;
 mod publication;
+mod strings;
+pub mod text;
 pub mod types;
 pub mod value;
 
@@ -383,15 +385,14 @@ mod tests {
 			),
 			Ok(Value::int(-5))
 		);
-		let fail =
-			|message: &str| Expr::Throw(Expr::Const(Value::String(Arc::from(message))).boxed());
+		let fail = |message: &str| Expr::Throw(Expr::Const(Value::string(message)).boxed());
 		assert_eq!(
 			run(
 				&mut host,
 				&call(vec![Arg::Value(fail("left")), Arg::Value(fail("right"))]),
 				0
 			),
-			Err(Error::Thrown(Value::String(Arc::from("right"))))
+			Err(Error::Thrown(Value::string("right")))
 		);
 		let mut defaults = add();
 		defaults.params[0].default = Some(fail("default"));
@@ -402,7 +403,7 @@ mod tests {
 				&call(vec![Arg::Default, Arg::Value(fail("written"))]),
 				0
 			),
-			Err(Error::Thrown(Value::String(Arc::from("written"))))
+			Err(Error::Thrown(Value::string("written")))
 		);
 	}
 

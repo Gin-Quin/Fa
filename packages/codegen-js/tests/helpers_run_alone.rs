@@ -66,7 +66,7 @@ fn a_collected_module_runs_a_program() {
 		"faRun",
 		"faFormat",
 		"faFloorDivide",
-		"faStringLength",
+		"faCodePointCount",
 		"faCaught",
 		"faFormatMember",
 	]);
@@ -80,7 +80,7 @@ try {
 }
 if (String(caught) !== "DivisionByZero") throw new Error(String(caught));
 if (faFloorDivide(-7, 2) !== -4) throw new Error("floor division");
-if (faStringLength("🇫🇷é") !== 2) throw new Error("graphemes");
+if (faCodePointCount("🇫🇷é") !== 4) throw new Error("code points");
 if (faFormatMember("Shape.Point") !== "Shape.Point") throw new Error("member");
 faRun(() => console.log(faFormat("ok")));
 "#,

@@ -1,0 +1,2 @@
+static half = "😀"[0]
+let invalid = Schema.StringLiteral { value = half } -- error: TF042

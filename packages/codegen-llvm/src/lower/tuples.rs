@@ -433,11 +433,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				Ok(Some(self.table_index(node, map, key)?))
 			}
-			Repr::Array(_)
+			Repr::Array(_) | Repr::Bytes
 				if self.node_repr(index)? != Repr::Range
 					&& let Some(code_points) = self.code_points_of(node) =>
 			{
 				Ok(Some(self.code_point_index(node, code_points, index)?))
+			}
+			Repr::Bytes if self.node_repr(index)? == Repr::Range => {
+				Ok(Some(self.bytes_slice(node, target, index, false)?))
 			}
 			Repr::Array(item_type) if self.node_repr(index)? == Repr::Range => {
 				let array = self.expr(target)?;

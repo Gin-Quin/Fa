@@ -1,4 +1,4 @@
-// helpers: faHashMix, faHashString, faHashNumber, faSides, faHash, FaSet, faDeepEquals, faKeyEquals, FaHashMap, faCopyShell, faSharedHandle, faCopy, faExit, FaStop, faStopMessage, faIsStackOverflow, faWriteError, faIsError, faReport, faRun
+// helpers: faHashMix, faHashString, faHashNumber, faSides, faHash, FaSet, faIsBytes, faBytesEqual, faDeepEquals, faKeyEquals, FaHashMap, faCopyShell, faSharedHandle, faCopy, faExit, FaStop, faStopMessage, faIsStackOverflow, faWriteError, faIsError, faReport, faRun
 
 function main() {
 	let head = undefined;

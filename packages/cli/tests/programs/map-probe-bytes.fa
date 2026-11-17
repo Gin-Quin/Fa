@@ -1,0 +1,27 @@
+-- Bytes mutation keeps the index and the cached probe of a separate map intact.
+-- asynchronous: false
+-- require-split: true
+
+function stamp = (bytes: Bytes, value: Byte) mutates bytes => {
+	if bytes.length > 0 {
+		bytes[0] = value
+	}
+}
+
+function run = (input: UInt32) => {
+	let key = input
+	mutable map = Map<UInt32, UInt32>.from([], capacity = 16)
+	mutable bytes = Bytes.filled(1)
+	assert map.get(key) is none
+	stamp(bytes, 7)
+	map[key] = 8
+	assert map.get(key) == 8
+	stamp(bytes, 9)
+	map[key] = 10
+	assert map.take(key) == 10
+	assert map.size == 0
+	console.log(bytes.get(0) ?? 0)
+}
+
+run(3)
+-- prints: 9

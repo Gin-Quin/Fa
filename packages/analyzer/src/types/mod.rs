@@ -67,8 +67,8 @@ pub enum TypeKind {
 	String,
 	/// A string literal type.
 	StringLit(Sym),
-	/// `Character`.
-	Character,
+	/// A fixed-length sequence of bytes, distinct from `Array<Byte>`.
+	Bytes,
 	/// An object type.
 	Object(ShapeId),
 	/// A tuple type.
@@ -314,6 +314,8 @@ pub enum RuntimeKind {
 	Columnar = 13,
 	/// Objects, named unions, C structures.
 	Object = 14,
+	/// A JavaScript `Uint8Array`, distinct from arrays and objects.
+	Bytes = 15,
 }
 
 impl RuntimeKind {
@@ -333,6 +335,7 @@ impl RuntimeKind {
 			12 => RuntimeKind::Pool,
 			13 => RuntimeKind::Columnar,
 			14 => RuntimeKind::Object,
+			15 => RuntimeKind::Bytes,
 			_ => RuntimeKind::Other,
 		}
 	}
@@ -524,8 +527,6 @@ pub enum ConstValue {
 	Float(u64),
 	/// A string.
 	String(Sym),
-	/// A character.
-	Character(Sym),
 	/// A big integer, by its decimal text.
 	BigInt(Sym),
 	/// A member of an enumeration.

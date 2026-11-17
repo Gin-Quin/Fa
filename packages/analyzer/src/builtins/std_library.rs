@@ -13,9 +13,9 @@
 //! - `std.time.sleep(milliseconds)`: waits (async, `design/async.md` §5).
 //! - `std.time.monotonic(): Integer`: a monotonic clock in nanoseconds (for
 //!   measuring durations); impure.
-//! - `std.fs.File.read(path): String throws FileError`: the whole file as
-//!   UTF-8; `File.readBytes(path): Array(Byte) throws FileError`;
-//!   `File.write(path, text) throws FileError` (creates or replaces the
+//! - `std.fs.File.read(path): Bytes throws FileError`: the whole file as
+//!   bytes; `File.readText(path): String throws FileError` decodes UTF-8;
+//!   `File.write(path, bytes)` and `File.writeText(path, text) throws FileError` (creates or replaces the
 //!   file). Blocking or awaited (natively, an awaited one runs on the
 //!   blocking pool); impure; not on `web` ([`missing_on`]).
 //! - `std.net` (`design/async.md` §5): `TcpListener { host = "…", port }`
@@ -135,10 +135,10 @@ pub fn impurity(path: &str) -> Option<&'static str> {
 	}
 	match path {
 		"std.time.now" | "std.time.monotonic" => Some("the clock (`now` is not deterministic)"),
-		"File.read" | "File.readBytes" => {
+		"File.read" | "File.readText" => {
 			Some("the file system (`File.read`; use `@readFile` at compile time)")
 		}
-		"File.write" => Some("the file system (`File.write`)"),
+		"File.write" | "File.writeText" => Some("the file system (`File.write`)"),
 		_ if path.starts_with("TcpListener") || path.starts_with("TcpStream") => {
 			Some("the network (`std.net`)")
 		}
@@ -151,7 +151,9 @@ pub fn impurity(path: &str) -> Option<&'static str> {
 /// library, `native-freestanding`, and JSON there, whose floats need it).
 pub fn missing_on(path: &str) -> &'static [&'static str] {
 	match path {
-		"File.read" | "File.readBytes" | "File.write" => &["web", "native-freestanding"],
+		"File.read" | "File.readText" | "File.write" | "File.writeText" => {
+			&["web", "native-freestanding"]
+		}
 		// floats need the C library's `strtod` and `snprintf`
 		"Json.parse" | "Json.stringify" => &["native-freestanding"],
 		_ if path.starts_with("TcpListener") || path.starts_with("TcpStream") => {
@@ -164,7 +166,8 @@ pub fn missing_on(path: &str) -> &'static [&'static str] {
 const STRING: Ty = Ty::Is(TypeId::STRING);
 const INTEGER: Ty = Ty::Is(TypeId::INTEGER);
 const VOID: Ty = Ty::Is(TypeId::VOID);
-const BYTES: Ty = Ty::Array(&Ty::Is(TypeId::BYTE));
+const BYTES: Ty = Ty::Is(TypeId::BYTES);
+const BYTE_ARRAY: Ty = Ty::Array(&Ty::Is(TypeId::BYTE));
 const STREAM: Ty = Ty::Socket(SyncKind::TcpStream);
 const NET_ERROR: Option<Ty> = Some(Ty::Error("NetError"));
 const FILE_ERROR: Option<Ty> = Some(Ty::Error("FileError"));
@@ -244,7 +247,7 @@ pub static BUILTINS: &[Builtin] = &[
 	},
 	// the whole file, as bytes
 	Builtin {
-		path: "File.readBytes",
+		path: "File.read",
 		kind: Function(&Signature {
 			params: &[param("path", STRING)],
 			variadic: false,
@@ -254,9 +257,18 @@ pub static BUILTINS: &[Builtin] = &[
 	},
 	// creates or replaces a file
 	Builtin {
-		path: "File.write",
+		path: "File.writeText",
 		kind: Function(&Signature {
 			params: &[param("path", STRING), param("text", STRING)],
+			variadic: false,
+			ret: VOID,
+			throws: FILE_ERROR,
+		}),
+	},
+	Builtin {
+		path: "File.write",
+		kind: Function(&Signature {
+			params: &[param("path", STRING), param("bytes", BYTES)],
 			variadic: false,
 			ret: VOID,
 			throws: FILE_ERROR,
@@ -312,7 +324,7 @@ pub static BUILTINS: &[Builtin] = &[
 	Builtin {
 		path: "TcpStream#read",
 		kind: Function(&Signature {
-			params: &[param("buffer", BYTES)],
+			params: &[param("buffer", BYTE_ARRAY)],
 			variadic: false,
 			ret: INTEGER,
 			throws: NET_ERROR,
@@ -323,7 +335,7 @@ pub static BUILTINS: &[Builtin] = &[
 		path: "TcpStream#write",
 		kind: Function(&Signature {
 			params: &[
-				param("bytes", BYTES),
+				param("bytes", BYTE_ARRAY),
 				Param {
 					name: "count",
 					ty: INTEGER,
@@ -346,7 +358,7 @@ pub static BUILTINS: &[Builtin] = &[
 	},
 	// the whole file, as UTF-8
 	Builtin {
-		path: "File.read",
+		path: "File.readText",
 		kind: Function(&Signature {
 			params: &[Param {
 				name: "path",
@@ -368,7 +380,7 @@ pub static BUILTINS: &[Builtin] = &[
 		kind: Function(&Signature {
 			params: &[Param {
 				name: "text",
-				ty: STRING,
+				ty: Ty::Union(&[STRING, BYTES]),
 				default: false,
 			}],
 			variadic: false,

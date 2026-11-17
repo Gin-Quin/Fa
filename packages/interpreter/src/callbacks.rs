@@ -14,6 +14,7 @@ pub(crate) enum Container {
 }
 
 enum Kind {
+	Json(Box<crate::json::Reader>),
 	Find,
 	Filter,
 	Delete,
@@ -83,7 +84,8 @@ impl Callback {
 	pub fn handles(path: &str) -> bool {
 		matches!(
 			path,
-			"Array#find"
+			"Json.parse"
+				| "Array#find"
 				| "Set#find" | "Map#find"
 				| "Array#filter"
 				| "Set#filter"
@@ -117,11 +119,27 @@ impl Callback {
 		staged: bool,
 	) -> Result<Box<Self>, Error> {
 		let mut arguments = arguments.into_iter();
-		let function = arguments.next().and_then(|value| match value {
+		let first = arguments.next().and_then(|value| match value {
 			Out::Value(value) => Some(value),
 			Out::Loan(_) => None,
 		});
-		let kind = if path.ends_with("#find") {
+		let function = if path == "Json.parse" {
+			None
+		} else {
+			first.clone()
+		};
+		let kind = if path == "Json.parse" {
+			let input = first.ok_or_else(|| Error::Stop("missing JSON input".into()))?;
+			let schema = match arguments.next() {
+				Some(Out::Value(value)) => value,
+				_ => return Err(Error::Stop("missing JSON schema".into())),
+			};
+			let strict = match arguments.next() {
+				Some(Out::Value(value)) => value.as_bool().unwrap_or(false),
+				_ => false,
+			};
+			Kind::Json(Box::new(crate::json::Reader::new(&input, schema, strict)?))
+		} else if path.ends_with("#find") {
 			Kind::Find
 		} else if path.ends_with("#filter") {
 			Kind::Filter
@@ -139,7 +157,7 @@ impl Callback {
 			Kind::Sort
 		};
 		let sort = matches!(kind, Kind::Sort);
-		if !sort && function.is_none() {
+		if !sort && !matches!(kind, Kind::Json(_)) && function.is_none() {
 			return Err(Error::Stop("missing callback argument".into()));
 		}
 		let total = if matches!(kind, Kind::Reduce) {
@@ -179,7 +197,23 @@ impl Callback {
 		}))
 	}
 
-	pub fn advance(mut self: Box<Self>, returned: Option<Value>) -> Result<Progress, Error> {
+	pub fn advance(
+		mut self: Box<Self>,
+		returned: Option<Value>,
+		interpreter: &mut crate::Interpreter<'_>,
+	) -> Result<Progress, Error> {
+		if let Kind::Json(reader) = &mut self.kind {
+			return match reader.advance(returned, || interpreter.step().map_err(Error::from))? {
+				crate::json::ReadProgress::Done(value) => {
+					Ok(Progress::Done(Output::Value(value.into())))
+				}
+				crate::json::ReadProgress::Call(function) => Ok(Progress::Call {
+					function,
+					arguments: Vec::new(),
+					next: self,
+				}),
+			};
+		}
 		if matches!(self.kind, Kind::Sort) {
 			return self.sort(returned);
 		}
@@ -215,7 +249,7 @@ impl Callback {
 					}
 				}
 				Kind::Reduce => self.total = value.into(),
-				Kind::Sort => unreachable!(),
+				Kind::Sort | Kind::Json(_) => unreachable!(),
 			}
 			self.position += 1;
 		}
@@ -261,7 +295,7 @@ impl Callback {
 				unvisited: self.position,
 			},
 			Kind::Map => Output::Mapped(self.container, self.output),
-			Kind::Sort => unreachable!(),
+			Kind::Sort | Kind::Json(_) => unreachable!(),
 		};
 		Ok(Progress::Done(output))
 	}

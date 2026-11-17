@@ -51,6 +51,10 @@ Supported escape sequences:
 
 A literal is always well-formed Unicode: `\x80` to `\xFF` are errors (use `\u{...}`), and so is a `\u{...}` that is not a Unicode scalar value (a surrogate, from `D800` to `DFFF`, or a value above `10FFFF`). Any other character after a backslash is an error.
 
+A string literal **type** also always holds a well-formed string. A compile-time string value containing a lone surrogate has the type `String`; its exact literal type is not kept. Trying to use that value as a literal type, directly or through `Schema.StringLiteral` and `TypeFromSchema`, is an error: use `String`, or make the value well-formed first.
+
+A runtime `Schema.StringLiteral` is ordinary data; an unknown runtime payload is not required to be well-formed until a schema becomes a type. Known compile-time schema construction is checked too.
+
 ## Template strings
 
 Any string can interpolate expressions with `{}`:
@@ -142,6 +146,8 @@ let fromSecond = someString[1..]   -- "ello"
 let last = someString[-1]          -- "o"
 ```
 
+Negative slice endpoints are normalized from the end. A start equal to `length` is allowed; reversed normalized bounds give an empty slice, and `""[..]` succeeds. An inclusive end must designate an existing code unit: `"ab"[0..=2]` is rejected, while `"ab"[0..2]` is valid. Certain invalid bounds are compile errors; unproven ones are checked at runtime.
+
 Ranges follow the same rules everywhere in Fa: `..` excludes the upper bound, `..=` includes it. See [ranges](/values/ranges).
 
 As with collections, an index or a range that the compiler cannot prove to be in bounds `throws IndexError` (JavaScript gives `undefined` instead). Use `get` to receive an optional:
@@ -152,6 +158,10 @@ let maybeUnit = text.get(index) -- String?
 ```
 
 See [errors](/values/errors) and [optionals](/values/optionals).
+
+`get` and `codeUnitAt` use the same negative indices as `[]`: `"ab".get(-1)` is `"b"`. Outside the bounds, `get` returns `none` and `codeUnitAt` throws `IndexError`.
+
+A string has no item assignment: `text[0] = "x"` is an error, including through an alias of that item. Build a new string and assign the owner instead.
 
 `codeUnitAt(index)` gives the code unit as a number (JavaScript's `charCodeAt`), which is what a lexer compares:
 
@@ -175,6 +185,10 @@ console.log(word) -- error: `word` was invalidated: declare it again with `use w
 ```
 
 A string owns its storage, so any mutation of the string invalidates its slices: appending to it, or replacing it, as in `person.name = "Bao"`. See [mutations](/advanced/owned-references#mutations).
+
+A slice is a view of a range of code units, not an independently replaceable string. Assigning the whole view, with `word = "other"` or `word += "!"`, is an error, even for a `mutable use`. Replace the owning string instead, or reseat a `mutable use` reference with `reuse`.
+
+A view has no structural operations: `word.reserve(8)` is an error on a `use` slice. Change or reserve the owning string, then `reuse` the view.
 
 ### Surrogate pairs
 
@@ -228,13 +242,17 @@ assert accented.length == 2
 assert accented.characters().length == 1
 ```
 
-It is the only string operation that depends on the Unicode tables: the segmentation follows the Unicode rules (UAX #29) of the Unicode version supported by the compiler, and, on JavaScript targets, of the JavaScript engine (`Intl.Segmenter`). Every other operation works on code units: a search can match a part of a grapheme cluster (`"e\u{301}".includes("e")` is `true`), as in JavaScript.
+Grapheme segmentation and case conversion depend on Unicode tables: the segmentation follows the Unicode rules (UAX #29) of the Unicode version supported by the compiler, and, on JavaScript targets, of the JavaScript engine (`Intl.Segmenter`). Position-based operations work on code units: a search can match a part of a grapheme cluster (`"e\u{301}".includes("e")` is `true`), as in JavaScript.
 
 `==` compares the code units exactly, with no Unicode normalization, as in JavaScript: `"é"` written as one code point is not equal to `"e\u{301}"`.
 
 ## String API
 
+Text entering through an operation that declares no decoding error, including command-line arguments, environment text and `CString.toString()`, is decoded as `String.fromUtf8Lossy`: invalid UTF-8 becomes one `U+FFFD` per maximal invalid subpart, following WHATWG. Such input never stops the program. `String.fromUtf8` and `File.readText` remain strict and report their declared error. Read bytes when their exact values matter.
+
 The string API is the JavaScript `String` API, with a few differences that don't change what a position means: an unproven index throws instead of giving `undefined`, `indexOf` returns an optional instead of `-1`, and no value is converted to a string implicitly. See [string operations](/operations/string) for the list of methods.
+
+`String.compareLocale` is available only at runtime: it depends on the locale data of the machine running the program and cannot be evaluated at compile time.
 
 ## Capacity and reservation
 
@@ -253,35 +271,47 @@ for line in lines {
 output.reserve(1024) -- room for 1024 more bytes than its current byte length
 ```
 
-Natively, `capacity` counts storage bytes, not UTF-16 code units: it is at least the current byte length, and an inline string has room for 23 bytes. A static string reports its byte length until a reservation or append gives it owned storage. `reserve(n)` takes a number of additional bytes, so no length has to be converted from code units: it makes room for at least the current byte length plus `n`, never shrinks and never changes the text. It requires a `mutable` receiver and declares `mutates self`, like an append: references into the string must be declared again afterwards.
+Natively, `capacity` counts storage bytes, not UTF-16 code units: it is at least the current byte length, and an inline string has room for 23 bytes (11 on wasm32). A static string reports its byte length until a reservation or append gives it owned storage. `reserve(n)` takes a number of additional bytes, so no length has to be converted from code units: it makes room for at least the current byte length plus `n`, never shrinks and never changes the text. It requires a `mutable` receiver and declares `mutates self`, like an append: references into the string must be declared again afterwards.
 
 On JavaScript and during compile-time evaluation, the hints are ignored, `reserve` does nothing and `capacity` equals `length`. This keeps the property constant-time without measuring an encoding or inventing storage the engine does not expose. Use `utf8Length()` to measure an encoding, and `length` for code-unit positions. Capacity is a storage hint, not a portable limit: only `capacity >= length` holds on every target (see [capacity and reservation](/collections/arrays#capacity-and-reservation)). Copies need not preserve spare capacity.
+
+`Json.stringify` escapes every lone surrogate as lowercase `\uXXXX`, so its JSON text is well-formed and parsing it restores the original code units. `Json.parse` preserves such escapes and joins an escaped high/low pair. See [JSON](/operations/json).
 
 :::implementation
 ## Implementation details
 
-The semantics are UTF-16 code units; the native storage is UTF-8. Text arrives and leaves as UTF-8 (files, the network, C), so nothing is transcoded at these boundaries, and ASCII text, the common case, pays nothing: one byte is one code unit.
+The semantics are UTF-16 code units; the native storage is UTF-8. Text arrives and leaves as UTF-8 (files, the network, C), and ASCII text, the common case, pays nothing: one byte is one code unit. Native arguments and `CString.toString()` validate external bytes and replace maximal invalid subparts with `U+FFFD`; Node and Bun already decode command-line arguments this way. Successful strict text reads retain their validated UTF-8 bytes.
+
+String literal types store well-formed UTF-8. A runtime `Schema.StringLiteral` is data: the well-formedness restriction applies to known compile-time construction and whenever a schema becomes a type, not to an unknown runtime payload. An exact compile-time value containing a lone surrogate widens to `String`; schema reconstruction or using that value as a literal type must diagnose it rather than replace or encode away the surrogate.
 
 ### Native
 
 Interpolation constructors and appended interpolations check each addition of byte lengths against the String representation limit before allocating or reserving. The check applies at both native and wasm pointer widths; an LLVM no-wrap annotation alone does not establish the bound.
 
 - **Layout.** A `String` is 24 bytes: a pointer, a length in bytes and a capacity with flags (static, inline, ASCII, surrogates). A string of at most 23 bytes is stored inline, without allocation. A literal is stored in read-only data, with its UTF-16 length computed at compile time; storing its value never copies its bytes. Mutation obtains writable storage before changing those bytes. There are no ropes: a `mutable` string that is appended to grows in place.
-- **Encoding.** The bytes are UTF-8, extended to lone surrogates (WTF-8): a lone surrogate is stored as the three bytes that the UTF-8 scheme gives to its value (`ED A0 80` to `ED BF BF`), and a surrogate pair is always stored as the four bytes of its code point. Equal strings therefore have equal bytes.
+- **Encoding.** The bytes are UTF-8, extended to lone surrogates (WTF-8): a lone surrogate is stored as the three bytes that the UTF-8 scheme gives to its value (`ED A0 80` to `ED BF BF`), and an owning string stores a surrogate pair as the four bytes of its code point. Equal owning strings therefore have equal bytes. A borrowed cut span uses the edge form below; readers compare and hash its logical canonical content.
 - **Assignment and stores (ownership decision, 2026-11-16).** No string reference counting. At most 23 bytes copy inline like a scalar; literals use static storage. A longer string moves at last use, or becomes a view when the destination is immutable, does not outlive its source and the source stays unchanged while the view lives (proved by escape and lifetime analysis). Otherwise the store makes one allocation and one block copy of the bytes. `use` rules that copy out. This is the explicit cost contract for ordinary string semantics; no `copy` syntax is required.
 - **The ASCII flag** says that every byte is below `0x80`. It is computed for literals at compile time, kept by copies and slices, kept by an append when the suffix has it, and computed by `String.fromUtf8` while it validates. It may be missing from an ASCII string (only slower), never set on another. With it, a code unit is a byte: `length` is the byte length, indexing is a load, a position is a byte offset.
-- **The surrogates flag** says that the string may hold a lone surrogate. Only an index or a slice that cuts a surrogate pair sets it (and operations on such strings keep it). Without it, the bytes are valid UTF-8. A concatenation whose left operand ends with a lone high surrogate and whose right operand starts with a lone low one writes the four bytes of the code point.
-- **`length`** of a string without the ASCII flag is the number of bytes that are not continuation bytes, plus the number of four-byte sequences. An inline string counts its bytes; a heap string caches the count in its block header; a write clears the cache.
-- **Indexing and slicing** a string without the ASCII flag convert code unit positions to byte offsets by scanning. A heap string builds breadcrumbs (the byte offset of every 64th code unit) at the second conversion after a write, so that a conversion scans at most 64 code units; a write clears them. A position inside a four-byte sequence yields the lone surrogate, as three bytes, and sets the surrogates flag of the result. `text[i]` returns an inline string; `codeUnitAt` returns the unit without building a string.
-- **A slice** (`String in text`) is a pointer and a byte length, with the ASCII flag of its string.
+- **The surrogates flag** says that the string may hold a lone surrogate. An index or a slice that cuts a surrogate pair sets it, and operations on such strings keep it. A counted non-ASCII view may carry it conservatively as part of its view tag; materializing an owner recomputes its flags. Without it, the bytes are valid UTF-8. A concatenation whose left operand ends with a lone high surrogate and whose right operand starts with a lone low one writes the four bytes of the code point.
+- **`length`** counts UTF-16 units. An inline/frame string scans at most its fixed 23/64-byte bound (11 inline on wasm32). A Unicode heap owner publishes a byte/unit base at creation and after non-ASCII writes. ASCII-only appends leave that base unchanged, so a query reads `base units + current bytes - base bytes`, without scanning or taking a lock. Only exclusive writers change the base. A same-byte-length replacement still publishes a new count; surrogate normalization publishes its final byte length and preserves the additive unit count.
+- **Indexing and slicing** a string without the ASCII flag convert code unit positions to byte offsets by scanning. A heap string builds breadcrumbs (the byte offset of every 64th code unit) at the second conversion after a write, so that a conversion scans at most 64 code units. Non-ASCII writes clear them; ASCII appends retain covered prefix positions and rebuild on demand when a requested entry lies beyond their coverage. The first table slot stores its allocation entry count, with position zero implicit, so freeing never depends on a later byte length or base count. A position inside a four-byte sequence yields the lone surrogate, as three bytes, and sets the surrogates flag of the result. `text[i]` returns an inline string; `codeUnitAt` returns the unit without building a string.
+- **Views and slices.** Every string value, including a view, has `O(1)` UTF-16 `length`. A general non-owning view uses the existing three-word String layout: pointer, plain physical byte length, and UTF-16 count with encoding flags and a view tag in the word where an owner stores capacity. A code-unit slice stores the normalized end minus start at creation; an ASCII view uses its byte length. A non-ASCII view produced by a byte search counts units in the same pass as that search. No value gets a fourth word.
+- **The two-word slice** (`String in text`), pointer and byte length, is an optimization when the text is known to be ASCII (its flag may be carried in the length), or when the slice's unit count and unit positions are never needed. Otherwise use the three-word counted view. ASCII packed strings, split views and benchmark paths retain their existing layouts and costs.
+- **Cut spans.** A no-copy view beginning with the low half of a four-byte sequence starts at that sequence's byte 2; a view ending with its high half ends after byte 2 (zero-based byte offsets). The physical low head has two bytes, the high tail three. These are unambiguous edges of otherwise canonical WTF-8 and need no length-word bits. The logical encoded length is the physical byte length plus one for a low head; owning copies encode either cut half as three canonical WTF-8 bytes, and outputs replace it with `U+FFFD`. Readers never access bytes outside the span. Empty ranges are decided in code units before byte intervals are formed.
+- **Whole-program view support.** Closed native/wasm/JIT modules specialize the virtual-span capability after lowering all functions, callbacks and generic instances. A program without an edge-producing view constructor removes that support. A split by a proven nonempty ASCII literal cannot create an edge; unknown or empty separators retain support. A separate explicit slice or region-slice constructor always keeps support enabled, including when its result is later split by ASCII. Every separately compiled unit and its runtime conservatively enables it, with the same setting for cached objects. Canonical Unicode views remain available without it; only a half-surrogate boundary requires virtual-edge support. Representation/lifetime rules for counted views apply independently of this capability.
+- **Positions in a non-ASCII view** scan from the view's start: views have no breadcrumbs of their own, so the work is bounded by the view's length. Iteration keeps a cursor rather than restarting the scan. A one-entry sequential-position cache is optional and must be measured before it is retained.
+- **Compact stored text.** ASCII packed records keep their existing length header: one byte for fewer than 127 bytes, otherwise `0xFF` plus one pointer-sized word (9 bytes total on native, 5 on wasm32). The low header bit is the ASCII flag. Non-ASCII records keep that byte-length header and add a UTF-16 count encoded in unsigned LEB128: 1–9 bytes on native, 1–4 on wasm32, before the text bytes. A compact inline arena text keeps its four-byte header on ASCII; non-ASCII adds a two-byte UTF-16 count, so its text starts at byte six. The ordinary arena prefix is 16 bytes, or 18 before non-ASCII text. External arena texts keep their existing owning String descriptor; a non-ASCII owner's count is initialized when it is stored, so a view reads it without scanning. These Unicode-only fields do not change any ASCII format or enlarge the three-word String value.
+
 - **Comparing a one-unit string with a literal** (`text[i] == "a"`, `when text[i] is { … }`) compares code units: no string is built.
 - **Iteration** decodes one code point per step from the bytes, `O(1)`, and advances the index by 1 or 2.
-- **Equality** compares two inline values word by word. Otherwise it checks byte lengths before reading bytes; empty and one-byte strings compare inline, and longer strings use the shared byte comparison.
+- **Equality** compares two inline values word by word. Canonical external values check byte lengths before reading bytes; empty and one-byte strings compare inline, and longer strings use the shared byte comparison. A virtual edge span compares code units directly and hashes its canonical byte stream without copying the text; ASCII flags bypass edge handling, including the specialized table-key comparator. Reservation checks keep the ASCII/view predicate inline and outline only the materialization of a virtual cut span, so enabling cut-span support does not add a call to ordinary ASCII reservations.
 - **`<`** compares the bytes, then corrects the result at the first byte that differs: the UTF-8 order is the code point order, which differs from the UTF-16 order only when one of the two bytes starts a four-byte sequence (`F0` to `F4`) and the other is `EE` or `EF` (`U+E000` to `U+FFFF`); the result is then inverted. When a string has the surrogates flag, the two sequences at the first difference are compared as code units.
 - **Searches** (`includes`, `indexOf`, `split`, `replace`…) search the bytes. A byte offset is converted to a position by counting the code units before it (the identity with the ASCII flag). A searched string that starts with a lone low surrogate or ends with a lone high one can match half of a pair: it is searched code unit by code unit.
-- **`utf8Length()`** is the byte length: a lone surrogate is three bytes, like the `U+FFFD` that replaces it.
+- **`utf8Length()`** is the logical encoded byte length: a lone surrogate is three bytes, like the `U+FFFD` that replaces it. A virtual low head adds one to the physical span length.
 - **`toUtf8()`** copies the bytes, or gives the string's own block to the `Bytes` when the string is not used afterwards; with the surrogates flag, each lone surrogate is written as `EF BF BD`. `String.fromUtf8` validates the bytes (which computes the ASCII flag) and copies them, or adopts the block of a `Bytes` that is not used afterwards.
-- **`characters()`** uses the compiler's UAX #29 tables, which are linked into the program only when it calls `characters()`.
+- **Direct UTF-8 iteration** uses a cursor with a physical byte offset, a four-byte encoded word and a remaining-byte count (16 bytes native, 12 on wasm32); it allocates no `Bytes`. ASCII retains a direct byte loop. A non-ASCII step decodes a code point, encodes it once and yields its bytes, replacing lone surrogates with `U+FFFD`.
+- **`characters()`** uses Unicode 17.0.0 extended grapheme clusters (UAX #29 revision 47), including Indic conjuncts, emoji ZWJ sequences and regional-indicator parity. Checked-in Unicode data generates the property ranges offline; the C tests check every official `GraphemeBreakTest` boundary. Hangul syllable properties are computed arithmetically. The tables are linked into the program only when it calls `characters()`; ordinary length, position, iteration, search and conversion operations do not reference them. ASCII collections retain their compact byte snapshot except when CRLF must form one cluster.
+- **Frozen fields.** When the whole-program field proof says a String field never changes after construction, a method borrows its inline bytes from the object's stable field storage instead of making a snapshot. Their encoded UTF-8 byte length is also read once at entry, so repeated byte bounds checks and `utf8Length()` reuse that frozen value. Numeric unit helpers carry their true result ranges at the call site. Negative ASCII indices are normalized before the same byte load used by positive indices, preserving a byte value until extension to `UInt16`. At O3, bounded mutually recursive method groups and their same-receiver callers that read code units or indexed UTF-8 bytes may receive guarded ASCII and Unicode LLVM bodies. The pre-optimization pass recognizes both reader APIs before their wrappers are inlined. The guard reads that frozen field once; calls on the same receiver select the matching body, while other receivers and function values use the ordinary entry. This preserves the lowered ownership, error, return-buffer and arena conventions. Self-recursive loops alone are not duplicated. Cached units include the complete written-fields fact set in their key.
 - **Small strings never touch the heap.** Besides inline strings, a local string that doesn't escape its function (it is not returned, thrown, stored in a field, a collection or a module-level value, nor captured by an escaping closure or a task; the analyzer lists them, `Analysis::non_escaping`) lives in a stack buffer of the function, up to 64 bytes. A string goes to the heap only when it is longer, or escapes.
 - **Capacity.** `String.from(text, capacity = n)` and `reserve(additional)` allocate the heap block at once (an inline string moves to the heap when it reserves more than fits inline); `capacity` reads the capacity word without its flags (the inline room for an inline string, the byte length of a literal).
 - **The parts of `split` are views** of the text when the compiler proves that the text outlives them unchanged: the call, possibly followed by `filter`, initializes a `let`; the source is a local or module-level value that no reference designates, and no code writes it while the parts live. A view is a pointer and a byte length; keeping a part in another value follows the same move/view/block-copy store contract, and materializes its bytes when the ancestor storage would not remain live and unchanged. Parts of an inline string view a copy in the function frame, so a module initializer uses copies instead. A loop over a split by a nonempty literal reads views without testing their representation. A one-byte separator is counted first to allocate the array once.
@@ -299,6 +329,14 @@ Interpolation constructors and appended interpolations check each addition of by
 - Iteration without an index is `for…of`. With an index, it is a loop that reads `codePointAt` and advances by the length of the code point.
 - `characters()` uses a shared `Intl.Segmenter` (`granularity: "grapheme"`).
 - `utf8Length()` is `Buffer.byteLength(text)` on Bun and Node, and a loop over `charCodeAt` in browsers. It is `O(n)`: this is why it is a method and not a property.
-- `toUtf8()` is the `encode` of a shared `TextEncoder`. `String.fromUtf8` is the `decode` of a shared `TextDecoder("utf-8", { fatal: true, ignoreBOM: true })`, and `String.fromUtf8Lossy` the same without `fatal`.
+- `toUtf8()` is the `encode` of a shared `TextEncoder`. Direct iteration (`for byte in text.toUtf8()`, with or without an index) encodes the receiver once into a temporary `Uint8Array`, then emits an indexed `for` loop over its length. The receiver is evaluated once before the loop; `break` and `continue` retain their usual meaning. `String.fromUtf8` is the `decode` of a shared `TextDecoder("utf-8", { fatal: true, ignoreBOM: true })`, and `String.fromUtf8Lossy` the same without `fatal`.
 - `String.from(text, capacity = n)` is `text`, `reserve` compiles to nothing (its argument is still evaluated), and `capacity` is the `length`.
+### Compile-time interpreter
+
+- Ordinary text stays in shared UTF-8 storage with a cached UTF-16 length. Only a string holding lone surrogates needs raw UTF-16 storage. ASCII copies and concatenations retain their known lengths without rescanning their new buffers.
+- Indexing, slices, searches, padding and ordering use code units; iteration visits code points with code-unit indices. Concatenating cut halves joins a pair again. Formatting into another string preserves raw units; only an output or UTF-8 encoding replaces lone surrogates.
+- `Bytes` has distinct compact byte storage and a distinct type test. Encoding, strict/lossy decoding and parsing JSON bytes use the same rules as runtime evaluation. `@readFile` remains strict UTF-8 text.
+- Direct `codePoints().length` counts without building an array; direct iteration over `toUtf8()` encodes through a four-byte cursor without building `Bytes`. Allocation preflights include temporary conversions, borrowed slices and byte copies on write, under the interpreter's existing step, depth and heap limits.
+- `String.compareLocale` runs only at runtime: its result depends on the locale data of the machine running the program, so it cannot be evaluated at compile time.
+
 :::

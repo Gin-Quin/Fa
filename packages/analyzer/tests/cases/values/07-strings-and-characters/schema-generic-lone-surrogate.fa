@@ -1,0 +1,3 @@
+function literal = (text: String): Schema => Schema.StringLiteral { value = text }
+type Cut<Input> = TypeFromSchema<@literal("😀"[0])>
+type Invalid = Cut<String> -- error: TF042

@@ -1,0 +1,8 @@
+-- Specification example: operations 3
+let name = "Fa"
+
+let upper = name.toUpperCase()
+let lower = name.toLowerCase()
+let length = name.length
+let trimmed = "  padded  ".trim()
+let repeated = "ab".repeat(3)

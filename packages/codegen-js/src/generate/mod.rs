@@ -65,7 +65,7 @@ pub(crate) enum Repr {
 	Number,
 	/// A bigint: `Int64`, `UInt64`, `Int128`, `UInt128`, `BigInt`.
 	BigInt,
-	/// A string: `String`, `Character`.
+	/// A string: `String`.
 	String,
 	/// A boolean.
 	Boolean,
@@ -86,7 +86,7 @@ pub(crate) enum Kind {
 	BigInt,
 	/// `Percentage`.
 	Percentage,
-	/// `String` or `Character`.
+	/// `String`.
 	Text,
 	/// `Boolean`.
 	Boolean,
@@ -894,7 +894,7 @@ impl<'s> Generator<'s> {
 			// up to 32 flags a number, a `bigint` above (fields.rs)
 			TypeKind::Fields(_) if self.fields_are_big(ty) => Repr::BigInt,
 			TypeKind::Fields(_) => Repr::Number,
-			TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => Repr::String,
+			TypeKind::String | TypeKind::StringLit(_) => Repr::String,
 			TypeKind::Boolean | TypeKind::BoolLit(_) => Repr::Boolean,
 			TypeKind::None => Repr::None,
 			_ => Repr::Other,
@@ -908,7 +908,7 @@ impl<'s> Generator<'s> {
 			TypeKind::Float(bits) | TypeKind::FloatLit(bits, _) => Kind::Float(bits),
 			TypeKind::BigInt | TypeKind::BigIntLit(_) => Kind::BigInt,
 			TypeKind::Percentage => Kind::Percentage,
-			TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => Kind::Text,
+			TypeKind::String | TypeKind::StringLit(_) => Kind::Text,
 			TypeKind::Boolean | TypeKind::BoolLit(_) => Kind::Boolean,
 			_ => Kind::Other,
 		}

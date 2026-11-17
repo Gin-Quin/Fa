@@ -1,0 +1,17 @@
+let text = String.from("é,日")
+mutable fields = text.split(",")
+use item = try fields[0]
+try fields[0] = "after"
+console.log(item, try fields[0]) -- prints: after after
+
+mutable owner = String.from("ab")
+mutable use alias = owner
+if true {
+	mutable use saved = alias
+	reuse alias = try owner[0..1]
+	reuse saved = alias
+	reuse alias = owner
+	console.log(alias, saved) -- prints: ab a
+}
+owner = "cd"
+console.log(alias) -- prints: cd

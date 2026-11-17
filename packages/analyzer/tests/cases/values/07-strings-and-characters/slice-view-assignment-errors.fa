@@ -1,0 +1,40 @@
+mutable bytes = Bytes.filled(4)
+mutable use part = bytes[0..2]
+use header = bytes[0..1]
+part = Bytes.filled(2, 7) -- error: REF016
+part = Bytes.filled(3) -- error: REF016
+(part) = Bytes.filled(2) -- error: REF016
+use alias = part
+alias = Bytes.filled(2) -- error: REF016
+bytes[0..2] = Bytes.filled(2) -- error: REF016
+console.log(header, part)
+mutable items = [1, 2, 3, 4]
+mutable use arrayPart = items[0..2]
+arrayPart = [7, 7] -- error: REF016
+items[0..2] = [7, 7] -- error: REF016
+mutable text = "abcd"
+mutable use word = text[0..2]
+word = "xy" -- error: REF016
+word += "!" -- error: REF016
+text[0..2] = "xy" -- error: REF016
+-- A branch can designate either an owner or a range. An alias must
+-- preserve all those possible targets, even after its source is reseated.
+function condition = (): Boolean => true
+mutable use choice = bytes[0..2]
+if condition() {
+	reuse choice = bytes[1..3]
+} else {
+	reuse choice = bytes
+}
+use snapshot = choice
+use wrapped = try (choice) -- warning: W-ERR-1
+reuse choice = bytes
+snapshot = Bytes.filled(2) -- error: REF016
+wrapped = Bytes.filled(2) -- error: REF016
+-- The second loop round can turn an initially whole-owner reference into
+-- a slice; this error must be checked in the stable flow round.
+mutable use changing = bytes
+while condition() {
+	changing = Bytes.filled(4) -- error: REF016
+	reuse changing = bytes[0..2]
+}

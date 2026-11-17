@@ -1,0 +1,21 @@
+-- skip-target: native-freestanding
+use { File, FileError } = std.fs
+use { monotonic } = std.time
+let path = "/tmp/fa-bytes-{monotonic()}.bin"
+let bytes = Bytes.from([0, 255, 152, 128, 237, 160, 128])
+try File.write(path, bytes)
+let read = try File.read(path)
+console.log(read == bytes, read, read.length) -- prints: true [0, 255, 152, 128, 237, 160, 128] 7
+console.log(File.readText(path) catch _ => "invalid") -- prints: invalid
+let text = "é😀".repeat(80)
+try File.writeText(path, text)
+console.log((try File.readText(path)) == text, (try File.read(path)) == text.toUtf8()) -- prints: true true
+let pair = String.from("😀")
+use low = try pair[1..2]
+try File.writeText(path, low)
+console.log(try File.read(path), try File.readText(path)) -- prints: [239, 191, 189] �
+async function roundTrip = (path: String, bytes: Bytes): Bytes throws FileError => {
+	try await File.write(path, bytes)
+	try await File.read(path)
+}
+console.log((try await roundTrip(path, bytes)) == bytes) -- prints: true

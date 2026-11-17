@@ -423,9 +423,16 @@ impl Session {
 			return Vec::new();
 		}
 		let mut completions = Vec::new();
-		if builtins::strings::is_string_like(&self.types, ty) {
+		let prefix = if builtins::strings::is_string_like(&self.types, ty) {
+			Some("String#")
+		} else if ty == TypeId::BYTES {
+			Some("Bytes#")
+		} else {
+			None
+		};
+		if let Some(prefix) = prefix {
 			for (index, builtin) in builtins::all().iter().enumerate() {
-				if let Some(name) = builtin.path.strip_prefix("String#") {
+				if let Some(name) = builtin.path.strip_prefix(prefix) {
 					completions.push(self.builtin_completion(BuiltinId::new(index), name));
 				}
 			}
@@ -617,6 +624,23 @@ mod tests {
 			.map(|c| c.label)
 			.collect();
 		assert_eq!(labels, ["log", "error"]);
+	}
+
+	#[test]
+	fn string_and_bytes_completions_follow_the_prelude() {
+		let (session, file) = analyze_source("\n");
+		let names = session.completions(file, 0);
+		assert!(names.iter().any(|item| item.label == "Bytes"));
+		assert!(!names.iter().any(|item| item.label == "Character"));
+		for (source, expected, absent) in [
+			("let text = \"a\"\ntext.\n", "codeUnitAt", "bytes"),
+			("let bytes = Bytes.filled(2)\nbytes.\n", "toArray", "push"),
+		] {
+			let (session, file) = analyze_source(source);
+			let items = session.completions(file, source.len() as u32 - 1);
+			assert!(items.iter().any(|item| item.label == expected), "{items:?}");
+			assert!(!items.iter().any(|item| item.label == absent));
+		}
 	}
 
 	#[test]

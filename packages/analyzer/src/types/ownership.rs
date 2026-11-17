@@ -90,7 +90,7 @@ impl TypeStore {
 			TypeKind::ImplicitParam(..) => Ownership::Dependent,
 			TypeKind::Unknown => Ownership::Unresolved,
 			// Error payloads are data, never unique (lead, 2026-11-16).
-			TypeKind::ErrorTop => Ownership::Structure,
+			TypeKind::ErrorTop | TypeKind::Bytes => Ownership::Structure,
 			TypeKind::Object(_)
 			| TypeKind::Collection(..)
 			| TypeKind::CArray(..)
@@ -99,8 +99,6 @@ impl TypeStore {
 			| TypeKind::NamedUnion(..)
 			| TypeKind::Member(..)
 			| TypeKind::Rec(_) => return None,
-			// Bytes needs an explicit collection arm when feature/strings lands.
-			// This match is exhaustive so that the merge cannot silently omit it.
 			TypeKind::Never
 			| TypeKind::Void
 			| TypeKind::None
@@ -115,7 +113,6 @@ impl TypeStore {
 			| TypeKind::Percentage
 			| TypeKind::String
 			| TypeKind::StringLit(_)
-			| TypeKind::Character
 			| TypeKind::Enum(..)
 			| TypeKind::EnumMember(..)
 			| TypeKind::Fields(_)

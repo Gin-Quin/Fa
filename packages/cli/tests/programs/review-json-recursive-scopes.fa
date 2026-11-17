@@ -1,0 +1,13 @@
+-- skip-target: native-freestanding
+use { Json } = std.json
+type Node = { number: Integer, next: Node? }
+function outside = (): Node => Node { number = 1, next = Node { number = 2, next = none } }
+function scoped = (): String => {
+	type Node = { text: String, next: Node? }
+	let inside = Node { text = "a", next = Node { text = "b", next = none } }
+	type Envelope = { outside: Type<outside()>, inside: Type<inside> }
+	Json.stringify(Envelope { outside = outside(), inside = inside })
+}
+static calculated = @scoped()
+console.log(calculated) -- prints: {"outside":{"number":1,"next":{"number":2}},"inside":{"text":"a","next":{"text":"b"}}}
+console.log(scoped()) -- prints: {"outside":{"number":1,"next":{"number":2}},"inside":{"text":"a","next":{"text":"b"}}}

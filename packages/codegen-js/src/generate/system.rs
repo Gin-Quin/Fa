@@ -25,11 +25,12 @@ impl Generator<'_> {
 				let helper = self.helper("faMonotonic");
 				js::call(helper, &[])
 			}
-			"File.read" | "File.readBytes" | "File.write" => {
+			"File.readText" | "File.read" | "File.writeText" | "File.write" => {
 				let values = values(self);
 				let helper = self.helper(match path {
-					"File.read" => "faReadFile",
-					"File.readBytes" => "faReadBytes",
+					"File.readText" => "faReadFile",
+					"File.read" => "faReadBytes",
+					"File.write" => "faWriteBytes",
 					_ => "faWriteFile",
 				});
 				js::call(helper, &values)
@@ -59,6 +60,21 @@ impl Generator<'_> {
 				};
 				let mut values = values(self);
 				values.push(schema);
+				let argument = self
+					.analysis
+					.call(n)
+					.and_then(|call| call.arguments.first())
+					.and_then(|arg| match arg {
+						fa_analyzer::analysis::Argument::Given(node) => Some(*node),
+						_ => None,
+					});
+				if argument.is_some_and(|node| {
+					self.types
+						.union_members(&self.type_of(node))
+						.contains(&TypeId::BYTES)
+				}) {
+					values.push(self.helper("faJsonReadBytes").to_string());
+				}
 				let helper = self.helper("faJsonParse");
 				js::call(helper, &values)
 			}
@@ -89,9 +105,10 @@ impl Generator<'_> {
 	/// another primitive.
 	pub(crate) fn io_await_helper(&mut self, name: &str) -> Option<(&'static str, bool)> {
 		let (helper, receiver) = match name {
-			"File.read" => ("faReadFileAsync", false),
-			"File.readBytes" => ("faReadBytesAsync", false),
-			"File.write" => ("faWriteFileAsync", false),
+			"File.readText" => ("faReadFileAsync", false),
+			"File.read" => ("faReadBytesAsync", false),
+			"File.writeText" => ("faWriteFileAsync", false),
+			"File.write" => ("faWriteBytesAsync", false),
 			"TcpListener.accept" => ("faAccept", true),
 			"TcpStream.connect" => ("faConnect", false),
 			"TcpStream.read" => ("faSocketRead", true),
@@ -173,7 +190,7 @@ impl Generator<'_> {
 		Some(match self.types.kind(ty) {
 			TypeKind::Boolean => "\"b\"".to_string(),
 			TypeKind::BoolLit(value) => format!("[\"l\", {value}]"),
-			TypeKind::String | TypeKind::Character => "\"s\"".to_string(),
+			TypeKind::String => "\"s\"".to_string(),
 			TypeKind::StringLit(sym) => {
 				format!(
 					"[\"l\", {}]",

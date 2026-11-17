@@ -180,7 +180,7 @@ pub struct Fact {
 	pub int: IntervalSetId,
 	/// Its exact value (strings, booleans, enumeration members, numbers).
 	pub literal: ConstId,
-	/// The length of a collection or the grapheme count of a string.
+	/// The length of a collection or the UTF-16 code unit count of a string.
 	pub length: IntervalId,
 	/// Map keys proven present (types brief D32).
 	pub key_present: ConstListId,

@@ -1,0 +1,26 @@
+-- prints: a$&b
+-- prints: a$1 $$ $&b
+-- prints: a$1 $$ $&b$1 $$ $&c
+-- prints: a$$b
+-- prints: a$`$'b
+-- prints: a$&b$&c
+-- prints: receiver
+-- prints: search
+-- prints: replacement
+-- prints: no match
+console.log("a-b".replace("-", "$&"))
+function replace = (replacement: String) => {
+	console.log("a-b".replace("-", replacement))
+	console.log("a-b-c".replaceAll("-", replacement))
+}
+replace("$1 $$ $&")
+console.log("a-b".replace("-", "$$"))
+console.log("a-b".replace("-", "$`$'"))
+console.log("a-b-c".replaceAll("-", "$&"))
+function receiver = (): String => { console.log("receiver")
+	"no match" }
+function search = (): String => { console.log("search")
+	"-" }
+function replacement = (): String => { console.log("replacement")
+	"$&" }
+console.log(receiver().replace(search(), replacement()))

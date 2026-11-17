@@ -949,7 +949,7 @@ async fn diagnostics_of_the_analyzer_have_codes() {
 	assert_eq!(list.len(), 2, "{list:?}");
 	assert_eq!(list[0]["code"], "E-NUM-6");
 	assert_eq!(list[0]["range"], range((0, 18), (0, 21)));
-	assert_eq!(list[1]["code"], "E-STR-9");
+	assert_eq!(list[1]["code"], "TY007");
 	assert_eq!(list[1]["severity"], 1);
 }
 

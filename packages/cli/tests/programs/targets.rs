@@ -1,5 +1,6 @@
 //! Node and browser-global execution, sharing annotations, discovery, workers,
 //! timeouts and comparisons with the Bun tests in the parent module.
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -65,11 +66,13 @@ fn programs(target: &'static str) -> Vec<(PathBuf, Expected)> {
 			if analyzer && !super::runnable_case(&text) {
 				continue;
 			}
+			let annotations = active_annotations(&text, target);
 			let mut expected = if asynchronous {
-				super::async_expectations(&path, &text)
+				super::async_expectations(&path, &annotations)
 			} else {
-				super::expectations(&text)
+				super::expectations(&annotations)
 			};
+			expected.annotated |= super::expectations(&text).annotated;
 			assert!(
 				expected.annotated,
 				"{} has no output annotation",
@@ -84,6 +87,45 @@ fn programs(target: &'static str) -> Vec<(PathBuf, Expected)> {
 		}
 	}
 	programs
+}
+
+/// An omitted target branch cannot print its annotations. Use the compiler's
+/// branch decisions; the harness still compiles the original program.
+fn active_annotations<'a>(text: &'a str, target: &str) -> Cow<'a, str> {
+	if !text.contains("@if target") {
+		return Cow::Borrowed(text);
+	}
+	let mut session = fa_analyzer::Session::new();
+	session.set_target(target);
+	let file = session.set_source("main", std::sync::Arc::from(text));
+	session.analyze_file(file);
+	let tree = session.tree(file);
+	let analysis = session.analysis(file);
+	let mut filtered = text.as_bytes().to_vec();
+	for index in 0..tree.nodes.len() {
+		let node = fa_analyzer::ids::NodeId::new(index);
+		let Some(first) = analysis.comptime_branch(node) else {
+			continue;
+		};
+		let fa_analyzer::syntax::View::If {
+			then_body,
+			else_body,
+			..
+		} = fa_analyzer::syntax::view(tree, node)
+		else {
+			continue;
+		};
+		let Some(skipped) = (if first { else_body } else { Some(then_body) }) else {
+			continue;
+		};
+		let span = tree.spans[skipped.index()];
+		for byte in &mut filtered[span.start..span.end] {
+			if *byte != b'\n' && *byte != b'\r' {
+				*byte = b' ';
+			}
+		}
+	}
+	Cow::Owned(String::from_utf8(filtered).expect("whole spans were replaced by ASCII"))
 }
 
 fn key(path: &Path) -> String {
@@ -366,6 +408,10 @@ fn target_restrictions_are_rejected_at_build_time() {
 	let scratch = Path::new(env!("CARGO_TARGET_TMPDIR"))
 		.join(format!("target-refusals-{}", std::process::id()));
 	fs::create_dir_all(&scratch).unwrap();
+	// The shared std-library fixture deliberately guards its file calls on
+	// web. Exercise refusal with an unguarded call instead.
+	let unavailable_fs = scratch.join("unavailable-fs.fa");
+	fs::write(&unavailable_fs, "use { File } = std.fs\nlet text = File.readText(\"unused\") catch error => \"\"\nconsole.log(text)\n").unwrap();
 	for (index, (target, file, code)) in [
 		("web", "std-library.fa", "AN004"),
 		("web", "foreign-libc.foreign.fa", "FFI008"),
@@ -378,14 +424,12 @@ fn target_restrictions_are_rejected_at_build_time() {
 			target,
 			..Expected::default()
 		};
-		let outcome = super::limited(|| {
-			super::run(
-				&manifest.join("tests/programs").join(file),
-				&expected,
-				&scratch,
-				index,
-			)
-		});
+		let source = if file == "std-library.fa" {
+			unavailable_fs.clone()
+		} else {
+			manifest.join("tests/programs").join(file)
+		};
+		let outcome = super::limited(|| super::run(&source, &expected, &scratch, index));
 		assert!(
 			outcome.build_failed,
 			"{file} must be refused on {target}: {outcome:?}"
@@ -414,4 +458,17 @@ fn shared_annotations_select_targets_and_exclude_diagnostic_cases() {
 		"call() -- error: EFF007\n-- prints: 3"
 	));
 	assert!(super::runnable_case("-- stderr: error: Boom\n-- exit: 1"));
+}
+
+#[test]
+fn target_guard_annotations_follow_the_compilers_selected_branch() {
+	let text = "@if target != \"web\" {\nconsole.log(1) -- prints: 1\n} @else {\nconsole.log(2) -- prints: 2\n}\n";
+	assert_eq!(
+		super::expectations(&active_annotations(text, "node")).stdout,
+		["1"]
+	);
+	assert_eq!(
+		super::expectations(&active_annotations(text, "web")).stdout,
+		["2"]
+	);
 }

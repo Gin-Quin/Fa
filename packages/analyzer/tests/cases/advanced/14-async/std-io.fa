@@ -32,7 +32,7 @@ let served = start serve(listener)
 
 -- blocking calls: the sockets can't block on `bun`
 function connectNow = (): TcpStream throws NetError => try TcpStream.connect("localhost", 8080) -- error CONC010
-let text = File.read("settings.json") catch error => ""
+let text = File.readText("settings.json") catch error => ""
 sleep(1)
 let elapsed: Integer = monotonic()
 

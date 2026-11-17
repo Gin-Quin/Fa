@@ -52,7 +52,7 @@ impl TypeId {
 	pub const BIG_INT: TypeId = TypeId(22);
 	pub const PERCENTAGE: TypeId = TypeId(23);
 	pub const STRING: TypeId = TypeId(24);
-	pub const CHARACTER: TypeId = TypeId(25);
+	pub const BYTES: TypeId = TypeId(25);
 	pub const RANGE: TypeId = TypeId(26);
 
 	/// The full-range type of an integer storage.
@@ -224,7 +224,7 @@ impl GlobalStore {
 			(TypeId::BIG_INT, TypeKind::BigInt),
 			(TypeId::PERCENTAGE, TypeKind::Percentage),
 			(TypeId::STRING, TypeKind::String),
-			(TypeId::CHARACTER, TypeKind::Character),
+			(TypeId::BYTES, TypeKind::Bytes),
 			(TypeId::RANGE, TypeKind::Range),
 		];
 		for (id, kind) in scalars {
@@ -653,6 +653,9 @@ impl TypeStore {
 		}
 	}
 
+	/// A well-formed literal type. `str` keeps this invariant by construction;
+	/// compile-time strings with lone surrogates must widen to `String` before
+	/// reaching this entry point, or be rejected when a literal type is required.
 	pub fn string_literal(&mut self, text: &str) -> TypeId {
 		let sym = self.syms.intern(text);
 		self.intern(TypeKind::StringLit(sym))
@@ -1714,9 +1717,10 @@ impl TypeStore {
 				(F::FLAT | F::COMPARABLE | F::ORDERED | F::JS_BIGINT)
 					.with_runtime_kind(RuntimeKind::BigInt)
 			}
-			TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => {
+			TypeKind::String | TypeKind::StringLit(_) => {
 				(F::FLAT | F::COMPARABLE | F::ORDERED).with_runtime_kind(RuntimeKind::String)
 			}
+			TypeKind::Bytes => F::COMPARABLE.with_runtime_kind(RuntimeKind::Bytes),
 			TypeKind::Range => scalar.with_runtime_kind(RuntimeKind::Range),
 			TypeKind::Subscription => F::MOVE_ONLY.with_runtime_kind(RuntimeKind::Object),
 			TypeKind::Sync(kind, item) => {
@@ -1915,7 +1919,7 @@ impl TypeStore {
 			TypeKind::Percentage => hasher.tag(13),
 			TypeKind::String => hasher.tag(14),
 			TypeKind::StringLit(sym) => hasher.tag(15).str(self.syms.resolve(sym)),
-			TypeKind::Character => hasher.tag(16),
+			TypeKind::Bytes => hasher.tag(39),
 			TypeKind::Object(shape) => {
 				let data = self.shape(shape);
 				hasher.tag(17);
@@ -2105,7 +2109,6 @@ impl TypeStore {
 			ConstValue::Int(value) => hasher.tag(1).bytes(&value.to_le_bytes()),
 			ConstValue::Float(bits) => hasher.tag(2).u64(bits),
 			ConstValue::String(sym) => hasher.tag(3).str(self.syms.resolve(sym)),
-			ConstValue::Character(sym) => hasher.tag(4).str(self.syms.resolve(sym)),
 			ConstValue::BigInt(sym) => hasher.tag(5).str(self.syms.resolve(sym)),
 			ConstValue::Binding(index) => hasher.tag(7).u32(index),
 			ConstValue::EnumMember(nominal, index) => hasher
@@ -2358,7 +2361,7 @@ mod tests {
 		assert!(!store.flags(TypeId::INTEGER).contains(TypeFlags::JS_BIGINT));
 		assert_eq!(store.runtime_kind(TypeId::INT64), RuntimeKind::BigInt);
 		assert_eq!(store.runtime_kind(TypeId::INTEGER), RuntimeKind::Number);
-		assert_eq!(store.runtime_kind(TypeId::CHARACTER), RuntimeKind::String);
+		assert_eq!(store.runtime_kind(TypeId::BYTES), RuntimeKind::Bytes);
 		assert!(
 			!store
 				.flags(TypeId::STRING)

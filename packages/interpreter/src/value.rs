@@ -18,6 +18,8 @@ use std::sync::Arc;
 
 use ethnum::I256;
 
+use crate::text::Text;
+
 /// What a member value belongs to.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum MemberKind {
@@ -118,8 +120,10 @@ pub enum Value {
 	Float(f64),
 	/// `Percentage`: the stored fraction (`50%` is `0.5`).
 	Percentage(f64),
-	/// `String`, `Character` (one grapheme cluster).
-	String(Arc<str>),
+	/// Text.
+	String(Text),
+	/// A fixed-length binary sequence, distinct from an array.
+	Bytes(Arc<Vec<u8>>),
 	/// `Array`, `GrowingArray`.
 	Array(Arc<Vec<Value>>),
 	/// A tuple.
@@ -159,6 +163,7 @@ pub fn equals(a: &Value, b: &Value) -> bool {
 		(Float(a), Float(b)) | (Percentage(a), Percentage(b)) => a == b,
 		(Integer(a), Float(b)) | (Float(b), Integer(a)) => a.as_f64() == *b,
 		(String(a), String(b)) => a == b,
+		(Bytes(a), Bytes(b)) => a == b,
 		(Array(a), Array(b)) | (Tuple(a), Tuple(b)) => {
 			a.len() == b.len() && a.iter().zip(b.iter()).all(|(a, b)| equals(a, b))
 		}
@@ -215,7 +220,7 @@ pub fn map_get<'v>(entries: &'v [(Value, Value)], key: &Value) -> Option<&'v Val
 impl Value {
 	/// A string value.
 	pub fn string(text: &str) -> Value {
-		Value::String(Arc::from(text))
+		Value::String(Text::from(text))
 	}
 
 	/// An integer value.
@@ -273,10 +278,10 @@ impl Value {
 		}
 	}
 
-	/// The text of a string or a character.
+	/// The well-formed text of a string, without copying.
 	pub fn as_str(&self) -> Option<&str> {
 		match self {
-			Value::String(text) => Some(text),
+			Value::String(text) => text.as_str(),
 			_ => None,
 		}
 	}
@@ -306,24 +311,84 @@ impl Value {
 		}
 	}
 
-	/// The top-level `toString`: a string is its text, anything else its Fa
-	/// notation.
-	pub fn to_text(&self) -> String {
+	/// Whether a constant needs an emitter that understands raw UTF-16 units.
+	pub fn has_lone_surrogates(&self) -> bool {
 		match self {
-			Value::String(text) => text.to_string(),
+			Value::String(text) => !text.is_well_formed(),
+			Value::Array(items) | Value::Tuple(items) | Value::Set(items) => {
+				items.iter().any(Self::has_lone_surrogates)
+			}
+			Value::Object(object) => object
+				.fields
+				.iter()
+				.any(|(_, value)| value.has_lone_surrogates()),
+			Value::Member(member) => member.data.as_ref().is_some_and(Self::has_lone_surrogates),
+			Value::Map(entries) => entries
+				.iter()
+				.any(|(key, value)| key.has_lone_surrogates() || value.has_lone_surrogates()),
+			_ => false,
+		}
+	}
+
+	/// The internal `toString`, before an output boundary replaces lone
+	/// surrogates. Formatting a composite must preserve its nested strings.
+	pub fn to_text_value(&self) -> Text {
+		match self {
+			Value::String(text) => text.clone(),
 			_ => {
-				let mut out = String::new();
+				let mut out = TextBuffer::default();
 				format_nested(self, &mut out);
-				out
+				out.finish()
 			}
 		}
 	}
 
-	/// The Fa notation of the value, as nested in a composite.
+	/// An upper bound for formatting, checked before allocating a template.
+	pub fn text_size(&self) -> usize {
+		match self {
+			Value::String(text) => text.utf8_len().saturating_mul(6).saturating_add(2),
+			Value::Array(items) | Value::Tuple(items) | Value::Set(items) => {
+				items.iter().fold(2usize, |size, v| {
+					size.saturating_add(v.text_size()).saturating_add(2)
+				})
+			}
+			Value::Bytes(bytes) => bytes.len().saturating_mul(5).saturating_add(2),
+			Value::Object(object) => object.fields.iter().fold(4usize, |size, (name, v)| {
+				size.saturating_add(name.len())
+					.saturating_add(v.text_size())
+					.saturating_add(5)
+			}),
+			Value::Member(member) => member
+				.name
+				.len()
+				.saturating_add(member.data.as_ref().map_or(0, Self::text_size))
+				.saturating_add(4),
+			Value::Map(entries) => entries.iter().fold(2usize, |size, (k, v)| {
+				size.saturating_add(k.text_size())
+					.saturating_add(v.text_size())
+					.saturating_add(6)
+			}),
+			_ => 256,
+		}
+	}
+
+	/// Text for an output: lone surrogates become U+FFFD here.
+	pub fn to_text(&self) -> String {
+		match self {
+			Value::String(text) => text.to_utf8_lossy().into_owned(),
+			_ => {
+				let mut out = TextBuffer::default();
+				format_nested(self, &mut out);
+				out.output()
+			}
+		}
+	}
+
+	/// The Fa notation of the value, for an output or diagnostic.
 	pub fn to_notation(&self) -> String {
-		let mut out = String::new();
+		let mut out = TextBuffer::default();
 		format_nested(self, &mut out);
-		out
+		out.output()
 	}
 }
 
@@ -356,26 +421,89 @@ pub fn quote(text: &str) -> String {
 	let mut out = String::with_capacity(text.len() + 2);
 	out.push('"');
 	for c in text.chars() {
-		match c {
-			'\\' => out.push_str("\\\\"),
-			'"' => out.push_str("\\\""),
-			'\n' => out.push_str("\\n"),
-			'\r' => out.push_str("\\r"),
-			'\t' => out.push_str("\\t"),
-			'\0' => out.push_str("\\0"),
-			'{' => out.push_str("{{"),
-			'}' => out.push_str("}}"),
-			c if (c as u32) < 0x20 || c as u32 == 0x7f => {
-				let _ = write!(out, "\\x{:02X}", c as u32);
-			}
-			c => out.push(c),
-		}
+		quote_character(c, &mut out);
 	}
 	out.push('"');
 	out
 }
 
-fn format_list(items: &[Value], out: &mut String) {
+fn quote_character(c: char, out: &mut impl std::fmt::Write) {
+	let escaped = match c {
+		'\\' => Some("\\\\"),
+		'"' => Some("\\\""),
+		'\n' => Some("\\n"),
+		'\r' => Some("\\r"),
+		'\t' => Some("\\t"),
+		'\0' => Some("\\0"),
+		'{' => Some("{{"),
+		'}' => Some("}}"),
+		_ => None,
+	};
+	if let Some(escaped) = escaped {
+		let _ = out.write_str(escaped);
+	} else if (c as u32) < 0x20 || c as u32 == 0x7f {
+		let _ = write!(out, "\\x{:02X}", c as u32);
+	} else {
+		let _ = out.write_char(c);
+	}
+}
+
+/// Ordinary formatting stays UTF-8. The first raw unit switches to UTF-16;
+/// the buffer is canonicalized only when complete, so joined pairs survive.
+#[derive(Default)]
+struct TextBuffer {
+	text: String,
+	units: Option<Vec<u16>>,
+}
+
+impl TextBuffer {
+	fn push_str(&mut self, text: &str) {
+		if let Some(units) = &mut self.units {
+			units.extend(text.encode_utf16());
+		} else {
+			self.text.push_str(text);
+		}
+	}
+	fn push(&mut self, c: char) {
+		let mut buffer = [0; 4];
+		self.push_str(c.encode_utf8(&mut buffer));
+	}
+	fn push_unit(&mut self, unit: u16) {
+		self.units
+			.get_or_insert_with(|| self.text.encode_utf16().collect())
+			.push(unit);
+	}
+	fn quote(&mut self, text: &Text) {
+		self.push('"');
+		for scalar in char::decode_utf16(text.units()) {
+			match scalar {
+				Ok(c) => quote_character(c, self),
+				Err(surrogate) => self.push_unit(surrogate.unpaired_surrogate()),
+			}
+		}
+		self.push('"');
+	}
+	fn output(self) -> String {
+		match self.units {
+			Some(units) => String::from_utf16_lossy(&units),
+			None => self.text,
+		}
+	}
+	fn finish(self) -> Text {
+		match self.units {
+			Some(units) => Text::from_units(&units),
+			None => Text::from(self.text),
+		}
+	}
+}
+impl std::fmt::Write for TextBuffer {
+	fn write_str(&mut self, text: &str) -> std::fmt::Result {
+		self.push_str(text);
+		Ok(())
+	}
+}
+
+fn format_list(items: &[Value], out: &mut TextBuffer) {
 	out.push('[');
 	for (index, item) in items.iter().enumerate() {
 		if index > 0 {
@@ -386,7 +514,7 @@ fn format_list(items: &[Value], out: &mut String) {
 	out.push(']');
 }
 
-fn format_object(object: &Object, out: &mut String) {
+fn format_object(object: &Object, out: &mut TextBuffer) {
 	if object.fields.is_empty() {
 		out.push_str("{}");
 		return;
@@ -403,7 +531,7 @@ fn format_object(object: &Object, out: &mut String) {
 	out.push_str(" }");
 }
 
-fn format_nested(value: &Value, out: &mut String) {
+fn format_nested(value: &Value, out: &mut TextBuffer) {
 	match value {
 		Value::None => out.push_str("none"),
 		Value::Boolean(value) => out.push_str(if *value { "true" } else { "false" }),
@@ -415,7 +543,17 @@ fn format_nested(value: &Value, out: &mut String) {
 			out.push_str(&format_float(value * 100.0));
 			out.push('%');
 		}
-		Value::String(text) => out.push_str(&quote(text)),
+		Value::String(text) => out.quote(text),
+		Value::Bytes(bytes) => {
+			out.push('[');
+			for (index, byte) in bytes.iter().enumerate() {
+				if index > 0 {
+					out.push_str(", ");
+				}
+				let _ = write!(out, "{byte}");
+			}
+			out.push(']');
+		}
 		Value::Array(items) | Value::Set(items) => format_list(items, out),
 		Value::Tuple(items) => {
 			out.push('(');

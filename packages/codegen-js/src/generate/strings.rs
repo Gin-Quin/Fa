@@ -1,15 +1,16 @@
 //! Strings and printing (values brief §2.8, §7; advanced brief D39):
 //! interpolation, the members of strings, `console.log` and `console.error`.
 //!
-//! Interpolation is a template literal. A `String`, a `Character`, an integer,
+//! Interpolation is a template literal. A `String`, an integer,
 //! a `Float` or a `Boolean` goes in directly (JavaScript's `ToString` is Fa's
 //! `toString` for them, D-5); a `Float32`, a `Percentage`, an optional or a
 //! composite value goes through a formatter of the runtime.
 //! `console.log(a, b)` prints one template literal: the values separated by
 //! a space.
 
-use fa_analyzer::analysis::{Argument, Callee};
+use fa_analyzer::analysis::{Argument, NodeFlags};
 use fa_analyzer::ids::{NodeId, TypeId};
+use fa_analyzer::lower::index::IndexAccess;
 use fa_analyzer::syntax::{TemplatePart, TemplateParts, View};
 use fa_analyzer::types::{CollKind, FloatBits, TypeKind};
 
@@ -256,10 +257,11 @@ impl Generator<'_> {
 			| TypeKind::BigIntLit(_)
 			| TypeKind::Float(FloatBits::F64)
 			| TypeKind::FloatLit(FloatBits::F64, _) => return Some(Ok("String".to_string())),
-			TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => {
+			TypeKind::String | TypeKind::StringLit(_) => {
 				return Some(Ok(self.helper("faQuote").to_string()));
 			}
 			TypeKind::None => "() => \"none\"".to_string(),
+			TypeKind::Bytes => return Some(Ok(self.helper("faFormatBytes").to_string())),
 			TypeKind::Range => return Some(Ok(self.helper("faFormatRange").to_string())),
 			TypeKind::Float(FloatBits::F32) | TypeKind::FloatLit(FloatBits::F32, _) => {
 				return Some(Ok(self.helper("faFloat32ToString").to_string()));
@@ -497,9 +499,56 @@ impl Generator<'_> {
 		&mut self,
 		n: NodeId,
 		path: &str,
-		receiver: Expr,
+		mut receiver: Expr,
 		arguments: Vec<Option<Expr>>,
 	) -> Expr {
+		let mut arguments = arguments;
+		if matches!(path, "String#replace" | "String#replaceAll") {
+			let replacement = self
+				.analysis
+				.call(n)
+				.and_then(|info| info.arguments.get(1))
+				.and_then(|arg| match arg {
+					Argument::Given(node) => Some(*node),
+					_ => None,
+				});
+			let literal = replacement.and_then(|node| match self.view(self.strip_groups(node)) {
+				View::String(text) => Some(text.to_string()),
+				_ => match self.types.kind(self.type_of(node)) {
+					TypeKind::StringLit(sym) => Some(self.types.syms.resolve(sym).to_string()),
+					_ => None,
+				},
+			});
+			if let Some(text) = literal.as_ref().filter(|text| text.contains('$')) {
+				// Preserve evaluation of a nonliteral expression even if its
+				// type determines the text it returns.
+				if let Some(value) = arguments
+					.get(1)
+					.cloned()
+					.flatten()
+					.filter(|value| !value.pure)
+				{
+					receiver = self.keep(receiver);
+					if let Some(Some(search)) = arguments.get_mut(0) {
+						*search = self.keep(search.clone());
+					}
+					self.out.line(format!("{};", value.text));
+				}
+				arguments[1] = Some(Expr::constant(
+					js::string_literal(&text.replace('$', "$$")),
+					Prec::Primary,
+				));
+			} else if literal.is_none() {
+				receiver = self.keep(receiver);
+				if let Some(Some(search)) = arguments.get_mut(0) {
+					*search = self.keep(search.clone());
+				}
+				if let Some(Some(replacement)) = arguments.get_mut(1) {
+					let value = self.keep(replacement.clone());
+					*replacement = Expr::new(format!("() => {}", value.text), Prec::Assign);
+				}
+			}
+		}
 		let mut given: Vec<String> = Vec::new();
 		// omitted trailing arguments are left out; a middle one is `undefined`
 		let last_given = arguments.iter().rposition(Option::is_some);
@@ -515,151 +564,136 @@ impl Generator<'_> {
 				given.join(", ")
 			))
 		};
-		let with_receiver = |receiver: Expr, given: Vec<String>| {
-			let mut all = vec![receiver.text];
-			all.extend(given);
-			all
-		};
 		match path {
-			"String#isEmpty" => {
-				let length = Expr::primary(format!("{}.length", receiver.primary_text()));
-				js::binary(
-					&length,
-					"===",
-					&Expr::constant("0", Prec::Primary),
-					Prec::Equality,
+			"String#toString" => receiver,
+			"String#get" | "Bytes#get" => method("at", &receiver, &given),
+			"String#isEmpty" | "Bytes#isEmpty" => Expr::new(
+				format!("{}.length === 0", receiver.primary_text()),
+				Prec::Equality,
+			),
+			"String#indexOf" | "String#lastIndexOf" => {
+				let found = self.keep(method(
+					path.trim_start_matches("String#"),
+					&receiver,
+					&given,
+				));
+				Expr::new(
+					format!("{} === -1 ? undefined : {}", found.text, found.text),
+					Prec::Conditional,
 				)
 			}
-			"String#toUpperCase" | "String#toLowerCase" | "String#trim" | "String#trimStart"
-			| "String#trimEnd" | "String#repeat" => {
-				let name = path.trim_start_matches("String#");
-				method(name, &receiver, &given)
-			}
-			"String#toString" => receiver,
-			// read in place: the bytes of the last text are kept
-			"String#bytes" if self.bytes_only_read(n) => {
-				let helper = self.helper("faStringBytesView");
-				js::call(helper, &with_receiver(receiver, given))
-			}
-			// simple texts (ASCII without `\r`): a character is a code unit
-			"String#padStart" | "String#padEnd" if self.simple_padding(n) => {
-				let name = path.trim_start_matches("String#");
-				method(name, &receiver, &given)
-			}
-			_ => {
-				let helper = match path {
-					"String#get" => "faStringGet",
-					"String#includes" => "faStringIncludes",
-					"String#startsWith" => "faStringStartsWith",
-					"String#endsWith" => "faStringEndsWith",
-					"String#indexOf" => "faStringIndexOf",
-					"String#lastIndexOf" => "faStringLastIndexOf",
-					"String#padStart" => "faStringPadStart",
-					"String#padEnd" => "faStringPadEnd",
-					"String#replace" => "faStringReplace",
-					"String#replaceAll" => "faStringReplaceAll",
-					"String#split" => "faStringSplit",
-					"String#characters" => "faCharacters",
-					"String#codePoints" => "faStringCodePoints",
-					"String#bytes" => "faStringBytes",
-					_ => return self.unsupported(n, &format!("`{path}`")),
+			"String#codeUnitAt" => {
+				let index = match self
+					.analysis
+					.call(n)
+					.and_then(|info| info.arguments.first())
+				{
+					Some(Argument::Given(index)) => *index,
+					_ => return self.unsupported(n, "a missing code-unit index"),
 				};
-				let helper = self.helper(helper);
-				js::call(helper, &with_receiver(receiver, given))
+				self.code_unit(n, index, receiver, Expr::primary(given[0].clone()))
 			}
-		}
-	}
-}
-
-impl Generator<'_> {
-	/// Whether the receiver and the filler of a `padStart`/`padEnd` call are
-	/// proven simple texts (`faIsSimpleText`), where a character is one code
-	/// unit and JavaScript's method pads as Fa does.
-	fn simple_padding(&self, call: NodeId) -> bool {
-		let View::Call { callee, .. } = self.view(call) else {
-			return false;
-		};
-		let View::Access { target, .. } = self.view(callee) else {
-			return false;
-		};
-		let filler = match self
-			.analysis
-			.call(call)
-			.and_then(|info| info.arguments.get(1))
-		{
-			Some(Argument::Given(filler)) => Some(*filler),
-			Some(Argument::Default) | None => None,
-			Some(_) => return false,
-		};
-		self.is_simple_text(target) && filler.is_none_or(|filler| self.is_simple_text(filler))
-	}
-
-	/// Whether the array of `text.bytes()` (the call `n`) is only read where
-	/// it is computed: indexed, read with `get`, measured, or iterated.
-	fn bytes_only_read(&mut self, n: NodeId) -> bool {
-		let parents = self.parents();
-		let Some(parent) = parents[n.index()] else {
-			return false;
-		};
-		match self.view(parent) {
-			View::Index { target, .. } if target == n => match parents[parent.index()] {
-				Some(grand) => match self.view(grand) {
-					View::Assignment { target, .. } | View::CompoundAssignment { target, .. } => {
-						target != parent
-					}
-					View::Use { .. } | View::Reuse { .. } | View::UpdateFields { .. } => false,
-					_ => true,
-				},
-				None => true,
-			},
-			View::Access { target, members } if target == n && members.len() == 1 => {
-				let name = members.first().map(|member| self.text(member).to_string());
-				matches!(name.as_deref(), Some("length" | "get"))
+			"String#isWellFormed" if self.options.target == crate::Target::Web => {
+				let helper = self.helper("faIsWellFormed");
+				js::call(helper, &[receiver.text])
 			}
-			View::For { iterable, .. } => iterable == n,
-			_ => false,
-		}
-	}
-
-	/// Whether a string value is proven to hold ASCII characters other than
-	/// `\r` only: a literal of them, a number or a boolean converted
-	/// (`toString()`, interpolation), or a template of these.
-	pub(crate) fn is_simple_text(&self, node: NodeId) -> bool {
-		let node = self.strip_groups(node);
-		let simple = |text: &str| {
-			text.bytes()
-				.all(|byte| byte < 0x80 && byte != b'\r' && byte != b'\\')
-		};
-		match self.view(node) {
-			View::String(text) => simple(text),
-			View::Template { parts } => parts.iter().all(|part| match part {
-				TemplatePart::Text(text) => simple(text),
-				TemplatePart::Expression(value) => {
-					self.is_printed_simply(value) || self.is_simple_text(value)
-				}
-			}),
-			View::Call { callee, arguments } if arguments.is_empty() => {
-				let Some(Callee::Builtin(builtin)) =
-					self.analysis.call(node).map(|info| info.callee)
-				else {
-					return false;
+			"String#utf8Length" => {
+				let helper = if self.options.target == crate::Target::Web {
+					self.helper("faUtf8Length")
+				} else {
+					"Buffer.byteLength"
 				};
-				let path = fa_analyzer::builtins::get(builtin).path;
-				matches!(
-					path,
-					"Integer#toString" | "Float#toString" | "BigInt#toString"
-				) && matches!(self.view(callee), View::Access { target, .. } if self.is_printed_simply(target))
+				js::call(helper, &[receiver.text])
 			}
-			_ => false,
+			"String#toUtf8" => {
+				let encoder = self.helper("faUtf8Encoder");
+				js::call(&format!("{encoder}.encode"), &[receiver.text])
+			}
+			"String#characters" | "String#codePoints" => {
+				let helper = self.helper(if path == "String#characters" {
+					"faCharacters"
+				} else {
+					"faStringCodePoints"
+				});
+				js::call(helper, &[receiver.text])
+			}
+			"Bytes#toArray" => js::call("Array.from", &[receiver.text]),
+			"Bytes#toString" => {
+				let helper = self.helper("faFormatBytes");
+				js::call(helper, &[receiver.text])
+			}
+			_ => method(path.trim_start_matches("String#"), &receiver, &given),
 		}
 	}
 
-	/// Whether a value prints as ASCII: an integer, a float or a boolean.
-	fn is_printed_simply(&self, node: NodeId) -> bool {
-		matches!(
-			self.kind(self.type_of(node)),
-			Kind::Int(_) | Kind::BigInt | Kind::Float(FloatBits::F64) | Kind::Boolean
-		)
+	/// Read a numeric code unit with exactly the analyzer's bounds check.
+	pub(crate) fn code_unit(
+		&mut self,
+		n: NodeId,
+		index: NodeId,
+		text: Expr,
+		position: Expr,
+	) -> Expr {
+		let access = self.index_access(n, index);
+		let text = if access == IndexAccess::Direct {
+			text
+		} else {
+			self.keep(text)
+		};
+		let position = match access {
+			IndexAccess::Direct => position.text,
+			IndexAccess::Checked => {
+				let helper = self.helper("faNormalizeIndex");
+				format!(
+					"{helper}({}.length, {})",
+					text.primary_text(),
+					position.text
+				)
+			}
+			IndexAccess::FromEnd => {
+				let position = self.keep(position);
+				format!(
+					"{} < 0 ? {} + {}.length : {}",
+					position.text,
+					position.text,
+					text.primary_text(),
+					position.text
+				)
+			}
+		};
+		Expr::primary(format!("{}.charCodeAt({position})", text.primary_text()))
+	}
+
+	/// A string index may be read numerically when its consumer compares units.
+	pub(crate) fn indexed_code_unit(&mut self, n: NodeId) -> Expr {
+		let n = self.strip_groups(n);
+		let View::Index { target, index } = self.view(n) else {
+			unreachable!("STRING_CODE_UNIT is an index")
+		};
+		let values = self.in_order(&[target, index], |g, node| g.expr(node));
+		self.code_unit(n, index, values[0].clone(), values[1].clone())
+	}
+
+	pub(crate) fn one_unit_literal(&self, node: NodeId) -> Option<u16> {
+		let View::String(text) = self.view(self.strip_groups(node)) else {
+			return None;
+		};
+		let mut units = text.encode_utf16();
+		let first = units.next()?;
+		units.next().is_none().then_some(first)
+	}
+
+	/// Direct code-point counting consumes the analyzer fact before building an array.
+	pub(crate) fn code_point_count(&mut self, n: NodeId, target: NodeId) -> Option<Expr> {
+		if !self.has(n, NodeFlags::CODE_POINT_COUNT) {
+			return None;
+		}
+		let View::Call { callee, .. } = self.view(self.strip_groups(target)) else {
+			return None;
+		};
+		let text = self.receiver(callee);
+		let helper = self.helper("faCodePointCount");
+		Some(js::call(helper, &[text.text]))
 	}
 }
 

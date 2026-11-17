@@ -17,7 +17,7 @@ use std::collections::HashMap;
 
 use fa_analyzer::ids::{NodeId, ParamId, Sym, SymbolId, TypeId};
 pub(crate) use fa_analyzer::modules::GenericRequirement as Hidden;
-use fa_analyzer::symbols::{Resolution, SymbolKind};
+use fa_analyzer::symbols::Resolution;
 use fa_analyzer::syntax::View;
 use fa_analyzer::types::{FieldFlags, TypeKind};
 
@@ -111,37 +111,8 @@ impl Generator<'_> {
 	/// The `Static` symbol a value parameter's name resolves to in the body
 	/// of a function.
 	fn value_parameter_symbol(&self, function: NodeId, param: ParamId) -> Option<SymbolId> {
-		let name = self.types.param(param).name;
-		// the declaration holds the generic parameters, not the lambda
-		let declaration = self
-			.analysis
-			.function(function)
-			.and_then(|info| info.declaration)
-			.unwrap_or(function);
-		let owner = self
-			.analysis
-			.function_owners
-			.get(&function)
-			.copied()
-			.filter(|owner| {
-				self.analysis
-					.type_decls
-					.get(owner)
-					.is_some_and(|info| info.generics.contains(&param))
-			})
-			.unwrap_or(declaration);
-		let span = self.tree.spans[owner.index()];
 		self.analysis
-			.symbols
-			.symbols()
-			.iter()
-			.position(|symbol| {
-				symbol.kind == SymbolKind::Static && symbol.name == name && {
-					let declared = self.tree.spans[symbol.decl_node.index()];
-					span.start <= declared.start && declared.end <= span.end
-				}
-			})
-			.map(SymbolId::new)
+			.value_parameter_symbol(self.types, self.tree, function, param)
 	}
 
 	/// The values of the hidden parameters of a generic function at a call

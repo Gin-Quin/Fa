@@ -1,0 +1,32 @@
+mutable bytes = Bytes.filled(4)
+mutable use part = bytes[0..2]
+try part[0] = 7
+reuse part = bytes[2..4]
+try part[1] = 9
+let source = Bytes.from([5, 6])
+for byte, index in source {
+	try part[index] = byte
+}
+mutable items = [1, 2, 3, 4]
+mutable use arrayPart = items[0..2]
+try arrayPart[0] = 7
+reuse arrayPart = items[2..4]
+try arrayPart[1] = 9
+-- An item may itself own a collection: replacing it isn't replacing a view.
+mutable nested = [[1], [2]]
+mutable use nestedPart = nested[..]
+try nestedPart[0] = [3, 4]
+for item in nestedPart {
+	item = [9]
+}
+-- Owned slice copies and aliases of whole collection slots stay assignable.
+mutable duplicate = bytes[0..2]
+duplicate = Bytes.filled(3)
+mutable arrayCopy = items[0..2]
+arrayCopy = [0]
+mutable use whole = bytes
+whole = Bytes.filled(1)
+mutable text = "abcd"
+mutable use word = text[0..2]
+reuse word = text[2..4]
+console.log(bytes, items, nested, duplicate, arrayCopy, word)

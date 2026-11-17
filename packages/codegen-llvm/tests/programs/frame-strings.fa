@@ -59,7 +59,7 @@ function preserveReservation = () => {
 	assert reserved >= previous
 	text += "é\r\n"
 	assert text.capacity >= reserved
-	assert text.length == 2
+	assert text.length == 3
 }
 preserveReservation()
 function returning = (count: Integer): String => {
@@ -71,9 +71,9 @@ function returning = (count: Integer): String => {
 }
 function bytes = (prefix: String): Array<Byte> => {
 	let text = "{prefix}:123456789012345678901234567890"
-	text.bytes()
+	text.toUtf8().toArray()
 }
-function characters = (prefix: String): Array<Character> => {
+function characters = (prefix: String): Array<String> => {
 	let text = "{prefix}:123456789012345678901234567890"
 	text.characters()
 }

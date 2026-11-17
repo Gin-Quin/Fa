@@ -876,7 +876,7 @@ fn literal_and_range_patterns_refine_integers() {
 
 #[test]
 fn proven_indices_can_span_both_signs() {
-	let source = "let alphabet = \"abcdefghijklmnopqrstuvwxyz\"\nfunction at = (index: Integer<min = -26, max = 25>): Character => alphabet[index]\n";
+	let source = "let alphabet = \"abcdefghijklmnopqrstuvwxyz\"\nfunction at = (index: Integer<min = -26, max = 25>): String => alphabet[index]\n";
 	let checked = analyze(source);
 	assert!(checked.codes().is_empty(), "{:?}", checked.codes());
 	assert!(

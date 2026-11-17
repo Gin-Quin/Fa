@@ -2,7 +2,7 @@
 mutable counter = AtomicInteger { value = 0 } -- error E-DECL-1
 mutable lock = Mutex<Integer> { value = 0 } -- error E-DECL-1
 let start = now() -- error E-DECL-1
-let text = File.read("a.txt") -- error E-DECL-1
+let text = File.readText("a.txt") -- error E-DECL-1
 let ordering = Ordering.relaxed -- error E-DECL-1
 
 -- a name of `std` doesn't hide anything without its `use`

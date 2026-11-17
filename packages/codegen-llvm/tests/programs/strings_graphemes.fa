@@ -1,0 +1,11 @@
+function count = (text: String): Integer => text.characters().length
+console.log(count("a\r\nb"), count("e\u{301}"), count("🇫🇷🇩🇪🇦")) -- prints: 3 1 3
+console.log(count("👩🏽‍💻"), count("👨‍👩‍👧‍👦"), count("각")) -- prints: 1 1 1
+console.log(count("क्‍क"), count("क्क"), count("\u{600}a"), count("a\u{903}")) -- prints: 1 1 1 1
+console.log("a\r\nb".characters()) -- prints: ["a", "\r\n", "b"]
+let emoji = "😀"
+use low = emoji[1..]
+console.log(count(low), (try low.characters()[0]) == emoji[1], count(emoji[0])) -- prints: 1 true 1
+static indicLength = @count("क्‍क")
+static carriageLength = @count("\r\n")
+console.log(indicLength, carriageLength) -- prints: 1 1

@@ -1,0 +1,10 @@
+function schema = (text: String): Schema => Schema.StringLiteral { value = text }
+function rule = (text: String): Boolean throws IndexError => {
+	let half = try text[0]
+	let data = schema(half)
+	when data is {
+		Schema.StringLiteral as literal => literal.value == half and not literal.value.isWellFormed()
+		else => false
+	}
+}
+console.log(try rule("😀")) -- prints: true

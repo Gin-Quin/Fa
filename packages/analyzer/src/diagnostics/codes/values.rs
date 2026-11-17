@@ -17,7 +17,7 @@ codes! {
 	E_CMP_10 = "E-CMP-10", Error, [], "as after is";
 	E_DECL_1 = "E-DECL-1", Error, ["MOD012"], "assignment to, or use of, an undeclared name";
 	E_DECL_2 = "E-DECL-2", Error, ["TY009"], "same name declared twice in one scope (not an invalidated use)";
-	E_DECL_3 = "E-DECL-3", Error, [], "assignment or compound assignment to a let, a use of an immutable place, a loop variable copy, a parameter";
+	E_DECL_3 = "E-DECL-3", Error, [], "assignment or compound assignment to a let, a use of an immutable place, a loop variable copy, a parameter, or a string item";
 	E_DECL_4 = "E-DECL-4", Error, ["TY023", "EFF012"], "write below an immutable place (myObject.foo += 1 with let myObject)";
 	E_DECL_6 = "E-DECL-6", Error, ["FN001"], "let f = (x) => …";
 	E_DECL_8 = "E-DECL-8", Error, [], "chained assignment";
@@ -118,8 +118,6 @@ codes! {
 	E_STR_5 = "E-STR-5", Error, [], "empty interpolation {} or { }";
 	E_STR_6 = "E-STR-6", Error, [], "unterminated interpolation";
 	E_STR_7 = "E-STR-7", Error, [], "+ with a non-string operand: \"expected a String, found an Integer: use \"Score: {score}\" or score.toString()\"";
-	E_STR_8 = "E-STR-8", Error, [], "String where a Character is expected (non-literal)";
-	E_STR_9 = "E-STR-9", Error, [], "literal with zero or several grapheme clusters where a Character is expected (let c: Character = \"ab\", = \"\")";
 	E_STR_11 = "E-STR-11", Error, [], "interpolating a Void expression";
 	E_STR_12 = "E-STR-12", Error, [], "interpolating a function value [D-39]";
 	E_STR_13 = "E-STR-13", Error, [], "single-quoted or backtick string ('a'): \"strings use double quotes\"";

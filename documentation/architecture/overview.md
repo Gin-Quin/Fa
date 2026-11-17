@@ -37,6 +37,8 @@ The file given to `fa run` is the program: its top-level statements run in order
 
 The arguments given after the file name (`fa run myFile.fa first second`) are in `arguments`, an implicit `Array<String>` that the top level of a standalone file or a script sees: `arguments.get(0)` is the first one (`first`). If the file exports a function, it is called after the top-level statements, as an entry function: it receives the same arguments, and its result is the exit code.
 
+Arguments are decoded as UTF-8, replacing each maximal invalid subpart with one `U+FFFD`, following WHATWG, like `String.fromUtf8Lossy`. Invalid argument text never stops the program.
+
 The other files are modules: they contain only declarations, like the files of a package (see [module-level values and initialization](/architecture/modules#module-level-values-and-initialization)).
 
 Files in parent directories are not accessible. To organize code across several folders, create a [package](#packages).

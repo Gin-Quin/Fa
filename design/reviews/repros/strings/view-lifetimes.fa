@@ -1,0 +1,50 @@
+function units = (text: String): String => {
+	mutable result: Array<String> = []
+	for index in 0..text.length { result.push(text.codeUnitAt(index).toString()) }
+	"{text.length}:[{result.join(",")}]"
+}
+function identity = <Item>(value: Item): Item => value
+function splitThenWrite = (count: Integer<min = 0>): Array<String> => {
+	mutable text = "é".repeat(count) + "😀,b"
+	let parts = text.split(",")
+	text = "x"
+	text += "é".repeat(100)
+	parts
+}
+function splitLoopWrite = (count: Integer<min = 0>): String => {
+	mutable text = "é".repeat(count) + "😀,b,c"
+	mutable seen: Array<String> = []
+	for part in text.split(",") {
+		text += "ü"
+		seen.push(part)
+	}
+	seen.join("|") + "/" + text.length.toString()
+}
+type Reader = () => String
+function capture = (count: Integer<min = 0>): Reader throws IndexError => {
+	let text = "é".repeat(count) + "😀z"
+	let part = try text[count + 1..]
+	() => units(part)
+}
+function generic = (count: Integer<min = 0>): String throws IndexError => {
+	let text = "é".repeat(count) + "😀z"
+	let part = identity(try text[count + 1..])
+	let items = identity([try text[count..count + 1], part])
+	units(try items[0]) + units(try items[1])
+}
+function run = (count: Integer<min = 0>) throws IndexError => {
+	console.log(splitThenWrite(count).map((part) => units(part)).join(" "))
+	console.log(splitLoopWrite(count))
+	console.log((try capture(count))())
+	console.log(try generic(count))
+}
+try run(3)
+try run(40)
+-- prints: 5:[233,233,233,55357,56832] 1:[98]
+-- prints: ééé😀|b|c/12
+-- prints: 2:[56832,122]
+-- prints: 1:[55357]2:[56832,122]
+-- prints: 42:[233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,233,55357,56832] 1:[98]
+-- prints: éééééééééééééééééééééééééééééééééééééééé😀|b|c/49
+-- prints: 2:[56832,122]
+-- prints: 1:[55357]2:[56832,122]

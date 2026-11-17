@@ -1,5 +1,3 @@
--- brief: → `☃ 🇫🇷`
-let snow: Character = "☃"
-let flag: Character = "🇫🇷"
-console.log(snow, flag)
--- prints: ☃ 🇫🇷
+let face = "😀"
+console.log(face[0].length, face[0].isWellFormed(), face[0] + face[1] == face, face[0..1] + face[1..] == face)
+-- prints: 1 false true true

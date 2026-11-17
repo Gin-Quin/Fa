@@ -12,7 +12,7 @@ use fa_interpreter::value::{Member, MemberKind};
 use crate::ids::TypeId;
 use crate::types::{CollKind, FloatBits, IntStorage, TypeKind, TypeStore};
 
-fn member(name: &str, fields: Vec<(&str, Value)>) -> Value {
+pub(super) fn member(name: &str, fields: Vec<(&str, Value)>) -> Value {
 	let data = (!fields.is_empty()).then(|| Value::object(fields));
 	Value::Member(Arc::new(Member {
 		name: Arc::from(format!("Schema.{name}")),
@@ -132,7 +132,11 @@ fn describe(types: &TypeStore, ty: TypeId, depth: u32, named: bool) -> Value {
 		&& let Some(name) = types.type_name(ty).or(nominal_name)
 		&& !matches!(
 			types.kind(ty),
-			TypeKind::Int(_) | TypeKind::Float(_) | TypeKind::String | TypeKind::Boolean
+			TypeKind::Int(_)
+				| TypeKind::Float(_)
+				| TypeKind::String
+				| TypeKind::Bytes
+				| TypeKind::Boolean
 		) {
 		return member(
 			"Named",
@@ -151,7 +155,7 @@ fn describe(types: &TypeStore, ty: TypeId, depth: u32, named: bool) -> Value {
 		}
 		TypeKind::Boolean => member("Boolean", Vec::new()),
 		TypeKind::String => member("String", Vec::new()),
-		TypeKind::Character => member("Character", Vec::new()),
+		TypeKind::Bytes => member("Bytes", Vec::new()),
 		TypeKind::Percentage => member("Percentage", Vec::new()),
 		TypeKind::BigInt => member("BigInt", Vec::new()),
 		TypeKind::None => member("None", Vec::new()),

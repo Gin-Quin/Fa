@@ -72,7 +72,6 @@ impl Walker<'_> {
 			| TypeKind::Int(_)
 			| TypeKind::String
 			| TypeKind::StringLit(_)
-			| TypeKind::Character
 			| TypeKind::Enum(..)
 			| TypeKind::EnumMember(..)
 			| TypeKind::Fields(_) => true,

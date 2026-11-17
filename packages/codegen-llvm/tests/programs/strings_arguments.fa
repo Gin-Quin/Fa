@@ -1,0 +1,7 @@
+-- args: ASCII é日😀
+for text in arguments {
+	console.log(text.length, text.isWellFormed(), text)
+}
+-- prints: 5 true ASCII
+-- prints: 4 true é日😀
+console.log(arguments.length) -- prints: 2

@@ -1,0 +1,13 @@
+static half = "😀"[0] -- type half: String
+let text: String = half
+static whole = "😀"
+type Face = whole
+let face: Face = "😀"
+static joined = "😀"[0] + "😀"[1]
+type JoinedFace = joined
+let repaired: JoinedFace = "😀"
+console.log(text, face, repaired)
+function literal = (text: String): Schema => Schema.StringLiteral { value = text }
+type RepairedSchema = TypeFromSchema<@literal("😀"[0] + "😀"[1])>
+let fromSchema: RepairedSchema = "😀"
+console.log(fromSchema)

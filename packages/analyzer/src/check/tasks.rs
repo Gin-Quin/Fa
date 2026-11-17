@@ -153,8 +153,9 @@ fn primitive(path: &str) -> Option<(&'static str, TargetSet)> {
 		),
 		// the file system: blocking wherever it exists (not on `web`)
 		"File.read" => ("File.read", TargetSet::all() - TargetSet::WEB),
-		"File.readBytes" => ("File.readBytes", TargetSet::all() - TargetSet::WEB),
+		"File.readText" => ("File.readText", TargetSet::all() - TargetSet::WEB),
 		"File.write" => ("File.write", TargetSet::all() - TargetSet::WEB),
+		"File.writeText" => ("File.writeText", TargetSet::all() - TargetSet::WEB),
 		// sockets: blocking natively only (async on `bun` and `node`)
 		"TcpListener#accept" => ("TcpListener.accept", TargetSet::NATIVE),
 		"TcpStream.connect" => ("TcpStream.connect", TargetSet::NATIVE),

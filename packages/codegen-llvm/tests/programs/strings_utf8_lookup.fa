@@ -1,0 +1,13 @@
+let pair = String.from("😀")
+let high = try pair[0]
+let low = try pair[1]
+let text = "x" + high + "y" + low
+let bytes = text.toUtf8()
+console.log(bytes.length, try bytes[0], try bytes[1], try bytes[2], try bytes[3], try bytes[4], try bytes[-3], try bytes[-2], try bytes[-1]) -- prints: 8 120 239 191 189 121 239 191 189
+console.log(try high.toUtf8()[0], try high.toUtf8()[1], try high.toUtf8()[2]) -- prints: 239 191 189
+let suffix = try text.toUtf8()[5..8]
+for byte in suffix { console.log(byte) }
+-- prints: 239
+-- prints: 191
+-- prints: 189
+console.log((try pair.codePoints()[0..1]).length) -- prints: 1

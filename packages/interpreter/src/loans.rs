@@ -26,6 +26,8 @@ pub(crate) enum Step {
 /// tuple containing copies of them.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum View<'v> {
+	Integer(ethnum::I256),
+	Bytes(&'v [u8]),
 	Value(&'v Value),
 	Entry(&'v (Value, Value)),
 }
@@ -33,6 +35,8 @@ pub(crate) enum View<'v> {
 impl<'v> View<'v> {
 	pub fn materialize(self) -> Value {
 		match self {
+			Self::Integer(value) => Value::Integer(value),
+			Self::Bytes(bytes) => Value::Bytes(Arc::new(bytes.to_vec())),
 			Self::Value(value) => value.clone(),
 			Self::Entry((key, value)) => Value::Tuple(Arc::new(vec![key.clone(), value.clone()])),
 		}
@@ -52,8 +56,32 @@ impl<'v> View<'v> {
 			};
 			return Ok(Self::Value(if position == 0 { &pair.0 } else { &pair.1 }));
 		}
+		let bytes = match self {
+			Self::Value(Value::Bytes(bytes)) => Some(bytes.as_slice()),
+			Self::Bytes(bytes) => Some(bytes),
+			_ => None,
+		};
+		if let Some(bytes) = bytes {
+			return match step {
+				Step::Index(Value::Range {
+					start,
+					end,
+					inclusive,
+				}) => {
+					let (from, to) = builtins::slice_bounds(*start, *end, *inclusive, bytes.len())?;
+					Ok(Self::Bytes(&bytes[from..to]))
+				}
+				Step::Index(key) => Ok(Self::Integer(ethnum::I256::from(
+					bytes[builtins::position(builtins::integer(key)?, bytes.len())?],
+				))),
+				Step::Field(name) if name.as_ref() == "length" => {
+					Ok(Self::Integer(ethnum::I256::from(bytes.len() as u64)))
+				}
+				_ => Err(Error::Stop("unsupported byte projection".into())),
+			};
+		}
 		let Self::Value(value) = self else {
-			unreachable!()
+			return Err(Error::Stop("an integer item has no nested place".into()));
 		};
 		Ok(Self::Value(match step {
 			Step::Field(name) => builtins::field_ref(value, name)?,
@@ -141,6 +169,18 @@ impl Loan {
 			parent: self.path.clone(),
 			step,
 		})));
+	}
+
+	pub fn parent(&self) -> Option<(Self, &Step)> {
+		let link = self.path.0.as_ref()?;
+		Some((
+			Self {
+				owner: self.owner,
+				path: link.parent.clone(),
+				depth: self.depth - 1,
+			},
+			&link.step,
+		))
 	}
 
 	pub fn steps(&self) -> Vec<&Step> {

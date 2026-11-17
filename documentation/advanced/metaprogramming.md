@@ -77,7 +77,9 @@ A function called at compile time must be [**pure**](/functions/defining-functio
 
 ### Determinism
 
-Compile-time evaluation is **deterministic**: given the same inputs, it always produces the same output, so a build can be reproduced and cached. Reading the clock, the network or a random source is not allowed at compile time:
+Compile-time evaluation is **deterministic**: given the same inputs, it always produces the same output, so a build can be reproduced and cached. Reading the clock, the network or a random source is not allowed at compile time.
+
+`String.compareLocale` is also a runtime-only operation: it depends on the locale data of the machine running the program. Call it at runtime rather than in a `static` or an `@` call.
 
 ```fa
 use { now } = std.time

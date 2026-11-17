@@ -1,0 +1,16 @@
+mutable text = "ab"
+text[0] = "x" -- error: E-DECL-3
+text[0] += "x" -- error: E-DECL-3
+mutable use unit = text[0]
+unit = "x" -- error: E-DECL-3
+mutable items = [1, 2]
+mutable use part = items[..]
+part.push(3) -- error: REF016
+part.clear() -- error: REF016
+(part.reserve)(1) -- error: REF016
+let grow = part.push -- error: REF016
+mutable use word = text[..]
+word.reserve(1) -- error: REF016
+function update = (text: String, index: Integer) => {
+	text[index] = "x" -- error: E-DECL-3
+}

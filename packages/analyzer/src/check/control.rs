@@ -291,23 +291,6 @@ impl Walker<'_> {
 			self.report_branch_mix(n, a, b);
 			return TypeId::UNKNOWN;
 		}
-		// a `Character` joined with a `String` is a `String`
-		let text = types.iter().any(|&ty| {
-			matches!(
-				self.s.types.kind(ty),
-				TypeKind::String | TypeKind::StringLit(_)
-			)
-		});
-		let types: SmallVec<[TypeId; 4]> = types
-			.iter()
-			.map(|&ty| {
-				if text && ty == TypeId::CHARACTER {
-					TypeId::STRING
-				} else {
-					ty
-				}
-			})
-			.collect();
 		let union = self.s.types.union(&types);
 		if let Some((a, b)) = self.s.types.indistinguishable_pair(union) {
 			self.report_branch_mix(n, a, b);
@@ -832,6 +815,12 @@ impl Walker<'_> {
 		(iterable, item): (NodeId, TypeId),
 		body: NodeId,
 	) -> TypeId {
+		if self.direct_string_call(iterable, "String#toUtf8") {
+			self.set_flag(
+				self.strip_groups(iterable),
+				crate::analysis::NodeFlags::UTF8_ITERATION,
+			);
+		}
 		let parent = self.body.scope;
 		let scope = self.a.symbols.scope_for(n, Some(parent), ScopeKind::Block);
 		self.body.scope = scope;
@@ -898,6 +887,7 @@ impl Walker<'_> {
 					..
 				) | TypeKind::String
 					| TypeKind::StringLit(_)
+					| TypeKind::Bytes
 					| TypeKind::CArray(..)
 					| TypeKind::Unknown
 			);

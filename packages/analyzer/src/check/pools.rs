@@ -243,19 +243,25 @@ impl Walker<'_> {
 		self.access_place(target, &members[..members.len().saturating_sub(1)])
 	}
 
-	/// The type of the receiver of a method call `a.b.method(…)`: `a.b`'s.
-	pub(crate) fn callee_receiver_type(&self, callee: NodeId) -> Option<TypeId> {
+	/// The receiver's last node (`text` in `self.text.method()`), whose type
+	/// is the receiver type even when the parser flattens the member chain.
+	pub(crate) fn callee_receiver_node(&self, callee: NodeId) -> Option<NodeId> {
 		let callee = self.strip_groups(callee);
 		let View::Access { target, members } = self.view(callee) else {
 			return None;
 		};
 		let members: Vec<NodeId> = members.iter().collect();
-		let prefix = match members.len() {
-			0 => return None,
-			1 => target,
-			length => members[length - 2],
-		};
-		Some(self.type_of(prefix))
+		match members.len() {
+			0 => None,
+			1 => Some(target),
+			length => Some(members[length - 2]),
+		}
+	}
+
+	/// The type of the receiver of a method call `a.b.method(…)`: `a.b`'s.
+	pub(crate) fn callee_receiver_type(&self, callee: NodeId) -> Option<TypeId> {
+		self.callee_receiver_node(callee)
+			.map(|node| self.type_of(node))
 	}
 
 	/// `WCL002`: `let duplicate = pool.add(…)` copies the stored element; the

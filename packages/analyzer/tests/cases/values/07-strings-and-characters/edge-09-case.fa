@@ -1,0 +1,8 @@
+function rule = (text: String): String throws IndexError => {
+	let high = try text[0]
+	let upper = ("aß" + high).toUpperCase()
+	let lower = ("ΟΣ" + high).toLowerCase()
+	"{upper.length} {upper.isWellFormed()} {lower.startsWith("ος")} {lower.endsWith(high)} {upper.endsWith(high)} {"İ".toLowerCase().length}"
+}
+static result = @rule("😀")
+console.log(result, (try rule("😀")) == result) -- prints: 4 false true true true 2 true

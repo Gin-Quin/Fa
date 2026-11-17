@@ -1,0 +1,36 @@
+-- Breadcrumbs of a heap Unicode owner across appends: built by two conversions,
+-- kept by ASCII appends (then extended), cleared by non-ASCII and joining writes.
+function probe = (text: String): String => {
+	mutable rows: Array<String> = []
+	for index in [0, 63, 64, 65, 127, 128, 129, text.length - 2, text.length - 1] {
+		rows.push(text.codeUnitAt(index).toString() catch _ => "error")
+	}
+	rows.push("{text.length}:{text.utf8Length()}:{text.isWellFormed()}")
+	rows.push((text.indexOf("z") ?? -1).toString())
+	rows.join(",")
+}
+mutable text = String.from("", capacity = 4096)
+for index in 0..70 { text += "é" }
+text += "😀"[0]
+console.log(probe(text)) -- prints: 233,233,233,233,error,error,error,233,55357,71:143:false,-1
+console.log(probe(text)) -- prints: 233,233,233,233,error,error,error,233,55357,71:143:false,-1
+text += "😀"[1]
+console.log(probe(text)) -- prints: 233,233,233,233,error,error,error,55357,56832,72:144:true,-1
+for index in 0..80 { text += "a" }
+console.log(probe(text)) -- prints: 233,233,233,233,97,97,97,97,97,152:224:true,-1
+console.log(probe(text)) -- prints: 233,233,233,233,97,97,97,97,97,152:224:true,-1
+text += "z😀"
+console.log(probe(text)) -- prints: 233,233,233,233,97,97,97,55357,56832,155:229:true,152
+for index in 0..3 { text += "😀"[0] }
+text += "😀"[1]
+text += "y"
+console.log(probe(text)) -- prints: 233,233,233,233,97,97,97,56832,121,160:240:false,152
+mutable shifted = "😀".repeat(70)
+console.log(probe(shifted)) -- prints: 55357,56832,55357,56832,56832,55357,56832,55357,56832,140:280:true,-1
+console.log(probe(shifted)) -- prints: 55357,56832,55357,56832,56832,55357,56832,55357,56832,140:280:true,-1
+shifted = "a" + shifted
+console.log(probe(shifted)) -- prints: 97,55357,56832,55357,55357,56832,55357,55357,56832,141:281:true,-1
+console.log(probe(shifted)) -- prints: 97,55357,56832,55357,55357,56832,55357,55357,56832,141:281:true,-1
+for index in 0..100 { shifted += "b" }
+console.log(probe(shifted)) -- prints: 97,55357,56832,55357,55357,56832,55357,98,98,241:381:true,-1
+console.log(try shifted[63..66], try shifted[127..130]) -- prints: 😀� 😀�

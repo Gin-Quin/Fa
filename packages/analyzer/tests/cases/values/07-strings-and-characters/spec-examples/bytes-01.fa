@@ -1,0 +1,6 @@
+-- Specification example: bytes 01
+let greeting = Bytes.from([104, 105])
+let empty = Bytes.filled(16) -- 16 bytes, all zero
+
+assert greeting.length == 2
+assert greeting[0] == 104

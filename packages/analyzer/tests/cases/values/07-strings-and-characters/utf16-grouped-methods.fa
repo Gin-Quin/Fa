@@ -1,0 +1,7 @@
+let text = "a😀"
+console.log((text.codeUnitAt)(0), (text.codePoints)().length) -- prints: 97 2
+mutable sum = 0
+for byte in (text.toUtf8)() {
+	sum += byte
+}
+console.log(sum, ("é😀".toUtf8)()[5]) -- prints: 776 128

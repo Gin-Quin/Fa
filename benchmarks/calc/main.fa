@@ -112,7 +112,7 @@ type Parser = {
 	nodes: Integer -- every node built, bad inputs included
 
 	-- The byte at the position, or a null byte at the end of the text.
-	function current = (self): Byte => self.text.bytes().get(self.position) ?? end
+	function current = (self): Byte => self.text.toUtf8().get(self.position) ?? end
 
 	function skipSpaces = (self) mutates self => {
 		while self.current() == space {
@@ -196,7 +196,7 @@ type Parser = {
 	function run = (self): UInt64 throws CalcError mutates self => {
 		let root = try self.expression()
 		self.skipSpaces()
-		if self.position != self.text.bytes().length {
+		if self.position != self.text.toUtf8().length {
 			throw CalcError.UnexpectedToken
 		}
 		try evaluate(root)

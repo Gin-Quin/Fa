@@ -1,0 +1,7 @@
+-- An empty string that owns a heap block (reserved capacity) is copied by sharing its block:
+-- ownership.rs treats every empty external string as shared. Native/wasm/freestanding, O0 and O3: double free.
+mutable output = String.from("", capacity = 4096)
+let saved = output
+output += "abc"
+console.log(saved.length, output)
+-- prints: 0 abc

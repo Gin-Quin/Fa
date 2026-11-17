@@ -45,6 +45,25 @@ pub fn result_inputs(tree: &TypedSyntaxTree, node: NodeId) -> Option<Vec<NodeId>
 	})
 }
 
+/// A result rooted in an owner constructed inside an argument expression.
+/// Enclosing places and references borrow; this local must instead leave its
+/// inner scope before the call can borrow the resulting temporary.
+pub fn argument_local_root(
+	tree: &TypedSyntaxTree,
+	analysis: &Analysis,
+	argument: NodeId,
+	value: NodeId,
+) -> Option<SymbolId> {
+	let symbol = place_root(tree, analysis, value)?;
+	let info = analysis.symbols.symbol(symbol);
+	if !matches!(info.kind, SymbolKind::Let | SymbolKind::Mutable) {
+		return None;
+	}
+	let outer = tree.spans[argument.index()];
+	let inner = tree.spans[info.decl_node.index()];
+	(outer.start <= inner.start && inner.end <= outer.end).then_some(symbol)
+}
+
 /// A runtime union alternative. A named member's semantic type is published
 /// in the shared store; its original nominal still identifies the source
 /// layout and tag in the unit being lowered.

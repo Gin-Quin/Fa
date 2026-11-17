@@ -1675,6 +1675,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// Takes a value, then registers it as a temporary of the enclosing
 	/// statement: the value of a block, of an `if`.
 	pub(crate) fn own(&self, value: Val<'ctx>, node: Option<NodeId>) -> Result<Val<'ctx>, Error> {
+		if node.is_some_and(|node| self.frame().default_inputs.contains_key(&node)) {
+			return Ok(value);
+		}
 		let owned = self.take(value, node)?;
 		Ok(self.fresh(owned))
 	}
@@ -2182,6 +2185,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		repr: Repr,
 		node: Option<NodeId>,
 	) -> Result<Val<'ctx>, Error> {
+		if let Some(node) = node
+			&& self.frame().default_inputs.contains_key(&node)
+		{
+			return self.convert(value, repr, node.index());
+		}
 		if !repr.has_value() || value.repr == Repr::Never {
 			return self.take(value, node);
 		}

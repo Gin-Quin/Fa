@@ -978,7 +978,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// The element a reference to a collection's element designates, and
 	/// whether it may be null: `pool.add(…)`, `pool.find(…)` (pools.rs),
 	/// `map.get(key)` (tables.rs).
-	fn collection_reference(&mut self, value: NodeId) -> Result<Option<(Slot<'ctx>, bool)>, Error> {
+	pub(super) fn collection_reference(
+		&mut self,
+		value: NodeId,
+	) -> Result<Option<(Slot<'ctx>, bool)>, Error> {
 		let mut node = value;
 		while let View::Group(inner) | View::Try(inner) = self.view(node) {
 			node = inner;

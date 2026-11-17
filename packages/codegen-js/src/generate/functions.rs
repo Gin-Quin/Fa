@@ -412,7 +412,17 @@ impl Generator<'_> {
 					parameters.push(name);
 					continue;
 				};
-				let (lines, value) = g.capture_at(indent + 2, |g| g.expr(default));
+				let default_flag = (g
+					.types
+					.contains_resource(g.analysis.symbols.symbol(param.symbol).ty)
+					&& !g
+						.types
+						.parameter_can_be_consumed(g.analysis.symbols.symbol(param.symbol).ty))
+				.then(|| g.temp());
+				let (lines, value) = g.capture_at(indent + 2, |g| match &default_flag {
+					Some(flag) => g.default_resource_value(default, flag),
+					None => g.expr(default),
+				});
 				let sentinel = g.omitted_by_sentinel(param.symbol);
 				let default_test = if sentinel {
 					let omitted = g.helper("faOmitted");
@@ -428,17 +438,11 @@ impl Generator<'_> {
 					format!("{name} === undefined")
 				};
 
-				if g.owns_resource(param.symbol)
-					&& !g
-						.types
-						.parameter_can_be_consumed(g.analysis.symbols.symbol(param.symbol).ty)
-				{
-					let flag = g.temp();
+				if let Some(flag) = default_flag {
 					owner_declarations.line(format!("let {flag} = false;"));
 					prologue.open(format!("if ({default_test})"));
 					prologue.append(lines);
 					prologue.line(format!("{name} = {};", value.text));
-					prologue.line(format!("{flag} = true;"));
 					prologue.close("");
 					default_owners.push((param.symbol, flag));
 					parameters.push(name);

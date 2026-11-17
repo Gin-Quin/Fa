@@ -100,17 +100,35 @@ impl Walker<'_> {
 				})
 			})
 			.collect();
-		// An omitted argument borrows exactly like a written argument.
-		// Only consuming parameters take ownership of their defaults.
-		values.extend(self.a.functions.values().flat_map(|info| {
-			info.params.iter().filter_map(|param| {
-				self.s
+		// Enclosing defaults borrow. A local constructed by the argument must
+		// leave its inner scope, just like a written block-valued argument.
+		for info in self.a.functions.values() {
+			for param in &info.params {
+				let Some(default) = param.default else {
+					continue;
+				};
+				if self
+					.s
 					.types
 					.parameter_can_be_consumed(self.a.symbols.symbol(param.symbol).ty)
-					.then_some(param.default)
-					.flatten()
-			})
-		}));
+				{
+					values.push(default);
+					continue;
+				}
+				let mut pending = vec![default];
+				while let Some(value) = pending.pop() {
+					if let Some(inputs) = crate::lower::copies::result_inputs(&self.tree, value) {
+						pending.extend(inputs);
+					} else if crate::lower::copies::argument_local_root(
+						&self.tree, &self.a, default, value,
+					)
+					.is_some()
+					{
+						values.push(value);
+					}
+				}
+			}
+		}
 		for index in 0..self.tree.nodes.len() {
 			let node = NodeId::new(index);
 			if self.a.has_flags(node, NodeFlags::TYPE_EXPR) {

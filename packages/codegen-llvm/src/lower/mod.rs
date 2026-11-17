@@ -37,6 +37,7 @@ mod constants;
 mod converting_copies;
 mod copies;
 mod decimal;
+mod defaults;
 mod destination;
 mod division;
 mod edits;
@@ -188,6 +189,9 @@ struct LoopFrame<'ctx> {
 
 /// The function being lowered.
 struct Frame<'ctx> {
+	/// Result paths of an omitted borrowed argument, never its inner stores.
+	default_inputs: FxHashMap<NodeId, defaults::DefaultInput<'ctx>>,
+	default_places: FxHashMap<NodeId, Slot<'ctx>>,
 	/// Explicit borrowed result expressions use the address-return ABI.
 	reference_returns: rustc_hash::FxHashSet<NodeId>,
 	reference_buffer: Option<PointerValue<'ctx>>,
@@ -1873,6 +1877,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let collection_budget = self.collection_budget_for(owner);
 		self.frame = Some(Frame {
 			reference_returns: rustc_hash::FxHashSet::default(),
+			default_inputs: FxHashMap::default(),
+			default_places: FxHashMap::default(),
 			reference_buffer: None,
 			return_slot: None,
 			nrvo_local: None,
@@ -2080,44 +2086,21 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 						chosen.as_basic_value().into_pointer_value()
 					}
 					(true, Some(default)) => {
-						// not given: the default, in a slot the function owns
 						let flag = value.get_nth_param(index).expect("a flag").into_int_value();
 						index += 1;
-						let own = self.alloca(repr, "default_parameter")?;
-						let owned = self
-							.needs_drop(repr)
-							.then(|| self.alloca(Repr::Bool, "default"))
-							.transpose()?;
-						if let Some(owned) = owned {
-							self.builder.build_store(
-								owned.pointer,
-								self.context.bool_type().const_zero(),
-							)?;
-						}
+						let input = self.prepare_default_input(default, repr)?;
 						let given_block = self.builder.get_insert_block().expect("a block");
 						let use_default = self.append_block("default");
 						let join = self.append_block("given");
 						self.builder
 							.build_conditional_branch(flag, join, use_default)?;
 						self.builder.position_at_end(use_default);
-						let default_value =
-							self.region(Some(repr), default, |this| this.expr(default))?;
-						self.store(own, default_value, default)?;
-						if let Some(owned) = owned {
-							self.builder.build_store(
-								owned.pointer,
-								self.context.bool_type().const_int(1, false),
-							)?;
-						}
+						let address = self.bind_default_input(default, input)?;
 						let default_end = self.builder.get_insert_block().expect("a block");
 						self.branch_to(join)?;
 						self.builder.position_at_end(join);
 						let chosen = self.builder.build_phi(self.pointer_type(), "parameter")?;
-						chosen
-							.add_incoming(&[(&pointer, given_block), (&own.pointer, default_end)]);
-						if let Some(owned) = owned {
-							self.own_flagged(own, owned.pointer);
-						}
+						chosen.add_incoming(&[(&pointer, given_block), (&address, default_end)]);
 						chosen.as_basic_value().into_pointer_value()
 					}
 					_ => pointer,
@@ -2157,6 +2140,25 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			let given = value.get_nth_param(index).expect("a parameter");
 			index += 1;
 			match (has_default, param.default) {
+				(true, Some(default)) if !self.is_moved_parameter(param.symbol) => {
+					let flag = value.get_nth_param(index).expect("a flag").into_int_value();
+					index += 1;
+					let input = self.prepare_default_input(default, repr)?;
+					self.builder.build_store(slot.pointer, given)?;
+					let use_default = self.append_block("default");
+					let join = self.append_block("given");
+					self.builder
+						.build_conditional_branch(flag, join, use_default)?;
+					self.builder.position_at_end(use_default);
+					let address = self.bind_default_input(default, input)?;
+					let selected = self.load(Slot {
+						pointer: address,
+						repr,
+					})?;
+					self.store(slot, selected, default)?;
+					self.branch_to(join)?;
+					self.builder.position_at_end(join);
+				}
 				(true, Some(default)) => {
 					let flag = value.get_nth_param(index).expect("a flag").into_int_value();
 					index += 1;
@@ -2716,12 +2718,20 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// (`coercions`): the range check of a `SINK_CHECK` root, `Float32` →
 	/// `Float`, `Integer` ↔ `Int64`.
 	pub(crate) fn expr(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
+		let value = self.checked_expr(node)?;
+		self.finish_default_input(node, value)
+	}
+
+	fn checked_expr(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
 		if self.frame().reference_returns.contains(&node) {
 			return self.borrowed_result(node);
 		}
 		// a read of a reactive place is tracked before it happens
 		self.track_read(node)?;
-		let value = self.expr_inner(node)?;
+		let value = match self.default_place_input(node)? {
+			Some(value) => value,
+			None => self.expr_inner(node)?,
+		};
 		// a generic function value given where a function type that isn't
 		// generic is expected, or `transform<Integer>`: its instance
 		// (`generic_values.rs`)

@@ -206,6 +206,8 @@ pub(crate) struct Generator<'s> {
 	/// The drop flag of each local holding a resource that moves out
 	/// somewhere (`resources.rs`).
 	resource_flags: HashMap<SymbolId, String>,
+	/// Cleanup of a default depends on its selected result, not on omission.
+	default_resource_results: HashMap<NodeId, (String, bool)>,
 	/// The compile-time results of the `@for` items being emitted, innermost
 	/// last (`Analysis::unrolled_items`, constants.rs).
 	pub(crate) item_results: Vec<fa_analyzer::analysis::ItemResults>,
@@ -340,6 +342,7 @@ pub(crate) fn generate_module(
 		copy_plans: HashMap::new(),
 		drops: HashMap::new(),
 		resource_flags: HashMap::new(),
+		default_resource_results: HashMap::new(),
 		item_results: Vec::new(),
 		equalities: HashMap::new(),
 		reusable_arrays: HashMap::new(),

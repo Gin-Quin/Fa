@@ -15,6 +15,23 @@ impl Generator<'_> {
 	/// The JavaScript of an expression, converted for its sink when the
 	/// analyzer recorded a conversion or a range check there.
 	pub(crate) fn expr(&mut self, n: NodeId) -> Expr {
+		let value = self.checked_expr(n);
+		match self.default_resource_results.get(&n).cloned() {
+			Some((flag, owned)) => {
+				let temp = self.inline_temp();
+				Expr::new(
+					format!(
+						"({temp} = {}, {flag} = {owned}, {temp})",
+						value.at(Prec::Assign)
+					),
+					Prec::Primary,
+				)
+			}
+			None => value,
+		}
+	}
+
+	fn checked_expr(&mut self, n: NodeId) -> Expr {
 		let value = if self.call_returns_reference(n) && !self.is_object_reference(self.type_of(n))
 		{
 			self.read_reference_call(n)

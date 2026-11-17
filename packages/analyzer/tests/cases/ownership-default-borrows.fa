@@ -1,0 +1,12 @@
+function grow = (source: Array<Integer>, choose: Boolean, values: Array<Integer> = if choose { source } else { [10] }): Integer mutates values => {
+ values.push(2)
+ values.length
+}
+function run = (): String => {
+ mutable source = [1]
+ let first = grow(source, true)
+ let second = grow(source, false)
+ "{source} {first} {second}"
+}
+static compiled = @run()
+console.log(compiled, run()) -- prints: [1, 2] 2 2 [1, 2] 2 2

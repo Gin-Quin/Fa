@@ -31,6 +31,9 @@ impl Generator<'_> {
 		while let View::Group(inner) | View::Try(inner) | View::Await(inner) = self.view(node) {
 			node = inner;
 		}
+		if self.call_returns_reference(node) {
+			return None;
+		}
 		let owned = match self.view(node) {
 			View::Call { .. } => self
 				.analysis
@@ -54,6 +57,45 @@ impl Generator<'_> {
 		} else {
 			None
 		}
+	}
+
+	/// Borrowed branches leave their source alive. Fresh branches install an
+	/// owner only after evaluation succeeds, including defaults using `??`.
+	pub(crate) fn default_resource_value(&mut self, root: NodeId, flag: &str) -> crate::js::Expr {
+		let mut pending = vec![root];
+		let mut leaves = Vec::new();
+		while let Some(node) = pending.pop() {
+			let children = match self.view(node) {
+				View::Loop { .. } => Some(
+					self.analysis
+						.loop_results
+						.get(&node)
+						.cloned()
+						.unwrap_or_default(),
+				),
+				_ => fa_analyzer::lower::copies::result_inputs(self.tree, node),
+			};
+			if let Some(children) = children {
+				pending.extend(children);
+			} else {
+				let owned = self.temporary_resource_drop(node).is_some()
+					|| fa_analyzer::lower::copies::argument_local_root(
+						self.tree,
+						self.analysis,
+						root,
+						node,
+					)
+					.is_some();
+				self.default_resource_results
+					.insert(node, (flag.to_owned(), owned));
+				leaves.push(node);
+			}
+		}
+		let value = self.expr(root);
+		for node in leaves {
+			self.default_resource_results.remove(&node);
+		}
+		value
 	}
 
 	/// The JavaScript function of the `destroy` of a resource type: of this

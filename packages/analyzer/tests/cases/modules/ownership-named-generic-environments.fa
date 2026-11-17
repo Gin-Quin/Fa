@@ -1,0 +1,15 @@
+-- prints: 3:1 name:1
+-- require-split: true
+-- file: library/make.fa
+
+type TextReader = () => String
+function keep = (operation: <T>(value: T) => String): TextReader => () => operation(1)
+export function = <Outer>(seed: Outer): TextReader => {
+	function tagged = <T>(value: T): String => "{seed}:{value}"
+	keep(tagged)
+}
+
+-- file: application/main.fa
+export function = () => {
+	console.log(library.make(3)(), library.make("name")())
+}

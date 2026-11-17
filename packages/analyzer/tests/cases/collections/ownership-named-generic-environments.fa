@@ -1,0 +1,48 @@
+-- prints: 204 204
+-- prints: 3 3
+-- prints: 3:1 name:1
+-- prints: 22 42
+-- prints: 10 20
+
+type Reader = () => Integer
+type TextReader = () => String
+
+function sum = (operation: <T>(value: T) => Integer): Integer => operation(1) + operation("text")
+function borrowed = (seed: Integer): Integer => {
+	mutable n = seed
+	function tagged = <T>(value: T): Integer => n
+	n += 100
+	sum(tagged)
+}
+static borrowedResult = @borrowed(2)
+console.log(borrowedResult, borrowed(2))
+
+function keep = (operation: <T>(value: T) => Integer): Reader => () => operation(1)
+function factory = (seed: Integer): Reader => {
+	mutable n = seed
+	function tagged = <T>(value: T): Integer => n
+	n += 100
+	keep(tagged)
+}
+function ownedSummary = (): Integer => factory(3)()
+static owned = @ownedSummary()
+console.log(owned, ownedSummary())
+
+function keepText = (operation: <T>(value: T) => String): TextReader => () => operation(1)
+function outer = <Outer>(seed: Outer): TextReader => {
+	function tagged = <T>(value: T): String => "{seed}:{value}"
+	keepText(tagged)
+}
+console.log(outer(3)(), outer("name")())
+
+function outerValue = <factor: Integer>(seed: Integer): Integer => {
+	function score = <T>(value: T): Integer => seed + factor
+	sum(score)
+}
+console.log(outerValue<10>(1), outerValue<20>(1))
+
+function noDataCapture = <factor: Integer>(): Integer => {
+	function score = <T>(value: T): Integer => factor
+	sum(score)
+}
+console.log(noDataCapture<5>(), noDataCapture<10>())

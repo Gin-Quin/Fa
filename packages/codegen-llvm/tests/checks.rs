@@ -120,7 +120,7 @@ mod with_llvm {
 	}
 
 	#[test]
-	fn a_capturing_named_generic_table_refuses_only_emitted_entries() {
+	fn a_capturing_named_generic_table_keeps_its_environment() {
 		for called in [false, true] {
 			let result = if called { "operation(1)" } else { "7" };
 			let source = format!(
@@ -148,14 +148,7 @@ mod with_llvm {
 					&Options::default(),
 					&output,
 				);
-				if called {
-					assert!(
-						matches!(result, Err(fa_codegen_llvm::Error::Unsupported { ref message, .. }) if message.contains("capturing named generic function value entry")),
-						"{result:?}"
-					);
-				} else {
-					assert!(result.is_ok(), "{result:?}");
-				}
+				assert!(result.is_ok(), "{result:?}");
 			}
 		}
 	}

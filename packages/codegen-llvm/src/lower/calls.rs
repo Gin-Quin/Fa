@@ -1267,7 +1267,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The `Static` symbol a value parameter's name resolves to in the body
 	/// of a generic function declaration.
-	fn value_parameter_symbol(
+	pub(super) fn value_parameter_symbol(
 		&self,
 		declaration: NodeId,
 		param: fa_analyzer::ids::ParamId,

@@ -467,6 +467,6 @@ Generic types, generic functions, structural constraints, compile-time value par
 ### Native
 
 - Every use is monomorphized for its actual parameters.
-- A generic function value is the ordinary function pair: a pointer to a constant table of its required instances and its closure environment. Whole-program compilation fills the table from the types at which the value is called; no box is allocated. An instance set that keeps growing is polymorphic recursion, reported with its first types.
+- A generic function value is the ordinary function pair: a pointer to a constant table of its required instances and its closure environment. Whole-program compilation fills the table from the types at which the value is called; no box is allocated. Named capturing functions reuse their declaration environment. A producer retains its enclosing type, method and compile-time value bindings when its entries are instantiated, and those bindings distinguish its cached tables even when it has no data captures. An instance set that keeps growing is polymorphic recursion, reported with its first types.
 - Tokenizer: a stack of the open brackets. `<` followed by a non-whitespace character pushes a generic list; `>` pops it when the top of the stack is a generic list, and is a comparison otherwise; `(`, `[` and `{` push, and their closing tokens pop. `<=`, `>=`, `=>` and `->` are matched first, as longer tokens.
 :::

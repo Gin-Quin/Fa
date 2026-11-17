@@ -103,17 +103,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(environment);
 		}
 		if let Some(symbol) = function.info.symbol
-			&& let Some(&slot) = self.slots.get(&symbol)
+			&& let Some(environment) = self.bound_function_environment(symbol)?
 		{
-			let pair = self
-				.load(slot)?
-				.value
-				.expect("a callable")
-				.into_struct_value();
-			return Ok(self
-				.builder
-				.build_extract_value(pair, 1, "")?
-				.into_pointer_value());
+			return Ok(environment);
 		}
 		if function.by_reference {
 			return self.build_environment(&function.captures, true, node);
@@ -121,6 +113,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Err(self.unsupported(
 			node.index(),
 			"a local function whose declaration environment is not available",
+		))
+	}
+
+	pub(super) fn bound_function_environment(
+		&self,
+		symbol: SymbolId,
+	) -> Result<Option<PointerValue<'ctx>>, Error> {
+		let Some(&slot) = self.slots.get(&symbol) else {
+			return Ok(None);
+		};
+		let pair = self
+			.load(slot)?
+			.value
+			.expect("a callable")
+			.into_struct_value();
+		Ok(Some(
+			self.builder
+				.build_extract_value(pair, 1, "")?
+				.into_pointer_value(),
 		))
 	}
 

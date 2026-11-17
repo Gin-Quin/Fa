@@ -2271,3 +2271,17 @@ emission instead of generating a null environment. This is a copy-first
 prerequisite: it enables no capture transfers and leaves the analyzer's source
 observations conservative. Full conditional source separation, transfer plans,
 early direct calls and unsupported generic table producers remain point-2 work.
+
+### Ownership enforcement: named generic environment tables (implementation, 2026-11-17)
+
+The preceding temporary refusal of capturing named generic value-table entries is
+superseded. A table handle retains the same declaration environment as a concrete
+specialization. Capturing entries use their environment-taking entry directly,
+while captureless entries keep the ordinary thunk. Producers preserve enclosing
+representation, type, method and compile-time value bindings in their cache key
+and restore them while emitting entries. Local declarations in a generic context
+use lexical instantiation even without data captures, so a compile-time-only
+outer input cannot be lost or reuse another context's table. This includes shared
+single-file and package/per-unit paths. Generic copy conditions remain the
+subsequent analyzer slice. The analyzer's existing refusal of compile-time value
+parameters in written function types is unchanged.

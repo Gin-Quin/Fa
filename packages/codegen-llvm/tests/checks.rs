@@ -463,6 +463,39 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn collection_stores_choose_transferable_storage_before_construction() {
+		let source =
+			include_str!("../../analyzer/tests/cases/ownership-collection-storage-moves.fa");
+		for target in [Target::Native, Target::Wasm] {
+			let ir = ir_at_target(
+				"collection-storage-moves",
+				source,
+				true,
+				OptLevel::O0,
+				target,
+			);
+			for name in [
+				"fa.arrayMove",
+				"fa.growingMove",
+				"fa.mapMove",
+				"fa.setMove",
+				"fa.poolMove",
+				"fa.columnarMove",
+				"fa.chainMove",
+				"fa.dynamicMove",
+				"fa.replaceMove",
+			] {
+				let body = function(&ir, name);
+				assert!(!body.contains("@fa.copy"), "{target:?}: {body}");
+				assert!(!body.contains("@fa_array_assign"), "{target:?}: {body}");
+			}
+			let body = function(&ir, "fa.readOnly");
+			assert!(body.contains("@fa.collection.static"), "{target:?}: {body}");
+			assert!(!body.contains("@fa.copy"), "{target:?}: {body}");
+		}
+	}
+
+	#[test]
 	fn heap_and_compound_captures_transfer_without_payload_copies() {
 		let source = include_str!("../../analyzer/tests/cases/ownership-heap-capture-moves.fa");
 		for target in [Target::Native, Target::Wasm] {

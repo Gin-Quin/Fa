@@ -1,0 +1,63 @@
+function arrayMove = (): Integer => {
+	let source: Array<Integer> = [1, 2]
+	mutable target = source
+	target.push(3)
+	target.length
+}
+function growingMove = (): Integer => {
+	let source: GrowingArray<Integer> = [1, 2]
+	mutable target = source
+	target.push(3)
+	target.length
+}
+function mapMove = (): Integer => {
+	let source: Map<Integer, Integer> = [(1, 10)]
+	mutable target = source
+	target[2] = 20
+	target.size
+}
+function setMove = (): Integer => {
+	let source: Set<Integer> = [1]
+	mutable target = source
+	target.add(2)
+	target.size
+}
+function poolMove = (): Integer => {
+	let source: Pool<Integer> = [1]
+	mutable target = source
+	target.add(2)
+	target.size
+}
+function columnarMove = (): Integer => {
+	let source: Columnar<{ value: Integer }> = [{ value = 1 }]
+	mutable target = source
+	target.add({ value = 2 })
+	target.size
+}
+function chainMove = (): Integer => {
+	let source: Array<Integer> = [1, 2]
+	let middle = source
+	mutable target = middle
+	target.push(3)
+	target.length
+}
+function dynamicMove = (first: Integer): Integer => {
+	let source = [first, 2]
+	mutable target = source
+	target.push(3)
+	target.length
+}
+function readOnly = (): Integer => {
+	let source = [1, 2]
+	source.length
+}
+function replaceMove = (first: Integer): Integer => {
+	let source = [first, 2]
+	mutable target = [0]
+	target = source
+	target.push(3)
+	target.length
+}
+function total = (): Integer => arrayMove() + growingMove() + mapMove() + setMove() + poolMove() + columnarMove() + chainMove() + dynamicMove(1) + replaceMove(1)
+static compiled = @total()
+console.log(compiled, total(), readOnly()) -- prints: 23 23 2

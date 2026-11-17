@@ -3047,3 +3047,7 @@ values never require `copy`; their move is an optimization promised by the
 native String contract. Structures still require `copy` when their source stays
 live. The perf/strings `respond` and `records` acceptance programs join the
 ownership fixtures when they land on main.
+
+### Ownership enforcement: collection storage before transfer (implementation, 2026-11-17)
+
+Read-only native collection backing uses the same closed borrowing proof as frame backing. A constant local that will be stored into another owner constructs transferable storage before that store; an immutable intermediate never reconstructs the source initializer as static data. Proven returned bindings retain the caller-buffer offer contract. A replacement store uses ordinary ownership transfer and destroys its former destination; the legacy array-assignment item copier cannot bypass the analyzer's move fact. Purely borrowed constants still use read-only data.

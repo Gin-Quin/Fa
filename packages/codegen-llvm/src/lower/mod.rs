@@ -2592,7 +2592,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		};
 		// an immutable collection of constants: read-only data (`collection_storage.rs`)
 		let repr = self.repr_of(ty, node.index())?;
-		if let Some(value) = self.readonly_collection(node, repr)? {
+		if self.collection_borrowed_only(symbol, false)
+			&& let Some(value) = self.readonly_collection(node, repr)?
+		{
 			return Ok(Some(value));
 		}
 		// the analyzer's constant expressions (literals, constant arithmetic,
@@ -3186,7 +3188,14 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		if let Some(value) = self.frame_string_declaration(node, symbol, value_node)? {
 			return Ok(value);
 		}
-		let readonly = if self.analysis.symbols.symbol(symbol).kind == SymbolKind::Let {
+		// Static headers cannot become mutable owners. Choose owning storage
+		// before construction when a later store transfers this collection;
+		// never rescue that store by copying its existing value.
+		let readonly = if self.analysis.symbols.symbol(symbol).kind == SymbolKind::Let
+			&& (self.collection_borrowed_only(symbol, false)
+				|| (self.frame().return_buffer.is_some()
+					&& self.collection_returned_binding(symbol)))
+		{
 			let repr = self.repr_of(self.analysis.symbols.symbol(symbol).ty, node.index())?;
 			self.readonly_collection(value_node, repr)?
 		} else {
@@ -3298,29 +3307,6 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let value_lowered = self.expr(value)?;
 		if value_lowered.repr == Repr::Never {
 			return Ok(Val::never());
-		}
-		// an array read from a place into an array local: its items are
-		// copied into the local's own block (no allocation, nothing leaked)
-		if let (View::Name(_), Repr::Array(item_type)) = (self.view(target), value_lowered.repr)
-			&& self.is_place_read(value)
-			&& self.copies_bytewise(item_type, value)?
-		{
-			let destination = self.load(slot)?;
-			let item = self.item_repr(item_type, value)?;
-			let size =
-				inkwell::types::BasicType::size_of(&self.llvm_type(item)).expect("a sized item");
-			let size = self
-				.builder
-				.build_int_cast(size, self.context.i64_type(), "")?;
-			self.call_runtime(
-				"fa_array_assign",
-				&[
-					destination.value.expect("an array").into(),
-					value_lowered.value.expect("an array").into(),
-					size.into(),
-				],
-			)?;
-			return Ok(Val::void());
 		}
 		if slot.repr == Repr::Str
 			&& self

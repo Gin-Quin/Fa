@@ -119,7 +119,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// A closed proof: every read borrows the collection as an indexed
 	/// receiver or iterable. Owning stores, returns and unknown uses choose
 	/// heap storage before construction, without introducing a copy-out.
-	fn collection_borrowed_only(&self, symbol: SymbolId, returning: bool) -> bool {
+	pub(super) fn collection_borrowed_only(&self, symbol: SymbolId, returning: bool) -> bool {
 		let parents = self.parents();
 		self.analysis
 			.resolutions
@@ -592,7 +592,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				return Ok(None);
 			};
 			let data = self.analysis.symbols.symbol(symbol);
-			if data.kind != SymbolKind::Let {
+			if data.kind != SymbolKind::Let || !self.collection_borrowed_only(symbol, false) {
 				return Ok(None);
 			}
 			let View::Declaration {

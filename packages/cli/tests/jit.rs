@@ -67,6 +67,44 @@ fn llvm() -> bool {
 }
 
 #[test]
+fn standalone_bulk_appends_keep_growing_header_caches_coherent_in_the_jit() {
+	if !llvm() {
+		return;
+	}
+	for (name, source, expected) in [
+		(
+			"fill",
+			include_str!("programs/growing-nested-fill.fa"),
+			"3\n4\n7\n8\ntrue\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\nfalse\n",
+		),
+		(
+			"copy",
+			include_str!("programs/growing-nested-copy.fa"),
+			"3\n4\n7\n8\n10\n20\n30\n99\n10\n20\n30\n99\n",
+		),
+	] {
+		let folder = scratch(&format!("bulk-growing-{name}"), &[("main.fa", source)]);
+		for opt in ["-O0", "-O3"] {
+			let arguments = [
+				"run",
+				"--target=native",
+				"--asynchronous=false",
+				opt,
+				"main.fa",
+			];
+			let (stdout, stderr, code) = fa(&arguments, &folder, true);
+			assert_eq!((stdout.as_str(), code), (expected, 0), "{name}: {stderr}");
+			assert!(stderr.contains("jit: loaded 1 object in "), "{stderr}");
+			assert_eq!(without_trace(&stderr), "");
+			assert_eq!(
+				fa(&arguments, &folder, false),
+				(stdout, String::new(), code)
+			);
+		}
+	}
+}
+
+#[test]
 fn bulk_growing_appends_and_narrow_remainders_work_in_jit_and_cached_units() {
 	if !llvm() {
 		return;

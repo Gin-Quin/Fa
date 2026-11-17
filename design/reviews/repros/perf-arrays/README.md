@@ -53,3 +53,20 @@ tests pass. The intentionally failing review programs are outside the regular
 runtime corpus. C1 is the new merge blocker; the UInt32 issue reproduces on
 the base. Per-unit freestanding O0 also retains the already documented hosted
 runtime link failure (M1); the other five combinations expose C1.
+
+## Fix follow-up (2026-11-17)
+
+The descriptions above retain the observations at reviewed head `627042e4`.
+Production commit `f8320f41` on `perf/arrays` fixes C1 and P1. The original
+fill/copy/remainder programs now agree with Bun on every LLVM target at O0/O3.
+Permanent fixtures live in `packages/cli/tests/programs/growing-*.fa` and
+`division-boundaries-*.fa`, with explicit LLVM O0/O3/checks-on/off matrices,
+JIT and per-unit coverage. The cache validity/write-through rule is documented
+in `lower/growing_loops.rs`; arithmetic result/work bounds are separated in
+`lower/arith.rs`. See the appended Review fixes section of the engineer report
+for final validation, instruction-gate data and the unchanged per-unit
+freestanding O0 linker limitation (M1).
+
+`signed-wide-comptime.fa` retains an independent pre-existing interpreter
+widening defect, explained in its adjacent Markdown file and in TODO. It is
+not an unsigned native narrowing failure.

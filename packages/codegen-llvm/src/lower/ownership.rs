@@ -2243,9 +2243,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return None;
 		}
 		let data = self.analysis.symbols.symbol(symbol);
-		// a move-only parameter is owned too (moved in by its caller)
-		if !matches!(data.kind, SymbolKind::Let | SymbolKind::Mutable)
-			&& !self.is_moved_parameter(symbol)
+		// A catch binding owns the error. A consuming parameter is moved
+		// into this frame by its caller and owns its value as well.
+		if !matches!(
+			data.kind,
+			SymbolKind::Let | SymbolKind::Mutable | SymbolKind::CatchBinding
+		) && !self.is_moved_parameter(symbol)
 		{
 			return None;
 		}

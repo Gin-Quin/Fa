@@ -1,0 +1,8 @@
+type Failure = Errors { Broken = { items: Array<Integer> } }
+function fail = (): Integer throws Failure => throw Failure.Broken { items = [1, 2] }
+function carry = (): Integer => fail() catch error => {
+	let held = error
+	when held is { Failure.Broken as { items } => items.length }
+}
+static compiled = @carry()
+console.log(compiled, carry()) -- prints: 2 2

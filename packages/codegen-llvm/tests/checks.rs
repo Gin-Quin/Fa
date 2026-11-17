@@ -463,6 +463,16 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn caught_structure_values_move_without_a_copier() {
+		let source = include_str!("../../analyzer/tests/cases/ownership-caught-values.fa");
+		for target in [Target::Native, Target::Wasm] {
+			let ir = ir_at_target("caught-structure-owner", source, true, OptLevel::O0, target);
+			let body = function(&ir, "fa.carry");
+			assert!(!body.contains("@fa.copy"), "{target:?}: {body}");
+		}
+	}
+
+	#[test]
 	fn an_owned_async_environment_is_retained_before_suspending() {
 		let source = include_str!("programs/async-ownership-environments.fa");
 		for (name, target) in [

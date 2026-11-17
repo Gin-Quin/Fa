@@ -181,4 +181,20 @@ mod tests {
 		assert!(result.contains("itemsSnapshot2"), "{result}");
 		assert!(result.contains("items = copy itemsSnapshot2"), "{result}");
 	}
+	#[test]
+	fn a_borrowed_call_conflict_snapshots_only_the_escaping_function() {
+		let result = fixed("type Reader = () => Integer\nfunction make = (): Reader => {\n let items = [1]\n function inspect = (): Integer => items.length\n function saved = (): Integer => items.length\n console.log(inspect())\n saved\n}\n".to_string());
+		assert!(
+			result.contains("let itemsSnapshot = copy items"),
+			"{result}"
+		);
+		assert!(
+			result.contains("function inspect = (): Integer => items.length"),
+			"{result}"
+		);
+		assert!(
+			result.contains("function saved = (): Integer => itemsSnapshot.length"),
+			"{result}"
+		);
+	}
 }

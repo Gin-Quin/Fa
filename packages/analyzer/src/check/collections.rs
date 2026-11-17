@@ -385,13 +385,14 @@ impl Walker<'_> {
 				} if matches!(syntax::view(&tree, name), View::Name(_)) => match tree.text(name.index()) {
 					"capacity" if capacity.is_none() => capacity = Some(value),
 					"key" if is_set => {
+						// The removed option has no callback signature to infer:
+						// don't suggest annotating a callback that can't be used.
 						problems.push((
 							name,
 							format!(
 								"`{path}` compares complete items: use a `Map` keyed by that value instead of `key`"
 							),
 						));
-						self.check(value, None);
 					}
 					other => {
 						problems.push((name, format!("`{path}` has no option `{other}`")));

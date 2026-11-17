@@ -1,4 +1,6 @@
 -- A separate key is a Map entry, never a Set constructor callback.
+let untyped = Set.from([1, 2], key = (value) => value) -- error FN023
+let untypedGrowing = GrowingSet.from([1, 2], key = (value) => value) -- error FN023
 let plain = Set.from([1, 2], key = (value: Integer) => value)          -- error FN023
 let growing = GrowingSet.from([1, 2], key = (value: Integer) => value) -- error FN023
 function identity = (value: Integer): Integer => value

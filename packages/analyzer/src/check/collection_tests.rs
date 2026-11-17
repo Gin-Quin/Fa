@@ -329,5 +329,7 @@ fn set_key_option_suggests_a_map() {
 			.expect("removed key option");
 		assert!(diagnostic.message.contains("Map"));
 		assert!(diagnostic.message.contains("keyed by that value"));
+		let untyped = format!("let items = {constructor}.from([1, 2], key = (value) => value)\n");
+		assert_eq!(codes(&untyped), ["FN023"]);
 	}
 }

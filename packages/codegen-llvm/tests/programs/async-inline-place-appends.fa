@@ -43,9 +43,10 @@ export async function = (): Integer => {
 		assert out.text.length == expected.length
 		assert out.text.isWellFormed() == expected.isWellFormed()
 	}
-	mutable resumed = library.output { text = "12345678" }
+	mutable resumed = library.output { text = "1234567" }
+	library.append(resumed, "8")
 	await Task.yield()
-	library.append(resumed, "9")
+	resumed.text += "9"
 	assert resumed.text == "123456789"
 	console.log("inline place appends")
 	0

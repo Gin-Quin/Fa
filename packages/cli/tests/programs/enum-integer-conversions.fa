@@ -2,6 +2,7 @@
 -- function returns, optional narrowing, generic calls and asynchronous suspension.
 type Color = Enum { red, green, blue }
 type Status = Enum { archived = 70000, pending = 0, active = 200 }
+type Wide = Enum { first = 4294967296, last = 9007199254740991 }
 
 function code = (value: Status): Integer => Integer(value)
 function genericCode = <Tag>(value: Status, _tag: Tag): Integer => Integer(value)
@@ -20,6 +21,11 @@ for status in Status.members {
 -- prints: 0 0
 -- prints: 200 200
 console.log(byteCode(Status.active), Int32(Status.archived)) -- prints: 200 70000
+for value in Wide.members {
+	console.log(Integer(value))
+}
+-- prints: 4294967296
+-- prints: 9007199254740991
 function fromFlag = (archived: Boolean): Status => if archived { Status.archived } else { Status.active }
 let returned = fromFlag(true)
 console.log(code(returned), returned.toString()) -- prints: 70000 archived

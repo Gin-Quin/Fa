@@ -55,7 +55,7 @@ cli/tests/programs/array-callbacks-generics.fa: target limit: formatting Float, 
 cli/tests/programs/builtin-methods.fa: line 34: `Integer#checkedPow` is not supported by the native backend yet
 cli/tests/programs/c-arrays.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
 cli/tests/programs/compound-assignments.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
-cli/tests/programs/conversions.fa: target limit: BigInt arithmetic needs the libc-backed runtime; build for native
+cli/tests/programs/conversions.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
 cli/tests/programs/fast-paths.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
 cli/tests/programs/float32.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
 cli/tests/programs/floats.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native

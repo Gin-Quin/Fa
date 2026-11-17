@@ -9,6 +9,6 @@ type SceneNode = {
 }
 
 use child = nodes.add({ id = 0, children = [] })
-use parent = nodes.add({ id = 1, children = [child] })
+use parent = nodes.add({ id = 1, children = [copy child] })
 child.id = 2
 console.log(try parent.children[0].id)

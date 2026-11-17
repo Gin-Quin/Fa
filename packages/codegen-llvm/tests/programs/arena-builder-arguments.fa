@@ -19,7 +19,7 @@ function churn = (): Integer => {
 }
 
 -- A builder taking a root: the argument is moved or borrowed.
-function wrap = (child: Tree): Tree => Tree { value = 100, left = child, right = child }
+function wrap = (child: Tree): Tree => Tree { value = 100, left = copy child, right = copy child }
 let wrapped = wrap(Tree.build(4))
 assert churn() == 4092
 assert wrapped.count() == 63
@@ -29,13 +29,13 @@ let twice = wrap(wrap(base))
 assert churn() == 4092
 assert twice.sum() == 100 + 2 * (100 + 2 * 11)
 assert base.sum() == 11
-function deeper = (depth: Integer, inner: Tree): Tree => if depth == 0 { inner } else {
+function deeper = (depth: Integer, inner: Tree): Tree => if depth == 0 { copy inner } else {
 	Tree { value = depth, left = deeper(depth - 1, inner) }
 }
 let chain = deeper(5, Tree.build(2))
 assert churn() == 4092
 assert chain.sum() == 15 + 4
-function pick = (a: Tree, b: Tree, first: Boolean): Tree => if first { a } else { b }
+function pick = (a: Tree, b: Tree, first: Boolean): Tree => if first { copy a } else { copy b }
 let picked = pick(Tree.build(2), Tree.build(3), false)
 assert churn() == 4092
 assert picked.sum() == 11

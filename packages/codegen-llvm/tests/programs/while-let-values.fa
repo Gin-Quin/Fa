@@ -23,7 +23,7 @@ mutable current: Node? = Node { value = 1, next = Node { value = 2, next = none 
 mutable total = 0
 while let node = current {
 	total += node.value
-	current = node.next
+	current = copy node.next
 }
 console.log(total)
 mutable shapes: Array<Shape> = [Shape.Circle { radius = 2 }, Shape.Empty]

@@ -5,7 +5,7 @@ async function make = <Item>(tag: Item, count: Integer<min = 0>): Array<Boolean>
 	for 0..count { bucket.flags.push(true) }
 	await sleep(1)
 	for 0..count { bucket.flags.push(false) }
-	bucket.flags
+	copy bucket.flags
 }
 async function growing = (count: Integer): GrowingArray<Boolean> => {
 	mutable flags: GrowingArray<Boolean> = []

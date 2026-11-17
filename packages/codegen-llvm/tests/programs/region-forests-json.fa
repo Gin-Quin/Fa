@@ -21,7 +21,7 @@ assert Json.stringify(build(2)) == expected
 function textLeaf = (text: String): Tree => Tree.Leaf { text }
 let longText = "é".repeat(5000)
 let longLeaf = textLeaf(longText)
-let duplicate = longLeaf
+let duplicate = copy longLeaf
 assert Json.stringify(longLeaf) == "{{\"type\":\"Leaf\",\"text\":\"" + longText + "\"}}"
 assert Json.stringify(duplicate) == Json.stringify(longLeaf)
 console.log("region JSON") -- prints: region JSON

@@ -33,7 +33,7 @@ function withAlias = (): Array<Integer> => {
 		add()
 		bucket.items.push(index)
 	}
-	bucket.items
+	copy bucket.items
 }
 let aliased = withAlias()
 assert aliased.length == 54

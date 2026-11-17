@@ -29,7 +29,7 @@ console.log(try people[1].age) -- prints: 10
 let names = people.map((human) => human.name)
 console.log(try names[0], names.length) -- prints: Ana 101
 console.log(people.some((human) => human.name == "P50")) -- prints: true
-let copied = people
+let copied = copy people
 people[0].name = "Changed"
 console.log(try copied[0].name, people[0].name) -- prints: Ana Changed
 

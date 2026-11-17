@@ -10,7 +10,7 @@ function build = (depth: Integer, payload: String): Tree => if depth == 0 {
 	Tree.Branch { left = build(depth - 1, payload), right = build(depth - 1, payload) }
 }
 
-function duplicate = (tree: Tree): Tree => tree
+function duplicate = (tree: Tree): Tree => copy tree
 for 0..3 {
 	let duplicate = do {
 		let root = build(3, "an owning string beyond inline capacity".repeat(2))

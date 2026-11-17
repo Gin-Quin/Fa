@@ -28,7 +28,7 @@ for parallel depth, index in depths {
 assert sums == [120, 247, 502, 1013]
 function forest = (depth: Integer): Tree => {
 	let ds = [depth, depth + 1]
-	mutable counts = ds
+	mutable counts = copy ds
 	for parallel d, index in ds {
 		counts[index] = Tree.build(d).count()
 	}

@@ -44,7 +44,7 @@ console.log(inField(9).items) -- prints: [9, 10]
 
 function copied = (n: Integer): Integer => {
 	let items = [n, n + 1]
-	mutable other = items
+	mutable other = copy items
 	other.push(100)
 	other[0] = 77
 	use first = items[0]
@@ -110,7 +110,7 @@ let reader = capture(42)
 console.log(reader()) -- prints: 42
 
 let constantMap: Map<String, Array<String>> = [("key", ["static nested payload"])]
-let aliasMap = constantMap
+let aliasMap = copy constantMap
 mutable changed = aliasMap
 changed["key"] = ["changed"]
 console.log(constantMap.get("key"), changed.get("key"))

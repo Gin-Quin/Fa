@@ -9,7 +9,7 @@ console.log(try part(original, -3, -1), try part(original, 4, 2), try part(Bytes
 console.log(filled(3, 255), Bytes.filled(2), Bytes.filled(0).isEmpty()) -- prints: [255, 255, 255] [0, 0] true
 
 mutable data = Bytes.from([10, 20, 30, 40])
-mutable other = data
+mutable other = copy data
 other[0] = 99
 console.log(data, other, data == other, data == Bytes.from([10, 20, 30, 40])) -- prints: [10, 20, 30, 40] [99, 20, 30, 40] false true
 mutable total = 0
@@ -24,19 +24,19 @@ do {
 	mutable use writable = data[1..3]
 	try writable[0] = 77
 	console.log(data, writable) -- prints: [10, 77, 30, 40] [77, 30]
-	let detached = writable
+	let detached = copy writable
 	console.log(detached == writable, detached.toArray()) -- prints: true [77, 30]
 }
 
 static constant = Bytes.from([0, 255, 128])
 static nested = { bytes = Bytes.from([4, 5]) }
-mutable fromConstant = constant
+mutable fromConstant = copy constant
 try fromConstant[0] = 7
 static initial = Bytes.from([8, 9])
-mutable immediate = initial
+mutable immediate = copy initial
 try immediate[0] = 6
 console.log(constant, nested.bytes, fromConstant, immediate) -- prints: [0, 255, 128] [4, 5] [7, 255, 128] [6, 9]
-let union: Bytes | String = original
+let union: Bytes | String = copy original
 console.log(union is Bytes, union is String, @typeToSchema(Bytes) == Schema.Bytes) -- prints: true false true
 mutable set: Set<Bytes> = []
 set.add(original)

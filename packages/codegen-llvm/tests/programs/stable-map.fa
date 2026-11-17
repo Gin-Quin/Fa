@@ -11,7 +11,7 @@ counts["replacement"] = 99
 anchor += 1
 console.log(try counts["anchor"], counts.size) -- prints: 13 1001
 
-let independent = counts
+let independent = copy counts
 counts["anchor"] = 20
 console.log(try independent["anchor"], anchor) -- prints: 13 20
 console.log(independent == counts) -- prints: false
@@ -26,7 +26,7 @@ console.log(churn.size) -- prints: 0
 churn[1] = "one"
 churn[2] = "two"
 console.log(churn.take(1), churn.get(1), churn.size) -- prints: one none 1
-let copied = churn
+let copied = copy churn
 churn.clear()
 console.log(churn.size, copied.size, try copied[2]) -- prints: 0 1 two
 

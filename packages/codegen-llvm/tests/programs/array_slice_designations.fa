@@ -7,7 +7,7 @@ function snapshots = (): String throws IndexError => {
 		if index == 0 { reuse kept = current }
 	}
 	try current[0] = 9
-	let saved = kept
+	let saved = copy kept
 	"{kept} {current} {values} {saved}"
 }
 console.log(try snapshots()) -- prints: [1] [9] [1, 2, 9] [1]

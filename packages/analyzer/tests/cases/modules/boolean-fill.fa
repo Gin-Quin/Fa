@@ -4,7 +4,7 @@ export function = <Item>(tag: Item, count: Integer<min = 0>): Array<Boolean> => 
 	mutable bucket = { tag = tag, flags = Array<Boolean>.from([], capacity = count) }
 	for 0..count { bucket.flags.push(true) }
 	for 0..count { bucket.flags.push(false) }
-	bucket.flags
+	copy bucket.flags
 }
 -- file: library/stable.fa
 export function = (count: Integer): GrowingArray<Boolean> => {

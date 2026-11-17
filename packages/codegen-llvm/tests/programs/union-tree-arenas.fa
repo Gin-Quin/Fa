@@ -15,7 +15,7 @@ function evaluate = (tree: Expression): Int128 => when tree is {
 	Expression.Add as { left, right } => evaluate(left) + evaluate(right)
 }
 
-function duplicate = (tree: Expression): Expression => tree
+function duplicate = (tree: Expression): Expression => copy tree
 
 for 0..3 {
 	let root = build(11)

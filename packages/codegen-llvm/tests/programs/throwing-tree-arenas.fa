@@ -22,7 +22,7 @@ function count = (expression: Expression, expected: String): Integer => when exp
 	Expression.Branch as { left, right } => count(left, expected) + count(right, expected)
 }
 
-function duplicate = (expression: Expression): Expression => expression
+function duplicate = (expression: Expression): Expression => copy expression
 let text = "a" + "\u{301}".repeat(20)
 let symbol = try text[0]
 for 0..5 {

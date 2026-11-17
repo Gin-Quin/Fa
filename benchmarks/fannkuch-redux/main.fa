@@ -12,7 +12,7 @@ function fannkuch = (n: Integer): Fannkuch throws IndexError => {
 		permutation.push(i)
 		count.push(0)
 	}
-	mutable current = permutation
+	mutable current = copy permutation
 	mutable maxFlips = 0
 	mutable checksum = 0
 	mutable permutationIndex = 0
@@ -23,7 +23,7 @@ function fannkuch = (n: Integer): Fannkuch throws IndexError => {
 			r -= 1
 		}
 
-		current = permutation
+		current = copy permutation
 		mutable flips = 0
 		mutable first = try current[0]
 		while first != 0 {

@@ -34,7 +34,7 @@ console.log(cache.size, cache.get(19999) == "value 19999 long enough to be owned
 console.log(cache.take(19950) == "value 19950 long enough to be owned on the heap", cache.size) -- prints: true 99
 
 -- A copy is independent of its source, then both are cleared or dropped.
-mutable copied = cache
+mutable copied = copy cache
 copied.delete(19999)
 copied[-1] = "new"
 console.log(cache.size, copied.size, cache.includes(19999), copied.includes(19999)) -- prints: 99 99 true false

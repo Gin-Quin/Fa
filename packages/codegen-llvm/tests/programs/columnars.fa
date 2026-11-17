@@ -51,7 +51,7 @@ console.log(people.some((human) => human.name == "person 5"), people.every((huma
 
 -- holes are filled, copies are deep
 people.add({ name = "Zoe", age = 1, tags = ["z"], home = { x = 0, y = 0 } })
-mutable duplicate = people
+mutable duplicate = copy people
 use zoe = duplicate.find((human) => human.name == "Zoe")
 if zoe is not none {
 	zoe.tags.push("copy")

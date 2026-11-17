@@ -3,7 +3,7 @@ type NestedMap = Map<Integer, NestedMap>
 mutable maps: NestedMap = []
 let emptyMap: NestedMap = []
 maps[0] = emptyMap
-let mapsCopy = maps
+let mapsCopy = copy maps
 maps.clear()
 console.log(mapsCopy)
 -- prints: [(0, [])]
@@ -38,7 +38,7 @@ assert pools.size == 1
 type OptionalPool = Pool<OptionalPool?>
 let emptyOptionalPool: OptionalPool = []
 mutable optionalPools: OptionalPool = [none, emptyOptionalPool]
-let optionalPoolsCopy = optionalPools
+let optionalPoolsCopy = copy optionalPools
 optionalPools.clear()
 assert optionalPoolsCopy.size == 2
 function optionalPoolSize = (items: OptionalPool): Integer => items.size
@@ -51,8 +51,8 @@ console.log(optionalPoolsCopy)
 -- prints: [none, []]
 
 type TupleTree = (Integer, Array<TupleTree>)
-let tuple: TupleTree = (1, [(2, [])])
-let tupleCopy = tuple
+let tuple: TupleTree = (1, [copy (2, [])])
+let tupleCopy = copy tuple
 console.log(tupleCopy)
 -- prints: (1, [(2, [])])
 assert tuple == tupleCopy

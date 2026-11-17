@@ -37,7 +37,7 @@ type Sparse = {
 }
 let onlyRight = Sparse { right = Sparse { right = Sparse {} } }
 let onlyLeft = Sparse { left = Sparse { left = Sparse {} } }
-let both = Sparse { left = onlyLeft, right = onlyRight }
+let both = Sparse { left = copy onlyLeft, right = copy onlyRight }
 console.log(onlyRight.count(), onlyLeft.count(), both.count()) -- prints: 3 3 7
 
 -- A constructor with a computed default keeps that computation per node.

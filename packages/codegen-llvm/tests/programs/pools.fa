@@ -37,7 +37,7 @@ use missing = items.find((item) => item.name == "nobody")
 console.log(missing?.name ?? "nobody found") -- prints: nobody found
 
 -- a copy is independent
-mutable duplicate = items
+mutable duplicate = copy items
 duplicate.clear()
 console.log(duplicate.size, items.size, duplicate.isEmpty()) -- prints: 0 7856 true
 

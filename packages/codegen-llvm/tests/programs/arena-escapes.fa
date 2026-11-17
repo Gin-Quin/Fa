@@ -22,11 +22,11 @@ function churn = (): Integer => {
 }
 
 -- A field read from a temporary root: the rest of the root is dropped.
-let child = Tree.build(6).left
+let child = copy Tree.build(6).left
 assert churn() == 4092
 assert child?.count() == 63
 assert child?.sum() == 57
-let right = Tree.build(6).right?.left
+let right = copy Tree.build(6).right?.left
 assert churn() == 4092
 assert right?.sum() == 26
 
@@ -53,7 +53,7 @@ assert leafCopy?.count() == 1
 -- A subtree copied out of a root, used after the root is dropped.
 function subtree = (depth: Integer): Tree? => {
 	let root = Tree.build(depth)
-	root.left?.right
+	copy root.left?.right
 }
 let kept = subtree(7)
 assert churn() == 4092

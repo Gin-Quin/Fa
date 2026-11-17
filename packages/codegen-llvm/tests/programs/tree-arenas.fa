@@ -11,8 +11,8 @@ type Tree = {
 	function count = (self): Integer => 1 + (self.left?.count() ?? 0) + (self.right?.count() ?? 0)
 }
 
-function duplicate = (tree: Tree): Tree => tree
-function optional = (tree: Tree): Tree? => tree
+function duplicate = (tree: Tree): Tree => copy tree
+function optional = (tree: Tree): Tree? => copy tree
 
 for 0..3 {
 	let root = Tree.build(12)
@@ -20,7 +20,7 @@ for 0..3 {
 	assert root.count() == 8191
 	assert duplicate.count() == 8191
 	do {
-		let subtree = root.left
+		let subtree = copy root.left
 		assert subtree?.count() == 4095
 	}
 	let boxed = optional(duplicate)

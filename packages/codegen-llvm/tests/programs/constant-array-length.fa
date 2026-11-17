@@ -8,11 +8,11 @@ function size = (): Integer => original.length
 assert size() == 2
 assert evaluated == 2
 
-mutable duplicate = original
+mutable duplicate = copy original
 duplicate.push(3)
 assert duplicate.length == 3
 assert original.length == 2
-let snapshot = duplicate
+let snapshot = copy duplicate
 duplicate.push(4)
 assert snapshot.length == 3
 assert duplicate.length == 4

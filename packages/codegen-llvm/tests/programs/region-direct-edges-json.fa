@@ -11,7 +11,7 @@ function leaf = (text: String): Tree => Tree.Leaf { text }
 function pair = (text: String): Tree => Tree.Pair { left = leaf(text), right = Tree.Empty }
 let text = "é".repeat(4000)
 let original = pair(text)
-let duplicate = original
+let duplicate = copy original
 let expectedLeaf = "{{\"type\":\"Leaf\",\"text\":\"" + text + "\"}}"
 let expected = "{{\"type\":\"Pair\",\"left\":" + expectedLeaf + ",\"right\":{{\"type\":\"Empty\"}}}}"
 assert Json.stringify(original) == expected

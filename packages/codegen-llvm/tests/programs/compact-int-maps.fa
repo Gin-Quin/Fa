@@ -10,7 +10,7 @@ for key, index in keys {
 for key, index in keys {
 	assert (map.get(key) ?? 999) == index
 }
-let original = map
+let original = copy map
 map.delete(0)
 map.delete(Int32.minValue)
 assert (original.get(0) ?? 999) == 0
@@ -36,7 +36,7 @@ for index in 0..600 {
 	let key: Int32 = index * 4096
 	assert map.includes(key) == (index %% 3 != 0)
 }
-let copied = map
+let copied = copy map
 map.clear()
 assert map.size == 0
 assert copied.size > 0

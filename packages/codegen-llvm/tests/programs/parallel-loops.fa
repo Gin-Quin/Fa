@@ -16,7 +16,7 @@ console.log(sum.load()) -- prints: 333833500
 
 -- a parallel map into an array
 let numbers = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3]
-mutable squares = numbers
+mutable squares = copy numbers
 for parallel number, index in numbers {
 	squares[index] = square(number)
 }

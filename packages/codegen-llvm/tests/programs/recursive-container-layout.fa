@@ -22,7 +22,7 @@ function change = (tree: Tree): Void mutates tree => {
 	}
 }
 
-function duplicate = (tree: Tree): Tree => tree
+function duplicate = (tree: Tree): Tree => copy tree
 
 function labelAt = (tree: Tree, index: Integer): String throws IndexError => try tree.children[index].label
 
@@ -56,7 +56,7 @@ assert duplicate(copied) == copied
 type Outer = { value: Integer, next: Inner? }
 type Inner = { values: Array<Outer> }
 let mutual = Outer { value = 7, next = Inner { values = [Outer { value = 8 }] } }
-let mutualCopy = mutual
+let mutualCopy = copy mutual
 assert mutual == mutualCopy
 console.log(mutual)
 -- prints: { value = 7, next = { values = [{ value = 8, next = none }] } }
@@ -70,7 +70,7 @@ for index in 1..100 {
 	directory.entries[index] = Directory { name = "item{index}", entries = [] }
 }
 firstDirectory.name += "!"
-let directoryCopy = directory
+let directoryCopy = copy directory
 directory.entries.clear()
 assert try directoryCopy.entries[0].name == "a long owning directory name!"
 assert directoryCopy.entries.size == 100
@@ -81,7 +81,7 @@ let nan = 0.0 / 0.0
 assert [nan] != [nan]
 assert [0.0] == [-0.0]
 let optionalFloats: Array<Float?> = [none, nan]
-let otherFloats = optionalFloats
+let otherFloats = copy optionalFloats
 assert optionalFloats != otherFloats
 
 -- An absent aggregate has null owning fields: equality must not read them.

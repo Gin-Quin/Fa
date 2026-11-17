@@ -28,7 +28,7 @@ function churn = (): Integer => {
 
 -- A child bound from a temporary root, kept after the root is gone.
 let child = when build(5, "x") is {
-	Expression.Add as { left } => left
+	Expression.Add as { left } => copy left
 	else => build(0, "")
 }
 assert churn() == 2048
@@ -36,7 +36,7 @@ assert evaluate(child) == 16
 assert names(child) == "x".repeat(16)
 
 function leftOf = (tree: Expression): Expression => when tree is {
-	Expression.Add as { left } => left
+	Expression.Add as { left } => copy left
 	else => tree
 }
 let owned = leftOf(build(4, "a long name that needs its own heap block"))

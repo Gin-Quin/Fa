@@ -22,7 +22,7 @@ mutable words: Array<String> = []
 for length in 0..30 {
 	words.push("a".repeat(length))
 }
-let duplicate = words
+let duplicate = copy words
 try words[1] = "changed"
 for word, i in duplicate {
 	assert word == "a".repeat(i)

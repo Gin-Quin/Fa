@@ -50,7 +50,7 @@ function values = (): Array<Value> => [
 ]
 
 mutable all = values()
-let snapshot = all
+let snapshot = copy all
 for value, index in all {
 	assert show(value) == show(try snapshot[index])
 }

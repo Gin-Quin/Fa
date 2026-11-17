@@ -30,7 +30,7 @@ for i in 0..30 {
 	choices.push(Choice.Text { text = "x".repeat(i) })
 	choices.push(Choice.Empty)
 }
-let snapshot = choices
+let snapshot = copy choices
 try choices[0] = Choice.Empty
 assert describe(try snapshot[0]) == "number 0"
 for item, index in snapshot {

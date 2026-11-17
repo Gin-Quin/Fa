@@ -8,7 +8,7 @@ assert characters.get(-1) == "f"
 assert characters.get(6) == none
 assert characters.get(-7) == none
 
-mutable duplicate = characters
+mutable duplicate = copy characters
 duplicate.push("z")
 assert characters.length == 6
 assert duplicate.join("") == "abcdefz"

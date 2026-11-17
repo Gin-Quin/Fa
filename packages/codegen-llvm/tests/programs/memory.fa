@@ -11,7 +11,7 @@ type Shape = Union {
 
 -- copies are deep, moves at last use
 mutable first: Person = { name = "Ada", tags = ["math"] }
-let second = first
+let second = copy first
 first.name = "Grace"
 first.tags.push("navy")
 console.log(first.name, first.tags, second.name, second.tags)

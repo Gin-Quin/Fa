@@ -4,7 +4,7 @@
 
 type Node = { value: String, next: Node? }
 let list = Node { value = "a", next = Node { value = "b", next = none } }
-mutable duplicate = list
+mutable duplicate = copy list
 duplicate.next = none
 console.log(list.next?.value ?? "none", duplicate.next?.value ?? "none")
 -- prints: b none
@@ -26,7 +26,7 @@ mutable head: Link? = none
 for index in 0..1_000_000 {
 	head = Link { value = index, next = head }
 }
-let deep = head
+let deep = copy head
 console.log(deep?.value ?? -1, head?.next?.value ?? -1)
 -- prints: 999999 999998
 

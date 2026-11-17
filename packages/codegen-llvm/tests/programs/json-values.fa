@@ -18,7 +18,7 @@ for index in 0..50 {
 	for score in entry.scores {
 		total += score
 	}
-	let again: Entry = Json.parse(Json.stringify(entry)) catch error => entry
+	let again: Entry = Json.parse(Json.stringify(entry)) catch error => copy entry
 	if again.name != entry.name {
 		console.log("mismatch")
 	}

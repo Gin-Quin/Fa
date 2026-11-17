@@ -11,7 +11,7 @@ function build = (depth: Integer): Tree => if depth == 0 {
 } else {
 	Tree.Branch { left = build(depth - 1), right = build(depth - 1) }
 }
-function surround = (child: Tree): Tree => Tree.Branch { left = child, right = Tree.Empty }
+function surround = (child: Tree): Tree => Tree.Branch { left = copy child, right = Tree.Empty }
 function sum = (node: Tree): Integer => when node is {
 	Tree.Empty => 0
 	Tree.Leaf as { value } => value
@@ -31,9 +31,9 @@ let kept = do {
 -- A refill may reuse lower pages released by the abandoned root. Nodes
 -- in this tree span more than the signed 16-bit link window in either case.
 let original = build(16)
-let duplicate = original
+let duplicate = copy original
 let wrapped = surround(duplicate)
-let mixed = Tree.Mixed { left = duplicate, stamp = 231, right = Tree.Empty }
+let mixed = Tree.Mixed { left = copy duplicate, stamp = 231, right = Tree.Empty }
 assert sum(kept) == 28672
 assert sum(original) == 458752
 assert sum(duplicate) == 458752

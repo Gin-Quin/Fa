@@ -65,6 +65,28 @@ impl Walker<'_> {
 		project_sources(&mut self.places, sources, suffix, capture)
 	}
 
+	/// Freeze a capture's sources in the enclosing context, rather than
+	/// resolving it later through the walk-order alias table. A nested
+	/// creation may itself read an enclosing function's capture input.
+	pub(crate) fn record_capture_origins(
+		&mut self,
+		lambda: NodeId,
+		symbol: SymbolId,
+		place: PlaceId,
+	) {
+		let mut sources = self.ownership_sources(symbol, place);
+		sources.sort_unstable();
+		sources.dedup();
+		let key = (lambda, symbol);
+		if self
+			.ownership_capture_origins
+			.insert(key, sources.clone())
+			.as_ref() != Some(&sources)
+		{
+			self.retention_version += 1;
+		}
+	}
+
 	pub(crate) fn record_alias_origins(
 		&mut self,
 		alias: SymbolId,

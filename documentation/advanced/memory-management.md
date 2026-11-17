@@ -506,6 +506,8 @@ The analysis records callable-slot sources when each read executes. Assignments 
 
 `copy` invokes the existing type-specialized copy operation: flat data copies inline; collection headers receive independent storage and every owned item is copied recursively. Shared handles retain their state; unique values have no copy operation. Copies preserve contents rather than spare capacity. Recursive copy and destruction must handle arbitrary finite depth without growing the native call stack; this is a backend obligation of the recursive ownership slices. Linked collections copied as one owner remap links to their copied targets; detached element copies lose links under the relation rules. An explicit copy of an arena-backed view must materialize independent storage before the ancestor arena dies.
 
+Reference aliases also carry ownership-only storage origins in flow: correlated source paths and logical capture inputs. Reseating replaces them; control-flow joins preserve each possibility, and an explicit empty designation stays empty. Read snapshots freeze the current pass and are cleared between key specializations. Move checking observes every possible source of a joined alias. Reference validity and the reference ABI remain separate.
+
 Named callable dependencies are published separately from data captures, including calls in defaults and transport through enclosing environments. Capture state is `Empty`, `Capturing` or `Pending`. A per-key snapshot retains edges to an enclosing function whose body is unfinished; its consumer must settle that state before selecting an environment layout. Complete captureless call chains need no environment. These facts do not authorize capture transfers or change declaration timing.
 
 ### Strings

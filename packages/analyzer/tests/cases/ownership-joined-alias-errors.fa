@@ -1,0 +1,34 @@
+-- An alias made from a joined reference keeps both possible owners live.
+function observe = (choose: Boolean) => {
+	let a = [1]
+	let b = [2]
+	mutable use selected = a
+	if choose { reuse selected = b }
+	use saved = selected
+	let moved = a -- error: MEM004
+	console.log(saved.length, moved.length)
+}
+
+function observeLoop = (choose: Boolean) => {
+	let a = [1]
+	let b = [2]
+	mutable use selected = a
+	while choose {
+		reuse selected = b
+		break
+	}
+	use saved = selected
+	let moved = a -- error: MEM004
+	console.log(saved.length, moved.length)
+}
+
+function capture = (choose: Boolean): (Array<Integer>, () => Integer) => {
+	let a = [1]
+	let b = [2]
+	mutable use selected = a
+	if choose { reuse selected = b }
+	use saved = selected
+	let moved = a                               -- error: MEM004
+	function read = (): Integer => saved.length -- error: MEM004
+	(moved, read)
+}

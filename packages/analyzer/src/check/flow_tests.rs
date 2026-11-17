@@ -1036,3 +1036,30 @@ fn empty_array_branches_use_constructor_context_without_item_conversion() {
 		["E-IF-2"]
 	);
 }
+
+#[test]
+fn an_alias_of_a_joined_reference_keeps_every_owner_live_for_moves() {
+	let source = "function observe = (choose: Boolean) => {\n let a = [1]\n let b = [2]\n mutable use selected = a\n if choose { reuse selected = b }\n use saved = selected\n let moved = a\n console.log(saved.length, moved.length)\n}\n";
+	assert_eq!(codes(source), ["MEM004"]);
+	analyzed(&source.replace("let moved = a", "let moved = copy a"));
+	analyzed(&source.replace(
+		"use saved = selected",
+		"reuse selected = b\n use saved = selected",
+	));
+}
+
+#[test]
+fn a_joined_alias_capture_observes_every_source_at_creation() {
+	let source = "function observe = (choose: Boolean): (Array<Integer>, () => Integer) => {\n let a = [1]\n let b = [2]\n mutable use selected = a\n if choose { reuse selected = b }\n use saved = selected\n let moved = a\n function read = (): Integer => saved.length\n (moved, read)\n}\n";
+	assert_eq!(codes(source), ["MEM004", "MEM004"]);
+}
+
+#[test]
+fn a_loop_joined_reference_keeps_each_possible_owner_live() {
+	let source = "function observe = (choose: Boolean) => {\n let a = [1]\n let b = [2]\n mutable use selected = a\n while choose {\n reuse selected = b\n break\n }\n use saved = selected\n let moved = a\n console.log(saved.length, moved.length)\n}\n";
+	assert_eq!(codes(source), ["MEM004"]);
+	analyzed(&source.replace(
+		"use saved = selected",
+		"reuse selected = b\n use saved = selected",
+	));
+}

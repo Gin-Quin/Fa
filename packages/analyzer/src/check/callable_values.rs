@@ -245,6 +245,7 @@ impl Walker<'_> {
 			let key = (lambda, symbol);
 			changed |= self.a.capture_types.remove(&key).is_some();
 			changed |= self.capture_places.remove(&key).is_some();
+			changed |= self.ownership_capture_origins.remove(&key).is_some();
 			changed |= self.callable_captures.remove(&key).is_some();
 		}
 		if changed {
@@ -266,6 +267,7 @@ impl Walker<'_> {
 				Some(&place) => place,
 				None => self.places.symbol(symbol),
 			};
+			self.record_capture_origins(lambda, symbol, place);
 			let declared = self
 				.place_type(place)
 				.unwrap_or(self.a.symbols.symbol(symbol).ty);

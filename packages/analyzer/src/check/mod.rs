@@ -470,6 +470,9 @@ pub struct Walker<'s> {
 	pub(crate) callable_reads: callable_values::CallableReads,
 	pub(crate) callable_captures: FxHashMap<(NodeId, SymbolId), Vec<callable_values::ReadSource>>,
 	pub(crate) capture_places: FxHashMap<(NodeId, SymbolId), Vec<PlaceId>>,
+	/// Capture inputs observed in the enclosing flow at their creation.
+	pub(crate) ownership_capture_origins:
+		FxHashMap<(NodeId, SymbolId), crate::flow::ownership::Sources>,
 	/// Sources available after written arguments and before call effects.
 	pub(crate) callable_calls: FxHashMap<NodeId, crate::flow::CallableBindings>,
 	/// The effects written in each function's signature, by lambda node.
@@ -665,6 +668,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		callable_reads: FxHashMap::default(),
 		callable_captures: FxHashMap::default(),
 		capture_places: FxHashMap::default(),
+		ownership_capture_origins: FxHashMap::default(),
 		callable_calls: FxHashMap::default(),
 		parallel: Vec::new(),
 		parallel_callbacks: rustc_hash::FxHashSet::default(),

@@ -1,0 +1,42 @@
+-- prints: 1 2 1
+-- prints: 2 2 1
+-- prints: 2 1
+-- prints: 21 21
+
+function independent = (choose: Boolean): (Integer, Integer, Integer) => {
+	let a = [1]
+	let b = [2, 3]
+	mutable use selected = a
+	if choose { reuse selected = b }
+	use saved = selected
+	mutable independent = copy a
+	independent.push(4)
+	(saved.length, independent.length, a.length)
+}
+
+function reseated = (choose: Boolean): (Integer, Integer) => {
+	let a = [1]
+	let b = [2, 3]
+	mutable use selected = a
+	while choose {
+		reuse selected = b
+		break
+	}
+	reuse selected = b
+	use saved = selected
+	let moved = a
+	(saved.length, moved.length)
+}
+
+let first = independent(false)
+console.log(first[0], first[1], first[2])
+let second = independent(true)
+console.log(second[0], second[1], second[2])
+let last = reseated(false)
+console.log(last[0], last[1])
+function summary = (): Integer => {
+	let result = reseated(true)
+	result[0] * 10 + result[1]
+}
+static compiled = @summary()
+console.log(compiled, summary())

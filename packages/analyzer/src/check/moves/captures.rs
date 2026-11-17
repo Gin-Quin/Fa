@@ -145,7 +145,9 @@ impl Walker<'_> {
 		for (lambda, creation, captures) in functions {
 			let mut places = Vec::new();
 			for symbol in captures {
-				if let Some(recorded) = self.capture_places.get(&(lambda, symbol)) {
+				if let Some(sources) = self.ownership_capture_origins.get(&(lambda, symbol)) {
+					places.extend(sources.iter().map(|source| source.place));
+				} else if let Some(recorded) = self.capture_places.get(&(lambda, symbol)) {
 					places.extend(recorded.iter().copied());
 				}
 			}

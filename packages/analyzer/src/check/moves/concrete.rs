@@ -166,6 +166,17 @@ impl Walker<'_> {
 	/// arguments. Include globals and transitive local calls in that read.
 	fn ownership_reads(&mut self) -> FxHashMap<NodeId, Vec<SymbolId>> {
 		let mut reads = self.move_reads.clone();
+		// Alias construction can preserve more current alternatives than
+		// the reference checker's single canonical walk-order path. Keep
+		// each source live; storage-origin filtering belongs to the later
+		// borrowed/owned invocation graph, not this conservative seed.
+		for (node, sources) in self.ownership_read_origins.clone() {
+			self.observe_places(
+				node,
+				sources.into_iter().map(|source| source.place),
+				&mut reads,
+			);
+		}
 		self.capture_creation_reads(&mut reads);
 		let defaults: FxHashSet<_> = self
 			.a

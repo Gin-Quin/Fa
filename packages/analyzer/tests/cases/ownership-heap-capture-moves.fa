@@ -1,0 +1,27 @@
+type Reader = () => Integer
+function heaped = (count: Integer): Reader => {
+	mutable items: Array<Integer> = []
+	for value in 0..count { items.push(value) }
+	function read = (): Integer => items.sum()
+	read
+}
+function binary = (): Reader => {
+	let data = Bytes.from([1, 2, 3, 4])
+	function read = (): Integer => data.length
+	read
+}
+type Pair = (Array<String>, Array<Integer>)
+function pairValue = (): Pair => (["owned text".repeat(20)], [1, 2])
+function compound = (): Reader => {
+	let owner = pairValue()
+	function read = (): Integer => owner[0].length + owner[1].length
+	read
+}
+function inspect = (): Integer => {
+	let first = heaped(4)
+	let second = binary()
+	let third = compound()
+	first() + second() + third()
+}
+static compiled = @inspect()
+console.log(compiled, inspect()) -- prints: 13 13

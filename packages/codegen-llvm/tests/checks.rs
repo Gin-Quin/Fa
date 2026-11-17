@@ -463,6 +463,24 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn heap_and_compound_captures_transfer_without_payload_copies() {
+		let source = include_str!("../../analyzer/tests/cases/ownership-heap-capture-moves.fa");
+		for target in [Target::Native, Target::Wasm] {
+			let ir = ir_at_target("heap-capture-transfer", source, true, OptLevel::O0, target);
+			for name in ["fa.heaped", "fa.binary", "fa.compound"] {
+				let body = function(&ir, name);
+				// The returned function handle may retain its environment once.
+				// Capturing the collection/tuple itself needs no copy operation.
+				let copies = body
+					.lines()
+					.filter(|line| line.contains("call") && line.contains("@fa.copy"))
+					.count();
+				assert!(copies <= 1, "{target:?}: {body}");
+			}
+		}
+	}
+
+	#[test]
 	fn structure_captures_transfer_their_last_use_owner() {
 		let source =
 			include_str!("../../analyzer/tests/cases/ownership-structure-capture-moves.fa");

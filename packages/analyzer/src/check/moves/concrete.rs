@@ -316,9 +316,21 @@ impl Walker<'_> {
 							&defaults,
 						) != body
 					{
-						free.entry(body)
-							.or_default()
-							.insert(self.places.symbol(symbol));
+						let paths: Vec<_> = self
+							.move_places
+							.get(&node)
+							.into_iter()
+							.flatten()
+							.copied()
+							.filter(|&place| self.place_symbol(place) == Some(symbol))
+							.collect();
+						if paths.is_empty() {
+							free.entry(body)
+								.or_default()
+								.insert(self.places.symbol(symbol));
+						} else {
+							free.entry(body).or_default().extend(paths);
+						}
 					}
 				}
 				continue;
@@ -536,6 +548,19 @@ impl Walker<'_> {
 				return false;
 			};
 			if data.pending {
+				return false;
+			}
+			// A free read after replacement observes the new value, not the
+			// incoming owner. Such entries need versioned observations before
+			// their flat read set can prove a transfer.
+			if self.move_writes.iter().any(|(&node, &place)| {
+				self.ownership_read_context(node, &defaults) == entry.context.node()
+					&& self.places.steps(place).is_empty()
+					&& self.place_symbol(place).is_some_and(|symbol| {
+						self.ownership_body(self.a.symbols.symbol(symbol).decl_node)
+							!= self.ownership_body(node)
+					})
+			}) {
 				return false;
 			}
 			for edge in &data.calls {

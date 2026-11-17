@@ -719,6 +719,8 @@ mod tests {
 
 	#[test]
 	fn projected_handles_keep_their_saved_capture_dependencies() {
+		// The declaration needs a copy while items stays live. Later handle
+		// calls read its owned environment, not the original items again.
 		for (statements, result) in [
 			(
 				"let holder = { run = read }\nlet invoke = holder.run\nlet moved = items",
@@ -739,7 +741,7 @@ mod tests {
 		] {
 			assert_eq!(
 				codes(&program(statements, result)),
-				["MEM004", "MEM004"],
+				["MEM004"],
 				"{statements}"
 			);
 		}
@@ -758,7 +760,7 @@ mod tests {
 				"if chain.next is not none {\nlet invoke = chain.next.run\nlet moved = items\ninvoke() + moved.length\n} else { 0 }"
 			)
 		);
-		assert_eq!(codes(&source), ["MEM004", "MEM004"]);
+		assert_eq!(codes(&source), ["MEM004"]);
 	}
 
 	#[test]

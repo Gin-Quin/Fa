@@ -419,7 +419,7 @@ def save(args, data):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("all", "prepare", "measure", "profile", "corpus", "legacy", "rss", "annotate", "render"), default="all")
+    parser.add_argument("--mode", choices=("all", "prepare", "benchmark", "measure", "profile", "corpus", "legacy", "rss", "annotate", "render"), default="all")
     parser.add_argument("--files", type=lambda s: list(map(int, s.split(','))), default=[1, 100, 1000, 2000])
     parser.add_argument("--allow-busy", action="store_true", help="record one provisional timing series on an overloaded host")
     parser.add_argument("--max-load", type=float, default=6, help="timing requires one-minute load below this (default 6)")
@@ -439,7 +439,7 @@ def main():
     args.directory = args.directory.resolve()
     args.fa, args.bun = args.fa.resolve(), args.bun.resolve()
     os.chdir(ROOT)
-    if args.mode in ("all", "prepare"):
+    if args.mode in ("all", "prepare", "benchmark"):
         if not args.no_build:
             run(["taskset", "-c", "0-4", "env", "CARGO_BUILD_JOBS=2", "cargo", "build", "--release", "-p", "fa", "--bin", "fa"])
         native_path = run(["taskset", "-c", "0-4", args.bun, "-e",
@@ -490,7 +490,7 @@ def main():
         corpus(args, data)
     if args.mode == "rss":
         rss_supplement(args, data)
-    if args.mode in ("all", "measure"):
+    if args.mode in ("all", "measure", "benchmark"):
         measure(args, data)
     save(args, data)
 

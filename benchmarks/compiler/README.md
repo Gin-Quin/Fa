@@ -1,6 +1,7 @@
 # Checker speed audit
 
-From the repository root, with Bun and Valgrind installed as in AGENTS.md:
+Needs Linux, Python 3.11+, GNU time, taskset, Cargo, Bun and Valgrind. From the
+repository root, with Bun and Valgrind installed as in AGENTS.md:
 
 ```sh
 export PATH="$HOME/.bun/bin:$HOME/.local/bin:$PATH"
@@ -15,13 +16,15 @@ are one standalone file, 100, 1,000 and 2,000 library files, approximately 500 F
 lines each. Packages also have three cyclic namespace files, an entry and a Fa
 configuration; JSON records exact file/line/byte counts and SHA-256s of the inputs.
 `--files 1,100 --lines 100 --runs 3` is a smoke run, never an acceptance result.
-`--mode prepare|measure|profile|annotate|legacy|corpus|rss|render` resumes one stage using the report.
-For a lead-run quiet rerun after full preparation, use:
+`--mode prepare|benchmark|measure|profile|annotate|legacy|corpus|rss|render` resumes one stage using the report.
+For a fresh lead-run quiet timing report (regenerates and validates inputs,
+skipping the already delivered profile/corpus), use a **new** report filename:
 
 ```sh
-taskset -c 0-4 python3 benchmarks/compiler/check_speed.py --mode measure --report benchmarks/results/check-speed.json
+taskset -c 0-4 python3 benchmarks/compiler/check_speed.py --mode benchmark --report benchmarks/results/check-speed-quiet.json
 ```
-Keep the first primary report: use a different `--report` for a supplemental run.
+`--mode measure --report <that-file>` resumes an interrupted report and skips
+completed rows; it does not silently replace a finished series. Keep the first primary report: use a different `--report` for a supplemental run.
 Timing starts only while the one-minute load is below 6. If it reaches 6 before
 a new round, the driver stops at its checkpoint; use `--mode measure` to resume
 in a quiet window. `--allow-busy` explicitly records one provisional busy-host

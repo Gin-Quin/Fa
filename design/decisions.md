@@ -2729,8 +2729,8 @@ slots by value, matching their nonescaping parser lifetime.
 A String field or collection item uses the existing local-string inline-byte
 proof before taking the cold append call: the current value is inline, its
 payload has room, and the suffix has exactly one byte and the ASCII flag.
-The owned/frame-buffer room test remains first. Unknown or non-ASCII suffixes,
-non-inline storage and exhausted inline capacity retain the existing fallback.
+The owned/frame-buffer room test remains first. Values failing the inline-room
+or one-byte ASCII suffix guards retain the existing fallback.
 Appending ASCII cannot join surrogate halves; existing encoding flags stay valid.
 This proof depends only on the current descriptor and applies inside generic
 instances, callbacks, coroutine bodies and separately compiled units.
@@ -2745,10 +2745,13 @@ In particular, last-use String field returns and transient stores remain for
 
 Fresh audit-size respond profiling confirms 189,946 cold append calls before,
 65,557 after: all 124,389 short calls disappear; growth and the 40,000 field-return
-copies are unchanged. Whole-process instructions fall from 235,269,947 to
-230,322,903 (2.10%). Final controlled CPU and full-audit/correctness evidence is
-recorded with the string performance report; instruction counts alone establish
-no CPU-time victory.
+copies are unchanged. Final whole-process instructions fall from 235,269,947 to
+230,322,944 (2.10%); all 36 audit rows stay within +1%, with sexp's +0.81850%
+the largest increase. The 21-round default-size respond CPU control fails
+(ratio of medians 1.02945, paired median 1.04793), so no CPU-time gain is claimed.
+The unchanged audit driver retains every sample in the
+[measurement data](../benchmarks/results/2026-11-17-strings-place-appends.json)
+and derives the [strict control table](../benchmarks/results/2026-11-17-strings-place-appends.md).
 
 The native unit-cache version advances with `inline-place-byte-1`; the runtime
 source/ABI is unchanged, so its hash alone would otherwise retain previously

@@ -170,6 +170,14 @@ types and must not be replaced by fact-name equality.
 
 ## 4. Performance
 
+- **Task-duration warnings in wasm matrix checks (2026-11-17).** Investigate
+  load-sensitive development-mode turn warnings without weakening the runtime
+  policy or empty-stderr assertions. Two complete InlineArray matrix attempts
+  fail on different wasm/O0 children (int16: 54 ms; uint32: 132 ms); both exact
+  children pass alone unchanged. The turn timer includes elapsed wall time.
+  Preserve these nonzero full-run results in String performance validation;
+  isolated passes do not constitute a green full matrix.
+
 - **Wide asynchronous aggregate compilation.** Profile optimized compilation of
   `packages/cli/tests/programs/inline-array-second-wide-async.fa`. Its native and
   freestanding executions and leak checks pass within the 512 MiB compiler

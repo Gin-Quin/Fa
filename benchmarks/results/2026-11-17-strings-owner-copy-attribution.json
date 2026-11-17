@@ -494,5 +494,14 @@
         "inclusive_ir": 22505415
       }
     ]
+  },
+  "strlist": {
+    "audit_size": 200000,
+    "copy_call_edges": [],
+    "ir": "benchmarks/audit/build/strings-final/strlist/fa/native/main.ll",
+    "ir_call_sites": [],
+    "all_executed_copy_edges": [],
+    "profile_sha256": "dcf1e68ca2e2d0e1ed456971f2be4d60a7b735da869f32fb8f67e7dc346ed458",
+    "note": "No executed slow String or owned-copy helper edge; optimized final IR contains neither helper. No slow materialization is attributed to last-owner extraction here; inline descriptor work may remain."
   }
 }

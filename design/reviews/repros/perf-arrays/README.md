@@ -20,10 +20,14 @@ pre-cache compiler (`68e00504`). The fix must synchronize both bulk fill and
 bulk copy paths with an enclosing push cache, or decline caching there.
 
 Passing probes: `growing-boundaries.fa`, `fill-fallbacks.fa`,
-`remainder-widths.fa`, `extents-alias-fp.fa`, `growing-fallbacks.fa`,
+`extents-alias-fp.fa`, `growing-fallbacks.fa`,
 `extent-fallbacks.fa`. Run them with the same runner. Use
 `REVIEW_ASYNC=true` for `async-fallbacks.fa`; `REVIEW_OVERFLOW=false` exercises
 the unchecked remainder path. Set `REVIEW_OUTPUT` to preserve distinct runs.
+`remainder-widths.fa` preserves a separate pre-existing failure at UInt32.maxValue:
+literal remainder by 7 prints/computes 1 instead of 3. The minimal
+`remainder-uint32-max.fa` and full `remainder-endpoints-observe.fa` preserve it
+without hiding later widths. The base compiler `71af4fd0` fails identically.
 `alias-negative.fa` is a checker rejection control (REF013), not a runnable test.
 
 `extents-alias-fp.fa` prints sign, binary exponent and all 53 significand bits

@@ -1,0 +1,301 @@
+{
+  "schema": 1,
+  "before_profile": "benchmarks/results/2026-11-17-arrays-strings-merge.json",
+  "after_profile": "benchmarks/results/2026-11-17-native-completeness-lookup-union-profiles.json",
+  "source_revision": "8eb72d7abf67fc5df5a6d2f4ddba49eb57a63a7a",
+  "threshold_percent": 1,
+  "benchmark_count": 36,
+  "identical_executables": 32,
+  "maximum_delta_percent": -0.0001491000596559562,
+  "passes": true,
+  "benchmarks": {
+    "binary-trees": {
+      "size": 14,
+      "before_Ir": 114538655,
+      "after_Ir": 114537495,
+      "delta_percent": -0.0010127585311701102,
+      "passes": true,
+      "identical_executable": true
+    },
+    "blur": {
+      "size": 1000,
+      "before_Ir": 92420352,
+      "after_Ir": 92419193,
+      "delta_percent": -0.0012540527869878703,
+      "passes": true,
+      "identical_executable": true
+    },
+    "blur-reserved": {
+      "size": 1000,
+      "before_Ir": 92420383,
+      "after_Ir": 92419195,
+      "delta_percent": -0.001285430725817269,
+      "passes": true,
+      "identical_executable": true
+    },
+    "calc": {
+      "size": 40000,
+      "before_Ir": 123705411,
+      "after_Ir": 123704238,
+      "delta_percent": -0.0009482204460724842,
+      "passes": true,
+      "identical_executable": true
+    },
+    "fannkuch-redux": {
+      "size": 9,
+      "before_Ir": 137428847,
+      "after_Ir": 137427677,
+      "delta_percent": -0.0008513496442271687,
+      "passes": true,
+      "identical_executable": true
+    },
+    "fib": {
+      "size": 35,
+      "before_Ir": 236889673,
+      "after_Ir": 236888500,
+      "delta_percent": -0.0004951672165126421,
+      "passes": true,
+      "identical_executable": true
+    },
+    "graph": {
+      "size": 10000,
+      "before_Ir": 10452073,
+      "after_Ir": 10450964,
+      "delta_percent": -0.010610335385143214,
+      "passes": true,
+      "identical_executable": true
+    },
+    "growing-index": {
+      "size": 1000000,
+      "before_Ir": 365176002,
+      "after_Ir": 365174792,
+      "delta_percent": -0.00033134707466346596,
+      "passes": true,
+      "identical_executable": false
+    },
+    "growing-index-array": {
+      "size": 1000000,
+      "before_Ir": 314169733,
+      "after_Ir": 314168552,
+      "delta_percent": -0.00037591145038787043,
+      "passes": true,
+      "identical_executable": false
+    },
+    "interp": {
+      "size": 17,
+      "before_Ir": 18857673,
+      "after_Ir": 18856514,
+      "delta_percent": -0.006146039333697217,
+      "passes": true,
+      "identical_executable": true
+    },
+    "lru": {
+      "size": 200000,
+      "before_Ir": 19155186,
+      "after_Ir": 19154013,
+      "delta_percent": -0.006123668023897027,
+      "passes": true,
+      "identical_executable": true
+    },
+    "lru-open": {
+      "size": 200000,
+      "before_Ir": 20953870,
+      "after_Ir": 20952756,
+      "delta_percent": -0.005316440352068615,
+      "passes": true,
+      "identical_executable": true
+    },
+    "mandelbrot": {
+      "size": 1000,
+      "before_Ir": 440665971,
+      "after_Ir": 440664862,
+      "delta_percent": -0.0002516645425294253,
+      "passes": true,
+      "identical_executable": true
+    },
+    "nbody": {
+      "size": 1500000,
+      "before_Ir": 753185480,
+      "after_Ir": 753184357,
+      "delta_percent": -0.0001491000596559562,
+      "passes": true,
+      "identical_executable": true
+    },
+    "particles": {
+      "size": 30000,
+      "before_Ir": 105171321,
+      "after_Ir": 105170207,
+      "delta_percent": -0.0010592241206136414,
+      "passes": true,
+      "identical_executable": true
+    },
+    "particles-reserved": {
+      "size": 30000,
+      "before_Ir": 105171356,
+      "after_Ir": 105170161,
+      "delta_percent": -0.0011362409361727731,
+      "passes": true,
+      "identical_executable": true
+    },
+    "push": {
+      "size": 3200000,
+      "before_Ir": 135551944,
+      "after_Ir": 135550821,
+      "delta_percent": -0.0008284646954233279,
+      "passes": true,
+      "identical_executable": true
+    },
+    "push-array": {
+      "size": 3200000,
+      "before_Ir": 135096436,
+      "after_Ir": 135095248,
+      "delta_percent": -0.0008793718288763739,
+      "passes": true,
+      "identical_executable": true
+    },
+    "records": {
+      "size": 400000,
+      "before_Ir": 77838661,
+      "after_Ir": 77837524,
+      "delta_percent": -0.0014607137191118948,
+      "passes": true,
+      "identical_executable": true
+    },
+    "respond": {
+      "size": 40000,
+      "before_Ir": 235271070,
+      "after_Ir": 235269947,
+      "delta_percent": -0.00047732175485919285,
+      "passes": true,
+      "identical_executable": true
+    },
+    "respond-interpolation": {
+      "size": 40000,
+      "before_Ir": 205915696,
+      "after_Ir": 205914515,
+      "delta_percent": -0.0005735356861771237,
+      "passes": true,
+      "identical_executable": true
+    },
+    "scene": {
+      "size": 9,
+      "before_Ir": 9337440,
+      "after_Ir": 9336295,
+      "delta_percent": -0.012262461659726862,
+      "passes": true,
+      "identical_executable": true
+    },
+    "sexp": {
+      "size": 2000,
+      "before_Ir": 81335779,
+      "after_Ir": 81334620,
+      "delta_percent": -0.0014249571520056382,
+      "passes": true,
+      "identical_executable": true
+    },
+    "sieve": {
+      "size": 10000000,
+      "before_Ir": 203738707,
+      "after_Ir": 203737565,
+      "delta_percent": -0.0005605218649002224,
+      "passes": true,
+      "identical_executable": true
+    },
+    "sort-objects": {
+      "size": 100000,
+      "before_Ir": 171202916,
+      "after_Ir": 171201807,
+      "delta_percent": -0.0006477693405642694,
+      "passes": true,
+      "identical_executable": true
+    },
+    "spectral-norm": {
+      "size": 1000,
+      "before_Ir": 535732488,
+      "after_Ir": 535731300,
+      "delta_percent": -0.00022175246538343218,
+      "passes": true,
+      "identical_executable": true
+    },
+    "string-building": {
+      "size": 300000,
+      "before_Ir": 228873826,
+      "after_Ir": 228872653,
+      "delta_percent": -0.0005125094557557665,
+      "passes": true,
+      "identical_executable": true
+    },
+    "string-building-bytes": {
+      "size": 300000,
+      "before_Ir": 175745617,
+      "after_Ir": 175744422,
+      "delta_percent": -0.0006799600584064637,
+      "passes": true,
+      "identical_executable": false
+    },
+    "string-building-growing": {
+      "size": 300000,
+      "before_Ir": 187642754,
+      "after_Ir": 187641564,
+      "delta_percent": -0.0006341838278498086,
+      "passes": true,
+      "identical_executable": false
+    },
+    "strlist": {
+      "size": 200000,
+      "before_Ir": 85937871,
+      "after_Ir": 85936734,
+      "delta_percent": -0.0013230488337324531,
+      "passes": true,
+      "identical_executable": true
+    },
+    "sum": {
+      "size": 3200000,
+      "before_Ir": 161783755,
+      "after_Ir": 161782610,
+      "delta_percent": -0.0007077348402501845,
+      "passes": true,
+      "identical_executable": true
+    },
+    "sum-reserved": {
+      "size": 3200000,
+      "before_Ir": 161783760,
+      "after_Ir": 161782601,
+      "delta_percent": -0.0007163883445408859,
+      "passes": true,
+      "identical_executable": true
+    },
+    "tree": {
+      "size": 17,
+      "before_Ir": 56688582,
+      "after_Ir": 56687437,
+      "delta_percent": -0.0020198070927228344,
+      "passes": true,
+      "identical_executable": true
+    },
+    "word-count": {
+      "size": 500000,
+      "before_Ir": 236120073,
+      "after_Ir": 236118899,
+      "delta_percent": -0.0004972046573947993,
+      "passes": true,
+      "identical_executable": true
+    },
+    "words": {
+      "size": 100000,
+      "before_Ir": 28590832,
+      "after_Ir": 28589709,
+      "delta_percent": -0.003927832530371974,
+      "passes": true,
+      "identical_executable": true
+    },
+    "words-wide": {
+      "size": 100000,
+      "before_Ir": 28590883,
+      "after_Ir": 28589709,
+      "delta_percent": -0.004106204065121038,
+      "passes": true,
+      "identical_executable": true
+    }
+  }
+}

@@ -441,7 +441,7 @@ def main():
     os.chdir(ROOT)
     if args.mode in ("all", "prepare", "benchmark"):
         if not args.no_build:
-            run(["taskset", "-c", "0-4", "env", "CARGO_BUILD_JOBS=2", "cargo", "build", "--release", "-p", "fa", "--bin", "fa"])
+            run(["taskset", "-c", "0-4", "env", "-u", "LLVM_SYS_181_PREFIX", "CARGO_BUILD_JOBS=2", "cargo", "build", "--release", "-p", "fa", "--bin", "fa"])
         native_path = run(["taskset", "-c", "0-4", args.bun, "-e",
                            'import getExePath from "./packages/benchmark-typescript/node_modules/@typescript/native/lib/getExePath.js"; console.log(getExePath());']).stdout.decode().strip()
         versions = json.loads(run(["taskset", "-c", "0-4", args.bun, "-p", "JSON.stringify(process.versions)"]).stdout)
@@ -469,9 +469,9 @@ def main():
         save(args, data)
     else:
         data = json.loads(args.report.read_text())
-        if args.mode != "render" and (identity(args.fa) != data["fa_binary"] or identity(args.bun) != data["bun_binary"]):
+        if args.mode not in ("render", "annotate") and (identity(args.fa) != data["fa_binary"] or identity(args.bun) != data["bun_binary"]):
             raise RuntimeError("checker binary changed since prepare")
-    if args.mode != "render":
+    if args.mode not in ("render", "annotate"):
         for fixture in data["fixtures"]:
             for relative, expected in fixture.get("configuration", {}).items():
                 if digest(args.directory / str(fixture["files"]) / relative) != expected:

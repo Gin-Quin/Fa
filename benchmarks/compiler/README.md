@@ -21,7 +21,7 @@ For a fresh lead-run quiet timing report (regenerates and validates inputs,
 skipping the already delivered profile/corpus), use a **new** report filename:
 
 ```sh
-taskset -c 0-4 python3 benchmarks/compiler/check_speed.py --mode benchmark --report benchmarks/results/check-speed-quiet.json
+taskset -c 0-4 env -u LLVM_SYS_181_PREFIX python3 benchmarks/compiler/check_speed.py --mode benchmark --report benchmarks/results/check-speed-quiet.json
 ```
 `--mode measure --report <that-file>` resumes an interrupted report and skips
 completed rows; it does not silently replace a finished series. Keep the first primary report: use a different `--report` for a supplemental run.

@@ -285,6 +285,7 @@ mod with_llvm {
 			},
 			..Options::default()
 		};
+		let started = std::time::Instant::now();
 		let compiled = if program.files.is_empty() {
 			compile_file(&program.path, target, &options, &output)
 		} else {
@@ -303,6 +304,16 @@ mod with_llvm {
 			}
 			Err(error) => return Outcome::Failed(format!("does not compile: {error}")),
 		};
+		if std::env::var_os("FA_TEST_TIMINGS").is_some() {
+			eprintln!(
+				"FA_TEST_COMPILE\t{}\t{:?}\t{}\t{:.6}\t{:?}",
+				target.name(),
+				options.opt_level,
+				program.path.display(),
+				started.elapsed().as_secs_f64(),
+				artifact.timings,
+			);
+		}
 		if let Some(failure) = expect(program, &artifact) {
 			return Outcome::Failed(failure);
 		}
@@ -334,10 +345,20 @@ mod with_llvm {
 	/// Runs a compiled program: what it does that its annotations don't say.
 	fn expect(program: &Program, artifact: &fa_codegen_llvm::Artifact) -> Option<String> {
 		let arguments: Vec<&str> = program.arguments.iter().map(String::as_str).collect();
+		let started = std::time::Instant::now();
 		let result = match run_within(artifact, &arguments, None) {
 			Ok(result) => result,
 			Err(reason) => return Some(reason),
 		};
+		if std::env::var_os("FA_TEST_TIMINGS").is_some() {
+			eprintln!(
+				"FA_TEST_RUN\t{}\t{:?}\t{}\t{:.6}",
+				artifact.target.name(),
+				artifact.options.opt_level,
+				program.path.display(),
+				started.elapsed().as_secs_f64()
+			);
+		}
 		let stdout = String::from_utf8_lossy(&result.stdout);
 		let stderr = String::from_utf8_lossy(&result.stderr);
 		let printed: Vec<&str> = stdout.lines().collect();

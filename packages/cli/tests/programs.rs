@@ -305,6 +305,7 @@ fn execute(command: &mut Command, scratch: &Path, name: &str) -> Outcome {
 		use std::os::unix::process::CommandExt;
 		command.process_group(0);
 	}
+	let started = Instant::now();
 	let mut child = command
 		.env("XDG_CACHE_HOME", scratch.join("cache"))
 		.stdin(Stdio::null())
@@ -313,6 +314,12 @@ fn execute(command: &mut Command, scratch: &Path, name: &str) -> Outcome {
 		.spawn()
 		.expect("`fa` runs");
 	let exit = wait_for_exit(&mut child, TIMEOUT);
+	if std::env::var_os("FA_TEST_TIMINGS").is_some() {
+		eprintln!(
+			"FA_TEST_PROCESS\t{name}\t{:.6}\t{command:?}",
+			started.elapsed().as_secs_f64()
+		);
+	}
 	let mut stderr = fs::read_to_string(&stderr_path).unwrap_or_default();
 	match exit {
 		-2 => stderr.push_str("\nharness: timed out after 20 seconds\n"),

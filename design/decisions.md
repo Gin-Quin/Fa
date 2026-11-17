@@ -2749,3 +2749,8 @@ copies are unchanged. Whole-process instructions fall from 235,269,947 to
 230,322,903 (2.10%). Final controlled CPU and full-audit/correctness evidence is
 recorded with the string performance report; instruction counts alone establish
 no CPU-time victory.
+
+The native unit-cache version advances with `inline-place-byte-1`; the runtime
+source/ABI is unchanged, so its hash alone would otherwise retain previously
+compiled, slower package objects. Final validation includes the existing cache
+and per-unit tests on this version.

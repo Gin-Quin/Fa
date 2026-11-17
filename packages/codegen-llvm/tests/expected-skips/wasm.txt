@@ -17,3 +17,6 @@ cli/tests/programs/pool-direct-reference-removal.fa: line 3: delete/take accepts
 
 # Documented target refusal: blocking sleep through the selected generic method.
 analyzer/tests/cases/review/written-method-origins-async.fa: CONC010: blocking describe reaches sleep; wasm requires await/start (the awaited control remains runnable)
+
+# analyzer/pending-a un-pended this case: a `do` block whose only value is `none` (type `Void`), annotated `Integer?`.
+analyzer/tests/cases/values/19-do-blocks-and-block-values/T-DO-4.fa: line 2: a value of type `Void` is not supported by the native backend yet (a `do` block whose only value is `none`, read as an optional)

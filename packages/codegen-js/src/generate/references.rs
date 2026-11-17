@@ -1602,6 +1602,12 @@ impl Generator<'_> {
 	/// value a reference designates (not a value of a map, which `set`
 	/// replaces, nor a union or an optional place).
 	pub(crate) fn writes_in_place(&mut self, target: NodeId) -> bool {
+		if let View::Name(_) = self.view(target)
+			&& let Resolution::Local(symbol) = self.analysis.resolution(target)
+			&& matches!(self.references.get(&symbol), Some(Reference::Object))
+		{
+			return true;
+		}
 		let storage_ty = match self.view(target) {
 			View::Name(_) => match self.analysis.resolution(target) {
 				Resolution::Local(symbol)

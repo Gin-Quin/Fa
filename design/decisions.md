@@ -1663,3 +1663,9 @@ map keys remain raw. Length-derived index facts are snapshots, so growing a
 collection does not reinterpret a previously selected position. Formal index
 parameters remain available when publishing declared effects. Value blocks
 publish origins at `walk_block`, including blocks checked directly by branches.
+
+Native object-cache producer `reference-results-8` invalidates objects emitted
+before evaluated block/callable provenance correctly marked escaping closures.
+Optional owned storage can be absent and is replaced; a selected bare-object
+reference always writes in place, including a generic object body whose type
+parameter itself conservatively admits `none` during type checking.

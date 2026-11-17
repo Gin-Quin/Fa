@@ -390,7 +390,7 @@ impl Walker<'_> {
 						problems.push((
 							name,
 							format!(
-								"`{path}` compares complete items: use a `Map` keyed by that value instead of `key`"
+								"`{path}` has no `key` option: a set compares complete items; to find items by a key, use a `Map` whose keys are the values this function returns"
 							),
 						));
 					}

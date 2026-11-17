@@ -166,8 +166,9 @@ A stored link adds a containment condition to replacement: resetting a pool is a
 
 :::implementation
 
-`GrowingSet.from` takes only a source and an optional capacity hint, like `Set.from`. Both use complete-item standard hashing and equality; neither stores a key callback. The hint is evaluated once on every target, even when JavaScript ignores its storage request.
 ## Implementation details
+
+`GrowingSet.from` takes only a source and an optional capacity hint, like `Set.from`. Both use complete-item standard hashing and equality; neither stores a key callback. The hint is evaluated once on every target, even when JavaScript ignores its storage request.
 
 ### Native
 

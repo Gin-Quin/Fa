@@ -1,0 +1,21 @@
+-- require-split: true
+-- file: library/exercise.fa
+export function = <Tag>(tag: Tag, count: Integer<min = 0>): Integer throws IndexError => {
+	mutable items: GrowingArray<{ tag: Tag, value: Integer }> = []
+	for i in 0..count { items.push({ tag = tag, value = i }) }
+	mutable total = 0
+	for item in items { total += item.value }
+	for i in 0..count { try items[i].value += 1 }
+	assert items.length == count
+	total
+}
+-- file: application/main.fa
+export function = () throws IndexError => {
+	let stored = library.exercise<Integer>
+	assert (try stored(7, 0)) == 0
+	assert (try stored(7, 2049)) == 2098176
+	assert (try library.exercise({ number = 7 }, 129)) == 8256
+	assert (try library.exercise(true, 129)) == 8256
+	assert (try library.exercise("a growing tag that exceeds inline storage", 129)) == 8256
+	console.log("split growing loop facts ok") -- prints: split growing loop facts ok
+}

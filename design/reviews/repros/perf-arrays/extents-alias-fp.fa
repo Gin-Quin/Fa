@@ -1,0 +1,43 @@
+-- Print an exact finite Float encoding without target-specific bit casts.
+function bits = (value: Float) => {
+	let negative = value < 0.0 or (value == 0.0 and 1.0 / value < 0.0)
+	mutable magnitude = value.abs()
+	mutable exponent = 0
+	if magnitude != 0.0 {
+		while magnitude >= 2.0 { magnitude *= 0.5
+		exponent += 1 }
+		while magnitude < 1.0 { magnitude *= 2.0
+		exponent -= 1 }
+	}
+	mutable mantissa = 0
+	for 0..53 {
+		mantissa *= 2
+		if magnitude >= 1.0 { mantissa += 1
+		magnitude -= 1.0 }
+		magnitude *= 2.0
+	}
+	console.log(negative, exponent, mantissa // 4294967296, mantissa %% 4294967296)
+}
+type Cell = { value: Float, mass: Float }
+function mix = (items: Array<Cell>, offset: Integer) throws IndexError mutates items => {
+	for item, i in items {
+		let j = (i + offset) %% 5
+		use other = try items[j]
+		item.value += other.value * 0.125
+		other.value = other.value * 0.5 - item.mass
+	}
+}
+function run = () throws IndexError => {
+	mutable items: Array<Cell> = [
+		{ value = 1e16, mass = 1e-16 }
+		{ value = 1.0, mass = 0.25 }
+		{ value = -1e16, mass = -0.0 }
+		{ value = 1.1125369292536007e-308, mass = 0.0 }
+		{ value = -0.0, mass = 0.0 }
+	]
+	for item in items { bits(item.value) }
+	items.reserve(100)
+	for round in 0..32 { try mix(items, round %% 5) }
+	for item in items { bits(item.value) }
+}
+try run()

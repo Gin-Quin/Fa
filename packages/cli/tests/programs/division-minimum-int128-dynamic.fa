@@ -1,0 +1,6 @@
+-- Minimum / -1 cannot fit the signed destination, including narrow types.
+function quotient = (value: Int128, divisor: Int128): Int128 throws DivisionByZero =>
+	try value // divisor
+console.log("before overflow") -- prints: before overflow
+console.log(try quotient(Int128.minValue, -1))
+-- exit: 101

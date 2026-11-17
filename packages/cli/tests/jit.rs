@@ -67,6 +67,100 @@ fn llvm() -> bool {
 }
 
 #[test]
+fn standalone_bulk_appends_keep_growing_header_caches_coherent_in_the_jit() {
+	if !llvm() {
+		return;
+	}
+	for (name, source, expected) in [
+		(
+			"fill",
+			include_str!("programs/growing-nested-fill.fa"),
+			"3\n4\n7\n8\ntrue\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\nfalse\n",
+		),
+		(
+			"copy",
+			include_str!("programs/growing-nested-copy.fa"),
+			"3\n4\n7\n8\n10\n20\n30\n99\n10\n20\n30\n99\n",
+		),
+	] {
+		let folder = scratch(&format!("bulk-growing-{name}"), &[("main.fa", source)]);
+		for opt in ["-O0", "-O3"] {
+			let arguments = [
+				"run",
+				"--target=native",
+				"--asynchronous=false",
+				opt,
+				"main.fa",
+			];
+			let (stdout, stderr, code) = fa(&arguments, &folder, true);
+			assert_eq!((stdout.as_str(), code), (expected, 0), "{name}: {stderr}");
+			assert!(stderr.contains("jit: loaded 1 object in "), "{stderr}");
+			assert_eq!(without_trace(&stderr), "");
+			assert_eq!(
+				fa(&arguments, &folder, false),
+				(stdout, String::new(), code)
+			);
+		}
+	}
+}
+
+#[test]
+fn bulk_growing_appends_and_narrow_remainders_work_in_jit_and_cached_units() {
+	if !llvm() {
+		return;
+	}
+	let folder = scratch(
+		"bulk-growing",
+		&[
+			("package.fa", "export = { name = \"bulkGrowing\" }\n"),
+			(
+				"library/nested.fa",
+				include_str!(
+					"../../../design/reviews/repros/perf-arrays/per-unit/library/nested.fa"
+				),
+			),
+			(
+				"library/remainder.fa",
+				"export function = (value: UInt32): UInt32 => value %% 7\n",
+			),
+			(
+				"application/main.fa",
+				"export function = () => {\nlibrary.nested()\nassert library.remainder(UInt32.maxValue) == 3\nconsole.log(\"bulk jit ok\")\n}\n",
+			),
+		],
+	);
+	for opt in ["-O0", "-O3"] {
+		for split in [false, true] {
+			let mut arguments = vec!["run", "--target=native", opt];
+			if !split {
+				arguments.push("--asynchronous=false");
+			}
+			arguments.push(".");
+			let (stdout, stderr, code) = fa(&arguments, &folder, true);
+			assert_eq!((stdout.as_str(), code), ("bulk jit ok\n", 0), "{stderr}");
+			let loaded = stderr
+				.lines()
+				.find_map(|line| {
+					line.strip_prefix("jit: loaded ")?
+						.split(' ')
+						.next()?
+						.parse::<usize>()
+						.ok()
+				})
+				.expect("the JIT loads objects");
+			assert!(if split { loaded > 2 } else { loaded == 1 }, "{stderr}");
+			let cached = fa(&arguments, &folder, true);
+			assert_eq!(
+				(cached.0, without_trace(&cached.1), cached.2),
+				(stdout.clone(), String::new(), code)
+			);
+			let linked = fa(&arguments, &folder, false);
+			assert_eq!(linked, (stdout, String::new(), code));
+		}
+	}
+}
+
+#[test]
 fn run_loads_a_file_in_memory_with_its_arguments() {
 	if !llvm() {
 		return;

@@ -419,6 +419,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	pub(super) fn invalidate_dropped_map_probes(&self, repr: Repr) -> Result<(), Error> {
+		// No probe exists outside this proof (notably in generic code).
+		// Do not resolve its unrelated generic cleanup types: invalidation
+		// is a no-op there, just as in invalidate_all_map_probes.
+		if !self.map_probe_program_is_closed() {
+			return Ok(());
+		}
 		let may_hold_map = match repr {
 			Repr::Map(_) | Repr::Set(_) => true,
 			Repr::Array(item)

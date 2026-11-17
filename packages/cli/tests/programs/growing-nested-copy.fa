@@ -1,0 +1,25 @@
+-- Bulk copies must synchronize an enclosing GrowingArray push cache, too.
+function run = () => {
+	let source = [10, 20, 30]
+	mutable destination: GrowingArray<Integer> = []
+	for round in 0..2 {
+		for value in source { destination.push(value) }
+		console.log(destination.length)
+		destination.push(99)
+		console.log(destination.length)
+	}
+	for value in destination { console.log(value) }
+}
+run()
+-- prints: 3
+-- prints: 4
+-- prints: 7
+-- prints: 8
+-- prints: 10
+-- prints: 20
+-- prints: 30
+-- prints: 99
+-- prints: 10
+-- prints: 20
+-- prints: 30
+-- prints: 99

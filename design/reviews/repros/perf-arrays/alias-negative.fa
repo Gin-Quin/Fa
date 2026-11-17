@@ -1,0 +1,11 @@
+-- Expected: REF013 rejects passing the same collection to an overlapping length-mutating parameter.
+-- Push through one parameter while reading an alias in the same loop.
+function reset = (items: GrowingArray<Integer>, alias: GrowingArray<Integer>) mutates alias.length => {
+	for 0..2 {
+		alias.push(4)
+		console.log(items.length)
+	}
+}
+mutable items: GrowingArray<Integer> = [1, 2, 3]
+reset(items, items)
+console.log(items.length)

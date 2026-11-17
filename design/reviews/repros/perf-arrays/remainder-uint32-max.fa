@@ -1,0 +1,8 @@
+function run = (value: UInt32) => {
+	let divisor: UInt32 = 7
+	for 0..1 {
+		console.log(value %% divisor)
+		console.log(value %% 7)
+	}
+}
+run(UInt32.maxValue)

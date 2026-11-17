@@ -1,0 +1,51 @@
+type Owner = {
+	items: GrowingArray<Integer>
+	function change = (self, n: Integer) mutates self => {
+		self.items = []
+		self.items.reserve(128)
+		for i in 0..n { self.items.push(i) }
+	}
+}
+function grow = (items: GrowingArray<Integer>, value: Integer) mutates items.length => items.push(value)
+mutable captured: GrowingArray<Integer> = [0]
+function exercise = () throws IndexError mutates captured => {
+	mutable items: GrowingArray<Integer> = [0]
+	for i in 0..129 {
+		grow(items, i + 1)
+		assert (try items[-1]) == i + 1
+	}
+	function change = (n: Integer) mutates captured => {
+		captured = []
+		captured.reserve(64)
+		for i in 0..n { captured.push(i) }
+	}
+	let stored = change
+	for i in 1..5 {
+		stored(i)
+		assert captured.length == i
+		assert (try captured[-1]) == i - 1
+	}
+	mutable owner: Owner = { items = [1] }
+	for i in 0..4 {
+		owner.change(i)
+		assert owner.items.length == i
+	}
+	use values = owner.items
+	for i in 0..3 {
+		values.push(i)
+		assert owner.items.length == i + 4
+	}
+	mutable errors = 0
+	for i in 0..3 {
+		let ignored = captured[100] catch _error => {
+			errors += 1
+			stored(i)
+			-1
+		}
+		assert ignored == -1
+		assert captured.length == i
+	}
+	assert errors == 3
+	console.log("growing fallbacks ok")
+}
+try exercise()

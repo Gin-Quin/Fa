@@ -1,0 +1,7 @@
+export function = () throws IndexError => {
+	library.nested()
+	let stored = library.generic<Integer>
+	assert (try stored(7)) == 524800
+	assert (try library.generic("a managed generic payload beyond inline storage")) == 524800
+	console.log("per-unit ok")
+}

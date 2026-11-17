@@ -36,9 +36,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		// nothing in the body can reach an array but its own reads
 		let mut names = Vec::new();
+		// A growing parameter can alias another growing parameter: its
+		// push changes length without invalidating an item reference. For
+		// these nonprivate owners, even builtin calls keep the fallback.
+		let mut growing_safe = true;
 		let mut stack = vec![body.index()];
 		while let Some(at) = stack.pop() {
 			let node = NodeId::new(at);
+			if matches!(self.view(node), View::Call { .. }) {
+				growing_safe = false;
+			}
 			match self.view(node) {
 				View::Lambda { .. }
 				| View::Function { .. }
@@ -113,7 +120,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let Some(&slot) = self.slots.get(&symbol) else {
 				continue;
 			};
-			if !matches!(slot.repr, Repr::Array(_)) {
+			if !matches!(slot.repr, Repr::Array(_))
+				&& !(growing_safe && matches!(slot.repr, Repr::Growing(_)))
+			{
 				continue;
 			}
 			let array = self
@@ -121,9 +130,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.value
 				.expect("an array")
 				.into_pointer_value();
-			let parts = self.array_parts(array)?;
+			if matches!(slot.repr, Repr::Growing(_)) {
+				let facts = self.snapshot_growing(array)?;
+				self.growing_loops.insert(array, facts);
+			} else {
+				let parts = self.array_parts(array)?;
+				self.hoisted_parts.insert(array, parts);
+			}
 			self.hoisted_arrays.insert(symbol, array);
-			self.hoisted_parts.insert(array, parts);
 			hoisted.push(symbol);
 		}
 		Ok(hoisted)
@@ -135,6 +149,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if let Some(array) = self.hoisted_arrays.remove(&symbol) {
 				let array: PointerValue<'ctx> = array;
 				self.hoisted_parts.remove(&array);
+				self.growing_loops.remove(&array);
 			}
 		}
 	}

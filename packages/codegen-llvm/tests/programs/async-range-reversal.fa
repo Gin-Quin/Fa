@@ -1,0 +1,20 @@
+use { sleep } = std.time
+async function reverse = <Item>(input: Array<Item>): Array<Item> throws IndexError => {
+	await sleep(1)
+	mutable items = copy input
+	mutable low = 0
+	mutable high = items.length - 1
+	while low < high {
+		let left = try items[low]
+		let right = try items[high]
+		try items[low] = right
+		try items[high] = left
+		low += 1
+		high -= 1
+	}
+	await sleep(1)
+	items
+}
+assert (try await reverse([1, 2, 3, 4, 5])) == [5, 4, 3, 2, 1]
+assert (try await reverse(["a long string exceeding inline storage", "other"])) == ["other", "a long string exceeding inline storage"]
+console.log("async range reversal ok") -- prints: async range reversal ok

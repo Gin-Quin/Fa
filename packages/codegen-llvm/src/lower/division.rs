@@ -17,8 +17,10 @@ use crate::target::Target;
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	/// A scalar immutable binding declared outside the innermost loop. A
-	/// constant divisor is left to LLVM's ordinary constant-division lowering.
-	fn invariant_divisor(&self, at: NodeId, mut divisor: NodeId) -> bool {
+	/// constant divisor is left to LLVM's ordinary constant-division lowering,
+	/// except for signed remainders by a positive constant: the guarded
+	/// nonnegative path avoids the signed remainder's floor adjustment.
+	fn invariant_divisor(&self, at: NodeId, mut divisor: NodeId, constant_remainder: bool) -> bool {
 		if self.target == Target::Wasm || self.frame().loops.is_empty() {
 			return false;
 		}
@@ -29,22 +31,28 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return false;
 		};
 		let data = self.analysis.symbols.symbol(symbol);
-		if !matches!(data.kind, SymbolKind::Let | SymbolKind::Static)
-			|| self.types().as_int(data.ty).is_some_and(|t| t.min == t.max)
-		{
+		if !matches!(data.kind, SymbolKind::Let | SymbolKind::Static) {
 			return false;
 		}
-		// a value known to the analysis (`let keyCount = capacity * 2` of
-		// constants): LLVM divides by the constant
 		let exact = |node: NodeId| {
 			self.analysis
 				.interval(node)
-				.is_some_and(|interval| interval.lo == interval.hi)
+				.filter(|interval| interval.lo == interval.hi)
+				.map(|interval| interval.lo)
 		};
-		if exact(divisor)
-			|| matches!(self.view(data.decl_node),
-				View::Declaration { value: Some(value), .. } if exact(value))
-		{
+		let constant = self
+			.types()
+			.as_int(data.ty)
+			.filter(|ty| ty.min == ty.max)
+			.map(|ty| ty.min)
+			.or_else(|| exact(divisor))
+			.or_else(|| match self.view(data.decl_node) {
+				View::Declaration {
+					value: Some(value), ..
+				} => exact(value),
+				_ => None,
+			});
+		if constant.is_some_and(|value| !constant_remainder || value <= ethnum::I256::ZERO) {
 			return false;
 		}
 		let point = self.tree.spans[at.index()];
@@ -253,7 +261,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Some(Argument::Given(divisor)) = info.arguments.get(1) else {
 			return Ok(None);
 		};
-		if !self.invariant_divisor(node, *divisor) {
+		if !self.invariant_divisor(node, *divisor, false) {
 			return Ok(None);
 		}
 		let mut body = function.info.body;
@@ -303,8 +311,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(None);
 		};
 		if operands.len() != 2
-			|| !self.invariant_divisor(node, operands.get(1).expect("two operands"))
-		{
+			|| !self.invariant_divisor(
+				node,
+				operands.get(1).expect("two operands"),
+				op == ArithOp::Remainder,
+			) {
 			return Ok(None);
 		}
 		let i64 = self.context.i64_type();

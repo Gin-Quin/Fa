@@ -1,0 +1,5 @@
+-- Minimum / -1 cannot fit the signed destination, including narrow types.
+function quotient = (value: Int8): Int8 => value // -1
+console.log("before overflow") -- prints: before overflow
+console.log(quotient(Int8.minValue))
+-- exit: 101

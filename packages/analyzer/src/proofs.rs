@@ -2079,19 +2079,27 @@ pub fn resolve_claims_owned(edges: BTreeSet<String>) -> BTreeSet<String> {
 
 /// What the proofs of a file establish for the backends (`index_facts`):
 /// the `array[index]` nodes whose index is proven in bounds (no check), and
-/// the integer nodes proven never negative (no count from the end).
+/// the integer nodes proven never negative (no count from the end), plus
+/// exact extents of closed array families that never resize.
 #[derive(Debug, Default)]
 pub struct IndexFacts {
 	/// The index nodes proven.
 	proven: FxHashSet<NodeId>,
 	/// The integer nodes proven never negative.
 	non_negative: FxHashSet<NodeId>,
+	/// Exact extents of closed, never-resized array families.
+	fixed_lengths: FxHashMap<SymbolId, u64>,
 }
 
 impl IndexFacts {
 	/// Whether the index of this `array[index]` node is proven in bounds.
 	pub fn proven_index(&self, node: NodeId) -> bool {
 		self.proven.contains(&node)
+	}
+
+	/// The exact length of a private array or its closed-family parameter.
+	pub fn fixed_array_length(&self, symbol: SymbolId) -> Option<u64> {
+		self.fixed_lengths.get(&symbol).copied()
 	}
 
 	/// Whether an integer node is proven never negative.
@@ -2154,6 +2162,10 @@ pub fn reliable_interval(
 /// `k >= 1`, or a read of a place every store of which is proven (a
 /// [`Claim`]): a greatest fixpoint. Values stay indices once proven, since
 /// `X` never shrinks.
+///
+/// A family with no pushes also has an exact extent when its root is a
+/// direct, passively initialized literal. This stronger fact rejects opaque
+/// sources, generic/unknown types and observable partial initialization.
 pub fn index_facts(
 	tree: &TypedSyntaxTree,
 	analysis: &Analysis,
@@ -2167,7 +2179,12 @@ pub fn index_facts(
 		ProofScope::Unit { module, failed } => {
 			let file = ProofFile::new(tree, analysis, types).with_module(module);
 			result.non_negative = non_negative(&file, Some(failed), overflow_checks);
-			result.proven = proven_indices(&file, Some(failed), overflow_checks);
+			result.proven = proven_indices(
+				&file,
+				Some(failed),
+				overflow_checks,
+				&mut result.fixed_lengths,
+			);
 			result
 		}
 		ProofScope::WholeFile => {
@@ -2178,7 +2195,7 @@ pub fn index_facts(
 				return result;
 			}
 			result.non_negative = non_negative(&file, None, overflow_checks);
-			result.proven = proven_indices(&file, None, overflow_checks);
+			result.proven = proven_indices(&file, None, overflow_checks, &mut result.fixed_lengths);
 			result
 		}
 	}
@@ -2189,6 +2206,7 @@ fn proven_indices(
 	file: &ProofFile<'_>,
 	program: Option<&dyn Fn(&str) -> bool>,
 	overflow_checks: bool,
+	fixed_lengths: &mut FxHashMap<SymbolId, u64>,
 ) -> FxHashSet<NodeId> {
 	let analysis = file.analysis;
 	let types = file.types();
@@ -2222,7 +2240,11 @@ fn proven_indices(
 		{
 			continue;
 		}
-		let Some(arrays) = array_family(file, array, array_type, program.is_some()) else {
+		let Some(ArrayFamily {
+			symbols: arrays,
+			grows,
+		}) = array_family(file, array, array_type, program.is_some())
+		else {
 			continue;
 		};
 		let declaration = analysis.symbols.symbol(array).decl_node;
@@ -2235,6 +2257,18 @@ fn proven_indices(
 			},
 			_ => continue,
 		};
+		// Minimum-length index proofs allow pushes; exact extents do not.
+		// They also need their own opacity gate, independently of Prover::claim.
+		if !grows
+			&& !file.opaque()
+			&& !program.is_some_and(|failed| failed(OPAQUE))
+			&& !types
+				.flags(array_type)
+				.intersects(TypeFlags::HAS_PARAM | TypeFlags::HAS_UNKNOWN)
+			&& let Some(length) = fixed_literal_length(file, declaration)
+		{
+			fixed_lengths.extend(arrays.iter().map(|&symbol| (symbol, length)));
+		}
 		let mut prover = Prover::new(
 			file,
 			Goal::Index {
@@ -2325,15 +2359,76 @@ fn non_negative(
 		.collect()
 }
 
+/// A literal's final extent is unobservable during this passive construction.
+/// Calls, defaults, conversions and reactive reads may observe a partial prefix.
+fn fixed_literal_length(file: &ProofFile<'_>, declaration: NodeId) -> Option<u64> {
+	let View::Declaration {
+		value: Some(value), ..
+	} = file.view(declaration)
+	else {
+		return None;
+	};
+	let View::Array { items } = file.view(value) else {
+		return None;
+	};
+	let mut pending = vec![value];
+	while let Some(node) = pending.pop() {
+		let analysis = file.analysis;
+		if analysis
+			.flags_of(node)
+			.intersects(NodeFlags::CAN_FAIL | NodeFlags::CONVERSION_CHECK)
+			|| analysis.coercion(node).is_some()
+			|| analysis.reactive_reads.contains_key(&node)
+			|| analysis.reactive_writes.contains_key(&node)
+		{
+			return None;
+		}
+		match file.view(node) {
+			View::Integer(_) | View::Float(_) | View::Boolean(_) | View::String(_) | View::None => {
+			}
+			View::Name(_) => {
+				let Resolution::Local(symbol) = analysis.resolution(node) else {
+					return None;
+				};
+				if analysis.symbols.symbol(symbol).kind != SymbolKind::Let {
+					return None;
+				}
+			}
+			View::Group(inner) | View::Negate(inner) | View::Percentage(inner) => {
+				pending.push(inner)
+			}
+			View::Arithmetic { operands, .. } => pending.extend(operands.iter()),
+			View::Array { items } | View::Tuple { items } => pending.extend(items.iter()),
+			View::Object { .. } => {
+				for &(_, value) in &analysis.object(node)?.fields {
+					match value {
+						FieldValue::Given(value) => pending.push(value),
+						FieldValue::None => {}
+						_ => return None,
+					}
+				}
+			}
+			_ => return None,
+		}
+	}
+	Some(items.len() as u64)
+}
+
+struct ArrayFamily {
+	symbols: FxHashSet<SymbolId>,
+	grows: bool,
+}
+
 /// The array and the parameters that receive it, when it is the only array
-/// of its type and never shrinks.
+/// of its type and never shrinks. Report pushes separately for exact extents.
 fn array_family(
 	file: &ProofFile<'_>,
 	array: SymbolId,
 	array_type: TypeId,
 	per_unit: bool,
-) -> Option<FxHashSet<SymbolId>> {
+) -> Option<ArrayFamily> {
 	let analysis = file.analysis;
+	let mut grows = false;
 	let parents = &file.parents;
 	let count = file.tree.nodes.len();
 	let declaration = analysis.symbols.symbol(array).decl_node;
@@ -2400,10 +2495,14 @@ fn array_family(
 			View::For { iterable, .. } => iterable == name,
 			View::Access { target, members } if target == name && members.len() == 1 => {
 				match analysis.resolution(members.first().expect("a member")) {
-					Resolution::Builtin(id) => matches!(
-						crate::builtins::get(id).path,
-						"Array#length" | "Array#push" | "Array#reserve" | "Array#get"
-					),
+					Resolution::Builtin(id) => {
+						let path = crate::builtins::get(id).path;
+						grows |= path == "Array#push";
+						matches!(
+							path,
+							"Array#length" | "Array#push" | "Array#reserve" | "Array#get"
+						)
+					}
 					_ => false,
 				}
 			}
@@ -2469,7 +2568,10 @@ fn array_family(
 			}
 		}
 	}
-	Some(family)
+	Some(ArrayFamily {
+		symbols: family,
+		grows,
+	})
 }
 
 #[cfg(test)]

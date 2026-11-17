@@ -1,0 +1,22 @@
+-- Signed endpoints and large divisors, compared with out-of-loop division.
+function reference = (value: Integer, divisor: Integer): Integer throws DivisionByZero => try value %% divisor
+function check = (value: Integer) throws DivisionByZero => {
+	let one = 1
+	let two = 2
+	let seven = 7
+	let large = 9_223_372_036_854_775_807
+	let negative = -7
+	let minusOne = -1
+	for 0..3 {
+		assert value %% one == (try reference(value, one))
+		assert value %% two == (try reference(value, two))
+		assert value %% seven == (try reference(value, seven))
+		assert value %% large == (try reference(value, large))
+		assert value %% negative == (try reference(value, negative))
+		assert value %% minusOne == 0
+	}
+}
+for value in [-9_223_372_036_854_775_808, -9_223_372_036_854_775_807, -8, -7, -1, 0, 1, 7, 8, 9_223_372_036_854_775_807] {
+	try check(value)
+}
+console.log("constant remainder wide ok") -- prints: constant remainder wide ok

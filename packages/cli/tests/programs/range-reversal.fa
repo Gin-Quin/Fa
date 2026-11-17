@@ -1,0 +1,89 @@
+-- A two-ended swap, with live final counters and checked fallback behavior.
+function reverse = <Item>(items: Array<Item>, start: Integer, end: Integer): { low: Integer, high: Integer } throws IndexError mutates items => {
+	mutable low = start
+	mutable high = end
+	while low < high {
+		let left = try items[low]
+		let right = try items[high]
+		try items[low] = right
+		try items[high] = left
+		low += 1
+		high -= 1
+	}
+	{ low, high }
+}
+-- The extra observable round count keeps the reference loop unrecognized.
+function reference = <Item>(items: Array<Item>, start: Integer, end: Integer): { low: Integer, high: Integer } throws IndexError mutates items => {
+	mutable low = start
+	mutable high = end
+	mutable rounds = 0
+	while low < high {
+		let left = try items[low]
+		let right = try items[high]
+		try items[low] = right
+		try items[high] = left
+		low += 1
+		high -= 1
+		rounds += 1
+	}
+	assert rounds >= 0
+	{ low, high }
+}
+function check = <Item>(input: Array<Item>, start: Integer, end: Integer, equal: (Item, Item) => Boolean): Boolean throws IndexError => {
+	mutable actual = copy input
+	mutable expected = copy input
+	mutable actualError = ""
+	mutable expectedError = ""
+	let a = reverse(actual, start, end) catch error => {
+		actualError = "{error}"
+		{ low = 0, high = 0 }
+	}
+	let b = reference(expected, start, end) catch error => {
+		expectedError = "{error}"
+		{ low = 0, high = 0 }
+	}
+	assert actualError == expectedError
+	assert actual.length == expected.length
+	for value, index in actual { assert equal(value, try expected[index]) }
+	assert a == b
+	true
+}
+function equalInteger = (a: Integer, b: Integer): Boolean => a == b
+for count in [0, 1, 2, 7, 8, 9, 16, 129] {
+	mutable values: Array<Integer> = []
+	for i in 0..count { values.push(i) }
+	assert (try check(values, 0, count - 1, equalInteger))
+	assert (try check(values, 1, count - 2, equalInteger))
+	assert (try check(values, -count, 0, equalInteger))
+	assert (try check(values, -count - 1, count - 1, equalInteger))
+	assert (try check(values, 0, count, equalInteger))
+	assert (try check(values, count + 1, count + 2, equalInteger))
+	assert (try check(values, -3, -1, equalInteger))
+}
+assert (try check([1.5, 2.5, -3.5, 4.5], 0, 3, (a, b) => a == b))
+assert (try check([true, false, false, true], 0, 3, (a, b) => a == b))
+let words: Array<String> = ["first long item exceeding inline storage", "middle", "last"]
+assert (try check(words, 0, 2, (a, b) => a == b))
+assert (try check([{ value = 1 }, { value = 2 }, { value = 3 }], 0, 2, (a, b) => a.value == b.value))
+let stored = reverse<Integer>
+mutable throughValue = [1, 2, 3, 4, 5]
+assert (try stored(throughValue, 0, 4)) == { low = 2, high = 2 }
+assert throughValue == [5, 4, 3, 2, 1]
+let callbacks = try [3, 5, 7].map((count) => {
+	mutable values: Array<Integer> = []
+	for i in 0..count { values.push(i) }
+	try reverse(values, 0, count - 1)
+	values
+})
+assert callbacks == [[2, 1, 0], [4, 3, 2, 1, 0], [6, 5, 4, 3, 2, 1, 0]]
+function captured = (last: Integer): Array<Integer> throws IndexError => {
+	function run = (): Array<Integer> throws IndexError => {
+		mutable values = [0, 1, 2, 3, 4]
+		try reverse(values, 0, last)
+		values
+	}
+	let action = run
+	try action()
+}
+assert (try captured(3)) == [3, 2, 1, 0, 4]
+console.log("range reversal ok") -- prints: range reversal ok

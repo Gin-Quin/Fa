@@ -1,0 +1,7 @@
+function fold = (value: Integer): Integer => {
+	let divisor = 7
+	mutable result = value
+	for 0..4 { result = result %% divisor }
+	result
+}
+console.log(fold(arguments.length))

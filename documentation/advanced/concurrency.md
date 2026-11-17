@@ -695,10 +695,11 @@ Requirements do **not** cross worker boundaries. A worker only receives copies o
 | --- | --- | --- | --- |
 | `async` / `await` / `start` | yes | yes | yes |
 | Blocking calls | see [the primitives](#blocking-calls-and-targets) | see [the primitives](#blocking-calls-and-targets) | see [the primitives](#blocking-calls-and-targets) |
-| Workers, channels | yes | yes | yes (Web Workers) |
+| Workers, worker pools | yes | no (`CONC010`) until wasm threads are implemented | yes (Web Workers) |
+| Channels between tasks | yes | yes | yes |
 | `for parallel`, `parallel()` | yes | no | no |
 | `Mutex`, atomics between tasks | yes | yes | yes |
-| `Mutex`, atomics, channels shared with a worker | yes | with shared memory, flat values only | with `SharedArrayBuffer`, flat values only |
+| `Mutex`, atomics, channels shared with a worker | yes | no workers yet; with shared memory, flat values only | with `SharedArrayBuffer`, flat values only |
 
 A flat value contains no collection, string or recursive union: on JavaScript and WebAssembly, only such a value can live in memory shared between threads.
 

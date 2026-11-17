@@ -122,14 +122,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		ty: TypeId,
 	) -> Option<inkwell::values::FunctionValue<'ctx>> {
 		self.other_files.values().find_map(|state| {
-			let declaration = state
+			state
 				.analysis
 				.type_decls
 				.values()
-				.find(|decl| decl.ty == ty)?;
-			declaration
-				.functions
-				.iter()
+				.filter(|decl| self.same_type(decl.ty, ty))
+				.flat_map(|decl| &decl.functions)
 				.map(|&function| state.analysis.symbols.symbol(function))
 				.find(|symbol| self.session.types().syms.resolve(symbol.name) == "destroy")
 				.and_then(|symbol| state.functions.get(&symbol.decl_node))
@@ -315,6 +313,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let current = self.file;
 		if file == current {
 			let key = match self.generic_functions.contains_key(&key) {
+				true if self.generic_functions[&key].generics.is_empty() => {
+					self.lambda_instance(key, &[])?
+				}
 				true => self.instance(key, call)?,
 				false => key,
 			};
@@ -405,15 +406,20 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let Some((reached, used)) = self.namespace_reach(target, members) else {
 			return Ok(None);
 		};
-		if used == members.len()
-			&& matches!(reached, Reached::Function(..) | Reached::RemoteFunction(_))
-		{
-			return self.reached_function_value(reached, node).map(Some);
-		}
-		let Some(slot) = self.reached_slot(reached, node)? else {
-			return Ok(None);
+		let mut value = match reached {
+			Reached::Function(..) | Reached::RemoteFunction(_) => {
+				let site = if used == members.len() {
+					node
+				} else {
+					members[used - 1]
+				};
+				self.reached_function_value(reached, site)?
+			}
+			_ => match self.reached_slot(reached, node)? {
+				Some(slot) => self.load(slot)?,
+				None => return Ok(None),
+			},
 		};
-		let mut value = self.load(slot)?;
 		let mut current_type = self.type_of(members[used - 1]);
 		for &member in &members[used..] {
 			if value.repr == Repr::Never {
@@ -661,14 +667,22 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		reached: Reached,
 		info: &CallInfo,
 	) -> Result<Val<'ctx>, Error> {
-		let function = match reached {
+		let function = self.reached_function(reached, node)?;
+		self.call_function(node, function, info)
+	}
+
+	pub(crate) fn reached_function(
+		&mut self,
+		reached: Reached,
+		node: NodeId,
+	) -> Result<Function<'ctx>, Error> {
+		Ok(match reached {
 			Reached::Function(file, key) => self.function_in(file, key, node)?,
 			Reached::RemoteFunction(key) => self.remote_function(key, node)?,
 			Reached::Value(..) | Reached::RemoteValue(_) => {
 				return Err(self.unsupported(node.index(), "calling this value"));
 			}
-		};
-		self.call_function(node, function, info)
+		})
 	}
 }
 

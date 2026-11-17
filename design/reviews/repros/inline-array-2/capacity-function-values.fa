@@ -1,0 +1,15 @@
+function empty = <capacity: UInt32>(): InlineArray<String, capacity> => []
+function apply = <capacity: UInt32>(create: () => InlineArray<String, capacity>): InlineArray<String, capacity>
+	throws CapacityError => {
+	mutable items = create()
+	try items.push("one")
+	items.push("two") catch _error => {}
+	items
+}
+function run = (): InlineArray<String, 1> throws CapacityError => {
+	let create = empty<1>
+	try apply<1>(create)
+}
+console.log(try run()) -- prints: ["one"]
+static result = @run()
+console.log(result) -- prints: ["one"]

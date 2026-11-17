@@ -23,6 +23,18 @@ pub(crate) fn use_emulated_tls(machine: &TargetMachine) {
 	unsafe { fa_use_emulated_tls(machine.as_mut_ptr()) };
 }
 
+/// Makes a machine put each function, global and jump table in its own ELF
+/// section, so that `--gc-sections` discards everything unused, including
+/// a function reached only from the jump table of another unused function.
+pub(crate) fn use_unique_sections(machine: &TargetMachine) {
+	unsafe extern "C" {
+		/// `shim/thin_bitcode.cpp`.
+		fn fa_use_unique_sections(machine: llvm_sys::target_machine::LLVMTargetMachineRef);
+	}
+	// SAFETY: the machine is alive
+	unsafe { fa_use_unique_sections(machine.as_mut_ptr()) };
+}
+
 pub use crate::options::{OptLevel, Options, Target};
 
 impl Target {

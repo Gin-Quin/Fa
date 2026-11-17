@@ -60,7 +60,9 @@ impl Generator<'_> {
 			// a tuple is a JavaScript array (printed by its type's formatter)
 			View::Array { items } => match self.collection_literal(n, items) {
 				Some(collection) => collection,
-				None => self.array_literal(items),
+				None => self
+					.inline_resource_literal(n, items)
+					.unwrap_or_else(|| self.array_literal(items)),
 			},
 			View::Tuple { items } => self.array_literal(items),
 			View::Range {
@@ -120,6 +122,7 @@ impl Generator<'_> {
 				let test = match self.types.kind(set_ty) {
 					fa_analyzer::types::TypeKind::Collection(
 						fa_analyzer::types::CollKind::Array
+						| fa_analyzer::types::CollKind::InlineArray
 						| fa_analyzer::types::CollKind::GrowingArray,
 						..,
 					) => {

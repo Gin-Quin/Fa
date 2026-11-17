@@ -1,0 +1,30 @@
+-- asynchronous: false
+-- Generic deletion must select the same layout as every concrete constructor.
+function prune = <K, V>(map: Map<K, V>) mutates map => {
+	map.deleteWhere((_key, _value) => true)
+}
+function pruneMatching = <K, V>(map: Map<K, V>, predicate: (key: K, value: V) => Boolean) mutates map => map.deleteWhere(predicate)
+function viaValue = (map: Map<Int64, Int64>, action: <K, V>(map: Map<K, V>) => Void mutates map) mutates map => action(map)
+type Owner<K, V> = {
+	map: Map<K, V>
+	function empty = (self) mutates self => self.map.deleteWhere((_key, _value) => true)
+}
+mutable wide: Map<Int64, Int64> = [(0, 10), (-1, 20), (9223372036854775807, 30)]
+viaValue(wide, prune)
+assert wide.size == 0
+mutable tiny: Map<Int8, Int8> = [(-1, 1), (0, 2), (127, 3)]
+mutable short: Map<Int16, Int64> = [(-1, 1), (0, 2), (32767, 3)]
+mutable small: Map<UInt32, UInt32> = [(0, 1), (4294967295, 2), (7, 3)]
+prune(tiny)
+pruneMatching(short, (_key, value) => value == Int64(2))
+assert short.size == 2
+assert short.get(0) is none
+prune(short)
+prune(small)
+assert tiny.size == 0
+assert short.size == 0
+assert small.size == 0
+mutable owner = Owner<UInt64, UInt64> { map = [(0, 1), (18446744073709551615, 2), (7, 3)] }
+owner.empty()
+assert owner.map.size == 0
+console.log("generic delete ok") -- prints: generic delete ok

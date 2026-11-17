@@ -226,7 +226,7 @@ impl MapFacts {
 					}
 					let params = parameters(&scratch, ty);
 					if params.is_empty() {
-						if let Some(name) = facts::stable_type_name(&scratch, ty) {
+						if let Some(name) = facts::map_key(&scratch, ty) {
 							found.insert(name);
 						}
 						continue;
@@ -473,7 +473,7 @@ fn family(types: &TypeStore, ty: TypeId) -> String {
 	};
 	let component = |ty| {
 		if parameters(types, ty).is_empty() {
-			facts::stable_type_name(types, ty).unwrap_or_else(|| "*".into())
+			facts::map_component(types, ty).unwrap_or_else(|| "*".into())
 		} else {
 			"*".into()
 		}
@@ -527,7 +527,36 @@ pub(crate) fn same_function_class(types: &mut TypeStore, left: TypeId, right: Ty
 
 #[cfg(test)]
 mod tests {
+	use fa_analyzer::types::CollKind;
+
 	use super::*;
+
+	#[test]
+	fn resolved_map_facts_keep_scalar_views_and_concrete_applications_consistent() {
+		let (session, file) = fa_analyzer::session::analyze_source(
+			r#"
+function retain = <Key, Item>(entries: Map<Key, Item>, key: Key, value: Item) mutates entries => {
+ use slot = entries.getOrInsert(copy key, copy value)
+ entries[key] = copy value
+ slot = copy value
+}
+mutable entries: Map<String, Integer> = []
+retain(entries, "key", 7)
+"#,
+		);
+		assert!(session.analysis(file).diagnostics.is_empty());
+		let mut complete = ProgramFacts::of_unit(&session, &[file]);
+		complete.resolve_maps(facts::map_facts(&session, &[file]));
+		let mut types = TypeStore::new();
+		let integer = types.collection(CollKind::Map, TypeId::INTEGER, TypeId::STRING);
+		let int64 = types.collection(CollKind::Map, TypeId::INT64, TypeId::STRING);
+		let unrelated = types.collection(CollKind::Map, TypeId::STRING, TypeId::STRING);
+		for ty in [integer, int64] {
+			assert!(facts::map_excluded(&types, ty, |key| complete.contains(REFERENCED_MAPS, key)));
+		}
+		assert!(!facts::map_excluded(&types, unrelated, |key| complete
+			.contains(REFERENCED_MAPS, key)));
+	}
 
 	#[test]
 	fn application_tuples_preserve_correlated_keys_and_values() {
@@ -538,7 +567,7 @@ function retain = <Key, Item>(entries: Map<Key, Item>, key: Key, value: Item) mu
  entries[key] = copy value
  slot = copy value
 }
-mutable a: Map<String, Integer> = []
+mutable a: Map<String, Int64> = []
 retain(a, "key", 7)
 mutable b: Map<Int8, String> = []
 retain(b, Int8(1), "text")
@@ -551,10 +580,10 @@ retain(b, Int8(1), "text")
 		);
 		let facts = facts::map_facts(&session, &[file]);
 		let found = facts.set(REFERENCED_MAPS).unwrap();
-		assert!(found.contains("Map<String, Integer>"), "{found:?}");
+		assert!(found.contains("Map<String, Int64>"), "{found:?}");
 		assert!(found.contains("Map<Int8, String>"), "{found:?}");
 		assert!(!found.contains("Map<String, String>"), "{found:?}");
-		assert!(!found.contains("Map<Int8, Integer>"), "{found:?}");
+		assert!(!found.contains("Map<Int8, Int64>"), "{found:?}");
 	}
 
 	#[test]
@@ -568,7 +597,7 @@ function unused = <Item>(entries: Map<String, Item>, value: Item) mutates entrie
  unused(entries, value)
 }
 function used = <Item>(entries: Map<String, Item>, value: Item) mutates entries => { entries["key"] = copy value }
-mutable a: Map<String, Integer> = []
+mutable a: Map<String, Int64> = []
 used(a, 7)
 "#,
 		);
@@ -583,7 +612,7 @@ used(a, 7)
 		assert!(
 			!facts
 				.consulted(REFERENCED_MAPS, Some(&log))
-				.contains("Map<String, Integer>")
+				.contains("Map<String, Int64>")
 		);
 		assert!(facts::FactLog::still_holds(&log.to_text(), Some(&facts)));
 		facts.extend(
@@ -591,7 +620,7 @@ used(a, 7)
 			BTreeSet::from(["\u{1f}map-family:String\u{1e}*".into()]),
 		);
 		assert!(!facts::FactLog::still_holds(&log.to_text(), Some(&facts)));
-		assert!(!facts.contains(REFERENCED_MAPS, "Map<Int8, Integer>"));
+		assert!(!facts.contains(REFERENCED_MAPS, "Map<Int8, Int64>"));
 	}
 
 	#[test]
@@ -631,8 +660,8 @@ function read = <Item>(entries: Map<String, Item>): Item? => {
  pause()
  if slot is none { none } else { copy slot }
 }
-function invoke = (action: <Value>(entries: Map<String, Value>) => Value?, entries: Map<String, Integer>): Integer => action(entries) ?? 0
-let entries: Map<String, Integer> = [("key", 9)]
+function invoke = (action: <Value>(entries: Map<String, Value>) => Value?, entries: Map<String, Int64>): Integer => action(entries) ?? 0
+let entries: Map<String, Int64> = [("key", 9)]
 let result = invoke(read, entries)
 "#,
 		);
@@ -643,7 +672,7 @@ let result = invoke(read, entries)
 		);
 		let facts = facts::map_facts(&session, &[file]);
 		assert!(
-			facts.contains(REFERENCED_MAPS, "Map<String, Integer>"),
+			facts.contains(REFERENCED_MAPS, "Map<String, Int64>"),
 			"{facts:?}"
 		);
 	}
@@ -660,7 +689,7 @@ let result = invoke(read, entries)
 		);
 		let facts = facts::map_facts(&session, &[file]);
 		assert!(
-			facts.contains(REFERENCED_MAPS, "Map<String, Integer>"),
+			facts.contains(REFERENCED_MAPS, "Map<String, Int64>"),
 			"{facts:?}"
 		);
 		assert!(
@@ -672,7 +701,7 @@ let result = invoke(read, entries)
 			"{facts:?}"
 		);
 		assert!(
-			!facts.contains(REFERENCED_MAPS, "Map<Int8, Integer>"),
+			!facts.contains(REFERENCED_MAPS, "Map<Int8, Int64>"),
 			"{facts:?}"
 		);
 	}

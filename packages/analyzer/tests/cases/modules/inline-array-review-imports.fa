@@ -1,0 +1,26 @@
+-- opt-level: 0
+-- require-split: true
+-- file: library/inline.fa
+export namespace = {
+	type Box<capacity: UInt32> = {
+		items: InlineArray<String, capacity> = []
+		function append = (self, text: String) throws CapacityError mutates self.items.length => {
+			try self.items.push(text)
+		}
+	}
+	function clear = <Item, capacity: UInt32>(items: InlineArray<Item, capacity>) mutates items => {
+		items.clear()
+	}
+}
+-- file: library/resource.foreign.fa
+export type = { name: String, function destroy = (self) => { console.log("drop {self.name}") } }
+-- file: application/main.fa
+type Resource = library.resource
+export function = () throws CapacityError => {
+	mutable box: library.inline.Box<1> = {}
+	try box.append("imported")
+	box.append("overflow") catch _error => console.log("full") -- prints: full
+	console.log(box.items, box.items.capacity)                 -- prints: ["imported"] 1
+	mutable resources: InlineArray<Resource, 1> = [{ name = "imported resource" }]
+	library.inline.clear<Resource, 1>(resources) -- prints: drop imported resource
+}

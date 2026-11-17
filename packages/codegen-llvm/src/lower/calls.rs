@@ -84,15 +84,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.contains(fa_analyzer::analysis::NodeFlags::GENERIC_APPLICATION)
 				&& let Some(reached) = self.callee_function(callee)
 			{
-				let function = match reached {
-					super::program::Reached::Function(file, declaration) => {
-						self.function_in(file, declaration, node)?
-					}
-					super::program::Reached::RemoteFunction(key) => {
-						self.remote_function(key, node)?
-					}
-					_ => unreachable!("callee_function returns a function"),
-				};
+				let function = self.reached_function(reached, node)?;
 				return self.applied_external_function_value(&function, node);
 			}
 			return Err(self.unsupported(node.index(), "this call"));
@@ -418,6 +410,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		// the sources of the reactive places given (D24), right before the call
 		self.pass_argument_sources(node, function.declaration, function.info.params.len())?;
+		self.invalidate_named_map_probes(&function, node, info)?;
 		// an awaited or started call: its async instance (tasks.rs)
 		let raw = match self.task_call(node, &function, &arguments)? {
 			Some(super::tasks::TaskCall::Task(task)) => {
@@ -664,7 +657,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The receiver of a method call (`pair` in `pair.swap()`, `a.b` in
 	/// `a.b.c()`).
-	fn method_receiver(&self, call: NodeId) -> Option<NodeId> {
+	pub(super) fn method_receiver(&self, call: NodeId) -> Option<NodeId> {
 		let View::Call { callee, .. } = self.view(call) else {
 			return None;
 		};

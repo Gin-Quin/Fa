@@ -535,6 +535,25 @@ impl Generator<'_> {
 				}
 				// the engine manages the memory: the capacity is the length or size
 				"Array#capacity" | "OrderedColumnar#capacity" => {
+					if let Some(parent) = self.parents()[member.index()]
+						&& let Some((_, capacity)) =
+							self.types.inline_array_types(self.receiver_type(parent))
+						&& let Some(capacity) = self.hidden_value(capacity)
+					{
+						if !value.pure {
+							self.out.line(format!("void ({});", value.text));
+						}
+						return Expr::primary(capacity);
+					}
+					if let Some(int) = self.types.as_int(self.type_of(member))
+						&& int.min == int.max
+					{
+						let constant = int.min.to_string();
+						if !value.pure {
+							self.out.line(format!("void ({});", value.text));
+						}
+						return Expr::constant(constant, Prec::Primary);
+					}
 					Expr::primary(format!("{}{dot}length", value.primary_text()))
 						.with_purity(value.pure, false)
 				}
@@ -1555,7 +1574,9 @@ impl Generator<'_> {
 	/// `faCopy` otherwise.
 	pub(crate) fn copy_of(&mut self, value: Expr, ty: TypeId) -> Expr {
 		let primitive_items = match self.types.kind(ty) {
-			TypeKind::Collection(CollKind::Array, item, _) => !self.is_composite(item),
+			TypeKind::Collection(CollKind::Array | CollKind::InlineArray, item, _) => {
+				!self.is_composite(item)
+			}
 			TypeKind::Tuple(list) => self
 				.types
 				.list_items(list)
@@ -1694,7 +1715,8 @@ impl Generator<'_> {
 					format!("(value) => new {class}(value.start, value.end, value.includesEnd)"),
 				)
 			}
-			TypeKind::Collection(CollKind::Array, item, _) | TypeKind::CArray(item, _)
+			TypeKind::Collection(CollKind::Array | CollKind::InlineArray, item, _)
+			| TypeKind::CArray(item, _)
 				if self.is_composite(item) =>
 			{
 				let item_copy = self.copy_function(item)?;
@@ -1808,7 +1830,8 @@ impl Generator<'_> {
 	/// The copy of a composite field read as `value.name`.
 	fn copy_field(&mut self, read: Expr, ty: TypeId) -> Option<Expr> {
 		match self.types.kind(ty) {
-			TypeKind::Collection(CollKind::Array, item, _) | TypeKind::CArray(item, _)
+			TypeKind::Collection(CollKind::Array | CollKind::InlineArray, item, _)
+			| TypeKind::CArray(item, _)
 				if !self.is_composite(item) =>
 			{
 				Some(Expr::primary(format!("{}.slice()", read.text)))

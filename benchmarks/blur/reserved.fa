@@ -1,0 +1,48 @@
+-- Image blur: 16 passes of a 3x3 Gaussian blur over a width x width image of bytes (`Array<UInt8>`),
+-- ping-ponged between two arrays. Nine loads per pixel at computed indices (`y * width + x`), which
+-- the range analysis can't prove: the kernel indexes with `try`.
+
+let passes = 16
+
+-- The xorshift64 generator of the Goose suite.
+function xorshift = (x: UInt64): UInt64 => {
+	mutable value = x
+	value = value.bitXor(value.shiftLeft(13))
+	value = value.bitXor(value.shiftRight(7))
+	value = value.bitXor(value.shiftLeft(17))
+	value
+}
+
+function blur = (source: Array<UInt8>, destination: Array<UInt8>, width: Integer) throws IndexError mutates destination => {
+	for y in 1..width - 1 {
+		for x in 1..width - 1 {
+			let i = y * width + x
+			let sum: Integer = try source[i - width - 1] + source[i - width] * 2 + source[i - width + 1]
+				+ source[i - 1] * 2 + source[i] * 4 + source[i + 1] * 2
+				+ source[i + width - 1] + source[i + width] * 2 + source[i + width + 1]
+			try destination[i] = sum // 16
+		}
+	}
+}
+
+let width = 3_000 -- BENCH_N: a constant, as in the Goose version (`run.ts` rewrites it)
+mutable a = Array<UInt8>.from([], capacity = width * width)
+mutable b = Array<UInt8>.from([], capacity = width * width)
+mutable state: UInt64 = 12345
+for 0..width * width {
+	state = xorshift(state)
+	a.push(state %% 256) -- between 0 and 255: a `UInt8`
+	b.push(0)
+}
+-- The border pixels are never written, so the border of `b` stays zero throughout.
+for 0..passes // 2 {
+	try blur(a, b, width)
+	try blur(b, a, width)
+}
+
+mutable total = 0
+for value in a {
+	total += value
+}
+console.log(width)
+console.log(total)

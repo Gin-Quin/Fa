@@ -1,0 +1,98 @@
+function empty = <capacity: UInt32>(): InlineArray<Integer, capacity> => []
+function append = <Item, capacity: UInt32>(
+	values: InlineArray<Item, capacity>
+	item: Item
+) throws CapacityError mutates values.length => { try values.push(item) }
+function operate = <capacity: UInt32>(
+	values: InlineArray<Integer, capacity>
+) throws CapacityError | IndexError mutates values => {
+	assert values.capacity == capacity
+	try append<Integer, capacity>(values, 1)
+	try append<Integer, capacity>(values, 2)
+	try append<Integer, capacity>(values, 3)
+	assert values.length == 3
+	assert values.get(9) is none
+	assert values.get(1) == 2
+	values[0] = 4
+	for item in values { item += 1 }
+	assert values.pop() == 4
+	assert values.take(0) == 5
+	try append<Integer, capacity>(values, 9)
+	try values.delete(0)
+	assert try values[0] == 9
+	values.clear()
+	assert values.pop() is none
+	try append<Integer, capacity>(values, 7)
+}
+function build = <capacity: UInt32>(): InlineArray<Integer, capacity> throws CapacityError | IndexError => {
+	mutable values = empty<capacity>()
+	try operate<capacity>(values)
+	values
+}
+console.log(try build<3>()) -- prints: [7]
+static values = @build<3>()
+console.log(values, values.capacity) -- prints: [7] 3
+
+type Buffer<capacity: UInt32> = {
+	items: InlineArray<Integer, capacity> = []
+	function append = (self, value: Integer) throws CapacityError mutates self.items.length => {
+		try self.items.push(value)
+	}
+	function room = (self): Integer => self.items.capacity
+}
+function boxed = (): Buffer<1> throws CapacityError => {
+	mutable value: Buffer<1> = {}
+	assert value.room() == 1
+	try value.append(8)
+	value.append(9) catch _error => {}
+	value
+}
+console.log(try boxed()) -- prints: { items = [8] }
+static box = @boxed()
+console.log(box) -- prints: { items = [8] }
+
+function throughValue = (): InlineArray<Integer, 2> throws CapacityError => {
+	let create: () => InlineArray<Integer, 2> = empty<2>
+	mutable values = create()
+	try append<Integer, 2>(values, 6)
+	values
+}
+console.log(try throughValue()) -- prints: [6]
+static bound = @throughValue()
+console.log(bound) -- prints: [6]
+
+function wide = <capacity: UInt32>(): InlineArray<Int64, capacity> => []
+mutable wideValues = wide<1>()
+try wideValues.push(Int64(7))
+console.log(wideValues) -- prints: [7]
+
+function identity = <Item>(values: InlineArray<Item, 2>): InlineArray<Item, 2> => values
+function applyInline = (
+	transform: (InlineArray<Integer, 2>) => InlineArray<Integer, 2>
+): InlineArray<Integer, 2> => transform([3])
+function inferred = (): InlineArray<Integer, 2> => {
+	let relay: (InlineArray<Integer, 2>) => InlineArray<Integer, 2> = identity
+	let literal = applyInline(<Item>(values: InlineArray<Item, 2>) => values)
+	let grouped: (InlineArray<Integer, 2>) => InlineArray<Integer, 2> = ((identity))
+	assert literal.get(0) == 3
+	assert grouped([4]).get(0) == 4
+	relay([5])
+}
+console.log(inferred()) -- prints: [5]
+static inferredValues = @inferred()
+console.log(inferredValues) -- prints: [5]
+
+type Row = { values: Array<String> }
+function duplicate = <Item, capacity: UInt32>(
+	items: InlineArray<Item, capacity>
+): InlineArray<Item, capacity> => copy items
+function check = (): InlineArray<Row, 2> throws IndexError => {
+	mutable items: InlineArray<Row, 2> = [{ values = ["before"] }]
+	let saved = duplicate<Row, 2>(items)
+	try items[0].values[0] = "after"
+	assert try saved[0].values[0] == "before"
+	saved
+}
+console.log(try check()) -- prints: [{ values = ["before"] }]
+static saved = @check()
+console.log(saved) -- prints: [{ values = ["before"] }]

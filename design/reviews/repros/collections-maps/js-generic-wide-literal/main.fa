@@ -1,0 +1,16 @@
+-- Pre-existing JS issue; native maps are correct after the layout fixes.
+function constant = <V: Integer>(): Map<UInt32, V> => {
+let result: Map<UInt32, V> = [(0, 7)]
+result
+}
+function run = () => {
+	mutable stable: Map<UInt32, Int64> = constant()
+	use held = stable.getOrInsert(0, 0)
+	stable.reserve(100)
+	assert held == Int64(7)
+	let compact: Map<UInt32, Int16> = constant()
+	assert compact.get(0) == Int16(7)
+	assert stable.get(0) == Int64(7)
+}
+run()
+console.log("readonly generic ok")

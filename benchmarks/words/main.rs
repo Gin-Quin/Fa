@@ -1,7 +1,8 @@
 //! Word frequencies: build a vocabulary and a skewed text of N words, split it, count the words
 //! in a hash map keyed by strings.
 //! From the Goose suite's `bench/rust/words_hashmap.rs` (the "rust HashMap<&str>" row: the
-//! standard map with its default hasher, like the Fa `Map(String, Integer)`).
+//! standard map with its default hasher). Counters are i32 to match Goose and Fa;
+//! wide.rs retains the original i64-counter row alongside the words-wide variant.
 
 use std::collections::HashMap;
 use std::env;
@@ -57,13 +58,13 @@ fn main() {
 	}
 	let words: Vec<&str> = text.split_whitespace().collect();
 
-	let mut counts: HashMap<&str, i64> = HashMap::new();
+	let mut counts: HashMap<&str, i32> = HashMap::new();
 	for word in &words {
 		*counts.entry(word).or_insert(0) += 1;
 	}
 	let mut total: i64 = 0;
 	for (word, count) in &counts {
-		total += count * (word.len() as i64 + word.as_bytes()[0] as i64);
+		total += (*count as i64) * (word.len() as i64 + word.as_bytes()[0] as i64);
 	}
 	println!("{}", words.len());
 	println!("{}", counts.len());

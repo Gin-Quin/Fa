@@ -1,0 +1,4 @@
+let key: InlineArray<Integer, 2> = [1]
+mutable entries: Map<InlineArray<Integer, 2>, String> = []
+entries[key] = "found"
+console.log(try entries[key]) -- expected: found

@@ -415,9 +415,11 @@ impl Generator<'_> {
 				Some(ForeignArg::Array { mutated }) => {
 					let array = self.expr(value);
 					let item = match self.types.kind(self.type_of(value)) {
-						TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item, _) => {
-							item
-						}
+						TypeKind::Collection(
+							CollKind::Array | CollKind::InlineArray | CollKind::GrowingArray,
+							item,
+							_,
+						) => item,
 						_ => TypeId::UNKNOWN,
 					};
 					let Some(c) = self.c_type_name(item).filter(|c| *c != "void") else {

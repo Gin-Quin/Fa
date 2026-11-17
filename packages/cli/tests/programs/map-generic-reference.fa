@@ -1,0 +1,22 @@
+-- asynchronous: false
+-- A concrete reference exclusion also applies inside generic mutation code.
+function replace = <K, V>(map: Map<K, V>, key: K, value: V) mutates map => { map[key] = value }
+function grow = <K, V>(map: Map<K, V>, key: K, other: K, value: V) mutates map => {
+	use held = map.getOrInsert(key, value)
+	map.reserve(1000)
+	map[other] = value
+	assert "{held}" == "{value}"
+}
+mutable map: Map<Int64, UInt64> = [(-1, 18446744073709551615), (0, 10)]
+replace(map, Int64(7), UInt64(70))
+assert map.get(7) == UInt64(70)
+use held = map.getOrInsert(0, 0)
+for i in 1..300 { map[Int64(i)] = UInt64(i) }
+held += 1
+assert held == UInt64(11)
+assert map.get(-1) == UInt64.maxValue
+mutable small: Map<UInt32, UInt32> = [(0, 7)]
+grow(small, UInt32(0), UInt32.maxValue, UInt32(7))
+assert small.get(0) == 7
+assert small.get(UInt32.maxValue) == 7
+console.log("generic reference ok") -- prints: generic reference ok

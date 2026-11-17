@@ -313,6 +313,19 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		Ok(())
 	}
 
+	/// Identity in the shared store, independent of a unit's local IDs.
+	pub(crate) fn shared_type(&self, ty: TypeId) -> TypeId {
+		self.types()
+			.merger(Some(self.session.module_id(self.file)))
+			.ty(ty)
+	}
+
+	pub(crate) fn same_type(&self, left: TypeId, right: TypeId) -> bool {
+		left == right
+			|| self.shared_type(self.concrete_type(left))
+				== self.shared_type(self.concrete_type(right))
+	}
+
 	/// A type argument as the type it stands for in the instance being
 	/// lowered (a type parameter of the instance: the type it was made for).
 	pub(crate) fn concrete_type(&self, ty: TypeId) -> TypeId {
@@ -346,6 +359,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		// every unit reads (a scratch view interns, the merge publishes)
 		let module = self.session.module_id(self.file);
 		let mut merger = self.types().merger(Some(module));
+		// A scratch view must also know how a generic recursive reference
+		// builds its target for new arguments.
+		merger.generic_declarations();
 		let global = merger.ty(ty);
 		let bindings = fa_analyzer::types::Bindings {
 			params: params.iter().map(|&param| merger.param(param)).collect(),
@@ -821,7 +837,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		} else {
 			self.split_mut().requests.push(Request {
 				key,
-				arguments,
+				arguments: arguments.clone(),
 				callbacks: callbacks.clone(),
 				methods,
 			});
@@ -1018,6 +1034,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					if !found.contains(&param) {
 						found.push(param);
 					}
+				}
+				TypeKind::Rec(rec) => {
+					stack.extend(self.types().list_items(self.types().rec_info(rec).args));
+					stack.extend(self.types().rec_target(ty));
 				}
 				TypeKind::Collection(_, item, key) => stack.extend([item, key]),
 				TypeKind::Tuple(list) | TypeKind::Union(list) => {

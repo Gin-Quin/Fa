@@ -1,0 +1,16 @@
+-- asynchronous: false
+type Failure = Errors { Stop }
+function scoped = (input: UInt32, fail: Boolean): Integer throws Failure.Stop => {
+	mutable map = Map<UInt32, UInt32>.from([(input, 10)], capacity = 32)
+	let key = input
+	assert map.get(key) == 10
+	map[key] = 20
+	map.reserve(1000)
+	if fail { throw Failure.Stop }
+	map.size
+}
+for i in 0..20 {
+	assert (scoped(UInt32(i), true) catch _ => -1) == -1
+	assert (scoped(UInt32(i), false) catch _ => -1) == 1
+}
+console.log("cleanup ok") -- prints: cleanup ok

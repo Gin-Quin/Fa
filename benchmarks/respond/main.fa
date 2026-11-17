@@ -1,5 +1,5 @@
 -- JSON responses: for each request, a response object with a `String` and an `Array` of objects
--- holding a `String` each, rendered with interpolation and string escaping into a new string,
+-- holding a `String` each, rendered directly into one output string with escaping,
 -- checksummed with 64-bit FNV-1a, then destroyed: many small strings and objects.
 
 let lowercase = "abcdefghijklmnopqrstuvwxyz"
@@ -72,30 +72,36 @@ function makeItems = (seed: UInt64, count: Integer): Array<Item> => {
 	items
 }
 
--- The JSON string of a text: quotes and backslashes are escaped.
-function quoted = (text: String): String => {
-	mutable result = "\""
+type Output = { text: String }
+
+-- A String parameter is a value; the output object owns the one mutable buffer.
+function emitQuoted = (out: Output, text: String): Void mutates out.text => {
+	out.text += "\""
 	for character in text {
 		if character == "\"" or character == "\\" {
-			result += "\\"
+			out.text += "\\"
 		}
-		result += character
+		out.text += character
 	}
-	result + "\""
+	out.text += "\""
 }
 
 function render = (response: Response): String => {
-	mutable out = "{{\"id\":{response.id},\"user\":{quoted(response.user)},\"items\":["
+	mutable out = Output { text = "{{\"id\":{response.id},\"user\":" }
+	emitQuoted(out, response.user)
+	out.text += ",\"items\":["
 	mutable total = 0
 	for item, index in response.items {
 		if index > 0 {
-			out += ","
+			out.text += ","
 		}
-		out += "{{\"sku\":{quoted(item.sku)},\"qty\":{item.quantity},\"price\":{item.price}}}"
+		out.text += "{{\"sku\":"
+		emitQuoted(out, item.sku)
+		out.text += ",\"qty\":{item.quantity},\"price\":{item.price}}}"
 		total += item.quantity * item.price
 	}
-	out += "],\"total\":{total}}}"
-	out
+	out.text += "],\"total\":{total}}}"
+	out.text
 }
 
 -- 64-bit FNV-1a over the UTF-8 bytes of the text.

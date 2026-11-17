@@ -1299,7 +1299,8 @@ impl Walker<'_> {
 							let positioned = matches!(
 								kind,
 								CollKind::Array
-									| CollKind::GrowingArray | CollKind::OrderedColumnar
+									| CollKind::InlineArray | CollKind::GrowingArray
+									| CollKind::OrderedColumnar
 							);
 							let (has, step) = if positioned {
 								("length", PathStep::Length)
@@ -2759,6 +2760,27 @@ impl Walker<'_> {
 	pub(crate) fn escape_closure(&mut self, lambda: NodeId, at: NodeId) {
 		self.a.escapes.insert(lambda);
 		self.check_escaping_references(lambda, at);
+		// a captured task or worker's handle moves into an escaping closure
+		let captured: Vec<SymbolId> = self
+			.a
+			.functions
+			.get(&lambda)
+			.map(|info| info.captures.clone())
+			.unwrap_or_default();
+		for symbol in captured {
+			let symbol_type = self.a.symbols.symbol(symbol).ty;
+			if self.is_moved_handle(symbol_type)
+				&& self.body.flow.reachable
+				&& !self
+					.body
+					.flow
+					.consumed
+					.iter()
+					.any(|&(other, _)| other == symbol)
+			{
+				self.body.flow.consumed.push((symbol, at));
+			}
+		}
 		// requirements are not captured (requirements.rs)
 		self.check_stored_lambda(lambda);
 		let Some(writes) = self.closure_writes.get(&lambda).cloned() else {
@@ -2805,9 +2827,21 @@ impl Walker<'_> {
 	/// `take` (which fail on an empty array), 0 after `clear`.
 	fn track_length(&mut self, place: PlaceId, path: &str, before: crate::types::Interval) {
 		let one = I256::ONE;
+		let capacity = self.place_symbol(place).and_then(|symbol| {
+			self.s
+				.types
+				.inline_array(self.a.symbols.symbol(symbol).ty)
+				.map(|(_, capacity)| I256::from(capacity))
+		});
+		if path == "Array#push" && capacity.is_some_and(|capacity| before.lo >= capacity) {
+			return;
+		}
 		let after = match path {
 			"Array#push" | "Array#insert" | "OrderedColumnar#add" => {
-				crate::types::Interval::new(before.lo + one, before.hi.saturating_add(one))
+				let hi = capacity.map_or(before.hi, |capacity| {
+					before.hi.min((capacity - one).max(I256::ZERO))
+				});
+				crate::types::Interval::new(before.lo + one, hi.saturating_add(one))
 			}
 			"Array#pop" | "OrderedColumnar#pop" => crate::types::Interval::new(
 				(before.lo - one).max(I256::ZERO),

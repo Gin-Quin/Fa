@@ -297,6 +297,53 @@ mod tests {
 	}
 
 	#[test]
+	fn borrowed_arguments_preserve_mutations_on_return_and_error() {
+		for fails in [false, true] {
+			let mut host = Functions::default();
+			let place = crate::ir::Place {
+				slot: 0,
+				steps: vec![],
+			};
+			let body = Expr::Block(vec![
+				Expr::Mutate("Array#push", place.clone(), vec![int(9)]),
+				if fails {
+					Expr::Throw(int(4).boxed())
+				} else {
+					Expr::none()
+				},
+			]);
+			host.0.insert(
+				FnKey(0, 80),
+				Arc::new(Function {
+					name: "append".into(),
+					params: vec![Param {
+						slot: 0,
+						default: None,
+					}],
+					captures: vec![],
+					slots: 1,
+					body,
+				}),
+			);
+			let call =
+				Expr::CallFunction(FnKey(0, 80), vec![Arg::Value(Expr::Borrow(place, false))]);
+			let expr = Expr::Block(vec![
+				Expr::Let(0, Expr::Array(vec![Item::One(int(1))]).boxed()),
+				Expr::Catch {
+					body: call.boxed(),
+					slot: None,
+					handler: Expr::none().boxed(),
+				},
+				Expr::Local(0),
+			]);
+			assert_eq!(
+				run(&mut host, &expr, 1),
+				Ok(Value::array(vec![Value::int(1), Value::int(9)]))
+			);
+		}
+	}
+
+	#[test]
 	fn calls_bind_arguments_and_defaults() {
 		let mut host = Functions::default();
 		host.0.insert(FnKey(0, 1), Arc::new(add()));

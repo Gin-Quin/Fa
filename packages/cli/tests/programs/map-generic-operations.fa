@@ -1,0 +1,46 @@
+-- asynchronous: false
+-- Eligible generic maps retain inline layouts, including nested owners and callbacks.
+function identity = <T>(value: T): T => copy value
+function build = <K, V>(key: K, value: V): Map<K, V> => [(key, value)]
+function inspect = <K, V>(map: Map<K, V>, key: K, value: V) mutates map => {
+	assert map.includes(key)
+	assert "{map.get(key)}" == "{value}"
+	map.reserve(400)
+	let filtered = map.filter((_key, _value) => true)
+	let mapped = filtered.map((_, item) => item)
+	assert "{mapped.get(key)}" == "{value}"
+	assert mapped.every((_, item) => "{item}" == "{value}")
+	assert mapped.find((_key, _value) => true) is not none
+	mutable count = 0
+	for (_key, _value) in mapped { count += 1 }
+	for _ in mapped.keys() { count += 1 }
+	for _ in mapped.values() { count += 1 }
+	assert count == 3
+	mutable duplicate = identity(map)
+	assert "{duplicate.take(key)}" == "{value}"
+	assert duplicate.size == 0
+	assert map.size == 1
+	assert map.delete(key)
+	assert not map.includes(key)
+	map[key] = value
+	map.clear()
+	assert map.isEmpty()
+	map[key] = value
+}
+function nested = <K, V>(maps: Array<Map<K, V>>, key: K, value: V) throws IndexError => {
+	assert "{(try maps[0]).get(key)}" == "{value}"
+	let copies = maps.map(identity)
+	assert "{(try copies[0]).get(key)}" == "{value}"
+}
+mutable wide = build(Int64(-1), UInt64.maxValue)
+inspect(wide, Int64(-1), UInt64.maxValue)
+try nested([wide], Int64(-1), UInt64.maxValue)
+mutable small = build(UInt32.maxValue, UInt32(7))
+inspect(small, UInt32.maxValue, UInt32(7))
+let tinyKey: UInt8 = 255
+mutable tiny = build(tinyKey, Int64(9))
+inspect(tiny, UInt8(255), Int64(9))
+let shortKey: UInt16 = 65535
+mutable short = build(shortKey, UInt64(10))
+inspect(short, UInt16(65535), UInt64(10))
+console.log("generic operations ok") -- prints: generic operations ok

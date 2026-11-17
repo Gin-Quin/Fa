@@ -1,0 +1,196 @@
+-- Explicit open-addressed LRU table: Int32 key / UInt32 arena index slots,
+-- Fibonacci hash, linear probing and backward-shift deletion, as in Goose.
+-- The standard Map implementation remains main.fa. Zero is the empty slot.
+
+-- xorshift64, the generator of the Goose suite: `UInt64` arithmetic that drops the bits
+-- shifted out.
+function xorshift = (seed: UInt64): UInt64 => {
+	mutable x = seed
+	x = x.bitXor(x.shiftLeft(13))
+	x = x.bitXor(x.shiftRight(7))
+	x.bitXor(x.shiftLeft(17))
+}
+
+-- A number in `0..bound`: the remainder of the unsigned random number.
+function below = (random: UInt64, bound: Integer<min = 1>): Integer => random %% bound
+
+type Node = {
+	key: Int32
+	value: Int32
+	previous: UInt32
+	next: UInt32
+}
+
+-- The two sentinels: the list is never empty, so every node has a previous and a next one.
+let head: UInt32 = 0
+let tail: UInt32 = 1
+
+function unlink = (nodes: Array<Node>, index: UInt32) throws IndexError mutates nodes => {
+	let previous = try nodes[index].previous
+	let next = try nodes[index].next
+	try nodes[previous].next = next
+	try nodes[next].previous = previous
+}
+
+function linkFront = (nodes: Array<Node>, index: UInt32) throws IndexError mutates nodes => {
+	let next = try nodes[head].next
+	try nodes[index].previous = head
+	try nodes[index].next = next
+	try nodes[next].previous = index
+	try nodes[head].next = index
+}
+
+-- Stores a node in a freed slot if there is one, so that the array never exceeds the capacity
+-- plus the sentinels.
+function allocate = (
+	nodes: Array<Node>
+	free: Array<UInt32>
+	node: Node
+): UInt32 throws IndexError mutates nodes, free => {
+	let index = free.pop()
+	if index is none {
+		nodes.push(node)
+		let last: UInt32 = nodes.length - 1
+		return last
+	}
+	try nodes[index] = node
+	index
+}
+
+type Slot = { key: Int32, index: UInt32 }
+
+-- The head sentinel (zero) is never a cache entry, so zero denotes an empty slot.
+function home = (key: Int32, mask: Integer<min = 0>): Integer throws ArithmeticError =>
+	try Integer(UInt64(key).wrappingMul(11400714819323198485).shiftRight(24).bitAnd(UInt64(mask)))
+
+function find = (
+	slots: Array<Slot>
+	mask: Integer<min = 0>
+	key: Int32
+): Integer throws IndexError | ArithmeticError => {
+	mutable index = try home(key, mask)
+	loop {
+		let slot = try slots[index]
+		if slot.index == 0 or slot.key == key {
+			break
+		}
+		index = (index + 1).bitAnd(mask)
+	}
+	index
+}
+
+-- Backward-shift deletion, including wraparound, in the same order as Goose.
+function mapRemove = (
+	slots: Array<Slot>
+	mask: Integer<min = 0>
+	at: Integer
+) throws IndexError | ArithmeticError mutates slots => {
+	mutable index = at
+	mutable next = index
+	loop {
+		next = (next + 1).bitAnd(mask)
+		let slot = try slots[next]
+		if slot.index == 0 {
+			break
+		}
+		let start = try home(slot.key, mask)
+		if (index < next and (start <= index or start > next))
+			or (index > next and start <= index and start > next) {
+			try slots[index] = slot
+			index = next
+		}
+	}
+	try slots[index].index = 0
+}
+
+let n = 2_000_000 -- BENCH_N: same workload as the standard Map main and Goose
+let capacity = n // 8
+let keyCount = capacity * 2
+assert keyCount > 0
+
+mutable slotCount = 16
+while slotCount < capacity * 2 {
+	slotCount *= 2
+}
+let mask: Integer<min = 0> = slotCount - 1
+mutable slots: Array<Slot> = []
+for 0..slotCount {
+	slots.push({ key = 0, index = 0 })
+}
+mutable nodes: Array<Node> = [
+	{ key = -1, value = 0, previous = head, next = tail }
+	{ key = -1, value = 0, previous = head, next = tail }
+]
+mutable free: Array<UInt32> = []
+mutable count = 0
+mutable hits = 0
+mutable misses = 0
+mutable removes = 0
+mutable random: UInt64 = 12345
+for 0..n {
+	random = xorshift(random)
+	let a = below(random, keyCount)
+	let key: Int32 = a * a // keyCount
+	let at = try find(slots, mask, key)
+	let found = try slots[at].index
+	if below(random.shiftRight(40), 16) == 0 {
+		if found != 0 {
+			try unlink(nodes, found)
+			try mapRemove(slots, mask, at)
+			free.push(found)
+			count -= 1
+			removes += 1
+		}
+		continue
+	}
+	if found != 0 {
+		try nodes[found].value += 1
+		try unlink(nodes, found)
+		try linkFront(nodes, found)
+		hits += 1
+		continue
+	}
+	misses += 1
+	mutable insert = at
+	if count == capacity {
+		let leastRecent = try nodes[tail].previous
+		try unlink(nodes, leastRecent)
+		let last = try find(slots, mask, try nodes[leastRecent].key)
+		try mapRemove(slots, mask, last)
+		free.push(leastRecent)
+		count -= 1
+		-- Shifting deletion can invalidate the empty position found before eviction.
+		insert = try find(slots, mask, key)
+	}
+	let index = try allocate(nodes, free, {
+		key
+		value = key %% 1000
+		previous = head
+		next = tail
+	})
+	try slots[insert] = { key, index }
+	try linkFront(nodes, index)
+	count += 1
+}
+
+-- Walk the list from the most to the least recent, so that the order is checked too.
+mutable walk: UInt64 = 0
+mutable values = 0
+mutable current = try nodes[head].next
+loop {
+	let node = try nodes[current]
+	let key = node.key
+	if key < 0 {
+		break
+	}
+	walk = walk.wrappingMul(31).wrappingAdd(key)
+	values += node.value
+	current = node.next
+}
+
+console.log(hits)
+console.log(misses)
+console.log(removes)
+console.log(count)
+console.log(walk)
+console.log(values)

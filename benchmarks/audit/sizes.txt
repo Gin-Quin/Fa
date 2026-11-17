@@ -1,5 +1,6 @@
 binary-trees 14
 blur 1000
+blur-reserved 1000
 calc 40000
 fannkuch-redux 9
 fib 35
@@ -8,13 +9,16 @@ growing-index 1000000
 growing-index-array 1000000
 interp 17
 lru 200000
+lru-open 200000
 mandelbrot 1000
 nbody 1500000
 particles 30000
+particles-reserved 30000
 push 3200000
 push-array 3200000
 records 400000
 respond 40000
+respond-interpolation 40000
 scene 9
 sexp 2000
 sieve 10000000
@@ -25,6 +29,8 @@ string-building-bytes 300000
 string-building-growing 300000
 strlist 200000
 sum 3200000
+sum-reserved 3200000
 tree 17
 word-count 500000
 words 100000
+words-wide 100000

@@ -46,11 +46,14 @@ pub(crate) mod generic_values;
 mod growing;
 mod hoisting;
 mod index_proofs;
+mod inline_arrays;
 mod inline_unions;
 mod inlining;
 mod io;
 mod iterators;
 mod json;
+mod map_headers;
+mod map_probes;
 mod numbers;
 mod objects;
 mod ownership;
@@ -297,7 +300,7 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	small_mutable_strings: FxHashMap<FileId, rustc_hash::FxHashSet<SymbolId>>,
 	/// The constants already emitted: string literals and check sites.
 	constants: FxHashMap<Vec<u8>, PointerValue<'ctx>>,
-	readonly_collections: FxHashMap<(FileId, NodeId, Repr), Val<'ctx>>,
+	readonly_collections: FxHashMap<(FileId, NodeId, String), Val<'ctx>>,
 	/// Source functions in a resolved direct-call cycle, shared by instances.
 	recursive_functions: rustc_hash::FxHashSet<(FileId, NodeId)>,
 	/// Line starts of the source, for locations.
@@ -401,6 +404,8 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// and measured, by symbol: the call, evaluated again (on an immutable
 	/// text) where they are read, so that the array is never built.
 	virtual_code_points: FxHashMap<SymbolId, NodeId>,
+	map_probes: map_probes::Probes<'ctx>,
+	local_map_headers: map_headers::Headers<'ctx>,
 	/// The whole program is lowered in this module (`compile.rs`, not the
 	/// units of `units.rs`): whole-program layouts may apply (dense maps).
 	whole_program: bool,
@@ -589,6 +594,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			resource_flags: std::cell::RefCell::new(FxHashMap::default()),
 			field_flags: std::cell::RefCell::new(FxHashMap::default()),
 			virtual_code_points: FxHashMap::default(),
+			map_probes: map_probes::Probes::default(),
+			local_map_headers: Default::default(),
 			whole_program: false,
 			program_facts: None,
 			fact_log: None,
@@ -1030,10 +1037,32 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				self.freeze_union_padding(&self.builder, Repr::Object(element), value.into());
 			return Ok(Val::new(Repr::Object(element), value));
 		}
+		// A wide value remains a snapshot of this evaluation even if a later
+		// argument changes its source. Keep that snapshot in memory: feeding
+		// capacity-sized SSA values to several helpers defeats LLVM's SROA
+		// limits and can promote them back into thousands of wasm arguments.
+		let snapshot = self.wide_aggregate(slot.repr);
+		let pointer = if snapshot {
+			let target = self.alloca(slot.repr, "aggregate_snapshot")?;
+			self.builder.build_memcpy(
+				target.pointer,
+				1,
+				slot.pointer,
+				1,
+				self.usize
+					.const_int(self.collection_data_size(self.llvm_type(slot.repr)), false),
+			)?;
+			target.pointer
+		} else {
+			slot.pointer
+		};
 		let value = self
 			.builder
-			.build_load(self.llvm_type(slot.repr), slot.pointer, "")?;
+			.build_load(self.llvm_type(slot.repr), pointer, "")?;
 		if let Some(instruction) = inkwell::values::BasicValue::as_instruction_value(&value) {
+			if snapshot {
+				crate::optimize::mark_aggregate_snapshot(value)?;
+			}
 			self.tag(instruction, false)?;
 			// a module `let` read by a function: initialized before any call
 			if self
@@ -1177,6 +1206,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		function: FunctionValue<'ctx>,
 		arguments: &[BasicMetadataValueEnum<'ctx>],
 	) -> Result<inkwell::values::BasicValueEnum<'ctx>, Error> {
+		self.invalidate_runtime_map_probes(function.get_name().to_str().unwrap_or(""))?;
 		let call = self.builder.build_call(function, arguments, "")?;
 		Ok(call
 			.try_as_basic_value()
@@ -1190,6 +1220,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		name: &str,
 		arguments: &[BasicMetadataValueEnum<'ctx>],
 	) -> Result<(), Error> {
+		self.invalidate_runtime_map_probes(name)?;
 		let function = self.runtime.function(name)?;
 		self.builder.build_call(function, arguments, "")?;
 		Ok(())
@@ -1315,13 +1346,18 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				})
 			})
 			.collect();
+		// Children can precede their method declaration in node order. Their
+		// callbacks must see the enclosing type parameters before indexing.
+		self.generic_type_methods.extend(
+			type_generics
+				.iter()
+				.map(|(&node, info)| ((self.file, node), info.clone())),
+		);
 		for (node, mut info) in infos {
-			if let Some((generics, declared)) = type_generics.get(&node) {
+			if let Some((generics, _)) = type_generics.get(&node) {
 				let mut all = generics.clone();
 				all.extend(info.generics.iter().copied());
 				info.generics = all;
-				self.generic_type_methods
-					.insert((self.file, node), (generics.clone(), *declared));
 			}
 			if let Some(symbol) = info.symbol {
 				self.symbol_functions.insert(symbol, node);
@@ -1331,9 +1367,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				self.generic_functions.insert(node, info);
 				continue;
 			}
-			if info.declaration.is_none() && self.inside_generic_function(node) {
-				// a lambda of a generic function: declared per instance of the
-				// function around it, when evaluated (`closures.rs`)
+			if self.inside_generic_function(node) {
+				// A closure or local function inherits its enclosing instance,
+				// even when it declares no generic parameters of its own.
 				self.generic_functions.insert(node, info);
 				continue;
 			}
@@ -1369,15 +1405,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// Whether a parameter of this representation is passed as a pointer to
 	/// the caller's value (never copied): every aggregate but a function
-	/// value, outside of asynchronous programs (whose tasks may outlive the
-	/// caller's places). The same for direct and indirect calls.
+	/// value. Direct calls, thunks and indirect calls share this convention.
+	/// A detached coroutine snapshots borrowed arguments into its own frame.
 	pub(crate) fn borrows_parameter(&self, repr: Repr) -> bool {
-		// a move-only value moves into its function: by value
-		let moved =
-			matches!(repr, Repr::Object(ty) | Repr::Tuple(ty) if self.types().owns_unique(ty));
-		!self.tasks.asynchronous
-			&& !moved && !matches!(repr, Repr::Function(_))
-			&& self.llvm_type(repr).is_struct_type()
+		let consumes = matches!(repr, Repr::Object(ty) | Repr::Tuple(ty) if self.types().consumes_parameter(ty));
+		!consumes && !matches!(repr, Repr::Function(_)) && self.llvm_type(repr).is_struct_type()
 	}
 
 	/// Declares a function (or an instance of a generic one, under the
@@ -1564,7 +1596,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				}
 				self.tree.nodes[at].for_each_child(|child| leaf.push(child));
 			}
-			if !self.tasks.asynchronous {
+			let wide = self.wide_aggregate(ret)
+				|| params.iter().any(|(repr, _)| self.wide_aggregate(*repr));
+			if wide {
+				self.runtime.add_attributes(value, &["noinline"]);
+			} else if !self.tasks.asynchronous {
 				if !calls && (count <= 24 || (count <= 64 && loops <= 1)) {
 					self.runtime.add_attributes(value, &["alwaysinline"]);
 				} else if count <= 96 {
@@ -2981,6 +3017,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				self.fresh(value)
 			}
 		} else {
+			self.prepare_local_map_header(node, symbol, value_node)?;
 			let repr = self.repr_of(self.analysis.symbols.symbol(symbol).ty, node.index())?;
 			let destination = if self.uses_return_slot(repr) {
 				Some(self.slot_of(symbol, node)?)
@@ -3281,6 +3318,21 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				}
 				let bytes = self.is_bytes_call(code_points);
 				return self.for_code_points(node, pattern, has_index, text, body, bytes);
+			}
+			if let Repr::Tuple(ty) = self.node_repr(iterable)?
+				&& self.inline_info(ty).is_some()
+			{
+				let view = if self.is_place(iterable) {
+					let slot = self.place(iterable)?;
+					self.inline_view_at(slot, ty)?
+				} else {
+					let value = self.expr(iterable)?;
+					if value.repr == Repr::Never {
+						return Ok(value);
+					}
+					self.inline_view(value, ty)?
+				};
+				return self.for_items(node, pattern, has_index, iterable, view, body);
 			}
 			let value = self.expr(iterable)?;
 			return match value.repr {

@@ -1,0 +1,12 @@
+-- Indexing/read/write/take/delete must agree between runtime and compile time.
+function run = (): Integer => {
+	mutable items: Array<Integer> = [1, 2, 3]
+	items[-1] = 7
+	let last = items[-1]
+	let removed = items.take(-1)
+	items.delete(-1)
+	last + removed + items[0]
+}
+console.log(run()) -- prints: 15
+static result = @run()
+console.log(result) -- prints: 15

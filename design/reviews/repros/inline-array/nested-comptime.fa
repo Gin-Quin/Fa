@@ -1,0 +1,9 @@
+type Box = { values: InlineArray<Integer, 1> = [] }
+function build = (): Box => {
+	mutable box: Box = {}
+	box.values.push(1) catch _error => {}
+	box.values.push(2) catch _error => {}
+	box
+}
+static result = @build()
+console.log(result.values, result.values.capacity) -- expected: [1] 1

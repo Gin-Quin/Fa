@@ -1680,6 +1680,27 @@ impl Generator<'_> {
 			self.unsupported(target, "this assignment target");
 			return;
 		};
+		// Resource owners keep their referenced outer identity, but a whole
+		// write destroys the previous contents and transfers the new ones.
+		let resource_array = matches!(
+			self.types.kind(self.type_of(target)),
+			TypeKind::Collection(
+				CollKind::Array | CollKind::InlineArray | CollKind::GrowingArray,
+				..
+			)
+		);
+		let resource_drop = if resource_array
+			|| matches!(self.types.kind(self.type_of(target)), TypeKind::Object(_))
+		{
+			self.drop_function(self.type_of(target))
+		} else {
+			None
+		};
+		let resource_target = resource_drop.as_ref().map(|_| {
+			let temp = self.temp();
+			self.out.line(format!("const {temp} = {};", place.text));
+			temp
+		});
 		let value = if lifted {
 			let temp = self.temp();
 			self.out.line(format!("let {temp};"));
@@ -1688,6 +1709,19 @@ impl Generator<'_> {
 		} else {
 			self.expr(value)
 		};
+		if let (Some(drop), Some(target)) = (resource_drop, resource_target) {
+			let temp = self.temp();
+			self.out.line(format!("const {temp} = {};", value.text));
+			self.out.line(format!("{drop}({target});"));
+			if resource_array {
+				self.out.line(format!("{target}.length = 0;"));
+				self.out
+					.line(format!("for (const item of {temp}) {target}.push(item);"));
+			} else {
+				self.out.line(format!("Object.assign({target}, {temp});"));
+			}
+			return;
+		}
 		let helper = self.helper("faAssign");
 		self.out
 			.line(format!("{helper}({}, {});", place.text, value.text));

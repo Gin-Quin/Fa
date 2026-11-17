@@ -1122,13 +1122,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 		};
 		let function = self.functions[&key].clone();
-		Ok(match kind {
-			ProducerKind::Lambda => function.value.as_global_value().as_pointer_value(),
-			ProducerKind::Declaration => self
-				.thunk_of(&function)?
-				.as_global_value()
-				.as_pointer_value(),
-		})
+		let thunk = matches!(kind, ProducerKind::Declaration);
+		let entry = if thunk {
+			self.thunk_of(&function)?
+		} else {
+			function.value
+		};
+		self.async_value_entry(&function, entry.as_global_value().as_pointer_value(), thunk)
 	}
 
 	/// Whether type arguments satisfy the constraints of parameters.

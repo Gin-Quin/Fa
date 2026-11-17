@@ -1,0 +1,26 @@
+let empty: InlineArray<Integer, 2> = []
+let short: InlineArray<Integer, 2> = [1]
+let long: InlineArray<Integer, 2> = [1, 2]
+let duplicate: InlineArray<Integer, 2> = [1]
+mutable entries: Map<InlineArray<Integer, 2>, String> = []
+entries[empty] = "empty"
+entries[short] = "found"
+entries[long] = "long"
+entries[duplicate] = "replaced"
+console.log(try entries[short], try entries[long], try entries[empty], entries.size) -- prints: replaced long empty 3
+mutable records: Map<{ key: InlineArray<Integer, 2> }, Integer> = []
+records[{ key = short }] = 7
+console.log(try records[{ key = duplicate }]) -- prints: 7
+mutable tuples: Map<(InlineArray<Integer, 2>, String), Integer> = []
+tuples[(short, "key")] = 8
+console.log(try tuples[(duplicate, "key")]) -- prints: 8
+mutable zeros: Map<InlineArray<Integer, 0>, Integer> = []
+zeros[[]] = 9
+console.log(try zeros[[]]) -- prints: 9
+mutable strings: Set<InlineArray<String, 2>> = [["a"], ["a"], [], ["a", "b"]]
+console.log(strings.size) -- prints: 3
+mutable nothing: Map<InlineArray<none, 2>, String> = []
+nothing[[]] = "empty"
+nothing[[none]] = "one"
+nothing[[none, none]] = "two"
+console.log(try nothing[[none]], nothing.size) -- prints: one 3

@@ -86,6 +86,12 @@ export class IndexError extends FaError {
 	}
 }
 
+// @fa-helper CapacityError deps: FaError
+/** A bounded inline list has no remaining slot. */
+export class CapacityError extends FaError {
+	static faName = this.register("CapacityError.InlineFull");
+}
+
 // @fa-helper KeyNotFound deps: FaError
 /** A map read with a key that isn't present. */
 export class KeyNotFound extends FaError {

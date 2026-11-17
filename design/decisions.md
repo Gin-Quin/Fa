@@ -1669,3 +1669,516 @@ before evaluated block/callable provenance correctly marked escaping closures.
 Optional owned storage can be absent and is replaced; a selected bare-object
 reference always writes in place, including a generic object body whose type
 parameter itself conservatively admits `none` during type checking.
+### Lead continuation decisions (2026-11-16)
+
+The language study owns one-way pool links, compact reference widths and bounded
+inline ordered lists. Keep tree, binary-trees, interp, graph, sexp, scene and calc
+unchanged until that study resolves their representations; do not approximate
+them with integer links in CArray fields. The recursive owning versions remain
+the main rows and are explicitly described as different structures from Goose.
+
+Words and lru keep standard Fa Map in the main row: it is the corresponding
+collection of the hand-written Goose table, and its CPU goal remains 1.10 times
+Goose. An explicit-table variant may be added only when idiomatic Fa can express
+the same slot layout/probe sequence today. Pair standard variants with
+words_hashmap.rs/lru_hashmap.rs and explicit variants with words_open.rs/lru_open.rs.
+Record missing stored borrowed string keys rather than materializing owning keys
+or encoding ranges by hand. Keep the missing Array reference-field rejection as
+an analyzer bug with the existing scene-children probe; no compiler fix here.
+
+Sum, particles and blur use unreserved Arrays in their main rows, preserving
+their reserved originals as variants; blur declares its stencil sum as UInt16.
+Respond appends escaping into one output buffer instead of returning quoted
+temporary strings. Since a primitive String parameter cannot declare mutates,
+an ordinary Output object owns that String and the helper mutates its text
+field, matching the existing documented object-field mutation model.
+
+The explicit lru variant uses Int32 keys and UInt32 arena indices, with zero as
+the empty slot since the head sentinel is never a cache entry. The matching safe
+Rust lru_open.rs row is adapted to the same zero marker and runtime size input;
+the probe/deletion order is preserved. A per-variant Rust entry is selected in
+the checked driver and hashed as main.rs, while unused alternate entry files
+are excluded from other rows' manifests. Main words uses Int32 counters to match
+Goose; words-wide retains both original 64-bit-counter sources. Its Rust HashMap
+profiles retain the same three-execution policy as the standard map mains.
+
+
+The [continuation measurements](../benchmarks/results/2026-11-16-ports-2.md)
+apply strict controls to all twelve rows: main sum and blur meet the Goose goal;
+main particles/respond/words/lru remain unresolved. Sum-reserved also meets it;
+respond-interpolation is behind with a passing control, and the other four
+variants remain unresolved. Preserve the first 21-round series rather than
+retrying failed controls. Removing source capacity hints retains effectively
+identical kernels; the corrected ports do not establish a speedup. Profiles
+prioritize String field append/return costs, explicit-table checked operations
+and standard Map short-key probe work. No compiler optimization is part of this
+continuation; the implementation and language gaps remain separate TODOs.
+
+## Collections performance (implementation, 2026-11-16)
+
+### Ported private negative map probes
+
+Port the proof of `1e3a91d7` onto trunk's storage ABI, without changing map
+semantics or the eager reservation contract. One function-local private inline
+Map/32-bit-key pair can retain a failed lookup. A runtime valid bit plus table
+pointer and raw-key equality protect joins and backedges; ordinary lookup is the
+fallback. Index-changing runtime calls, potentially map-mutating named calls and
+map-owning drops invalidate the hint. Calls proved to mutate only map-free data
+can keep it. Closed synchronous whole-program compilation excludes callbacks,
+generics, external code, captures and reference uses. This deliberately retains
+the validated optimization's conservative scope.
+
+An inline backward shift adds exactly one empty slot and leaves former empty
+slots empty. Update a missing key's probe to the earlier of its old empty slot
+and that hole, in cyclic order from its home. The separate all-ones-key slot
+cannot affect a run. Append receives raw key bits, allowing the sentinel guard
+to disappear when range facts exclude it. Read-only literal construction and
+`fa_table_local` use the same all-ones marker as heap slots; explicit copies,
+reserve/growth, clear, iteration and deletion keep every 32-bit key available.
+Bump the object-cache version for the changed append ABI.
+
+Validation: LLVM-enabled workspace 1,378 passed, zero failed, eight existing
+ignored; 90 IR checks included. C ASan/UBSan passes. Shared fixtures additionally
+pass Bun/Node/web and every LLVM target with leak checks. A borrowed-only runtime
+literal is verified to call `fa_table_local` in a fixed 160-byte frame block;
+read-only and explicit-copy cases are separate.
+
+All 36 audit rows pass exact output/source checks and the +1% instruction gate.
+Lru: 20,241,014 → 18,739,665 Ir (−7.417%); words unchanged, word-count −5 startup
+instructions. Largest other increase is five Ir on lru-open (+0.000024%). The
+21-round CPU-5 before/after/Goose/Rust series fails the identical-binary control
+on all three map rows. CPU gains and regressions are **not resolved**; preserve
+these first samples, with no retiming to replace them. Canonical profiles,
+artifacts, paired samples and strict-control tables are retained in
+`benchmarks/results/2026-11-16-collections-{before,probes}.json` and the generated
+`2026-11-16-collections-probes.md`. No benchmark source or string code changed.
+
+### Ported private inline map headers
+
+Port `3d93c163` using today's `storage` word rather than its old `directory=-1`
+marker: 1 means a private frame header owning ordinary heap probe slots. Growth,
+reserve, clear and drops retain their existing payload ownership; free releases
+slots but not this header. Copies already reset storage to heap (0); immutable
+read-only and whole-frame storage remain 2/3.
+
+The existing closed synchronous whole-program and inline KEY32 proofs apply.
+Every owner use must remain in its function and be a supported immediate map
+operation, indexing, scalar measurement or direct iteration. Copies, returns,
+unknown uses, references, captures and shared top-level initializer locals are
+excluded by this proof. Literals and literal-source `Map.from` are the covered fresh
+constructors; replacement retains normal drop/ownership rules.
+
+Record eligible initializers without allocating. Existing read-only, whole-frame
+and caller-buffer storage stays preferred. Only the actual remaining constructor
+allocates a fixed entry-block header, charging 96 aligned bytes against the
+shared 4 KiB / recursive 512-byte collection frame budget on both pointer widths.
+Tests require 42 ordinary headers, five recursive headers, or 41 after a 160-byte
+immutable literal; additional constructors fall back to the heap. Bump the object
+cache version. No input-sized stack allocation or map-value layout change.
+
+Final validation: LLVM-enabled workspace 1,381 passed, zero failed, eight existing
+ignored, including all 93 IR checks. New shared fixtures pass Bun/Node/web and
+native/freestanding/wasm with leak checks. C ASan/UBSan, fmt and Clippy pass.
+Manual O0 IR confirms private frame headers in the reassignment loop and the
+throwing cleanup fixture, and the earlier immutable-literal path stays distinct.
+
+All 36 audit rows match exact output and unchanged source hashes. Lru rises
+18,739,665 → 19,070,292 Ir (+1.764%) versus probes alone, with 181,188 fewer data
+reads and more register moves/stores. All 35 other rows remain within +1%.
+The named/literal LLVM header type produces identical optimized main IR and is
+not the cause of that instruction trade-off.
+
+**Keep the port on CPU evidence.** In the first 21-round header series on CPU 5,
+header/probe-only CPU is 0.917 / 0.919 (ratio of medians / paired median), while
+Fa/Goose is 0.986 / 0.967 and Fa/Rust 0.489 / 0.491. The identical-binary control
+0.993 / 1.028 passes strict <3% on both measures. Lru meets both CPU goals in
+this series despite its additional instructions. Retain its broad quartiles;
+instruction count alone is not the acceptance metric. Words/word-count controls
+fail and their CPU verdicts remain not resolved. No primary series is replaced.
+
+Canonical complete profiles, samples, manifests and strict-control tables are
+`benchmarks/results/2026-11-16-collections-headers.{json,md}`; the earlier probe
+and baseline files remain separate. No benchmark source or string code changed.
+
+### Successful same-key probe reuse (2026-11-16)
+
+Part 1 item 2 extends the accepted private inline KEY32 cache to found as well
+as missing slots. An inline remove/take only looks up its entry before release,
+so it can consume the same guarded lookup as insertion or value replacement.
+The ordinary lookup remains the fallback whenever the existing closed-program,
+layout, local owner/key, capture/reference or effect proof does not hold.
+
+Replacement of a scalar value changes no index position. Keep that position,
+but always load the new value from its slot. A deletion may move any positive
+slot by backward shifting: invalidate positive entries of that table before
+release. Negative entries retain their existing final-hole update; another
+map's release leaves a cached slot untouched. Append/growth, reserve, clear,
+drop and unknown effects keep their existing invalidation. Key/table identity
+checks and entry initialization still protect joins and backedges. No C runtime
+or String-key code changes; bump the object-cache generation for the lowering.
+
+New IR tests cover firing on native/wasm and fallback for references and key
+parameters. Programs cover same-key overwrite/take/delete, the sentinel, zero,
+wraparound colliding deletion, mutable keys and named calls that clear/rehash.
+Validation and measured acceptance follow in the continuation report.
+
+Instruction checkpoint: all 36 audit rows pass exact output and unchanged-source
+checks, with none above +1% versus the accepted private-header compiler.
+Lru is 19,070,292 → 19,047,821 Ir (−0.118%); words is unchanged and word-count
+changes by −19 Ir. The complete profile is retained in
+`benchmarks/results/2026-11-16-collections-positive.{json,md}`. Full workspace
+validation is still running; controlled CPU measurements follow after it.
+
+Final item 2 validation: LLVM-enabled workspace 1,382 passed, zero failed,
+eight existing ignored (68 groups, 94 IR checks). Shared CLI 11/11 and LLVM
+4/4 pass, including native/freestanding/wasm leak checks. Fmt/Clippy are clean.
+The complete retained dataset adds 21 interleaved CPU-5 rounds on each map row,
+including the accepted-header compiler as the before actor. All three identical
+binary controls fail: lru 1.100 / 1.073, words 1.009 / 0.947, word-count
+0.939 / 0.948 (ratio of medians / paired median). Their CPU verdicts are **not
+resolved**; no speedup or regression is established. Keep the correct guarded
+reuse and its small instruction reduction. Preserve the accepted item 1 series
+separately; this unresolved series neither replaces nor reconfirms it. No source
+benchmark, String code or runtime ABI changed in this item.
+
+
+### Scalar64 inline map entries (2026-11-16)
+
+Part 1 item 3 extends inline entries from 8/16/32-bit integer keys and narrow
+values to 64-bit integer keys and scalar values (integer, boolean, float) of
+at most 64 bits. Keep the existing dense-map reference proof, merged per-unit
+facts, deleteWhere exclusion and GrowingMap stable chunks. String keys and all
+String hashing/comparison/lowering are unchanged. Private header/probe proofs
+retain their 32-bit key restriction.
+
+KEY64 uses the full key as its presence marker. All ones lives after the probe
+array with the existing separate presence bit, just as KEY32. Hash homes for
+rehashing and backward shifts match generated integer hashing: xor with the
+upper 32 bits, multiply by the odd golden-ratio constant, xor again with the
+upper half. Each step is bijective. Preserve the existing KEY32 rotated hash.
+The append ABI now carries 64 raw key bits, zero-extending KEY32; bump the
+object-cache generation. All three runtime IR targets are regenerated.
+
+Small tagged keys with wide values use an 8-byte prefix (tag plus padding) so
+the entry remains ABI aligned. Narrow tagged entries keep their 4-byte prefix.
+Match runtime stride/offset, read-only global padding, frame-buffer sizing and
+copy/grow/clear/iteration. No unaligned wide loads or changes to shared Slot
+lowering. Runtime tests cover all four key widths, wide value bits, heap and
+private frame headers, randomized operations and 64-bit wraparound deletion.
+Shared fixtures separately cover full-width extrema, mutable/static/frame maps,
+copy independence, small-key alignment, references and deleteWhere/GrowingMap
+fallbacks. IR checks require firing and the three fallbacks on native and wasm.
+Full validation and controlled measurements follow.
+
+Actual benchmark IR check: word-count uses KEY64-eligible integer fields, but
+its numeric map retains stable chunks. `facts::short_reference` rejects the
+named `random.next` call inside getOrInsert: it scans the initializer as well
+as the statements after the reference. The String map already uses dense
+entries. Preserve this existing reference-proof boundary in this item, as
+required; do not change ownership/fact analysis or the benchmark to force a
+layout. Scalar64 fires in the new eligible programs and remains unavailable
+where the existing reference proof declines it. The pre-reference argument
+call case is a separately recorded proof follow-up, so this item must not be
+reported as solving word-count even if a noisy CPU point estimate improves.
+
+Item 3 checkpoint: 27/36 instruction profiles completed, all within +1%; lru 19,047,821 → 19,153,936 Ir (+0.557%). Complete validation and remaining profiles/CPU phases are pending. Preserve these partial rows as the work checkpoint, not an acceptance claim. Full Bun/Node/web program suites and multi-file packages pass. Manual O0 native/wasm IR confirms KEY64 frame payload 232 bytes rounded to an aligned 240-byte buffer.
+
+Complete instruction phase: all 36 audit rows pass the +1% gate versus the
+successful-probe compiler, with exact unchanged source hashes and outputs.
+Lru is 19,047,821 → 19,153,936 Ir (+0.5571%), words is unchanged at 28,382,794,
+word-count is 235,017,839 → 235,017,865 (+26 Ir). The 27 checkpoint records are
+identical in the complete profile. No instruction win on these map benchmarks
+is claimed. Canonical scalar64 results now contain the complete instruction
+phase; full workspace and controlled CPU acceptance remain pending.
+
+The full corpus exposed two wrong pre-existing order assertions in
+`table-storage.fa` and its O0 counterpart: returned Map<Integer,Integer> printed
+[(9, 2), (8, 1)] instead of [(8, 1), (9, 2)]. The language specifies no map
+iteration order. Correct both fixtures to require the exact formatted string
+in either of the two possible orders, plus both keyed values and size two;
+print the keyed values deterministically. This preserves formatting/content
+checks and adds cardinality checking, without pinning a storage layout.
+No expected-skip changes. All other outputs in all three targets matched.
+Focused corrected fixtures pass all LLVM targets/leak checks (4/4), fmt and
+Clippy pass; the whole workspace is rerun. Compiler sources remain identical
+to 1f8e7118, so existing instruction profiles and archived binaries are valid.
+
+Scalar64 validation checkpoint after correcting the two order assumptions:
+37 complete workspace result groups, 706 passed,
+zero failed so far; all 95 IR checks, packages, Bun/Node/web, C-library,
+object-cache and memory groups pass. The full LLVM program corpus is still
+active; final workspace acceptance and CPU phases remain pending. Compiler
+sources remain unchanged from the archived 1f8e7118 build. The GCC sanitizer
+runtime harness independently ran and passed (1/1) rather than relying on the
+Clang environment's unavailable ASan probe. No additional skip was introduced.
+
+Final scalar64 validation: LLVM-enabled workspace 1,383 passed, zero failed,
+eight pre-existing ignored, 68 result groups including all 95 IR checks.
+Native 812 / freestanding 723 / wasm 791 programs pass with leak checking;
+existing documented skips remain 31 / 120 / 52. Fmt/Clippy are warning-free;
+GCC ASan/UBSan passed via both the script and actual Rust runtime harness.
+The two corrected order assumptions are the only existing tests changed.
+
+The first 21-round CPU-5 series is retained in full. Lru control 0.991 / 0.966
+fails, and word-count control 0.960 / 1.006 fails: both remain not resolved.
+Words control 0.992 / 0.999 passes; Fa/Goose 1.171 / 1.137 is behind the 1.10
+goal, Fa/Rust 0.483 / 0.464 meets its goal. After/before words 0.987 / 0.961
+has broad paired quartiles [0.848, 1.011]; do not claim the scalar64 layout
+caused a speedup in this unchanged String-key workload. Word-count still needs
+the separate reference-initializer proof, and String work remains separate.
+This item supplies the requested guarded layout, not a demonstrated map-row
+speedup. Preserve the accepted header lru series independently.
+
+Complete evidence is `benchmarks/results/2026-11-16-collections-scalar64.{json,md}`:
+all 36 profiles, three CPU phases, 315 samples, 63 round orders, binary/source
+hashes and strict-control publication. Benchmark sources and driver unchanged.
+The dataset round-trips byte-for-byte; all 27 checkpoint rows are retained.
+Part 2 remains unimplemented at this completed-item context boundary.
+
+
+## Collection map review fixes (2026-11-16)
+
+C1 exposed an ABI disagreement: a generic `deleteWhere` used the generic
+map TypeId's dense layout while its concrete caller constructed scalar64
+inline slots. C2 has the same cause in the other direction: concrete callers
+requiring stable references passed chunked tables to generic mutation code
+using dense/inline entries. C2 predates scalar64.
+
+One policy now lives in `facts.rs::map_excluded`, called by
+`lower/tables.rs::table_of` after resolving the concrete instance. The same
+collectors supply whole-program exclusions and merged per-unit facts. Each
+generic key/value component becomes a wildcard, including nested parameters;
+non-generic components retain their stable identity. We deliberately widen
+constraints and repeated-parameter correlations rather than requiring a
+complete call/instance inventory before any constructor is lowered. This
+changes only representation eligibility, never accepted programs or map
+semantics. Generic code without exclusions retains inline entries at every
+supported integer width. Concrete reference facts apply inside instances too.
+
+Sibling checks exposed helper caches keyed only by scalar representations:
+`Map<Int64, Int64>` requiring chunks and an inline `Map<Integer, Integer>`
+shared a generic copy helper and crashed. Copy/drop/equality helpers and
+read-only literal caches now include exact type bindings; map representations
+carry concrete type identities, generic argument conversion forwards those
+bindings, and nested collections compare actual table layouts. Callback
+indexing also registers generic type methods before their child lambdas and
+defers local named closures to their enclosing instance. These retain accepted
+generic methods and captured-map code while avoiding eager erased layouts.
+
+An additional view boundary used the same scalar storage with different
+range spellings: `Map<Int64,Integer<min=0,max=100>>` could be read as
+`Map<Int64,Integer>`, losing the source reference exclusion and reading the
+wrong value. Scalar fact components now use their storage type; literal
+components widen to their base type. Union/optional refinements conservatively
+use a wildcard, and enum member subsets share their nominal identity. This
+keeps erased scalar views on the same side of the layout rule.
+
+Cache logs query all matching concrete/wildcard exclusions, including their
+absence; the object ABI version changes. Copies, drops, callbacks, readonly
+literals and frame constructors all pass through `table_of`; private headers
+and lookup hints retain their narrower separate proofs. M1 (split freestanding
+O0 runtime linking) is independent and remains a documented follow-up.
+
+A generic constant constructor with a local `let` literal exposed static
+header reuse between UInt32-key/chunked and UInt16-key/inline instances
+(both with Int64 values). The static-cache fix is guarded by native/wasm IR checks
+requiring both a chunked 32-entry block and an eight-slot tagged inline block, plus
+leak-checked O0/O3 execution. Scalar-range, optional, union and enum views
+have shared runtime regressions too.
+
+Focused validation passes: 97 IR tests, 24 O0/leak executions, the shared O3
+map corpus on all LLVM targets, 105 reviewer standalone executions, 15 package
+executions (only the three pre-existing M1 links remain blocked), 12 split IR
+module checks and 28 independent optimization controls. Workspace Clippy is
+warning-free; the GCC sanitizer runtime test actually executes and passes.
+Final LLVM-enabled workspace validation passes: 1,387 tests, zero failures,
+eight pre-existing ignored tests, 69 result groups. Native/freestanding/wasm
+program counts are 822/733/801 with unchanged skips; CLI Bun/Node/web, JIT,
+packages/workspaces, memory, C-library, formatter/parser, language-server and
+doctests all pass. No expected-skip list changed.
+No benchmark source/runtime C/String code changes are involved.
+
+The shared multi-file runner now recognizes an explicit `package.fa` fixture
+and invokes the package root, so library namespaces and split compilation
+are exercised on Bun, Node and web. The read-only fixture varies only
+Number-backed generic keys and retains concrete Int64 values: a generic
+Int64 value literal separately exposes a pre-existing JavaScript conversion
+bug (recorded with a durable repro in todo). The corrected fixture still
+fails on the archived scalar64 native compiler and preserves both static
+layouts and all value assertions. No expected-skip list changes.
+
+## Links step 1b: InlineArray (2026-11-16)
+
+`InlineArray<Item, capacity>` is represented in the analyzer as a collection
+with a new kind and its integer capacity in the second type argument slot.
+This keeps capacity in type identity, stable hashes, substitutions and exported
+interfaces using the existing collection machinery. Capacity is invariant.
+The collection's category flags come from its items, unlike a heap collection.
+
+LLVM uses the existing aggregate ABI with a dedicated layout: an array of
+capacity item slots followed by the smallest unsigned initialized-prefix count.
+Copy and destruction traverse only that prefix. Existing read-only array
+algorithms can borrow a temporary stack header pointing at the inline slots;
+that header never owns storage and is never used for growth or destruction.
+JavaScript and the interpreter keep ordinary arrays and obtain the capacity
+from the analyzed type. A distinct capacity-check flag records conditional
+append errors independently of index checks.
+
+JSON schemas retain the bound: JavaScript's array schema carries an optional
+maximum count; the native schema has a bounded-array tag. Validation happens
+before constructing the typed value, including in nested fields and unions.
+CapacityError's only member is InlineFull; existing built-in error numbers
+remain unchanged by appending it to the prelude error table.
+
+Inline capacities can be UInt32-constrained compile-time parameters as well as
+constant integer expressions. Their HAS_PARAM flag is retained independently
+of the items' ownership flags; native instantiation resolves the constant and
+JavaScript uses the existing hidden value parameter. Scalar optional results
+of get/pop are derived from the analyzed result type, preserving flattened
+optionals and the value-less representation of none.
+
+The interpreter's existing value-only user-call arguments lost mutations of
+borrowed lists. Calls now carry resolved caller places for borrowed arguments
+and write back their parameter slots on normal and error exits, including
+partially applied calls. Collection iteration binds ordinary loop variables
+to the original indexed place; index expressions are saved once before the
+loop. This uses the shared interpreter path rather than an InlineArray-only
+mutation mechanism.
+
+A constant inline capacity property still evaluates its receiver and destroys
+its temporary owner at the statement boundary. Native numeric-constant folding
+therefore excludes instance properties; JavaScript temporary-resource accesses
+include collection length/capacity reads. `None` items use one byte of slot
+storage with no semantic payload, so generic slot addressing retains a stride.
+
+JavaScript in-place writes of resource-containing objects and positional lists
+now drop their old contents and transfer the new ones while retaining the
+outer object/array identity required by `use` aliases. They avoid structural
+copying of unique items. Printing a None-typed effectful expression evaluates
+it before emitting the fixed text `none`, including in interpolation.
+
+## InlineArray review fixes (2026-11-16)
+
+The initialized-prefix bound must survive every generic call, including compile-time calls. The interpreter receives leading value parameters in declaration order (owner parameters before method parameters), forwards symbolic bindings through nested calls, and binds them in function values using its existing closure argument map. Capacity reads and checked pushes use that value. Builtin argument omission follows `Argument::Default`/`Missing`; a supplied `none` is never an omitted argument. Receiver places retain all field steps for both ordinary and inline collections. Native constant lowering checks the bound before creating any storage, independently of interpreter correctness.
+
+Inline-array flags inherit the item's ownership/category and containment flags, plus parameter/unknown metadata from the bound. They exclude scalar ordering and JavaScript BigInt representation. JavaScript lifetime dispatch identifies inline arrays even when the capacity is symbolic; destruction depends on Item, not on knowing a numeric bound. Native hashing visits the initialized prefix with the array hashing algorithm; an inline list is never exposed as a fictitious tuple field layout.
+
+Lead decision: reflection uses a distinct `Schema.InlineArray { item: Schema, capacity: Integer<min = 0> }`, because the capacity belongs to the type and has no meaning for other collection kinds. There is no existing fixed-count CArray schema representation to reuse. `TypeFromSchema` reconstructs the exact item and bound, rejecting non-integer, negative or greater-than-UInt32 capacities with an actionable diagnostic.
+
+The cleanup audit also found that erased generic Item had no destructor capability in the reviewed implementation. Generic requirements now include a drop operation for each type parameter, passed through local/imported calls and function values; ordinary instantiations pass a shared no-op. A composite drop involving a parameter is a local closure capturing that operation, not a global helper referring to a function-local name. Generic locals use the existing drop-flag/move machinery. This adds no metadata or wrapper to an inline array.
+
+Generic field defaults on native retain type bindings as well as representation bindings, since a value parameter can change aggregate layout without changing the scalar representation of the parameter. Native substitution promotes the module identity before using a scratch type-store view; a local ID belongs only to its source view. The ordinary `Array<none>` control uses canonical byte storage when push/pop have no semantic item payload.
+
+Inline representations carry their fully instantiated identity in the shared type store. The identity must outlive temporary binding scopes: call sites, function-value thunks and another compilation unit use exactly the same slots and count layout. Remote signature construction binds value types as well as representations. Shared interning supplies exact identity comparisons for resource methods and conversions; field lookup compares resolved names across local and shared symbol IDs. Structural generic instances need not retain a nominal identity, so field defaults recover their declaration from the default's source and the recorded generic application.
+
+The native object-cache version advances to `inline-length-3` so a cached caller with the previous incomplete generic aggregate ABI cannot be reused. Recursive type arguments and targets participate in native parameter collection, and generic recursive declarations are published before scratch-view substitution creates an instance with new arguments.
+
+Native JSON entry points resolve their concrete type before building schemas and memoizing readers/writers, so different capacity instances cannot reuse a symbolic reader with a different aggregate ABI. Hidden generic capability names use the same synthesized-name sanitizer as global helpers, including derived types displayed with angle brackets.
+
+The imported generic-owner O0 probe exposed an inherited freestanding link failure: an unused constant containing the libc stack-guard callback kept the callback live from a shared data section. Per-unit ELF emission separates data sections as well as function sections, so garbage collection discards the unused constant and callback together (since the merge with the trunk, through the target machine: see "Links step 1b: merge with the trunk"). The required split O0 imported-owner fixture covers this on every LLVM target.
+
+Contextual generic function-value specialization also applies to lambdas and parenthesized names. JavaScript binds their destructor/method/value arguments exactly once at the node carrying the instantiation; native declaration values recover that node through their group parents before constructing the thunk. The inline callback fixture checks named, lambda and grouped values at runtime and compile time; the existing ordinary Array.map generic-lambda case remains the control.
+
+The full corpus exposed a timer race in the existing async-starter regression: sleeping 5 ms cannot guarantee a yielded detached task has finished. The test now polls explicit completion flags through asynchronous sleep, retaining detached tasks and all ten event-order/shared-state expectations. This is a test synchronization correction, with no scheduler or runtime change.
+
+## InlineArray second review fixes (2026-11-16)
+
+Aggregate parameters use the same borrowed-place ABI in direct calls, function
+values, generic thunks and asynchronous entries. The representation does not
+change because another function in the program suspends, or because an item has
+a destructor. Awaited and kept coroutine calls retain the caller's place;
+detached tasks construct their owned snapshot in the frame before suspension.
+Only Task-consuming parameters transfer ownership; ordinary resource parameters
+borrow as required by the memory-management specification.
+
+Native representation identity compares promoted and local nominal identities
+through the shared store before interpreting a union as a box. Hash helpers
+borrow aggregate keys by address so an inline capacity never becomes wasm
+function arity. Nested aggregate fields use that same helper convention.
+
+The LLVM integration matrix is deterministic and grouped by item kind to bound
+compiler memory. Each operation sequence is evaluated by the compile-time
+interpreter in a local place; the runtime encloses that value in each tested
+position. Bun must agree with that oracle before native/wasm/freestanding O0/O3
+are compared, with leak checks. Generated annotated sources remain in target/tmp
+for inspecting individual failures; the generator and harness live in tests/.
+
+The O0 wasm audit additionally removes tagged code pointers: wasm callable
+indices can be odd, so they cannot share their low bit with a linear-memory
+entry table. Every callable in an asynchronous program now uses a constant
+`{ sync, async }` entry table, with a null async entry for synchronous functions;
+synchronous programs keep direct code pointers. Generic producers, compositions,
+error adapters and worker callbacks share this rule. Aggregate copy helpers use
+caller-owned result storage as well as address parameters, including their early
+return paths, so wide return values are not flattened either.
+
+Inline copy/drop/hash and nested equality helpers operate on initialized places,
+without loading capacity-sized values at entry. Wide helpers remain out of line
+to bound optimizer expansion. Resource destructors borrow the actual cleanup
+place; field cleanup observes their writes. The object-cache ABI suffix advances
+to `inline-length-4` for these calling conventions. Closure captures transfer
+unique ownership only when the closure escapes; aggregate literal fields and
+items publish that escape just as assignment does.
+
+Destructor lookup searches matching declarations for the method, rather than
+letting an empty alias declaration hide its nominal Resource's `destroy`.
+This applies to local and other-file native lowering and JavaScript. The
+generated Resource rows check construction-derived destruction counts as well
+as the cross-engine trace, so agreement between two missing destructors cannot
+serve as a passing oracle.
+
+Wide evaluated aggregates get private stack snapshots at their original read.
+Helpers borrow those immutable snapshots; stores from them remain byte copies
+before LLVM SROA. This preserves evaluation order if a later argument mutates
+the source, and prevents capacity-sized SSA expansion and wasm argument
+promotion. Copies of owners still construct only the initialized prefix; an
+opaque byte snapshot neither creates another owner nor interprets spare slots.
+The same normalization runs for whole-program and per-unit compilation.
+
+Imported function names and namespace paths use the same reached-function
+resolver as direct calls and explicit generic applications. Their values use
+the existing synchronous/asynchronous thunks, including defaults and aggregate
+borrows. Non-LTO asynchronous units also run the coroutine pipeline at O0:
+dead-code removal alone cannot emit their unsplit coroutine intrinsics.
+
+The indirect argument path uses the Task-consuming predicate too; a fresh
+Resource argument remains a caller-owned temporary. JavaScript retains fresh
+borrowed arguments through the statement and releases them before an enclosing
+error handler on failure, including errors evaluating later arguments. Cleanup
+frames belong to the function being generated, never its enclosing declaration.
+The throwing-literal fixture constructs its resource prefix through a factory;
+moving a borrowed generic resource parameter into the prefix was invalid under
+the documented parameter contract. Typed errors retain their declared payload
+field formatter, independently of ordinary union payload representation order.
+
+## Links step 1b: merge with the trunk (2026-11-17)
+
+Objects linked without LTO (per-unit O0 builds, cached `fa run` objects, the
+JIT) are compiled by a target machine with LLVM's `FunctionSections` and
+`DataSections` (`fa_use_unique_sections` of the shim), as clang's
+`-ffunction-sections -fdata-sections`; the pass that named a section per
+function and global in the IR is removed. Sections named in the IR left the
+jump tables of every function in one shared `.rodata`: once any live
+function's jump table was there, `--gc-sections` kept every function those
+tables jump into. After the merge, the unused `json_value` of the
+freestanding runtime was kept this way, with its `strtod`, and the split O0
+freestanding imports fixtures no longer linked; the trunk's leak-checked
+per-unit map packages failed the same way. Wasm and ThinLTO objects are
+unchanged. The object-cache version is bumped.
+
+## Links reference landing: merge with the trunk (2026-11-17)
+
+Reference owner paths also carry InlineArray borrows, including generic capacity
+arguments. The evaluator uses those live paths instead of the older delayed
+copy/writeback protocol; loop items keep their existing reference semantics.
+Stored reference types use the common pre-erasure checker, including InlineArray
+aliases and generic defaults. JavaScript keeps both reference entry selection
+and resource destructor capabilities, with cleanup scopes local to each function.
+
+Native map exclusions resolve complete concrete generic application tuples before
+layout selection, then normalize each concrete key/item to the scalar or union
+ABI shared by its views. Per-unit provisional generic patterns are replaced by
+that complete result, keeping unused generics and unrelated maps optimized. Cache
+lookups retain matching families and invalidation logging. Exact helper type
+bindings, aggregate/async function entries and reference results remain combined;
+the object-cache generation includes both branches and a landing suffix.

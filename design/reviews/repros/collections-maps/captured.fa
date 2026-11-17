@@ -1,0 +1,10 @@
+-- asynchronous: false
+type Reader = () => UInt32?
+function make = (input: UInt32): Reader => {
+	mutable map = Map<UInt32, UInt32>.from([(input, 10)], capacity = 32)
+	map[input] = 42
+	() => map.get(input)
+}
+let readers = [make(7), make(UInt32.maxValue)]
+for read in readers { assert read() == 42 }
+console.log("capture ok") -- prints: capture ok

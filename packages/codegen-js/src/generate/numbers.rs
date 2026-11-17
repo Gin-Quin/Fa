@@ -879,6 +879,7 @@ impl Generator<'_> {
 				TypeKind::Object(_)
 					| TypeKind::Collection(
 						fa_analyzer::types::CollKind::Array
+							| fa_analyzer::types::CollKind::InlineArray
 							| fa_analyzer::types::CollKind::GrowingArray,
 						..
 					)

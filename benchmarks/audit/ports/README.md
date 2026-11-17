@@ -74,6 +74,15 @@ operator payload for a faithful calc port instead of silently widening it.
 
 ## Next ports
 
+The lead continuation decisions are recorded in design/decisions.md under
+Benchmark ports. The seven pool ports wait for the language study, retaining
+their current mains. Standard Map is the intended main comparison for words/lru,
+with the same 1.10-times-Goose goal. Lru-open is the expressible explicit-table
+variant; the words counterpart is blocked by REL001/REL002 in
+words-slice-key/main.fa. Main words now uses 32-bit counters and words-wide keeps
+the original 64-bit-counter sources. The table above remains the source audit at
+e7e05356, before these continuation changes.
+
 After the push checkpoint: unreserved sum/particles/blur variants, direct-output
 respond, then any pool ports enabled by the lead's relation/compact-link/inline-list
 decisions. Resolve words/lru exact-table-versus-standard-Map policy before

@@ -1,0 +1,35 @@
+-- The KEY32 empty marker is also a real key, in read-only and frame literals.
+-- asynchronous: false
+-- require-split: true
+
+function literal = (key: UInt32) => {
+	let map: Map<UInt32, UInt32> = [(0, 10), (key, 20), (UInt32.maxValue, 30)]
+	let other = copy map
+	assert map.get(0) == 10
+	assert map.get(key) == 20
+	assert map.get(UInt32.maxValue) == 30
+	assert other.size == 3
+	assert other.get(0) == 10
+	assert other.get(UInt32.maxValue) == 30
+}
+
+function frameLiteral = (key: UInt32) => {
+	let map: Map<UInt32, UInt32> = [(0, 10), (key, 20), (UInt32.maxValue, 30)]
+	assert map.get(0) == 10
+	assert map.get(key) == 20
+	assert map.get(UInt32.maxValue) == 30
+	assert map.size == 3
+}
+
+let map: Map<UInt32, UInt32> = [(0, 11), (1, 22), (UInt32.maxValue, 33)]
+let other = copy map
+assert map.get(0) == 11
+assert map.get(1) == 22
+assert map.get(2) is none
+assert map.get(UInt32.maxValue) == 33
+assert other.size == 3
+assert other.get(0) == 11
+assert other.get(UInt32.maxValue) == 33
+literal(7)
+frameLiteral(9)
+console.log("map storage sentinel") -- prints: map storage sentinel

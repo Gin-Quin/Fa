@@ -1,0 +1,22 @@
+type Resource = {
+	name: String
+	function destroy = (self) => { console.log("drop {self.name}") }
+}
+function read = (items: InlineArray<Resource, 1> = [Resource { name = "default" }]) => {
+	console.log(items.length) -- prints: 1
+}
+do {
+	mutable items: InlineArray<Resource, 1> = [Resource { name = "caller" }]
+	read(items)
+	console.log(items.length) -- prints: 1
+	read() -- prints: 1
+	-- prints: drop default
+	items.clear() -- prints: drop caller
+	console.log(items.length) -- prints: 0
+}
+function absent = (items: InlineArray<Resource, 1>? = [Resource { name = "optional default" }]): Boolean => {
+	items is none
+}
+console.log(absent(none)) -- prints: true
+-- prints: drop optional default
+console.log(absent()) -- prints: false

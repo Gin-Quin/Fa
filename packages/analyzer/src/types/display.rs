@@ -289,6 +289,13 @@ impl TypeStore {
 			TypeKind::Collection(kind, item, key) => {
 				out.push_str(kind.name());
 				open_arguments(out);
+				if kind == crate::types::CollKind::InlineArray {
+					self.write_type(out, item, false);
+					out.push_str(", ");
+					self.write_type(out, key, false);
+					close_arguments(out);
+					return;
+				}
 				if key != TypeId::NONE {
 					self.write_type(out, key, false);
 					out.push_str(", ");

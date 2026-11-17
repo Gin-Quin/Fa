@@ -1,0 +1,7 @@
+-- skip-target: native-freestanding (JSON needs the C library's floats)
+use { Json, JsonError } = std.json
+function encode = <capacity: UInt32>(values: InlineArray<Integer, capacity>): String => Json.stringify(values)
+function decode = <capacity: UInt32>(text: String): InlineArray<Integer, capacity> throws JsonError => try Json.parse(text)
+console.log(encode<2>(try decode<2>("[1,2]"))) -- prints: [1,2]
+decode<1>("[1,2]") catch _error => console.log("full") -- prints: full
+console.log(encode<0>(try decode<0>("[]"))) -- prints: []

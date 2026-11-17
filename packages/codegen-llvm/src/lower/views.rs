@@ -288,7 +288,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The closest function, lambda, task, test or watcher around a node
 	/// (`usize::MAX` for the top level of the file).
-	fn body_of(&self, node: usize, parents: &[usize]) -> usize {
+	pub(super) fn body_of(&self, node: usize, parents: &[usize]) -> usize {
 		let mut at = node;
 		while let Some(&parent) = parents.get(at) {
 			if parent == usize::MAX {

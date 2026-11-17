@@ -1,0 +1,31 @@
+type Row = { values: InlineArray<String, 2> }
+function row = (name: String): Row => Row { values = [name] }
+mutable array: Array<Row> = [row("array")]
+mutable growing: GrowingArray<Row> = [row("growing")]
+mutable pool: Pool<Row> = []
+mutable permanent: GrowingPool<Row> = []
+pool.add(row("pool"))
+permanent.add(row("permanent"))
+mutable columns: Columnar<Row> = []
+mutable stable: GrowingColumnar<Row> = []
+mutable ordered: OrderedColumnar<Row> = []
+columns.add(row("columns"))
+stable.add(row("stable"))
+ordered.add(row("ordered"))
+for entry in array { console.log(entry.values) } -- prints: ["array"]
+for entry in growing { console.log(entry.values) } -- prints: ["growing"]
+for entry in pool { console.log(entry.values) } -- prints: ["pool"]
+for entry in permanent { console.log(entry.values) } -- prints: ["permanent"]
+for entry in columns { console.log(entry.values) } -- prints: ["columns"]
+for entry in stable { console.log(entry.values) } -- prints: ["stable"]
+for entry in ordered { console.log(entry.values) } -- prints: ["ordered"]
+mutable mapping: Map<String, InlineArray<String, 2>> = []
+mutable persistent: GrowingMap<String, InlineArray<String, 2>> = []
+mapping["key"] = ["map"]
+persistent["key"] = ["growing map"]
+console.log(try mapping["key"], try persistent["key"]) -- prints: ["map"] ["growing map"]
+mutable keys: GrowingMap<InlineArray<String, 2>, Integer> = []
+keys[["key"]] = 1
+console.log(try keys[["key"]]) -- prints: 1
+mutable members: GrowingSet<InlineArray<String, 2>> = [["set"], ["set"]]
+console.log(members.size) -- prints: 1

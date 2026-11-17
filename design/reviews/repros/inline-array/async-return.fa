@@ -1,0 +1,6 @@
+async function make = (): InlineArray<String, 2> => {
+	await Task.yield()
+	["first string kept in the asynchronous return", "second"]
+}
+let values = await make()
+console.log(values) -- expected: ["first string kept in the asynchronous return", "second"]

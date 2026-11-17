@@ -1,0 +1,38 @@
+-- asynchronous: false
+function returned = (input: UInt32): Map<UInt32, UInt32> => {
+	mutable map = Map<UInt32, UInt32>.from([(input, 10)], capacity = 16)
+	map[UInt32.maxValue] = 99
+	map
+}
+function stored = (input: UInt32): { values: Map<UInt32, UInt32> } => {
+	mutable map = Map<UInt32, UInt32>.from([(input, 20)], capacity = 16)
+	map[0] = 30
+	{ values = map }
+}
+function moved = (input: UInt32): Map<UInt32, UInt32> => {
+	mutable map = Map<UInt32, UInt32>.from([(input, 40)], capacity = 16)
+	map[0] = 50
+	mutable next = map
+	next[UInt32.maxValue] = 60
+	next
+}
+function copied = (input: UInt32): Map<UInt32, UInt32> => {
+	mutable map = Map<UInt32, UInt32>.from([(input, 70)], capacity = 16)
+	mutable other = copy map
+	map[input] = 80
+	other[0] = 90
+	assert map.get(input) == 80
+	assert other.get(input) == 70
+	other
+}
+let a = returned(7)
+let b = stored(7)
+let c = moved(7)
+let d = copied(7)
+assert a.get(7) == 10
+assert a.get(UInt32.maxValue) == 99
+assert b.values.get(7) == 20
+assert c.get(7) == 40
+assert c.get(UInt32.maxValue) == 60
+assert d.get(7) == 70
+console.log("escape ok") -- prints: escape ok

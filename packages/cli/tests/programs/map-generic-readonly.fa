@@ -1,0 +1,17 @@
+-- asynchronous: false
+-- A generic literal needs separate static headers for each concrete layout.
+function constant = <K: Integer>(): Map<K, Int64> => {
+let result: Map<K, Int64> = [(0, 7)]
+result
+}
+function run = () => {
+	mutable stable: Map<UInt32, Int64> = constant()
+	use held = stable.getOrInsert(0, 0)
+	stable.reserve(100)
+	assert held == Int64(7)
+	let compact: Map<UInt16, Int64> = constant()
+	assert compact.get(0) == Int64(7)
+	assert stable.get(0) == Int64(7)
+}
+run()
+console.log("readonly generic ok") -- prints: readonly generic ok

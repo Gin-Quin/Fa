@@ -1,0 +1,74 @@
+-- Exercise the complete API in collection elements, through generic capacity.
+-- Every operation through generic methods, callbacks and compile-time calls.
+function append = <Item, capacity: UInt32>(items: InlineArray<Item, capacity>, item: Item)
+	throws CapacityError mutates items.length => { try items.push(item) }
+function operate = <capacity: UInt32>(items: InlineArray<String, capacity>)
+	throws CapacityError | IndexError mutates items => {
+	assert items.length == 0
+	assert items.capacity == capacity
+	assert items.pop() is none
+	assert items.get(-1) is none
+	try append<String, capacity>(items, "one")
+	try append<String, capacity>(items, "two")
+	try append<String, capacity>(items, "three")
+	mutable overflowed = false
+	items.push("overflow") catch _error => { overflowed = true }
+	assert overflowed
+	assert items.length == 3
+	assert items[2] == "three"
+	assert items.get(0) == "one"
+	assert items.get(3) is none
+	items[1] = "changed"
+	for item in items { item += "!" }
+	assert items.pop() == "three!"
+	assert items.take(1) == "changed!"
+	try append<String, capacity>(items, "deleted")
+	try items.delete(0)
+	assert try items[0] == "deleted"
+	items.clear()
+	assert items.length == 0
+	assert items.pop() is none
+	try append<String, capacity>(items, "result")
+}
+type Row<capacity: UInt32> = { items: InlineArray<String, capacity> = [] }
+mutable array: Array<Row<3>> = [{}]
+for row in array { try operate<3>(row.items)
+	console.log(row.items) } -- prints: ["result"]
+mutable growingArray: GrowingArray<Row<3>> = [{}]
+for row in growingArray { try operate<3>(row.items)
+	console.log(row.items) } -- prints: ["result"]
+mutable pool: Pool<Row<3>> = [{}]
+for row in pool { try operate<3>(row.items)
+	console.log(row.items) } -- prints: ["result"]
+mutable growingPool: GrowingPool<Row<3>> = [{}]
+for row in growingPool { try operate<3>(row.items)
+	console.log(row.items) } -- prints: ["result"]
+mutable columnar: Columnar<Row<3>> = [{}]
+for row in columnar { try operate<3>(row.items)
+	console.log(row.items) } -- prints: ["result"]
+mutable growingColumnar: GrowingColumnar<Row<3>> = [{}]
+for row in growingColumnar { try operate<3>(row.items)
+	console.log(row.items) } -- prints: ["result"]
+mutable orderedColumnar: OrderedColumnar<Row<3>> = [{}]
+for row in orderedColumnar { try operate<3>(row.items)
+	console.log(row.items) } -- prints: ["result"]
+mutable inlineArray: InlineArray<Row<3>, 1> = [{}]
+for row in inlineArray { try operate<3>(row.items)
+	console.log(row.items) } -- prints: ["result"]
+mutable map: Map<String, Row<3>> = [("row", {})]
+for (_key, row) in map { try operate<3>(row.items)
+	console.log(row.items) } -- prints: ["result"]
+mutable growingMap: GrowingMap<String, Row<3>> = [("row", {})]
+for (_key, row) in growingMap { try operate<3>(row.items)
+	console.log(row.items) } -- prints: ["result"]
+function build = (): InlineArray<String, 3> throws CapacityError | IndexError => {
+ mutable items: InlineArray<String, 3> = []
+	try operate<3>(items)
+	items
+}
+let set: Set<InlineArray<String, 3>> = [try build(), try build()]
+assert set.size == 1
+for items in set { console.log(items) } -- prints: ["result"]
+let growingSet: GrowingSet<InlineArray<String, 3>> = [try build(), try build()]
+assert growingSet.size == 1
+for items in growingSet { console.log(items) } -- prints: ["result"]

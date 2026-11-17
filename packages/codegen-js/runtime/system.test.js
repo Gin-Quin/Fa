@@ -176,3 +176,12 @@ describe("faJsonStringify", () => {
 		expect(faJsonStringify('say "hi"')).toBe('"say \\"hi\\""');
 	});
 });
+
+test("JSON bounded arrays validate the initialized count, including nested fields", () => {
+	expect(faJsonParse("[]", ["a", "s", 0])).toEqual([]);
+	expect(faJsonParse('["a","b"]', ["a", "s", 2])).toEqual(["a", "b"]);
+	expect(() => faJsonParse('["a"]', ["a", "s", 0])).toThrow();
+	expect(() =>
+		faJsonParse('{"items":[1,2]}', ["o", [["items", ["a", ["i", null, null], 1]]]]),
+	).toThrow();
+});

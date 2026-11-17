@@ -22,6 +22,7 @@ mod fields;
 mod foreign;
 mod functions;
 mod generics;
+mod inline_arrays;
 mod integer_variants;
 pub(crate) mod modules;
 mod number_api;
@@ -812,6 +813,8 @@ impl<'s> Generator<'s> {
 		let aliases = self.aliases.clone();
 		let maps = self.map_aliases.clone();
 		let references = self.references.clone();
+		let guards = std::mem::take(&mut self.guard_frames);
+		let guard_bindings = std::mem::take(&mut self.guard_bindings);
 		self.scopes.push();
 		let result = f(self);
 		self.scopes.pop();
@@ -819,6 +822,8 @@ impl<'s> Generator<'s> {
 		self.aliases = aliases;
 		self.map_aliases = maps;
 		self.references = references;
+		self.guard_frames = guards;
+		self.guard_bindings = guard_bindings;
 		let fcx = std::mem::replace(&mut self.fcx, saved);
 		(result, fcx.inline_temps)
 	}

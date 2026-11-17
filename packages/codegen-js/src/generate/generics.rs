@@ -28,12 +28,14 @@ use crate::js::{self, Expr};
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Hidden {
 	Value(ParamId),
+	Drop(ParamId),
 	Method(ParamId, Sym),
 }
 impl From<GenericRequirement> for Hidden {
 	fn from(value: GenericRequirement) -> Self {
 		match value {
 			GenericRequirement::Value(p) => Self::Value(p),
+			GenericRequirement::Drop(p) => Self::Drop(p),
 			GenericRequirement::Method(p, m) => Self::Method(p, m),
 		}
 	}
@@ -100,6 +102,15 @@ impl Generator<'_> {
 						Some(symbol) => self.declare(symbol),
 						None => self.temp(),
 					};
+					self.hidden_names.insert(entry, name.clone());
+					names.push(name);
+				}
+				Hidden::Drop(param) => {
+					let wanted = format!(
+						"${}$drop",
+						self.types.syms.resolve(self.types.param(param).name)
+					);
+					let name = self.declare_hidden_name(&wanted);
 					self.hidden_names.insert(entry, name.clone());
 					names.push(name);
 				}
@@ -247,6 +258,7 @@ impl Generator<'_> {
 						}
 						None => None,
 					},
+					Hidden::Drop(param) => binding(param).map(|ty| self.drop_argument(ty)),
 					Hidden::Method(param, method) => {
 						let parameter = generics
 							.iter()
@@ -315,6 +327,9 @@ impl Generator<'_> {
 				fa_analyzer::analysis::NodeFlags::GENERIC_APPLICATION,
 			) {
 			return self.signature_hidden_arguments(inner, call);
+		}
+		if matches!(self.view(callee), View::Lambda { .. }) {
+			return self.hidden_arguments(callee, call);
 		}
 		let named = match self.view(callee) {
 			View::Access { members, .. } | View::OptionalAccess { members, .. } => {
@@ -389,7 +404,7 @@ impl Generator<'_> {
 
 	/// The value a value parameter is bound to: a literal type, or the
 	/// enclosing function's own value parameter.
-	fn hidden_value(&mut self, ty: TypeId) -> Option<String> {
+	pub(crate) fn hidden_value(&mut self, ty: TypeId) -> Option<String> {
 		if let TypeKind::Param(param) = self.types.kind(ty) {
 			return self.hidden_names.get(&Hidden::Value(param)).cloned();
 		}
@@ -538,10 +553,18 @@ impl Generator<'_> {
 	/// Implicit generic-to-concrete function conversions bind capabilities
 	/// once at conversion, just like an explicitly written application.
 	pub(crate) fn instantiated_function_value(&mut self, node: NodeId, value: Expr) -> Expr {
+		let mut source = node;
+		while let View::Group(inner) = self.view(source) {
+			if self.analysis.instantiation(inner).is_some() {
+				return value;
+			}
+			source = inner;
+		}
 		if !matches!(
-			self.view(node),
+			self.view(source),
 			View::Name(_) | View::Access { .. } | View::Lambda { .. }
 		) || self.is_callee(node)
+			|| (source != node && self.analysis.instantiation(node).is_none())
 		{
 			return value;
 		}

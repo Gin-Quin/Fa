@@ -89,6 +89,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Never | Repr::Void => Ok(Repr::Bool),
 			// A collection provides this value's storage even when some of
 			// its own fields still require boxes to break direct cycles.
+			Repr::Rec(target)
+				if self.types().contains_inline_array(target)
+					&& !self.recursive_layout_is_finite(target) =>
+			{
+				self.repr_of(item, node.index())
+			}
 			Repr::Rec(target) => self.repr_of(target, node.index()),
 			repr => Ok(repr),
 		}
@@ -218,6 +224,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let repr = self.node_repr(node)?;
 		if let Repr::Map(_) | Repr::Set(_) = repr {
 			return self.table_literal(node, repr, items);
+		}
+		if let Repr::Tuple(ty) = repr
+			&& self.inline_info(ty).is_some()
+		{
+			return self.inline_literal(node, ty, items);
 		}
 		// `[1.0, 2.0, 3.0]` as a `CArray(Float32, 3)`: its items inline
 		if let Repr::Tuple(ty) = repr
@@ -789,9 +800,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			// room was reserved before the loop: no capacity check
 			let (items, length) = self.array_parts(array)?;
 			let slot = self.item_pointer(items, item, length)?;
-			let store = self
-				.builder
-				.build_store(slot, value.value.expect("an item"))?;
+			let store = self.builder.build_store(
+				slot,
+				value
+					.value
+					.unwrap_or_else(|| self.context.bool_type().const_zero().into()),
+			)?;
 			self.tag(store, false)?;
 			let length_pointer = self
 				.builder
@@ -881,9 +895,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.tag(instruction, true)?;
 		}
 		let slot = self.item_pointer(items.into_pointer_value(), item, length)?;
-		let stored = self
-			.builder
-			.build_store(slot, value.value.expect("an item"))?;
+		let stored = self.builder.build_store(
+			slot,
+			value
+				.value
+				.unwrap_or_else(|| self.context.bool_type().const_zero().into()),
+		)?;
 		self.tag(stored, false)?;
 		let next = self
 			.builder
@@ -894,7 +911,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// `array.get(index)`: the item, or `none`.
-	fn array_get(
+	pub(super) fn array_get(
 		&mut self,
 		array: Val<'ctx>,
 		index: Val<'ctx>,
@@ -972,6 +989,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		path: &str,
 		arguments: &[NodeId],
 	) -> Result<Val<'ctx>, Error> {
+		if let Some(ty) = self.inline_receiver_type(node) {
+			return self.inline_method(node, ty, path, arguments);
+		}
 		if path == "Array#get"
 			&& let [index] = arguments
 			&& let Some(text) = self.code_points_of(node)
@@ -1756,8 +1776,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let position = this.load(kept)?.int();
 					let (items, _) = this.array_parts(array)?;
 					let pointer = this.item_pointer(items, item, position)?;
-					this.builder
-						.build_store(pointer, value.value.expect("an item"))?;
+					this.builder.build_store(
+						pointer,
+						value
+							.value
+							.unwrap_or_else(|| self.context.bool_type().const_zero().into()),
+					)?;
 					let following =
 						this.builder
 							.build_int_nsw_add(position, i64.const_int(1, false), "")?;
@@ -1956,8 +1980,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let (_, length) = self.array_parts(array)?;
 				let result = self.alloca(repr, "popped")?;
 				let none = self.convert(Val::none(), repr, node.index())?;
-				self.builder
-					.build_store(result.pointer, none.value.expect("an optional"))?;
+				self.builder.build_store(
+					result.pointer,
+					none.value
+						.unwrap_or_else(|| self.context.bool_type().const_zero().into()),
+				)?;
 				let empty = self.builder.build_int_compare(
 					IntPredicate::EQ,
 					length,
@@ -1973,8 +2000,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.build_int_nsw_sub(length, i64.const_int(1, false), "")?;
 				let value = self.load_item(array, item, last)?;
 				let value = self.convert(value, repr, node.index())?;
-				self.builder
-					.build_store(result.pointer, value.value.expect("an optional"))?;
+				self.builder.build_store(
+					result.pointer,
+					value
+						.value
+						.unwrap_or_else(|| self.context.bool_type().const_zero().into()),
+				)?;
 				let header = self.header_type();
 				let length_pointer = self.builder.build_struct_gep(header, array, 1, "")?;
 				self.builder.build_store(length_pointer, last)?;
@@ -2018,8 +2049,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let pointer = self
 					.call_value(slot, &[array.into(), position.into(), size.into()])?
 					.into_pointer_value();
-				self.builder
-					.build_store(pointer, value.value.expect("an item"))?;
+				self.builder.build_store(
+					pointer,
+					value
+						.value
+						.unwrap_or_else(|| self.context.bool_type().const_zero().into()),
+				)?;
 				Ok(Val::void())
 			}
 			("Array#delete" | "Array#take", [index]) => {
@@ -2326,11 +2361,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.build_unconditional_branch(item_block)?;
 		self.builder.position_at_end(item_block);
 		let pointer = self.item_pointer(items, item, index)?;
-		let value = self.load(Slot {
-			pointer,
-			repr: item,
-		})?;
-		self.append_nested_of(value, item_type, node)?;
+		if let Repr::Tuple(ty) = item
+			&& self.inline_info(ty).is_some()
+		{
+			let format = self.aggregate_formatter(item, node)?;
+			self.builder.build_call(format, &[pointer.into()], "")?;
+		} else {
+			let value = self.load(Slot {
+				pointer,
+				repr: item,
+			})?;
+			self.append_nested_of(value, item_type, node)?;
+		}
 		let next = self
 			.builder
 			.build_int_nsw_add(index, i64.const_int(1, false), "")?;

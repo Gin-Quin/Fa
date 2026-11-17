@@ -28,10 +28,15 @@ Positional names select benchmarks/variants; `--suite secondary` selects own por
 and variants. The original suite is exactly `binary-trees`, `blur`, `calc`, `graph`,
 `interp`, `lru`, `particles`, `push`, `records`, `respond`, `scene`, `sexp`, `strlist`,
 `sum`, `tree`, `words`. `binary-trees` is Goose's `bintrees`, also one of the original
-ten: there are 25 unique original ports, plus growing-index and four variants.
+ten: there are 25 unique original ports, plus growing-index and ten variants.
 `push-array` preserves the original reserved Array port; `push` grows an unreserved
 GrowingArray, with integer marks as prescribed by Fa's reference documentation.
 Both use the suite's sole safe Rust push row (Vec+reserve, indices).
+The other continuation controls are sum-reserved, particles-reserved,
+blur-reserved, respond-interpolation, lru-open and words-wide. Lru-open uses
+its matching explicit-table Rust entry; words-wide retains the 64-bit-counter
+Rust entry. The standard words main uses 32-bit counters. Alternate Rust sources
+are selected and hashed as main.rs and excluded from other rows' inputs.
 Use `growing-index growing-index-array --size 16` (then 1000 and 1000000) with the
 same prepare/cpu/profile workflow. Render keeps size overrides as separate rows.
 
@@ -74,8 +79,8 @@ main ELF's object name, the postprocessor recovers anonymous PCs only when at
 least 90% of their instruction-weighted addresses match the saved executable's
 disassembly at one known load base. Empty executable instruction maps fail the
 profile step; they are not published as a successful attribution.
-Rust HashMap keeps its randomized default hasher for fairness: lru, words and
-word-count retain three Rust profiles and use the median-Ir execution, with every
+Rust HashMap keeps its randomized default hasher for fairness: lru, words,
+words-wide and word-count retain three Rust profiles and use the median-Ir execution, with every
 event set retained so hash-probe variation is visible. No deterministic hasher is
 substituted. Callgrind counts executed instructions exactly; entropy can still
 change which instructions a randomized program executes.

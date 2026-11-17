@@ -43,3 +43,14 @@ extern "C" void fa_use_init_array(LLVMTargetMachineRef machine) {
 extern "C" void fa_use_emulated_tls(LLVMTargetMachineRef machine) {
 	reinterpret_cast<llvm::TargetMachine *>(machine)->Options.EmulatedTLS = true;
 }
+
+// Makes a target machine give each function, global and jump table its own
+// ELF section (clang's `-ffunction-sections -fdata-sections`), so that
+// `--gc-sections` discards what nothing uses. Sections named in the IR would
+// leave the jump tables in one shared `.rodata`, which keeps every function
+// they jump into.
+extern "C" void fa_use_unique_sections(LLVMTargetMachineRef machine) {
+	llvm::TargetOptions &options = reinterpret_cast<llvm::TargetMachine *>(machine)->Options;
+	options.FunctionSections = true;
+	options.DataSections = true;
+}

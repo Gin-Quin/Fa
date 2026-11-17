@@ -1,5 +1,5 @@
 -- Word frequencies: a vocabulary of random words, a text of N words drawn from it with a skew
--- towards its front, split into words, then counted in a `Map<String, Integer>`.
+-- towards its front, split into words, then counted in a `Map<String, Int32>`.
 
 let letters = "abcdefghijklmnopqrstuvwxyz"
 
@@ -43,7 +43,7 @@ for 0..n {
 let words = text.split(" ").filter((word) => not word.isEmpty())
 
 -- Sized for the vocabulary up front, as Goose sizes its table.
-mutable counts = Map<String, Integer>.from([], capacity = vocabularySize)
+mutable counts = Map<String, Int32>.from([], capacity = vocabularySize)
 for word in words {
 	use count = counts.getOrInsert(word, 0)
 	count += 1

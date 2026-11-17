@@ -2520,3 +2520,13 @@ Ordinary String arguments are immutable values; explicitly dependent String
 arguments still retain their place. Borrowing a compile-time constant gives it
 caller-lived temporary storage. JSON default closures capture their snapshot
 slots by value, matching their nonescaping parser lifetime.
+
+## JavaScript follow-ups (2026-11-17)
+
+`Pointer.allocate` and `Pointer#free` use the same analyzer target check as C calls, report FFI008 on Node/web, and mark the analysis target-dependent so conditional compilation and interface caching retain the restriction.
+
+Successful JavaScript String JSON parsing stays on the engine parser. On rejection, an iterative error-only scanner follows the native parser's grammar, wording and error precedence; no engine wording or offset enters JsonError. Successful Bytes parsing still decodes individual string tokens; only its error path may decode the whole document, first diagnosing invalid UTF-8. The scanner does not construct values or apply schemas. Shared runtime helper extraction keeps it absent from programs without JSON parsing.
+
+Dense numeric `when` decisions use the existing switch emitter from sixteen arms when their signed-32-bit constants fill at least half the span and no arm contains a loop break. Smaller, sparse, BigInt and nonnumeric matches keep their current lowering. Five fresh-process samples per variant on CPU 5: the 16-arm chain/switch medians are 149.514/121.959 ms on Bun 1.4.4 (-18.4%) and 127.113/109.362 ms on Node v26.13.1 (-14.0%), for ten million randomized dispatches. Peak RSS is essentially unchanged (24,320/23,808 KiB Bun; 55,508/55,380 KiB Node). Sources, exact checksums and samples are in benchmarks/js-followups; the experiment also preserves the separate 64-bit RNG study requested for a later representation project.
+
+A checked destructuring pattern, codeUnitAt argument list, or when decision list missing its required analysis data is an internal compiler fault, not an unsupported language feature. These three defensive paths now emit an internal JavaScript compiler diagnostic under AN001 without panicking. Other refusal sites retain their existing meaning until individually audited.

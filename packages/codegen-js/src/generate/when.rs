@@ -15,6 +15,10 @@ use crate::js::{self, Expr, Prec};
 /// ([`Generator::flat_when`]).
 const FLAT_WHEN_ARMS: usize = 64;
 
+/// Dense integer dispatch measures faster on both JavaScript engines at
+/// sixteen arms. Smaller and nonnumeric decisions retain their short chains.
+const DENSE_WHEN_ARMS: usize = 16;
+
 impl Generator<'_> {
 	/// A `when` whose arms' values go to `dest`.
 	pub(crate) fn when_into(&mut self, n: NodeId, dest: Dest) {
@@ -45,7 +49,14 @@ impl Generator<'_> {
 		};
 		let subject_type = list.subject_type;
 		let count = list.decisions.len();
-		if count >= FLAT_WHEN_ARMS {
+		let dense = count >= DENSE_WHEN_ARMS
+			&& self.repr(subject_type) == Repr::Number
+			&& Self::dense_integer_cases(&list.decisions)
+			&& !list
+				.decisions
+				.iter()
+				.any(|decision| self.has_break(decision.value));
+		if count >= FLAT_WHEN_ARMS || dense {
 			self.flat_when(&list.decisions, &subject, subject_type, &dest, units);
 			return;
 		}
@@ -90,6 +101,29 @@ impl Generator<'_> {
 		if count > 0 {
 			self.out.close("");
 		}
+	}
+
+	/// The tested constants fit a compact signed-32-bit dispatch table.
+	/// The exhaustive last arm becomes the default, as in `flat_when`.
+	fn dense_integer_cases(decisions: &[Decision<'_>]) -> bool {
+		let values: Option<Vec<i32>> = decisions
+			.iter()
+			.take(decisions.len().saturating_sub(1))
+			.flat_map(|decision| &decision.tests)
+			.map(|test| match test {
+				Test::Equals(Literal::Integer(value)) => i32::try_from(*value).ok(),
+				_ => None,
+			})
+			.collect();
+		let Some(mut values) = values else {
+			return false;
+		};
+		values.sort_unstable();
+		values.dedup();
+		let (Some(&min), Some(&max)) = (values.first(), values.last()) else {
+			return false;
+		};
+		i64::from(max) - i64::from(min) < 2 * values.len() as i64
 	}
 
 	/// The body of an arm: its bindings, then its value into `dest`.
@@ -168,7 +202,9 @@ impl Generator<'_> {
 				};
 				self.out.open(header);
 				self.when_arm(decision, subject, dest);
-				self.out.line("break;");
+				if !matches!(dest, Dest::Return) {
+					self.out.line("break;");
+				}
 				self.out.close("");
 			}
 			self.out.close("");

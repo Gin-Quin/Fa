@@ -171,18 +171,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		((header + slots * 8 + directory + 15) & !15) + chunks * chunk
 	}
 
-	/// Every table operation uses the same concrete type and the same
-	/// exclusions, including generic patterns (`facts::map_excluded`). A
-	/// lowering without complete program facts keeps stable chunks.
+	/// Every operation consults the same normalized map ABI, including scalar
+	/// views. Concrete applications were resolved before any layout was chosen.
 	fn map_excluded(
 		&self,
 		ty: TypeId,
 		kind: &'static str,
 		local: &std::collections::BTreeSet<String>,
 	) -> bool {
+		let ty = self.concrete_type(ty);
 		crate::facts::map_excluded(self.types(), ty, |name| {
 			if self.whole_program {
-				local.contains(name)
+				crate::facts::contains_map_fact(local, name)
 			} else {
 				self.program_facts.as_ref().is_none_or(|facts| {
 					facts
@@ -193,13 +193,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		})
 	}
 
-	/// No reference into a map of this type outlives growth: entries may
-	/// move. The type has already been resolved by `table_of`.
-	fn dense_map(&self, ty: TypeId) -> bool {
+	/// No reference into a map of this ABI outlives growth.
+	pub(crate) fn dense_map(&self, ty: TypeId) -> bool {
 		!self.map_excluded(ty, crate::facts::REFERENCED_MAPS, &self.unsafe_maps)
 	}
 
-	/// A `deleteWhere` needs positions that shifting deletion cannot move.
 	fn deleted_while_iterated(&self, ty: TypeId) -> bool {
 		self.map_excluded(
 			ty,
@@ -572,7 +570,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// `fa.hash.<shape>(value) -> i64`: equal keys have equal hashes.
 	pub(crate) fn hash_function(&self, repr: Repr) -> Result<FunctionValue<'ctx>, Error> {
-		let key = format!("hash {repr:?}");
+		let key = format!("hash {}", self.shape_key(repr));
 		if let Some(function) = self.drop_functions.borrow().get(&key) {
 			return Ok(*function);
 		}
@@ -679,7 +677,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// the runtime calls it for the rare rebuilds of the index that need
 	/// the hashes of the keys (a set compacting its entries, a wide index).
 	pub(crate) fn hash_at_function(&self, repr: Repr) -> Result<FunctionValue<'ctx>, Error> {
-		let key = format!("hash_at {repr:?}");
+		let key = format!("hash_at {}", self.shape_key(repr));
 		if let Some(function) = self.drop_functions.borrow().get(&key) {
 			return Ok(*function);
 		}
@@ -2058,6 +2056,95 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The methods of sets and maps, `Set.from` and `Map.from`.
+	/// Find the first live entry, retaining its address for either data reads
+	/// or an explicitly borrowed set result.
+	fn find_table_entry(
+		&mut self,
+		pointer: PointerValue<'ctx>,
+		table: Table<'ctx>,
+		callback: Val<'ctx>,
+		callback_node: NodeId,
+	) -> Result<PointerValue<'ctx>, Error> {
+		let found = self.alloca_type(self.pointer_type().into(), "found_entry")?;
+		self.builder
+			.build_store(found, self.pointer_type().const_null())?;
+		self.for_each_entry(pointer, table, |this, entry, _| {
+			let previous = this
+				.builder
+				.build_load(this.pointer_type(), found, "")?
+				.into_pointer_value();
+			let search = this.append_block("find_entry");
+			let skip = this.append_block("found_entry");
+			let missing = this.builder.build_is_null(previous, "")?;
+			this.builder
+				.build_conditional_branch(missing, search, skip)?;
+			this.builder.position_at_end(search);
+			let holds = this.entry_callback(callback, callback_node, entry, table, &[])?;
+			let take = this.append_block("find_take");
+			this.builder
+				.build_conditional_branch(holds.int(), take, skip)?;
+			this.builder.position_at_end(take);
+			this.builder.build_store(found, entry)?;
+			this.builder.build_unconditional_branch(skip)?;
+			this.builder.position_at_end(skip);
+			Ok(())
+		})?;
+		Ok(self
+			.builder
+			.build_load(self.pointer_type(), found, "")?
+			.into_pointer_value())
+	}
+
+	pub(super) fn set_reference(
+		&mut self,
+		node: NodeId,
+	) -> Result<Option<(Slot<'ctx>, bool)>, Error> {
+		let Some(info) = self.analysis.call(node).cloned() else {
+			return Ok(None);
+		};
+		let Callee::Builtin(id) = info.callee else {
+			return Ok(None);
+		};
+		if fa_analyzer::builtins::get(id).path != "Set#find" {
+			return Ok(None);
+		}
+		let receiver = self.receiver(node)?;
+		let table = self.table_of(receiver.repr)?;
+		let [Argument::Given(callback_node)] = info.arguments.as_slice() else {
+			return Err(self.unsupported(node.index(), "this set predicate"));
+		};
+		let callback = self.expr(*callback_node)?;
+		let entry = self.find_table_entry(
+			receiver.value.expect("set").into_pointer_value(),
+			table,
+			callback,
+			*callback_node,
+		)?;
+		let result = self.alloca_type(self.pointer_type().into(), "set_reference")?;
+		self.builder
+			.build_store(result, self.pointer_type().const_null())?;
+		let present = self.builder.build_is_not_null(entry, "")?;
+		let take = self.append_block("set_reference_found");
+		let end = self.append_block("set_reference_end");
+		self.builder.build_conditional_branch(present, take, end)?;
+		self.builder.position_at_end(take);
+		let key = self.entry_slot(entry, table, false)?;
+		self.builder.build_store(result, key.pointer)?;
+		self.builder.build_unconditional_branch(end)?;
+		self.builder.position_at_end(end);
+		let pointer = self
+			.builder
+			.build_load(self.pointer_type(), result, "")?
+			.into_pointer_value();
+		Ok(Some((
+			Slot {
+				pointer,
+				repr: table.key,
+			},
+			true,
+		)))
+	}
+
 	pub(crate) fn table_method(
 		&mut self,
 		node: NodeId,
@@ -2253,61 +2340,45 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.load(result)
 			}
 			("find", [callback]) => {
-				let callback_node = nodes[0];
 				let repr = self.collection_optional_repr(self.node_repr(node)?, table.key);
 				let result = self.alloca(repr, "found")?;
 				self.builder
 					.build_store(result.pointer, self.llvm_type(repr).const_zero())?;
-				let done = self.alloca(Repr::Bool, "done")?;
+				let entry = self.find_table_entry(pointer, table, *callback, nodes[0])?;
+				let present = self.builder.build_is_not_null(entry, "")?;
+				let take = self.append_block("find_present");
+				let end = self.append_block("find_end");
+				self.builder.build_conditional_branch(present, take, end)?;
+				self.builder.position_at_end(take);
+				let key = self.entry_slot(entry, table, false)?;
+				let found = match (table.value, repr) {
+					(Some(_), Repr::Optional(Scalar::Tuple(tuple))) => {
+						let fields = self.tuple_reprs(tuple);
+						let key = self.collection_item_view(key, fields[0], node.index())?;
+						let value = self.entry_slot(entry, table, true)?;
+						let value = self.collection_item_view(value, fields[1], node.index())?;
+						let structure = self.tuple_type(tuple);
+						let pair = self.builder.build_insert_value(
+							structure.get_undef(),
+							key.value.expect("a key"),
+							0,
+							"",
+						)?;
+						let pair = self.builder.build_insert_value(
+							pair,
+							value.value.expect("a value"),
+							1,
+							"",
+						)?;
+						Val::new(Repr::Tuple(tuple), pair.into_struct_value())
+					}
+					_ => self.load(key)?,
+				};
+				let found = self.convert(found, repr, node.index())?;
 				self.builder
-					.build_store(done.pointer, bool_type.const_zero())?;
-				self.for_each_entry(pointer, table, |this, entry, _| {
-					let finished = this.load(done)?.int();
-					let search = this.append_block("find_entry");
-					let skip = this.append_block("found_entry");
-					this.builder
-						.build_conditional_branch(finished, skip, search)?;
-					this.builder.position_at_end(search);
-					let holds = this.entry_callback(*callback, callback_node, entry, table, &[])?;
-					let take = this.append_block("find_take");
-					this.builder
-						.build_conditional_branch(holds.int(), take, skip)?;
-					this.builder.position_at_end(take);
-					let key = this.entry_slot(entry, table, false)?;
-					let found = match (table.value, repr) {
-						(Some(_), Repr::Optional(Scalar::Tuple(tuple))) => {
-							let fields = this.tuple_reprs(tuple);
-							let key = this.collection_item_view(key, fields[0], node.index())?;
-							let value = this.entry_slot(entry, table, true)?;
-							let value =
-								this.collection_item_view(value, fields[1], node.index())?;
-							let structure = this.tuple_type(tuple);
-							let pair = this.builder.build_insert_value(
-								structure.get_undef(),
-								key.value.expect("a key"),
-								0,
-								"",
-							)?;
-							let pair = this.builder.build_insert_value(
-								pair,
-								value.value.expect("a value"),
-								1,
-								"",
-							)?;
-							Val::new(Repr::Tuple(tuple), pair.into_struct_value())
-						}
-						_ => this.load(key)?,
-					};
-					let found = this.convert(found, repr, node.index())?;
-					this.builder
-						.build_store(result.pointer, found.value.expect("a value"))?;
-					this.builder
-						.build_store(done.pointer, bool_type.const_int(1, false))?;
-					this.builder.build_unconditional_branch(skip)?;
-					this.builder.position_at_end(skip);
-					Ok(())
-				})?;
-				// a view of the entry
+					.build_store(result.pointer, found.value.expect("a value"))?;
+				self.builder.build_unconditional_branch(end)?;
+				self.builder.position_at_end(end);
 				self.load(result)
 			}
 			("filter", [callback]) => {

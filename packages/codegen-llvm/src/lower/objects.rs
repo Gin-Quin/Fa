@@ -963,14 +963,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	// ── objects ─────────────────────────────────────────────────────────
 
+	/// Field names survive promotion between the local and global stores.
+	pub(super) fn same_field_name(
+		&self,
+		left: fa_analyzer::ids::Sym,
+		right: fa_analyzer::ids::Sym,
+	) -> bool {
+		left == right || self.types().syms.resolve(left) == self.types().syms.resolve(right)
+	}
+
 	/// The shape index of a field of an object type.
 	fn field_index(&self, ty: TypeId, name: fa_analyzer::ids::Sym) -> Option<u32> {
 		self.types()
 			.fields_of(ty)
 			.iter()
-			.position(|field| {
-				self.types().syms.resolve(field.name) == self.types().syms.resolve(name)
-			})
+			.position(|field| self.same_field_name(field.name, name))
 			.map(|index| index as u32)
 	}
 
@@ -986,9 +993,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.types()
 			.fields_of(owner)
 			.get(index as usize)
-			.is_some_and(|field| {
-				self.types().syms.resolve(field.name) == self.types().syms.resolve(name)
-			}) {
+			.is_some_and(|field| self.same_field_name(field.name, name))
+		{
 			return Ok(u32::from(index));
 		}
 		self.field_index(owner, name)
@@ -1216,7 +1222,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.types()
 				.fields_of(from_type)
 				.iter()
-				.find(|other| other.name == field.name)
+				.find(|other| self.same_field_name(other.name, field.name))
 				.map(|other| other.ty)
 				.expect("a field");
 			let from_repr = self.repr_of(from_field, node.index())?;
@@ -1307,9 +1313,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			(TypeKind::Object(declared), TypeKind::Object(actual)) => {
 				let actual = types.shape_fields(actual);
 				for field in types.shape_fields(declared) {
-					if let Some(other) = actual.iter().find(|other| {
-						types.syms.resolve(other.name) == types.syms.resolve(field.name)
-					}) {
+					if let Some(other) = actual
+						.iter()
+						.find(|other| self.same_field_name(other.name, field.name))
+					{
 						self.match_params(field.ty, other.ty, found, depth + 1);
 					}
 				}
@@ -1577,9 +1584,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.filter(|&name| !types.syms.resolve(name).starts_with('#'))
 			.filter(|&name| self.side_repr(ty, name).is_none())
 			.filter_map(|name| {
-				let index = shape.iter().position(|field| {
-					self.types().syms.resolve(field.name) == self.types().syms.resolve(name)
-				})?;
+				let index = shape
+					.iter()
+					.position(|field| self.same_field_name(field.name, name))?;
 				Some((
 					types.syms.resolve(name).to_string(),
 					index as u32,
@@ -1670,6 +1677,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		target: NodeId,
 		members: NodeList<'_>,
 	) -> Result<Val<'ctx>, Error> {
+		if self.is_generic_function_type(self.type_of(node))
+			&& let Some(reached) = self.callee_function(node)
+		{
+			return self.reached_generic_function_value(reached, node);
+		}
 		// `Palette.Color.red`, `Self.Shade.Dark`: the types declared inside
 		// types first; the rest reads like a member of the last of them
 		let nested = members
@@ -1751,6 +1763,30 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				)),
 				_ => self.build_member(nominal, index, None, node),
 			};
+		}
+		// A method used through its type is an unbound function value:
+		// the caller supplies self, so the type name is never a runtime load.
+		if self.flags(target).contains(NodeFlags::TYPE_EXPR) {
+			if let Some(member) = members.last()
+				&& let Resolution::Local(symbol) = self.analysis.resolution(member)
+			{
+				let data = self.analysis.symbols.symbol(symbol);
+				if data.kind == fa_analyzer::symbols::SymbolKind::Function {
+					return self.function_value(data.decl_node, node);
+				}
+			}
+			if let Some(reached) = self.callee_function(node) {
+				let function = match reached {
+					super::program::Reached::Function(file, declaration) => {
+						self.function_in(file, declaration, node)?
+					}
+					super::program::Reached::RemoteFunction(key) => {
+						self.remote_function(key, node)?
+					}
+					_ => unreachable!("a reached function"),
+				};
+				return self.applied_external_function_value(&function, node);
+			}
 		}
 		// `Integer.maxValue`, `Float.infinity`…
 		if let Resolution::Builtin(id) = self.analysis.resolution(first)
@@ -2206,6 +2242,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	pub(crate) fn place(&mut self, node: NodeId) -> Result<Slot<'ctx>, Error> {
 		match self.view(node) {
+			View::Try(inner) => self.place(inner),
+			View::Call { .. } if self.user_reference_result(node).is_some() => {
+				let (element, _) = self.user_reference_result(node).expect("checked above");
+				let raw = self.call_present(node)?;
+				let pointer = raw.value.expect("a reference address").into_pointer_value();
+				Ok(Slot {
+					pointer,
+					repr: self.reference_result_repr(node, element)?,
+				})
+			}
 			View::Name(_) => {
 				let resolution = self.analysis.resolution(node);
 				if let Some(reached) = self.external(resolution)

@@ -31,7 +31,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		{
 			return self.optional_call(node, target, members);
 		}
-		self.call_present(node)
+		let raw = self.call_present(node)?;
+		self.read_reference_result(node, raw)
 	}
 
 	/// A call whose receiver, if any, is present.
@@ -145,9 +146,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let Argument::Given(argument) = argument else {
 						return Err(self.unsupported(node.index(), "these arguments"));
 					};
+					if self.explicit_reference_parameter(ty, position) {
+						let address = self.borrowed_result(*argument)?;
+						let (params, _, _) = self.value_signature(ty, node)?;
+						let repr = params[position];
+						arguments.push(Val::new(repr, self.zero_value(repr)));
+						places.push(Some(
+							address
+								.value
+								.expect("a reference address")
+								.into_pointer_value(),
+						));
+						continue;
+					}
 					if changed.contains(&position) && self.is_place(*argument) {
 						let place = self.place(*argument)?;
-						if self.borrows_parameter(place.repr) {
+						if self.signature_borrows(ty, position, place.repr) {
 							arguments.push(Val::new(place.repr, self.zero_value(place.repr)));
 							places.push(Some(place.pointer));
 							continue;
@@ -266,30 +280,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			function.info.sig,
 			function.throws,
 		);
-		// an instance's result typed with its type parameters: the type of
-		// the call (`twice(7)`: `Array(Integer)`, not `Array(Value)`)
-		let ret = match ret {
-			Repr::Object(ty)
-			| Repr::Array(ty)
-			| Repr::Function(ty)
-			| Repr::Tuple(ty)
-			| Repr::Rec(ty)
-			| Repr::Map(ty)
-			| Repr::Set(ty)
-			| Repr::Growing(ty)
-			| Repr::Pool(ty)
-			| Repr::Sync(ty)
-			| Repr::Task(ty)
-				if !function.bindings.is_empty()
-					&& self
-						.types()
-						.flags(ty)
-						.contains(fa_analyzer::types::TypeFlags::HAS_PARAM) =>
-			{
-				self.node_repr(node).unwrap_or(ret)
-			}
-			_ => ret,
-		};
+		// Resolve the declared layout under the callee's exact bindings, then
+		// restore the caller before evaluating any argument.
+		let ret = self.concrete_call_repr(&function, ret, true);
 		// a method of a worker of an asynchronous program: a call on its thread (tasks.rs)
 		if let Some(value) = self.worker_call(node, &function, info)? {
 			return Ok(value);
@@ -315,8 +308,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let receiver_first = matches!(info.arguments.first(), Some(Argument::Receiver(_)));
 		let mut receiver_value = None;
 		if receiver_first && by_pointer.first() == Some(&true) {
-			let receiver = self.method_receiver(node);
-			let repr = self.concrete_param_repr(&function, params[0].0, receiver)?;
+			let repr = self.concrete_call_repr(&function, params[0].0, false);
 			let (pointer, write_back) =
 				self.argument_place(node, None, repr, function.borrowed[0])?;
 			places.insert(0, pointer);
@@ -329,8 +321,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			receiver_value = Some(lowered);
 		}
 		for (position, value) in given {
+			if self.explicit_reference_parameter(function.info.ty, position) {
+				let address = self.borrowed_result(value)?;
+				places.insert(
+					position,
+					address
+						.value
+						.expect("a reference address")
+						.into_pointer_value(),
+				);
+				continue;
+			}
 			if by_pointer.get(position) == Some(&true) {
-				let repr = self.concrete_param_repr(&function, params[position].0, Some(value))?;
+				let repr = self.concrete_call_repr(&function, params[position].0, false);
 				let (pointer, write_back) =
 					self.argument_place(node, Some(value), repr, function.borrowed[position])?;
 				places.insert(position, pointer);
@@ -421,6 +424,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			for pointer in self.requirement_arguments(node, &keys)? {
 				arguments.push(pointer.into());
 			}
+		}
+		if let Some(repr) = function.reference_buffer {
+			arguments.push(self.allocate_reference_buffer(repr)?.into());
 		}
 		let return_slot = if function.return_slot {
 			let slot = self.call_return_slot(node, ret)?;
@@ -632,36 +638,55 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		result
 	}
 
-	/// The representation of a parameter of an instance typed with its type
-	/// parameters (`self: Pair<Left, Right>`), as the caller sees it: the
-	/// representation of the argument (`argument`) given to it.
-	fn concrete_param_repr(
+	/// A call keeps its declared slot layout, even if the given value is
+	/// narrower. Normalize under the callee without evaluating caller code.
+	fn concrete_call_repr(
 		&self,
 		function: &super::Function<'ctx>,
 		repr: Repr,
-		argument: Option<NodeId>,
-	) -> Result<Repr, Error> {
+		returning: bool,
+	) -> Repr {
+		if function.bindings.is_empty() && function.types.is_empty() {
+			return repr;
+		}
+		let mut bindings = self.bindings.borrow().clone();
+		bindings.extend(
+			function
+				.bindings
+				.iter()
+				.map(|(param, repr)| (*param, *repr)),
+		);
+		let saved = self.bindings.replace(bindings);
+		let mut types = self.type_bindings.borrow().clone();
+		types.extend(function.types.iter().map(|(param, ty)| (*param, *ty)));
+		let saved_types = self.type_bindings.replace(types);
+		let repr = self.concrete_bound_repr(repr, returning);
+		self.type_bindings.replace(saved_types);
+		self.bindings.replace(saved);
+		repr
+	}
+
+	fn concrete_bound_repr(&self, repr: Repr, returning: bool) -> Repr {
 		match repr {
-			Repr::Object(ty)
-			| Repr::Array(ty)
-			| Repr::Function(ty)
-			| Repr::Tuple(ty)
-			| Repr::Map(ty)
-			| Repr::Set(ty)
-			| Repr::Growing(ty)
-			| Repr::Pool(ty)
-				if !function.bindings.is_empty()
-					&& self
-						.types()
-						.flags(ty)
-						.contains(fa_analyzer::types::TypeFlags::HAS_PARAM) =>
-			{
-				match argument {
-					Some(argument) => self.node_repr(argument),
-					None => Ok(repr),
-				}
-			}
-			_ => Ok(repr),
+			Repr::Optional(item) => Repr::Optional(
+				super::values::Scalar::of(self.concrete_bound_repr(item.repr(), returning))
+					.unwrap_or(item),
+			),
+			Repr::Object(ty) => Repr::Object(self.concrete_type(ty)),
+			Repr::Array(ty) => Repr::Array(self.concrete_type(ty)),
+			Repr::Function(ty) => Repr::Function(self.concrete_type(ty)),
+			Repr::Tuple(ty) => Repr::Tuple(self.concrete_type(ty)),
+			Repr::Map(ty) => Repr::Map(self.concrete_type(ty)),
+			Repr::Set(ty) => Repr::Set(self.concrete_type(ty)),
+			Repr::Growing(ty) => Repr::Growing(self.concrete_type(ty)),
+			Repr::Pool(ty) => Repr::Pool(self.concrete_type(ty)),
+			Repr::Columnar(ty) => Repr::Columnar(self.concrete_type(ty)),
+			// These are result normalizations only: their parameter-address
+			// conventions are handled separately by argument_place.
+			Repr::Rec(ty) if returning => Repr::Rec(self.concrete_type(ty)),
+			Repr::Sync(ty) if returning => Repr::Sync(self.concrete_type(ty)),
+			Repr::Task(ty) if returning => Repr::Task(self.concrete_type(ty)),
+			_ => repr,
 		}
 	}
 
@@ -690,6 +715,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		repr: Repr,
 		at: usize,
 	) -> Result<Val<'ctx>, Error> {
+		let repr = self.concrete_call_repr(function, repr, false);
 		if function.bindings.is_empty() {
 			return self.convert(value, repr, at);
 		}
@@ -708,7 +734,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		);
 		let saved = self.bindings.replace(merged);
 		let mut types = self.type_bindings.borrow().clone();
-		types.extend(function.types.iter().map(|(&param, &ty)| (param, ty)));
+		types.extend(function.types.iter().map(|(param, ty)| (*param, *ty)));
 		let saved_types = self.type_bindings.replace(types);
 		let converted = self.convert(value, repr, at);
 		self.type_bindings.replace(saved_types);
@@ -1165,7 +1191,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// A selection made while checking a generic body may still refer to
 	/// that body's parameters. Preserve its exact owner arguments and method
 	/// dependencies before switching to the file declaring the selected method.
-	fn concrete_method(&self, method: GenericMethod) -> GenericMethod {
+	pub(super) fn concrete_method(&self, method: GenericMethod) -> GenericMethod {
 		let arguments = self.types().list_items(method.arguments).to_vec();
 		let mut dependencies = method.methods.as_ref().clone();
 		dependencies.extend(self.forwarded_methods(&arguments));
@@ -1183,6 +1209,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.iter()
 			.map(|&argument| merger.ty(argument))
 			.collect();
+		let module = merger.module(module);
 		drop(merger);
 		let mut scratch = fa_analyzer::types::TypeStore::view(self.types().global());
 		let list = scratch.list(&arguments);
@@ -1225,8 +1252,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		&self,
 		call: NodeId,
 	) -> Option<&fa_analyzer::analysis::WrittenType> {
-		let View::Call { mut callee, .. } = self.view(call) else {
-			return None;
+		let mut root = call;
+		while let View::Group(inner) = self.view(root) {
+			root = inner;
+		}
+		let mut callee = match self.view(root) {
+			View::Call { callee, .. } => callee,
+			View::Access { .. } | View::OptionalAccess { .. } => root,
+			_ => return None,
 		};
 		loop {
 			while let View::Group(inner) = self.view(callee) {

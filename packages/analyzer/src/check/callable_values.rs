@@ -267,7 +267,7 @@ impl Walker<'_> {
 				Some(&place) => place,
 				None => self.places.symbol(symbol),
 			};
-			self.record_capture_origins(lambda, symbol, place);
+			self.record_ownership_capture_origins(lambda, symbol, place);
 			let declared = self
 				.place_type(place)
 				.unwrap_or(self.a.symbols.symbol(symbol).ty);

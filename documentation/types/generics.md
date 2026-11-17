@@ -461,7 +461,8 @@ Generic types, generic functions, structural constraints, compile-time value par
 - Generic functions are erased: one JavaScript function serves every use, without boxing.
 - A parameter bound to a union whose members behave differently at runtime (`Integer | Float` when the operations differ, an explicit `Int64` represented as a `BigInt`, overflow checks) gets one JavaScript instance per member actually used.
 - Operations that depend on the actual type of another parameter (static methods, copies, `==`, hashing, formatting) receive hidden dictionaries of functions.
-- Imported calls use the same published generic order and runtime requirements as local calls. Applying a generic function as a value binds those hidden arguments.
+- Imported calls use the same published generic order and runtime requirements as local calls. Each erased type parameter also receives an object-versus-slot flag for references; primitive and mixed-union slots keep their cached carrier even when the current value is an object.
+- Explicit applications and implicit conversions to a concrete function type bind hidden arguments once when the function value is created. A written generic owner binds its own arguments while preserving a method's remaining generic list. The bound function preserves an asynchronous entry's task-first convention.
 - A parameter of a generic function type receives the JavaScript function itself: the function that receives it is erased too, and needs one instance per argument only when the argument needs one of the instances or dictionaries above.
 
 ### Native

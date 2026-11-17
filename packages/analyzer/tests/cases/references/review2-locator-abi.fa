@@ -1,0 +1,29 @@
+type Node = { left: Integer, right: Integer, children: Array<Integer> }
+function element = (values: Array<Integer>, i: Integer): Integer in values throws IndexError => try values[i]
+function field = (values: Array<Node>): Integer in values throws IndexError => try values[0].left
+function choose = (values: Array<Node>, right: Boolean): Integer in values throws IndexError => {
+ if right { try values[0].right } else { try values[0].left }
+}
+function nested = (values: Array<Node>): Integer in values throws IndexError => try values[0].children[0]
+function bump = (owner: Array<Node>, value: Integer in owner) mutates value => { use target = value
+ target += 1 }
+type Choose = (values: Array<Node>, right: Boolean) => Integer in values throws IndexError
+function exercise = (): Array<Integer> throws IndexError => {
+ mutable values: Array<Integer> = [1, 2]
+ use item = try element(values, 1)
+ item = 7
+ mutable nodes: Array<Node> = [{ left = 3, right = 4, children = [5] }]
+ use left = try field(nodes)
+ left = 8
+ use right = try choose(nodes, true)
+ right = 9
+ use child = try nested(nodes)
+ bump(nodes, child)
+ let pick: Choose = choose
+ use indirect = try pick(nodes, false)
+ indirect += 10
+ [values[1], nodes[0].left, nodes[0].right, try nodes[0].children[0]]
+}
+static result = @exercise()
+console.log(result) -- prints: [7, 18, 9, 6]
+console.log(try exercise()) -- prints: [7, 18, 9, 6]

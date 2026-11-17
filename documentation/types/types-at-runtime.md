@@ -149,6 +149,12 @@ Reflection is only needed when you want the *shape* of a type as data: for schem
 
 A runtime `Schema.StringLiteral` is ordinary data and may carry an unknown `String`, including a lone surrogate. Known compile-time construction and reconstruction with `TypeFromSchema` enforce the well-formed literal-type rule.
 
+## Stored links in reflection
+
+Reflection retains a field's storage kind (ordinary, relation or explicit link), exact symbolic owner path and list shape. It also preserves InlineArray capacity and GrowingPool/GrowingArray Index. A link is never expanded into an owned recursive field. `Schema.Reference` still means a recursive **type name**, not a pool element reference. `TypeFromSchema` rejects unresolved or escaping owner paths instead of manufacturing an unbound link.
+
+You can build a complete immutable graph at compile time under the same rules as at runtime. Printing, equality and hashing omit link fields; to export a graph as JSON, define a separate type containing its ordinary data and node identifiers.
+
 :::implementation
 ## Implementation details
 
@@ -166,5 +172,10 @@ A runtime `Schema.StringLiteral` is ordinary data and may carry an unknown `Stri
 
 - `TypeFromSchema` builds every schema member except `Schema.Fields`; pinned enumeration values other than their positions remain unsupported. A named union or enumeration takes the enclosing `Schema.Named` name, or the name of the applying declaration. A reference to an enclosing named schema builds a recursive type. A schema that is the value of a generic type function is evaluated for each application; an error is `TF004` at that application, with its `message`.
 - `Schema.StringLiteral` requires a well-formed UTF-8 payload. A compile-time string containing a lone surrogate widens to `String`; when a literal type is required, reject it with the fix to use `String` or make the value well-formed. Check schema construction, reconstruction (including nested and generic schemas), and a static value used as a type. Never use lossy decoding to manufacture a literal type.
+
+
+### Link metadata and constants
+
+Generated serializers and worker codecs use analyzed types at build time, rather than interpreting schemas at runtime. Graph constants export symbolic owner and element identities, never interpreter addresses. Keep storage kind, owner paths, capacity and Index in analyzed reflection metadata on every target. Reconstruction validates closed bindings before layout generation; Schema.Reference retains recursive-type semantics. Native/interpreter graph constants relocate symbolic owner/ordinal identities; JavaScript builds target objects before edges. Generated codecs/copy operations receive this metadata even in erased generic code. No runtime schema interpreter or accidental owning recursion is permitted.
 
 :::

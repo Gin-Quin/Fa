@@ -1,0 +1,7 @@
+type Node = { value: Integer }
+function same = <T>(pool: GrowingPool<T>, node: T in pool): T in pool => node
+function wrong = (owner: GrowingPool<Node>): Node in owner => {
+	mutable local: GrowingPool<Node> = []
+	use n = local.add({ value = 7 })
+	same(local, n)
+}

@@ -1,0 +1,13 @@
+-- Pre-existing: a function of a type nested in World cannot see World fields (EFF008, AN001).
+type World = {
+ nodes: GrowingPool<Node> = []
+ type Node = {
+  world: Integer
+  function create = (owner: World): Integer mutates owner.nodes.size => {
+   owner.nodes.add({ world = 3 })
+   owner.nodes.size
+  }
+ }
+}
+mutable owner: World = {}
+console.log(World.Node.create(owner))

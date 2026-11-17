@@ -48,15 +48,18 @@ impl Generator<'_> {
 		if self.analysis.relation_sides.is_empty() {
 			return Vec::new();
 		}
-		let names: Vec<Sym> = self
-			.types
-			.fields_of(ty)
-			.iter()
-			.map(|field| field.name)
-			.collect();
+		let fields = self.types.fields_of(ty).to_vec();
+		let names: Vec<Sym> = fields.iter().map(|field| field.name).collect();
 		let sides: Vec<Sym> = names
 			.into_iter()
-			.filter(|&name| self.relation_side(ty, name).is_some())
+			.filter(|&name| {
+				fields.iter().any(|field| {
+					field.name == name
+						&& field
+							.flags
+							.contains(fa_analyzer::types::FieldFlags::RELATION)
+				}) || self.relation_side(ty, name).is_some()
+			})
 			.collect();
 		sides
 			.into_iter()
@@ -92,12 +95,15 @@ impl Generator<'_> {
 		if self.analysis.relation_sides.is_empty() {
 			return false;
 		}
-		let names: Vec<Sym> = self
-			.types
-			.fields_of(ty)
-			.iter()
-			.map(|field| field.name)
-			.collect();
+		let fields = self.types.fields_of(ty).to_vec();
+		if fields.iter().any(|field| {
+			field
+				.flags
+				.contains(fa_analyzer::types::FieldFlags::RELATION)
+		}) {
+			return true;
+		}
+		let names: Vec<Sym> = fields.iter().map(|field| field.name).collect();
 		names
 			.into_iter()
 			.any(|name| self.relation_side(ty, name).is_some())

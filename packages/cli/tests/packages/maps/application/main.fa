@@ -24,5 +24,8 @@ export function = (arguments: Array<String>): Integer => {
 		rows += Integer(cell.row) * 10 + Integer(cell.column)
 	}
 	console.log(cells.size, rows)
+	mutable entries: Map<String, Integer> = [("key", 7)]
+	library.forward(entries, 9)
+	console.log(entries.get("key") ?? 0)
 	0
 }

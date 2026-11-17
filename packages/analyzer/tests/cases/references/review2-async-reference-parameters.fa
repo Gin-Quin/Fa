@@ -1,0 +1,14 @@
+use { sleep } = std.time
+async function read = <T>(values: GrowingPool<T>, item: T in values): T => {
+ await sleep(1)
+ item
+}
+async function exercise = () => {
+ mutable numbers: GrowingPool<Integer> = []
+ use number = numbers.add(7)
+ console.log(await read(numbers, number)) -- prints: 7
+ mutable nodes: GrowingPool<{ value: Integer }> = []
+ use node = nodes.add({ value = 9 })
+ console.log((await read(nodes, node)).value) -- prints: 9
+}
+await exercise()

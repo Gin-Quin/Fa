@@ -30,6 +30,15 @@ use fa_analyzer::types::{CollKind, ConstValue, NominalKind, TypeKind};
 use crate::generate::{Generator, Kind};
 use crate::js::{self, Expr, Prec};
 
+/// A scalar reference can select a local variable or a located member.
+pub(crate) struct LocalChoice {
+	pub selector: String,
+	pub locals: Vec<String>,
+	pub helper: String,
+	pub container: String,
+	pub key: String,
+}
+
 /// An assignable place, its container evaluated once.
 pub(crate) struct Place {
 	/// The JavaScript of the place (`point.x`, `items[$t0]`, `count`).
@@ -39,6 +48,9 @@ pub(crate) struct Place {
 	/// A value of a map (`map[key]`, a reference to it): the map and the
 	/// key, evaluated once. `text` reads it; a write is `map.set(key, value)`.
 	pub(crate) map: Option<(String, String)>,
+	/// Erased references write through the carrier or update the object in place.
+	pub(crate) reference: Option<(String, String)>,
+	pub(crate) choice: Option<LocalChoice>,
 }
 
 impl Place {
@@ -48,11 +60,33 @@ impl Place {
 			text,
 			ty,
 			map: None,
+			reference: None,
+			choice: None,
 		}
 	}
 
 	/// The statement writing a value into the place.
 	pub(crate) fn write(&self, value: &str) -> String {
+		if let Some(choice) = &self.choice {
+			let mut text = format!(
+				"{{ const $referenceValue = {value}; switch ({}) {{",
+				choice.selector
+			);
+			for (index, local) in choice.locals.iter().enumerate() {
+				text.push_str(&format!(
+					" case {}: {local} = $referenceValue; break;",
+					index + 1
+				));
+			}
+			text.push_str(&format!(
+				" default: {}({}, {}, $referenceValue); }} }}",
+				choice.helper, choice.container, choice.key
+			));
+			return text;
+		}
+		if let Some((helper, carrier)) = &self.reference {
+			return format!("{helper}({carrier}, {value});");
+		}
 		match &self.map {
 			Some((map, key)) => format!("{map}.set({key}, {value});"),
 			None => format!("{} = {value};", self.text),
@@ -440,6 +474,12 @@ impl Generator<'_> {
 
 	/// Whether a node names a type (`Point`, `Self`).
 	pub(crate) fn is_type_name(&self, n: NodeId) -> bool {
+		if self
+			.analysis
+			.has_flags(n, fa_analyzer::analysis::NodeFlags::TYPE_EXPR)
+		{
+			return true;
+		}
 		match self.analysis.resolution(n) {
 			Resolution::Local(symbol) => {
 				self.analysis.symbols.symbol(symbol).kind == SymbolKind::Type
@@ -457,6 +497,9 @@ impl Generator<'_> {
 				let name = self.name_of(function);
 				Expr::name(name, true)
 			}
+			Resolution::External(_) => self
+				.external_value(member)
+				.unwrap_or_else(|| self.unsupported(member, "this imported function of a type")),
 			Resolution::Builtin(builtin) if builtins::get(builtin).path == "Enum.members" => {
 				let denoted = match self.analysis.resolution(target) {
 					Resolution::Local(symbol) => self.analysis.symbols.symbol(symbol).ty,
@@ -1128,6 +1171,9 @@ impl Generator<'_> {
 				let Resolution::Local(symbol) = self.analysis.resolution(target) else {
 					return None;
 				};
+				if let Some(place) = self.local_choice_place(symbol, ty) {
+					return Some(place);
+				}
 				let mut text = self.name_of(symbol);
 				// a narrowed local designates its payload, the same JavaScript
 				// value (`if x is not none { x += 1 }`)
@@ -1143,7 +1189,14 @@ impl Generator<'_> {
 					ty = self.without_none(ty);
 					text = text.replace("?.[", "[").replace("?.", ".");
 				}
-				Some(Place { text, ty, map })
+				let reference = self.reference_write(symbol);
+				Some(Place {
+					text,
+					ty,
+					map,
+					reference,
+					choice: None,
+				})
 			}
 			View::Access {
 				target: container,
@@ -1226,6 +1279,8 @@ impl Generator<'_> {
 						text: read.text,
 						ty: self.type_of(target),
 						map: Some((container_value.primary_text(), position.text)),
+						reference: None,
+						choice: None,
 					});
 				}
 				if self.index_needs_normalizing(target, index) {
@@ -1505,6 +1560,14 @@ impl Generator<'_> {
 	/// a call result is always fresh. A `mutable` local of the function, or
 	/// a `let` bound to a fresh value, is returned as is.
 	pub(crate) fn copy_returned(&mut self, node: NodeId, value: Expr) -> Expr {
+		if self
+			.current_function()
+			.and_then(|function| self.analysis.function(function))
+			.and_then(|info| info.sig)
+			.is_some_and(|sig| self.types.sig(sig).reference.is_some())
+		{
+			return value;
+		}
 		let ty = self.type_of(node);
 		if !self.is_composite(ty) || self.is_move(node) {
 			return value;

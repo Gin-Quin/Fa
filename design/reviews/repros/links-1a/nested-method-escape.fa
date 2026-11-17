@@ -1,0 +1,11 @@
+type Outer = {
+	inner: Inner = {}
+	type Inner = {
+		nodes: GrowingPool<Node> = []
+		type Node = { value: Integer }
+		function wrong = (self): Node in self.nodes => {
+			mutable local: GrowingPool<Node> = []
+			local.add({ value = 7 })
+		}
+	}
+}

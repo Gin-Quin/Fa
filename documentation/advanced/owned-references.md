@@ -21,9 +21,9 @@ This page explains the model with examples. [Reference checking](/advanced/refer
 A reference is either:
 
 - **local**: declared with `use` or `mutable use`, received as a parameter, or returned by a function. The compiler tracks it statically, call after call. This page is about local references.
-- **stored**: a field typed `(Person in people)?` or `Pool<Person in people>`. A stored reference is always one side of a [relation](/advanced/relations), with a declared reverse side: the compiler updates both sides on every write, and when the target is deleted.
+- **stored**: a field typed `(Person in people)?` or `Pool<Person in people>`. A stored reference is either a [relation](/advanced/relations), maintained on writes/deletion, or an explicit [link](/advanced/relations#links-without-a-reverse-side), contained by an owner of growing collections.
 
-A local reference can't be stored as it is: a field typed `Person` or `Person?` owns a value under the [storage rules](/advanced/memory-management#copies-moves-unique-values-and-shared-handles). To store a reference, declare a relation. A local collection of references, like `Array<Person in people>`, is not allowed either: keep indices, or declare a relation `Pool`.
+A local reference can't be stored as it is: a field typed `Person` or `Person?` owns a value under the [storage rules](/advanced/memory-management#copies-moves-unique-values-and-shared-handles). To store a reference, declare a relation or an explicit link field. A local collection of references, like `Array<Person in people>`, is not allowed either: keep indices, or declare a relation `Pool`. This also applies inside aliases, tuples, generic arguments and function types, including result types (`REF010`). Only the whole parameter or result may declare a local reference; nesting it inside an owned type would lose its collection.
 
 ## Invalidation
 
@@ -167,7 +167,7 @@ if someone is not none {
 }
 ```
 
-Stored references don't need any of this: they are [relations](/advanced/relations), cleaned up at runtime when their target is deleted.
+Stored references use a different proof: relations clean up on deletion, while explicit links require growing targets and [complete-owner containment](/advanced/reference-checking#link-containment).
 
 ## After invalidation
 
@@ -312,7 +312,9 @@ function firstPerson = (persons: Array<Person>): (Person in persons)? => {
 }
 ```
 
-The caller receives a reference whose validity is tied to its own collection: the parameter name in the return type is replaced by the argument, so `firstPerson(persons)` returns a `(Person in persons)?`. The index of the element is not known to the caller.
+A reference result can be an `if`, `when`, `catch`, block or `loop` expression. A loop returns the reference supplied by its reachable `break` values. Every reachable result must designate an element of the declared collection; returning a local collection's element in just one branch is still an error. A reseatable reference must satisfy that rule for every place it may designate at the return. An `async` function cannot declare a reference result: return an index or an owned copy instead.
+
+The caller receives a reference whose validity is tied to its own collection: the parameter name in the return type is replaced by the argument, so `firstPerson(persons)` returns a `(Person in persons)?`. The caller uses the evaluated result provenance for validity: known functions retain their field and nested collection paths, including across imports; an unknown function value conservatively borrows anywhere below its declared owner. Collection metadata such as `length` is not an element and cannot satisfy an `in` result.
 
 ```fa
 mutable persons = [Person { name = "Ana" }]
@@ -327,9 +329,15 @@ if first is not none {
 }
 ```
 
+## Owner paths through methods
+
+An enclosing type binds its nested element types to each owner's collection instance. Methods may return `Node in self.nodes`; dependent parameters may write `(model: Model, node: Model.Node in model.nodes)`. Calls replace self/parameter paths with the caller's full path, including private and nested paths, through generic functions, imports and function values. Results stored with `use` borrow the caller's collection; an inferred ordinary result is still owned data. Only a direct call whose every reachable reference result comes from a fresh add exports freshness; calls through function values have unknown identity.
+
+A function following stored links needs that named owner path (or a module owner), because the target binding comes from the signature. A structural Node view may read ordinary fields but cannot invent a missing owner binding. Return a complete locally built owner to keep it alive; returning a reference into a local pool is `REF008`/`REF009`. A reference result into a temporary cannot be bound with `use` (`REF017`, alias of `REF004`): bind the owner first, or request an independent data value with `let` where ownership permits it.
+
 ## Moving an element out
 
-Every collection has a `take` method, which removes an element and returns it as a standalone value:
+Every deletable collection has a `take` method, which removes an element and returns it as a standalone value:
 
 ```fa
 mutable arrayOfPersons = [Person {}, Person {}, Person {}]
@@ -341,3 +349,99 @@ anotherArrayOfPersons.push(someone)
 ```
 
 `take` moves rather than copies, and it declares the same effect as `delete`: `take(1)` on an array invalidates the references from index 1 on.
+
+:::implementation
+## Reference function ABI
+
+Native and wasm functions with an explicit borrowed result return its address
+(nullable for an optional), using the ordinary error-result ABI when they throw.
+Dependent parameters receive that same borrowed address, including primitive
+subfields; no owned temporary may replace the designated place. Local `use`
+keeps it, while an ordinary owning store follows the data's copy/move rules.
+Relation-field borrows read the target address once, rather than aliasing the
+field that can later be reassigned. Columnar references keep their row locator.
+
+JavaScript passes and returns object references as the objects themselves, with
+`undefined` for an absent reference. A local primitive reference is a direct
+place: evaluate its innermost container and key once, then rewrite each read or
+write to that member access. `use score = player.score; score += 1` emits
+`player.score += 1`. A mutable member reference retains two locals reassigned by
+`reuse`. When a mutable reference can also designate scalar locals, a selector
+chooses direct reads and writes of those locals; its other alternative uses the
+container and key. Copying that reference with `use` snapshots the selector and
+location, without copying the referent or allocating a cell. A map slot uses its existing `get`/`set` operations; a primitive pool
+uses its slot array and stable slot index, with direct member accesses. There are no accessor cells or reference caches.
+
+At a function boundary a primitive or mixed-union reference has two parts:
+**(innermost container, key)**. For `values[i]` these are `(values, i)`;
+for `values[i].left`, `(values[i], "left")`; for a nested collection slot,
+the inner collection and its index. A dependent primitive parameter takes two
+JavaScript arguments. Other parameters retain their ordinary argument list.
+A general result returns the container and publishes the key in the shared
+runtime module's live `faReferenceKey` binding. The caller captures both
+immediately after the call, before evaluating anything else. Publishing happens
+after the callee's cleanup. A throwing call publishes only on success; optional
+absence uses an absent container. Reference results cannot be async, so no
+`await` can intervene.
+
+A known function additionally gets a compressed direct-call entry when all its
+reachable result places prove the same container or key. A fixed key can be a field name, a nonnegative array index, or a literal map key; a negative array index depends on the container length and keeps the general convention. The analyzed layout
+summary is exported and hashed with its interface, so separate compilation uses
+the same convention. For example, the following JavaScript sketches omit bounds
+checks and error propagation to show only the reference convention:
+
+```js
+// Every result is an element of the owner: return only the key.
+function element$key(values, i) { return i; }
+const i = element$key(values, nextIndex());
+values[i] += 1;
+
+// Every result has the static key "left": return only the container.
+function left$field(values, i) { return values[i]; }
+const node = left$field(nodes, 0);
+node.left += 1;
+
+// A fixed nested index also returns only its innermost container.
+function nested$index(values, i) { return values[i].children; }
+const children = nested$index(nodes, 0);
+children[0] += 1;
+
+// Dynamic projections: return the container and publish the key.
+function choose(values, right) {
+    return faReferenceResult(values[0], right ? "right" : "left");
+}
+const container = choose(nodes, condition);
+const key = faReferenceKey;
+container[key] += 1;
+
+// Function values use the general convention of their function type.
+const pick = choose;
+const selectedContainer = pick(nodes, condition);
+const selectedKey = faReferenceKey;
+selectedContainer[selectedKey] += 1;
+```
+
+The general entry remains available even when a compressed entry exists, so
+converting a known function to a function value needs no binding wrapper.
+Generic bodies specialize only representation-sensitive parameters, selecting
+bare objects or located slots from the instantiated type. Generic callbacks
+select the corresponding emitted body through static function properties.
+Ordinary generic calls and callbacks acquire neither representation flags nor
+reference binding wrappers. Mixed primitive/object unions retain the slot form
+regardless of the current member. Whole-object writes preserve the existing
+object's identity. This is a call convention, not the storage representation of
+a link.
+
+The compile-time interpreter retains evaluated places as a frame identity and
+generation, a local slot, and field/index keys evaluated once. Borrowed arguments,
+local aliases and results retain that identity; ordinary reads materialize data.
+Caller-owned argument and default temporaries remain alive until the caller
+finishes; immutable module owners remain in the evaluation's root frame. Pools
+keep stable slots through removal. Internal place carriers cannot be embedded
+as constants: only the resulting data leaves evaluation.
+
+Owner paths, effects and direct-call freshness stay compile-time facts; they
+survive callable interface merging, hashing and import substitution. Structured
+results merge addresses on native/wasm and evaluated container/key parts on JavaScript, with freshness
+only when every reachable result is fresh.
+:::

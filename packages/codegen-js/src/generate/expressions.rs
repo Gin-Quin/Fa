@@ -15,7 +15,12 @@ impl Generator<'_> {
 	/// The JavaScript of an expression, converted for its sink when the
 	/// analyzer recorded a conversion or a range check there.
 	pub(crate) fn expr(&mut self, n: NodeId) -> Expr {
-		let value = self.expr_raw(n);
+		let value = if self.call_returns_reference(n) && !self.is_object_reference(self.type_of(n))
+		{
+			self.read_reference_call(n)
+		} else {
+			self.expr_raw(n)
+		};
 		if let Some(input) = self.analysis.copy_inputs.get(&n).copied() {
 			return if input.produces {
 				// Keep range checks, and unchecked sized-integer wrapping,
@@ -37,29 +42,11 @@ impl Generator<'_> {
 	pub(crate) fn expr_raw(&mut self, n: NodeId) -> Expr {
 		// a value computed at compile time (constants.rs)
 		if let Some(value) = self.comptime_value(n) {
-			return self.constant_value(n, &value, self.type_of(n));
+			let value = self.constant_value(n, &value, self.type_of(n));
+			return self.instantiated_function_value(n, value);
 		}
 		let value = self.expr_value(n);
-		// A grouped value can own the contextual instantiation. Its child
-		// may own one instead: bind the capabilities exactly once.
-		let mut source = n;
-		while let View::Group(inner) = self.view(source) {
-			if self.analysis.instantiation(inner).is_some() {
-				source = inner;
-				break;
-			}
-			source = inner;
-		}
-		let value = if self.analysis.instantiation(n).is_some()
-			&& (source == n || self.analysis.instantiation(source).is_none())
-			&& matches!(
-				self.view(source),
-				View::Name(_) | View::Access { .. } | View::Lambda { .. }
-			) {
-			self.specialized_function_value(n, value)
-		} else {
-			value
-		};
+		let value = self.instantiated_function_value(n, value);
 		// reads and writes of reactive places (reactivity.rs)
 		self.reactive_expr(n, value)
 	}

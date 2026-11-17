@@ -1,0 +1,13 @@
+-- Expected: EFF003 on both writes: the declared effects name another field / another collection.
+type World = {
+ nodes: GrowingPool<Node> = []
+ others: GrowingPool<Node> = []
+ type Node = { world: Integer, other: Integer }
+}
+function narrowWrong = (world: World, node: World.Node in world.nodes) mutates node.other => { node.world += 1 }
+function wideWrong = (world: World, node: World.Node in world.nodes) mutates world.others[..].world => { node.world += 1 }
+mutable world: World = {}
+use node = world.nodes.add({ world = 0, other = 0 })
+narrowWrong(world, node)
+wideWrong(world, node)
+console.log(node.world)

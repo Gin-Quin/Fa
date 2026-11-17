@@ -1,0 +1,15 @@
+-- A function returning a reference, used as a value of a function type with an owned result:
+-- either refused, or the caller gets an owned copy. Expected: 1 then 99 (or a diagnostic).
+type Node = { value: Integer }
+type Owned = (values: Array<Node>, i: Integer) => Node throws IndexError
+function at = (values: Array<Node>, i: Integer): Node in values throws IndexError => try values[i]
+function exercise = (): Array<Integer> throws IndexError => {
+ mutable values: Array<Node> = [{ value = 1 }]
+ let get: Owned = at
+ mutable owned = try get(values, 0)
+ owned.value = 99
+ [(try values[0]).value, owned.value]
+}
+static result = @exercise()
+console.log(result)
+console.log(try exercise())

@@ -1,0 +1,8 @@
+-- pending: links slices 3–7 (specified Index, copy and containment)
+-- Acceptance: link target validation is implemented in subsequent link slices.
+type Wrong = {
+	nodes: Pool<Node> = []
+	type Node = {
+		link next: (Node in nodes)? = none -- error: nodes can remove elements; use GrowingPool or a relation
+	}
+}

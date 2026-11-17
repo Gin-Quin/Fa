@@ -1,0 +1,19 @@
+type Node = { value: Integer }
+function wrong = (
+	first: Array<Node>
+	second: Array<Node>
+	flag: Boolean
+): Node in first throws IndexError => {
+	if flag { try first[0] } else { try second[0] } -- error: REF009
+}
+type Reader = () => Integer
+function escaped = (flag: Boolean): Reader => {
+	mutable first = [7]
+	mutable second = [9]
+	use one = first[0]
+	use two = second[0]
+	function readOne = (): Integer => one
+	function readTwo = (): Integer => two
+	let selected = if flag { readOne } else { readTwo }
+	selected -- error: MEM004
+}

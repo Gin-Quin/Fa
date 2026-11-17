@@ -1,0 +1,11 @@
+-- Regression from the links 1a review.
+type Node = { value: Integer }
+type Callback = () => Integer
+function make = (pool: GrowingPool<Node>): Node in pool mutates pool.size => pool.add({ value = 7 })
+function wrong = (): Callback => {
+	mutable local: GrowingPool<Node> = []
+	use n = make(local)
+	() => n.value -- error: MEM004
+}
+let escaped = wrong()
+console.log(escaped())

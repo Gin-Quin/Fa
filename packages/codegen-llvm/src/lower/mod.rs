@@ -138,6 +138,8 @@ pub(crate) struct Function<'ctx> {
 	/// Read-only aggregate parameters borrowed from the caller's storage.
 	borrowed: Vec<bool>,
 	ret: Repr,
+	/// Caller storage for a returned slice descriptor, when the result can be a view.
+	reference_buffer: Option<Repr>,
 	/// A synchronous object/tuple result slot precedes ordinary parameters
 	/// (after the environment, when present).
 	return_slot: bool,
@@ -186,6 +188,9 @@ struct LoopFrame<'ctx> {
 
 /// The function being lowered.
 struct Frame<'ctx> {
+	/// Explicit borrowed result expressions use the address-return ABI.
+	reference_returns: rustc_hash::FxHashSet<NodeId>,
+	reference_buffer: Option<PointerValue<'ctx>>,
 	return_slot: Option<Slot<'ctx>>,
 	nrvo_local: Option<(FileId, SymbolId)>,
 	return_buffer: Option<collection_storage::CollectionBuffer<'ctx>>,
@@ -313,6 +318,7 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	lines: Vec<usize>,
 	/// The structs of object types.
 	object_types: std::cell::RefCell<FxHashMap<TypeId, StructType<'ctx>>>,
+	canonical_types: std::cell::RefCell<FxHashMap<TypeId, TypeId>>,
 	/// The global id of every member of a named union built or tested.
 	union_ids: std::cell::RefCell<FxHashMap<(fa_analyzer::ids::NominalId, u16), u64>>,
 	/// The generic functions, declared per instance.
@@ -431,7 +437,7 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The facts this lowering consulted (the key of a cached unit).
 	pub(crate) fact_log: Option<std::sync::Arc<crate::facts::FactLog>>,
 	/// The map types the program may keep a reference into the values of
-	/// (`facts::referenced_maps`, including generic patterns).
+	/// (`program::unsafe_maps`).
 	unsafe_maps: std::collections::BTreeSet<String>,
 	/// The map types some `deleteWhere` iterates over while deleting: their
 	/// entries stay out of the probe array (`tables.rs`, `inline`).
@@ -529,7 +535,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			.map(|(_, path)| path.clone())
 			.unwrap_or_default();
 		let state = program::FileState::new(session, entry, &path);
-		let fact_files: Vec<_> = files.iter().map(|(file, _)| *file).collect();
+		let map_facts = program::map_facts(session, files);
 		let mut lowering = Lowering {
 			session,
 			file: entry,
@@ -571,6 +577,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			constants: FxHashMap::default(),
 			lines: state.lines.clone(),
 			object_types: std::cell::RefCell::new(FxHashMap::default()),
+			canonical_types: std::cell::RefCell::new(FxHashMap::default()),
 			union_ids: std::cell::RefCell::new(FxHashMap::default()),
 			type_ids: std::cell::RefCell::new(FxHashMap::default()),
 			generic_functions: FxHashMap::default(),
@@ -614,8 +621,14 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			fact_log: None,
 			index_proofs: std::cell::RefCell::new(None),
 			program_proof_claims: std::cell::OnceCell::new(),
-			unsafe_maps: crate::facts::referenced_maps(session, &fact_files),
-			no_inline_maps: crate::facts::deleted_while_iterated_maps(session, &fact_files),
+			unsafe_maps: map_facts
+				.set(crate::facts::REFERENCED_MAPS)
+				.cloned()
+				.unwrap_or_default(),
+			no_inline_maps: map_facts
+				.set(crate::facts::DELETED_WHILE_ITERATED_MAPS)
+				.cloned()
+				.unwrap_or_default(),
 			packable_items: packed::packable_items(session, files),
 			packed_layouts: std::cell::RefCell::new(FxHashMap::default()),
 			readonly_collections: FxHashMap::default(),
@@ -952,6 +965,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// The representation of a node's type.
 	pub(crate) fn node_repr(&self, node: NodeId) -> Result<Repr, Error> {
+		if self.reference_control(node) {
+			return Ok(Repr::Pointer);
+		}
 		self.repr_of(self.type_of(node), node.index())
 	}
 
@@ -1549,7 +1565,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				return Err(self.unsupported(node.index(), "a function without a signature"));
 			};
 			let sig = self.types().sig(sig);
-			let ret = self.repr_of(sig.ret, node.index())?;
+			let ret = if sig.reference.is_some() {
+				Repr::Pointer
+			} else {
+				self.repr_of(sig.ret, node.index())?
+			};
+			let reference_buffer = self.reference_buffer_repr(info.ty);
 			let mut params = Vec::new();
 			let mut types: Vec<BasicMetadataTypeEnum> = Vec::new();
 			if lambda {
@@ -1585,7 +1606,14 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				// Parameters are never copied: synchronous calls, direct or through
 				// a function value, borrow aggregates instead of expanding them
 				// into registers and spilling a new copy in every callee.
-				if !by_pointer[position] && self.borrows_parameter(repr) {
+				if !by_pointer[position]
+					&& (self.borrows_parameter(repr)
+						|| self
+							.types()
+							.params(sig.params)
+							.get(position)
+							.is_some_and(|param| param.reference.is_some()))
+				{
 					by_pointer[position] = true;
 					borrowed[position] = true;
 				}
@@ -1616,6 +1644,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			// the requirements: one hidden pointer each, after the parameters
 			for _ in self.types().requirements(sig.requires) {
+				types.push(self.pointer_type().into());
+			}
+			if reference_buffer.is_some() {
 				types.push(self.pointer_type().into());
 			}
 			let throws = info.throws != TypeId::NEVER || !callbacks.is_empty();
@@ -1713,6 +1744,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				borrowed,
 				ret,
 				return_slot,
+				reference_buffer,
 				return_collection,
 				throws,
 				lambda,
@@ -1840,6 +1872,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.saved_cleanups.push(outer);
 		let collection_budget = self.collection_budget_for(owner);
 		self.frame = Some(Frame {
+			reference_returns: rustc_hash::FxHashSet::default(),
+			reference_buffer: None,
 			return_slot: None,
 			nrvo_local: None,
 			return_buffer: None,
@@ -1937,6 +1971,20 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				.into_pointer_value();
 			self.frame_mut().self_environment = Some((self.functions[&key].value, environment));
 		}
+		if function.reference_buffer.is_some() {
+			self.frame_mut().reference_buffer = Some(
+				value
+					.get_last_param()
+					.expect("reference result storage")
+					.into_pointer_value(),
+			);
+		}
+		if info
+			.sig
+			.is_some_and(|sig| self.types().sig(sig).reference.is_some())
+		{
+			self.prepare_reference_returns(info.body);
+		}
 		self.frame_mut().arena = function.arena_body.is_some();
 		self.frame_mut().throws = throws;
 		self.begin_function_task(&function)?;
@@ -2009,6 +2057,28 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					.into_pointer_value();
 				index += 1;
 				let pointer = match (has_default, param.default) {
+					(true, Some(default))
+						if self.explicit_reference_parameter(info.ty, position) =>
+					{
+						let flag = value.get_nth_param(index).expect("a flag").into_int_value();
+						index += 1;
+						let given_block = self.builder.get_insert_block().expect("a block");
+						let use_default = self.append_block("default");
+						let join = self.append_block("given");
+						self.builder
+							.build_conditional_branch(flag, join, use_default)?;
+						self.builder.position_at_end(use_default);
+						let address = self
+							.borrowed_result(default)?
+							.value
+							.expect("a reference address");
+						let default_end = self.builder.get_insert_block().expect("a block");
+						self.branch_to(join)?;
+						self.builder.position_at_end(join);
+						let chosen = self.builder.build_phi(self.pointer_type(), "parameter")?;
+						chosen.add_incoming(&[(&pointer, given_block), (&address, default_end)]);
+						chosen.as_basic_value().into_pointer_value()
+					}
 					(true, Some(default)) => {
 						// not given: the default, in a slot the function owns
 						let flag = value.get_nth_param(index).expect("a flag").into_int_value();
@@ -2051,6 +2121,27 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 						chosen.as_basic_value().into_pointer_value()
 					}
 					_ => pointer,
+				};
+				let repr = if self.explicit_reference_parameter(info.ty, position) {
+					if let Repr::Optional(element) = repr {
+						self.nullable_references.insert(param.symbol, ());
+						element.repr()
+					} else {
+						repr
+					}
+				} else {
+					repr
+				};
+				let repr = if let Some(sig) = info.sig {
+					let params = self.types().params(self.types().sig(sig).params);
+					if let Some(path) = params.get(position).and_then(|param| param.reference) {
+						let roots: Vec<_> = params.iter().map(|param| param.ty).collect();
+						self.reference_item_repr(path, &roots, repr)
+					} else {
+						repr
+					}
+				} else {
+					repr
 				};
 				self.slots.insert(param.symbol, Slot { pointer, repr });
 				if repr == Repr::Str
@@ -2625,6 +2716,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// (`coercions`): the range check of a `SINK_CHECK` root, `Float32` →
 	/// `Float`, `Integer` ↔ `Int64`.
 	pub(crate) fn expr(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
+		if self.frame().reference_returns.contains(&node) {
+			return self.borrowed_result(node);
+		}
 		// a read of a reactive place is tracked before it happens
 		self.track_read(node)?;
 		let value = self.expr_inner(node)?;
@@ -3566,7 +3660,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// `loop { … }`, whose value is the value of its `break`.
 	fn loop_expression(&mut self, node: NodeId, body: NodeId) -> Result<Val<'ctx>, Error> {
-		let repr = self.node_repr(node).unwrap_or(Repr::Void);
+		let repr = if self.reference_control(node) {
+			Repr::Pointer
+		} else {
+			self.node_repr(node).unwrap_or(Repr::Void)
+		};
 		let value = if repr.has_value() {
 			Some(self.alloca(repr, "loop")?)
 		} else {

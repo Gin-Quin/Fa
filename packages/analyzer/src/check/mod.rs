@@ -55,7 +55,9 @@ mod optionals;
 mod patterns;
 mod pools;
 mod proofs;
+mod provenance;
 pub(crate) mod reactivity;
+mod reference_sensitivity;
 mod references;
 mod relations;
 mod requirements;
@@ -183,6 +185,11 @@ pub struct FnCx {
 	pub async_acc: tasks::Acc,
 	/// The owner of the reference it returns (`: T in owner`, references.rs).
 	pub ref_owner: Option<PlaceId>,
+	/// All returned reference values are fresh so far.
+	pub ref_fresh: bool,
+	pub ref_layout: Option<crate::analysis::ReferenceLayout>,
+	pub ref_origins: Vec<crate::analysis::ReferenceOrigin>,
+	pub ref_valid: bool,
 }
 
 impl FnCx {
@@ -214,6 +221,10 @@ impl FnCx {
 			is_async: false,
 			async_acc: tasks::Acc::new(),
 			ref_owner: None,
+			ref_fresh: true,
+			ref_layout: None,
+			ref_origins: Vec::new(),
+			ref_valid: true,
 		}
 	}
 }
@@ -239,6 +250,8 @@ pub struct LoopCx {
 	pub function_depth: usize,
 	/// The types of the `break` values of the current round.
 	pub break_types: Vec<(NodeId, TypeId)>,
+	pub break_origins: crate::flow::values::ValueOrigins,
+	pub break_nodes: Vec<NodeId>,
 	/// The hull of the integer `break` values of the current round (`None`
 	/// inside: a value that is not an integer).
 	pub break_values: Option<Option<crate::types::Interval>>,
@@ -445,9 +458,21 @@ pub struct Walker<'s> {
 	pub(crate) hoisted_blocks: rustc_hash::FxHashSet<NodeId>,
 	/// The place each `use` alias and `for` variable over a collection designates.
 	pub(crate) aliases: FxHashMap<SymbolId, PlaceId>,
+	/// Borrowed call results, recorded once after that evaluation's effects.
+	pub(crate) effect_protected_references: Vec<SymbolId>,
+	pub(crate) invalid_reference_arguments: rustc_hash::FxHashSet<NodeId>,
+	pub(crate) reference_results: FxHashMap<NodeId, crate::flow::values::ValueOrigins>,
+	/// Borrowed result leaves, captured before their branch flow is joined.
+	pub(crate) value_origins: FxHashMap<NodeId, crate::flow::values::ValueOrigins>,
+	pub(crate) capture_origins: FxHashMap<NodeId, Vec<provenance::CapturedOrigins>>,
+	/// Whole reference annotations in borrowing positions; nested storage is never allowed.
+	pub(crate) borrowed_type_nodes: rustc_hash::FxHashSet<NodeId>,
+	pub(crate) type_expression_root: Option<NodeId>,
+	/// Dependent parameter owners; parameter roots still name their own effects.
+	pub(crate) reference_parameters: FxHashMap<SymbolId, PlaceId>,
 	/// The collection each local iterator reads, and whether its items are
 	/// the collection's elements (`iterators.rs`).
-	pub(crate) iterator_locals: FxHashMap<SymbolId, (PlaceId, bool)>,
+	pub(crate) iterator_locals: FxHashMap<SymbolId, (Vec<PlaceId>, bool)>,
 	/// The relation fields and their uses (`relations.rs`).
 	pub(crate) relations: relations::RelationState,
 	/// The places of relation pools iterated by a loop: their loop
@@ -658,6 +683,14 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		implicit_write_calls: Vec::new(),
 		key_sets: key_sets::KeySetState::default(),
 		aliases: FxHashMap::default(),
+		effect_protected_references: Vec::new(),
+		invalid_reference_arguments: rustc_hash::FxHashSet::default(),
+		reference_results: FxHashMap::default(),
+		value_origins: FxHashMap::default(),
+		capture_origins: FxHashMap::default(),
+		borrowed_type_nodes: rustc_hash::FxHashSet::default(),
+		type_expression_root: None,
+		reference_parameters: FxHashMap::default(),
 		foreign: foreign::ForeignState::default(),
 		std_library: std_library::StdState::default(),
 		growing_only: false,
@@ -963,6 +996,7 @@ impl Walker<'_> {
 			}
 			View::UpdateFields { target, value } => self.check_update_fields(n, target, value),
 			View::Readonly(field) => self.check_readonly(n, field),
+			View::Link(_) => self.unsupported(n, "stored link fields (not implemented yet)"),
 
 			// patterns (patterns.rs)
 			View::Destructuring {
@@ -996,6 +1030,7 @@ impl Walker<'_> {
 			self.body.flow.set_unreachable();
 		}
 		self.record_callable_read(n, ty);
+		self.record_value_origins(n);
 		ty
 	}
 
@@ -1141,6 +1176,7 @@ impl Walker<'_> {
 			}
 		};
 		self.set_flag(n, NodeFlags::PLACE);
+		self.record_value_origins(n);
 		info
 	}
 
@@ -1219,12 +1255,24 @@ impl Walker<'_> {
 			// `let f: Float32 = 16_777_217`, `let p: Percentage = 50` (math.rs)
 			Err(_) if self.number_literal_sink(n, actual, target) => {}
 			Err(_) => {
-				let message = format!(
+				let mut message = format!(
 					"a `{}` is not accepted where a `{}` is expected{}",
 					self.display(actual),
 					self.display(target),
 					self.text_bytes_hint(n, actual, target)
 				);
+				if let (TypeKind::Function(actual), TypeKind::Function(target)) =
+					(self.s.types.kind(actual), self.s.types.kind(target))
+				{
+					let (actual, target) = (self.s.types.sig(actual), self.s.types.sig(target));
+					if actual.reference != target.reference {
+						message.push_str(if target.reference.is_none() {
+							": this function returns a reference; return an owned `copy` in a wrapper, or declare the same `in owner` result in the expected type"
+						} else {
+							": the result must borrow from the same owner as the expected type; give both signatures the same `in owner` result"
+						});
+					}
+				}
 				let diagnostic = self.diagnostic(&codes::values::E_TYPE_1, n, message);
 				self.report_flow(diagnostic);
 			}
@@ -1387,8 +1435,11 @@ impl Walker<'_> {
 	/// `UNKNOWN`; its children are still walked (names resolve for the IDE),
 	/// with their diagnostics dropped.
 	pub fn unsupported(&mut self, n: NodeId, what: &str) -> TypeId {
+		self.unsupported_with_message(n, &format!("{what} is not supported yet by the analyzer"))
+	}
+
+	pub(super) fn unsupported_with_message(&mut self, n: NodeId, message: &str) -> TypeId {
 		self.memo(n, |w| {
-			let message = format!("{what} is not supported yet by the analyzer");
 			let diagnostic = w.diagnostic(&codes::analyzer::AN001, n, message);
 			w.report(diagnostic);
 			TypeId::UNKNOWN
@@ -1442,7 +1493,59 @@ impl Walker<'_> {
 
 	/// Prints a type for a message.
 	pub fn display(&self, ty: TypeId) -> String {
+		if let TypeKind::Function(sig) = self.s.types.kind(ty)
+			&& (self.s.types.sig(sig).reference.is_some()
+				|| self
+					.s
+					.types
+					.params(self.s.types.sig(sig).params)
+					.iter()
+					.any(|param| param.reference.is_some()))
+		{
+			let names = self.function_type_parameter_names(ty);
+			return self.s.types.display_with_parameters(ty, &names);
+		}
 		self.s.types.display(ty)
+	}
+
+	fn function_type_parameter_names(&self, ty: TypeId) -> Vec<String> {
+		if let Some(info) = self.a.functions.values().find(|info| info.ty == ty) {
+			return info
+				.params
+				.iter()
+				.map(|param| {
+					self.s
+						.types
+						.syms
+						.resolve(self.a.symbols.symbol(param.symbol).name)
+						.to_string()
+				})
+				.collect();
+		}
+		for (index, node_ty) in self.a.types.iter().enumerate() {
+			if *node_ty != ty {
+				continue;
+			}
+			let View::Lambda { signature, .. } = self.view(NodeId::new(index)) else {
+				continue;
+			};
+			return signature
+				.parameters
+				.iter()
+				.enumerate()
+				.map(|(index, node)| {
+					let node = match self.view(node) {
+						View::Assignment { target, .. } => target,
+						_ => node,
+					};
+					match self.view(node) {
+						View::Name(name) => self.tree.name(name).to_string(),
+						_ => format!("arg{}", index + 1),
+					}
+				})
+				.collect();
+		}
+		Vec::new()
 	}
 
 	/// The view of a node. It borrows the walker: to call handlers while

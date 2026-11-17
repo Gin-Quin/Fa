@@ -74,6 +74,7 @@ impl Walker<'_> {
 		arguments: NodeList<'_>,
 		expected: Option<TypeId>,
 	) -> TypeId {
+		self.reference_results.remove(&n);
 		// `@readFile(path)`… (comptime.rs)
 		if let Some(ty) = self.check_operation(n, callee, arguments) {
 			return ty;
@@ -540,7 +541,9 @@ impl Walker<'_> {
 			self.resolve_requirements(n, &name, &requires)
 		};
 		self.record_callable_call(n);
+		self.check_reference_arguments(n, sig);
 		self.apply_call_effects(n, callee, sig.effects);
+		self.record_reference_result(n, callee, sig);
 		self.call_providers.clear();
 		// `subscription.stop()` consumes it (reactivity.rs)
 		self.note_stop_call(n, callee);

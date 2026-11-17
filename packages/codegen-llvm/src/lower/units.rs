@@ -379,6 +379,17 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		merger.ty(substituted)
 	}
 
+	/// Compare semantic types across the session-local and global stores.
+	pub(crate) fn same_concrete_type(&self, left: TypeId, right: TypeId) -> bool {
+		let left = self.concrete_type(left);
+		let right = self.concrete_type(right);
+		let mut merger = self.types().merger(None);
+		let mut canonical = self.canonical_types.borrow_mut();
+		let left = *canonical.entry(left).or_insert_with(|| merger.ty(left));
+		let right = *canonical.entry(right).or_insert_with(|| merger.ty(right));
+		left == right
+	}
+
 	/// Notes the types an instance of a generic function is made for (its
 	/// type parameters' representations in it, `calls.rs`).
 	pub(crate) fn note_instance_types(
@@ -801,6 +812,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			(bindings, arguments)
 		};
+		let exact_types: FxHashMap<_, _> = generics
+			.iter()
+			.copied()
+			.zip(arguments.iter().copied())
+			.collect();
 		let name = if arguments.is_empty() && callbacks.is_empty() && methods.is_empty() {
 			mangle(self.types(), key)
 		} else {
@@ -832,9 +848,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let mut merged = self.bindings.borrow().clone();
 		merged.extend(bindings.iter().map(|(param, repr)| (*param, *repr)));
 		let saved = self.bindings.replace(merged);
-		let mut types = self.type_bindings.borrow().clone();
-		types.extend(generics.iter().copied().zip(arguments.iter().copied()));
-		let saved_types = self.type_bindings.replace(types);
+		let mut merged_types = self.type_bindings.borrow().clone();
+		merged_types.extend(exact_types.iter().map(|(param, ty)| (*param, *ty)));
+		let saved_types = self.type_bindings.replace(merged_types);
 		let function = self.remote_signature(
 			key,
 			node,
@@ -847,7 +863,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		);
 		self.bindings.replace(saved);
 		self.type_bindings.replace(saved_types);
-		let function = function?;
+		let mut function = function?;
+		function.types = exact_types;
 		let module = self.types().module_path(declared.module).to_string();
 		self.split_mut()
 			.remote_modules
@@ -886,7 +903,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					.collect()
 			})
 			.unwrap_or_default();
-		let ret = self.repr_of(sig.ret, node.index())?;
+		let reference_buffer = self.reference_buffer_for_signature(sig);
+		let ret = if sig.reference.is_some() {
+			Repr::Pointer
+		} else {
+			self.repr_of(sig.ret, node.index())?
+		};
 		let mut by_pointer = vec![false; params.len()];
 		let mut borrowed = vec![false; params.len()];
 		let (mutates, invalidates) = self.types().effects(sig.effects);
@@ -909,7 +931,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			if !repr.has_value() {
 				return Err(self.unsupported(node.index(), "this parameter type"));
 			}
-			if !by_pointer[position] && self.borrows_parameter(repr) {
+			if !by_pointer[position] && (self.borrows_parameter(repr) || param.reference.is_some())
+			{
 				by_pointer[position] = true;
 				borrowed[position] = true;
 			}
@@ -939,6 +962,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			types.push(self.pointer_type().into());
 		}
 		let throws = sig.throws != TypeId::NEVER || callback_errors;
+		if reference_buffer.is_some() {
+			types.push(self.pointer_type().into());
+		}
 		let (fn_type, return_slot, return_collection) =
 			self.function_type_of(types, false, ret, throws);
 		let value = match self.module.get_function(&name) {
@@ -985,6 +1011,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			borrowed,
 			ret,
 			return_slot,
+			reference_buffer,
 			return_collection,
 			throws,
 			lambda: false,
@@ -1064,7 +1091,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	}
 
 	/// Whether a type mentions a generic parameter.
-	fn mentions_param(&self, ty: TypeId) -> bool {
+	pub(super) fn mentions_param(&self, ty: TypeId) -> bool {
 		let mut found = Vec::new();
 		self.collect_params(ty, &mut found);
 		!found.is_empty()

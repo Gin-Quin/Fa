@@ -1,0 +1,1 @@
+export function = <Item>(entries: Map<String, Item>, value: Item) mutates entries => retain(entries, value)

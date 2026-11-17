@@ -1,0 +1,46 @@
+-- Valid reference parameters/results across features; the compile-time and runtime lines must agree on every engine.
+type Node = { value: Integer }
+type Pick = (values: Array<Node>, i: Integer) => Node in values throws IndexError
+function at = (values: Array<Node>, i: Integer): Node in values throws IndexError => try values[i]
+function generic = <Item>(values: Array<Item>, i: Integer): Item in values throws IndexError => try values[i]
+function chosen = (values: Array<Node>, mode: Integer): Node in values throws IndexError => when mode is {
+ 0 => try values[0]
+ 1 => try values[1]
+ else => try values[2]
+}
+function caught = (values: Array<Node>, i: Integer): Node in values throws IndexError => values[i] catch _error => try values[0]
+function withDefault = (values: Array<Node>, node: Node in values = try values[1]): Node in values throws IndexError => node
+function fails = (values: Array<Node>, i: Integer): Node in values throws IndexError mutates values => {
+ use node = try values[i]
+ node.value += 1000
+ try values[i + 10]
+}
+function exercise = (): Array<Integer> throws IndexError => {
+ mutable values: Array<Node> = [{ value = 1 }, { value = 2 }, { value = 3 }]
+ function inner = (i: Integer): Integer throws IndexError => {
+  use n = try at(values, i)
+  n.value
+ }
+ let pick: Pick = at
+ use a = try pick(values, 0)
+ a.value += 10
+ use b = try generic(values, 1)
+ b.value += 20
+ use c = try chosen(values, 2)
+ c.value += 30
+ use d = try caught(values, 7)
+ d.value += 100
+ use e = try withDefault(values)
+ e.value += 200
+ mutable use f = try at(values, 0)
+ for i in 0..3 {
+  if (try at(values, i)).value > 30 { reuse f = try at(values, i) }
+ }
+ f.value += 5000
+ let failed = fails(values, 2).value catch _error => -1
+ let total = values.map((node) => node.value)
+ [try total[0], try total[1], try total[2], try inner(2), failed]
+}
+static result = @exercise()
+console.log(result)
+console.log(try exercise())

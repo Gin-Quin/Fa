@@ -1,0 +1,11 @@
+-- Regression from the links 1a review.
+type Node = { value: Integer }
+type Callback = () => Integer
+function wrong = (): Callback => {
+	mutable local: GrowingPool<Node> = []
+	local.add({ value = 7 })
+	use n = local.find((_n) => true)
+	() => n?.value ?? 0 -- error: MEM004
+}
+let escaped = wrong()
+console.log(escaped())

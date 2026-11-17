@@ -1,0 +1,15 @@
+-- pending: links slices 3–7 (specified Index, copy and containment)
+use { Json } = std.json
+-- Acceptance: link containment is implemented in subsequent link slices.
+type Graph = {
+	nodes: GrowingPool<Node, UInt16> = []
+	link root: (Node in nodes)? = none
+	type Node = { value: Integer, link next: (Node in nodes)? = none }
+}
+mutable graph: Graph = {}
+use a = graph.nodes.add({ value = 1 })
+use b = graph.nodes.add({ value = 2, next = a })
+graph.root = b
+let detached = copy b -- error: this node has links into graph.nodes; borrow it or copy graph
+graph.nodes = [] -- error: graph.root may outlive graph.nodes; replace the complete graph
+let encoded = Json.stringify(graph) -- error: project the data and node identifiers into a separate type

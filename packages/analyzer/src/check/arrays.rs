@@ -130,6 +130,7 @@ impl Walker<'_> {
 		let params: Vec<ParamSig> = params
 			.iter()
 			.map(|&ty| ParamSig {
+				reference: None,
 				ty,
 				variadic: false,
 			})
@@ -244,7 +245,7 @@ impl Walker<'_> {
 				continue;
 			}
 			let ty = self.check(item, expected_item);
-			self.escape(item, n);
+			self.store_closures(item, n);
 			if let Some(expected_item) = expected_item {
 				self.sink(item, ty, expected_item);
 			}

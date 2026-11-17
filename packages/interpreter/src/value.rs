@@ -106,6 +106,26 @@ impl Closure {
 	}
 }
 
+/// Stable evaluator slots. Removing an element never shifts a surviving place.
+#[derive(Clone, Debug, Default)]
+pub struct Pool {
+	pub slots: Vec<Option<Value>>,
+	pub len: usize,
+}
+
+impl Pool {
+	pub fn new(values: Vec<Value>) -> Self {
+		Self {
+			len: values.len(),
+			slots: values.into_iter().map(Some).collect(),
+		}
+	}
+
+	pub fn values(&self) -> impl Iterator<Item = &Value> {
+		self.slots.iter().filter_map(Option::as_ref)
+	}
+}
+
 /// A compile-time value.
 #[derive(Clone, Debug)]
 pub enum Value {
@@ -126,6 +146,8 @@ pub enum Value {
 	Bytes(Arc<Vec<u8>>),
 	/// `Array`, `GrowingArray`.
 	Array(Arc<Vec<Value>>),
+	/// Stable pool/columnar slots, with holes after deletion.
+	Pool(Arc<Pool>),
 	/// A tuple.
 	Tuple(Arc<Vec<Value>>),
 	/// An object.
@@ -182,6 +204,19 @@ pub fn equals(a: &Value, b: &Value) -> bool {
 				}
 		}
 		(Set(a), Set(b)) => a.len() == b.len() && a.iter().all(|item| contains(b, item)),
+		(Pool(a), Pool(b)) => {
+			if a.len != b.len {
+				return false;
+			}
+			let mut unmatched: Vec<_> = b.values().collect();
+			for value in a.values() {
+				let Some(index) = unmatched.iter().position(|other| equals(value, other)) else {
+					return false;
+				};
+				unmatched.swap_remove(index);
+			}
+			true
+		}
 		(Map(a), Map(b)) => {
 			a.len() == b.len()
 				&& a.iter()
@@ -555,6 +590,7 @@ fn format_nested(value: &Value, out: &mut TextBuffer) {
 			out.push(']');
 		}
 		Value::Array(items) | Value::Set(items) => format_list(items, out),
+		Value::Pool(pool) => format_list(&pool.values().cloned().collect::<Vec<_>>(), out),
 		Value::Tuple(items) => {
 			out.push('(');
 			for (index, item) in items.iter().enumerate() {

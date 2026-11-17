@@ -1,0 +1,18 @@
+-- Generic functions used as callbacks and function values after the hidden JS flag.
+function twice = <Item>(item: Item): (Item, Item) => (item, item)
+function first = <Item>(values: Array<Item>, i: Integer): Item in values throws IndexError => try values[i]
+type Pair = (item: Integer) => (Integer, Integer)
+type Pick = (values: Array<String>, i: Integer) => String in values throws IndexError
+function exercise = (): String throws IndexError => {
+ let numbers = [1, 2]
+ let pairs = numbers.map(twice)
+ let f: Pair = twice
+ mutable words: Array<String> = ["a", "b"]
+ let pick: Pick = first
+ use w = try pick(words, 1)
+ w = "z"
+ "{pairs} {f(3)} {words}"
+}
+static result = @exercise()
+console.log(result)
+console.log(try exercise())

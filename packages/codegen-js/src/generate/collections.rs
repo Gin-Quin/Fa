@@ -39,8 +39,8 @@ impl Generator<'_> {
 	pub(crate) fn is_value_pool(&self, ty: TypeId) -> bool {
 		matches!(
 			self.types.kind(ty),
-			TypeKind::Collection(CollKind::Pool | CollKind::GrowingPool, item, _)
-				if self.is_primitive(item)
+			TypeKind::Collection(CollKind::Pool | CollKind::GrowingPool | CollKind::Columnar | CollKind::GrowingColumnar, item, _)
+				if !self.is_object_reference(item)
 		)
 	}
 
@@ -414,19 +414,10 @@ impl Generator<'_> {
 		if self.is_value_pool(receiver_type) {
 			return self.value_pool_call(n, callee, name, arguments);
 		}
-		if let TypeKind::Collection(_, item, _) = self.types.kind(receiver_type)
-			&& !matches!(
-				self.types.kind(item),
-				TypeKind::Object(_) | TypeKind::Tuple(_)
-			) {
-			return self.unsupported(
-				n,
-				"a pool or a columnar of values that are neither objects, tuples nor primitive values",
-			);
-		}
 		if owner == "OrderedColumnar" && name != "add" {
 			return self.array_method(n, callee, &format!("Array#{name}"), arguments);
 		}
+
 		let receiver = self.receiver(callee);
 		let nodes: Vec<NodeId> = arguments
 			.iter()

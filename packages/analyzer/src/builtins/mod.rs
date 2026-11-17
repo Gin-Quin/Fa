@@ -230,6 +230,7 @@ impl Signature {
 			.iter()
 			.enumerate()
 			.map(|(index, param)| ParamSig {
+				reference: None,
 				ty: param.ty.build_for(types, receiver),
 				variadic: self.variadic && index == last,
 			})

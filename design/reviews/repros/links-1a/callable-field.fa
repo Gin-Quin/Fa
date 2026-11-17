@@ -1,0 +1,7 @@
+type Node = { value: Integer }
+type Ops = { get: (pool: GrowingPool<Node>) => Node in pool }
+function make = (pool: GrowingPool<Node>): Node in pool mutates pool.size => pool.add({ value = 4 })
+function wrong = (ops: Ops, owner: GrowingPool<Node>): Node in owner => {
+	mutable local: GrowingPool<Node> = []
+	ops.get(local)
+}

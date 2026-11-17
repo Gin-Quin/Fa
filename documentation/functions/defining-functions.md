@@ -124,6 +124,8 @@ console.log(size(), independent(), shared.length) -- 2 2 2
 
 The parameters and the top-level declarations of the body share one scope: declaring a value with the name of a parameter is an error.
 
+A default for a reference parameter must itself be a reference into its declared collection. It is checked where the parameter is declared, with the preceding parameters in scope. For example, `value: Integer in owner = owner.add(7)` is valid; a literal `7` or an element of another collection is not (`REF020`).
+
 ### Named arguments
 
 Arguments can be passed by position or by name. Positional arguments come first, named arguments after:
@@ -142,7 +144,7 @@ move(x = 1, 2) -- error: a positional argument can't follow a named argument
 move(1, 2, x = 3) -- error: `x` is already given
 ```
 
-Named arguments and default values belong to the declaration: they work in direct calls, not through a value of a [function type](#function-types). Defaults come from the exact written declaration, including across files and generic instantiations; structural type equality never selects another declaration's defaults. When an anonymous nested annotation has no written default owner, supply the argument explicitly.
+Named arguments and default values belong to the declaration: they work in direct calls, not through a value of a [function type](#function-types). Writing a default in a function type is an error (`FN030`): put it on the function declaration, or pass the argument explicitly. Defaults come from the exact written declaration, including across files and generic instantiations; structural type equality never selects another declaration's defaults. When an anonymous nested annotation has no written default owner, supply the argument explicitly.
 
 ### Variadic parameters
 
@@ -264,6 +266,12 @@ function register = (name: String) mutates people.size => {
 Unlike a parameter, a module-level value can be replaced: a function that declares `mutates people` can write `people = []`.
 
 A value passed to a mutated parameter can't overlap anything else the call uses: another argument, a requirement or a module-level value that the function uses, or a reference captured by a callback argument. `swap(team, team)` with two mutated parameters is an error, since both arguments designate the same value; so is any call where the compiler can't prove that they are distinct. `use` aliases can still designate the same value as each other. See [arguments that alias](/advanced/reference-checking#arguments-that-alias).
+
+### Effects through links
+
+A method traversing [links](/advanced/relations#links-without-a-reverse-side) declares writes at the target collection: `mutates self.nodes[..].world`. `mutates node.world` covers only its starting place, not every node reached recursively. Changing `node.children` declares that field alone; appending nodes declares `self.nodes.size`. There is no implied reverse write. Growth and link writes preserve target aliases; a broad `mutates self.nodes` still needs the complete-owner containment proof because it could reset the pool.
+
+Use `(self, node: Node in self.nodes)` for a dependent reference parameter and `: Node in self.nodes` for a reference result. Function values, generic functions and imports retain this owner substitution; an inferred ordinary return is not a reference. The complete [scene example](/advanced/relations#complete-scene) snapshots its scalar-only Transform before recursion. Passing `node.world` directly to a call that may mutate every world overlaps if a child points back to node; links do not assert a tree.
 
 ### Invalidating references
 
@@ -422,7 +430,7 @@ function sumOf = (numbers: Array<Integer>): Integer => {
 }
 ```
 
-A closure that **escapes** owns immutable captures, taken when it is created. Ordinary values copy; a structure moves at its last use, and otherwise requires an explicit snapshot (`MEM004`). A borrowed parameter, [`use`](/advanced/memory-management#aliases) alias or loop item cannot surrender its owner: first create `let snapshot = copy input`, then capture `snapshot` at its last use. The closure cannot modify its owned captures. Worker transfer also obeys [thread safety](/advanced/concurrency#thread-safety-and-synchronization):
+A closure that **escapes** owns immutable captures, taken when it is created. Ordinary values copy; a structure moves at its last use, and otherwise requires an explicit snapshot (`MEM004`). A borrowed parameter, [`use`](/advanced/memory-management#aliases) alias or loop item cannot surrender its owner: first create `let snapshot = copy input`, then capture `snapshot` at its last use. An escaping closure cannot retain an element reference into a collection that can be destroyed or replaced before the closure is called (`MEM004`). Capture the element's data instead, or keep the collection in an owner that outlives the closure. The closure cannot modify its owned captures. Worker transfer also obeys [thread safety](/advanced/concurrency#thread-safety-and-synchronization):
 
 ```fa
 function makeGreeter = (greeting: String) => (name: String) => "{greeting}, {name}!"
@@ -773,4 +781,9 @@ Native and the VM bind a named local callable at its declaration, once per execu
 ### Native and WebAssembly recursion
 
 A small base case of a direct recursive call is evaluated at the call site when its guard and result use only scalar parameters and operations; an empty node of an arena, whose optional fields are all `none`, is also such a base case. A function whose body is a `when` over a union parameter has the same shortcut for a member whose fields are all scalar: at each recursive call, the member is tested on the evaluated argument and its arm (scalar arithmetic over its fields, the parameters and constants, without calls or `try`) is computed in place; the arms before it may only test other members. Arguments are evaluated once, in order. In speed builds, an integer sum through a final optional recursive call (`prefix + (child?.walk() ?? 0)`) exposes both return paths to LLVM's tail-recursion elimination, so that the last recursive edge can become an accumulator loop. Other effects and calls keep their evaluation order.
+
+### Reference interfaces on every target
+
+Reference result and parameter contracts retain symbolic owner paths through methods, generic specialization, function values and imports. Resolve the caller's collection path after call effects. Native aliases borrow existing places without copying, and structured reference results merge their addresses. JavaScript passes and returns object references directly. Local primitive and mixed-union references rewrite to their evaluated places. Across calls they use an allocation-free innermost-container/key pair, with proven direct-call compression and a general convention for function values; generic bodies specialize representation without hidden flags or binding wrappers. The compile-time interpreter retains evaluated frame/slot/key paths through the same calls. See the [reference ABI](/advanced/owned-references) for the calling convention. Ordinary storage copies the designated data. This is an internal call ABI, not a new source-level handle type or the storage representation of a link. Direct all-return-path freshness is interface metadata; indirect calls retain the owner contract but not freshness. Link traversal effects restart at the target collection and use the ordinary overlap engine.
+
 :::

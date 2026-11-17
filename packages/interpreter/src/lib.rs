@@ -301,7 +301,7 @@ mod tests {
 	}
 
 	#[test]
-	fn borrowed_arguments_write_back_on_return_and_error() {
+	fn borrowed_arguments_preserve_mutations_on_return_and_error() {
 		for fails in [false, true] {
 			let mut host = Functions::default();
 			let place = crate::ir::Place {
@@ -846,22 +846,24 @@ mod tests {
 		host.0.insert(
 			FnKey(0, 24),
 			Arc::new(Function {
-				name: "evenKey".into(),
-				params: vec![
-					Param {
-						slot: 0,
+				name: "evenKeyWithValue".into(),
+				params: (0..2)
+					.map(|slot| Param {
+						slot,
 						default: None,
-					},
-					Param {
-						slot: 1,
-						default: None,
-					},
-				],
+					})
+					.collect(),
 				captures: Vec::new(),
 				slots: 2,
-				body: Expr::CallFunction(
-					FnKey(0, 20),
-					crate::ir::Call::from(vec![Arg::Value(Expr::Local(0))]),
+				body: Expr::If(
+					Expr::CallFunction(FnKey(0, 20), vec![Arg::Value(*local(0))]).boxed(),
+					Expr::Equals(
+						local(1),
+						Expr::Arith(ArithOp::Multiply, INTEGER, local(0), int(10).boxed()).boxed(),
+						false,
+					)
+					.boxed(),
+					Some(Expr::Const(Value::Boolean(false)).boxed()),
 				),
 			}),
 		);
@@ -1441,5 +1443,273 @@ mod tests {
 		);
 		let compare = Expr::Compare(CompareOp::Less, int(1).boxed(), int(2).boxed());
 		assert_eq!(run(&mut host, &compare, 0), Ok(Value::Boolean(true)));
+	}
+	#[test]
+	fn borrowed_results_keep_the_evaluated_slot_and_export_only_data() {
+		let mut host = Functions::default();
+		let key = FnKey(0, 90);
+		host.0.insert(
+			key,
+			Arc::new(Function {
+				name: "first".into(),
+				params: vec![Param {
+					slot: 0,
+					default: Some(Expr::Array(vec![Item::One(int(7))])),
+				}],
+				captures: Vec::new(),
+				slots: 1,
+				body: Expr::Borrow(
+					Place {
+						slot: 0,
+						steps: vec![Step::Index(int(0))],
+					},
+					false,
+				),
+			}),
+		);
+		let owner = Place {
+			slot: 0,
+			steps: Vec::new(),
+		};
+		let reference = Place {
+			slot: 1,
+			steps: Vec::new(),
+		};
+		let expr = Expr::Block(vec![
+			Expr::Let(0, Expr::Array(vec![Item::One(int(7))]).boxed()),
+			Expr::Let(
+				1,
+				Expr::CallFunction(key, vec![Arg::Value(Expr::Borrow(owner, false))]).boxed(),
+			),
+			Expr::Assign(reference, int(9).boxed()),
+			Expr::Local(0),
+		]);
+		assert_eq!(
+			run(&mut host, &expr, 2),
+			Ok(Value::array(vec![Value::int(9)]))
+		);
+		// The public host entry has no lowered caller argument slot; it creates
+		// one, and materializes the reference before disposing its root frame.
+		let function = Value::Function(Arc::new(crate::value::Closure {
+			function: key,
+			captured: Vec::new(),
+			bound: Vec::new(),
+		}));
+		let value = Interpreter::new(&mut host, Limits::default())
+			.call_value(&function, vec![Value::array(vec![Value::int(9)])]);
+		assert_eq!(value, Ok(Value::int(9)));
+		let omitted = Expr::Dereference(Expr::CallFunction(key, vec![Arg::Default]).boxed());
+		assert_eq!(run(&mut host, &omitted, 0), Ok(Value::int(7)));
+	}
+
+	#[test]
+	fn borrowed_indices_are_evaluated_once_and_stale_frames_are_errors() {
+		let mut host = Functions::default();
+		let expr = Expr::Block(vec![
+			Expr::Let(
+				0,
+				Expr::Array(vec![Item::One(int(7)), Item::One(int(9))]).boxed(),
+			),
+			Expr::Let(1, int(0).boxed()),
+			Expr::Let(
+				2,
+				Expr::Borrow(
+					Place {
+						slot: 0,
+						steps: vec![Step::Index(Expr::Local(1))],
+					},
+					false,
+				)
+				.boxed(),
+			),
+			Expr::Assign(
+				Place {
+					slot: 1,
+					steps: Vec::new(),
+				},
+				int(1).boxed(),
+			),
+			Expr::Local(2),
+		]);
+		assert_eq!(run(&mut host, &expr, 3), Ok(Value::int(7)));
+		let key = FnKey(0, 91);
+		host.0.insert(
+			key,
+			Arc::new(Function {
+				name: "invalid escape".into(),
+				params: Vec::new(),
+				captures: Vec::new(),
+				slots: 1,
+				body: Expr::Block(vec![
+					Expr::Let(0, int(7).boxed()),
+					Expr::Borrow(
+						Place {
+							slot: 0,
+							steps: Vec::new(),
+						},
+						false,
+					),
+				]),
+			}),
+		);
+		let escaped = Expr::Dereference(Expr::CallFunction(key, Vec::new()).boxed());
+		assert!(
+			matches!(run(&mut host, &escaped, 0), Err(Error::Stop(message)) if message.contains("outlived its collection"))
+		);
+	}
+
+	#[test]
+	fn callback_builtins_preserve_results_and_atomic_mutations() {
+		let mut host = Functions::default();
+		let predicate = Expr::Equals(
+			Expr::Arith(ArithOp::Remainder, INTEGER, local(0), int(2).boxed()).boxed(),
+			int(0).boxed(),
+			false,
+		);
+		for (key, body, slots) in [
+			(20, predicate, 1),
+			(
+				21,
+				Expr::Arith(ArithOp::Add, INTEGER, local(0), local(1)),
+				2,
+			),
+			(
+				22,
+				Expr::Arith(ArithOp::Subtract, INTEGER, local(0), local(1)),
+				2,
+			),
+			(
+				23,
+				Expr::If(
+					Expr::Equals(local(0), int(2).boxed(), false).boxed(),
+					Expr::Throw(Expr::Const(Value::error("Bad", Vec::new())).boxed()).boxed(),
+					Some(Expr::Const(Value::Boolean(true)).boxed()),
+				),
+				1,
+			),
+		] {
+			host.0.insert(
+				FnKey(0, key),
+				Arc::new(Function {
+					name: "callback".into(),
+					params: (0..slots)
+						.map(|slot| Param {
+							slot,
+							default: None,
+						})
+						.collect(),
+					captures: Vec::new(),
+					slots,
+					body,
+				}),
+			);
+		}
+		let values = || {
+			Expr::Array(
+				[1, 2, 3, 4]
+					.into_iter()
+					.map(|n| Item::One(int(n)))
+					.collect(),
+			)
+		};
+		let callback = |key| Expr::Function(FnKey(0, key));
+		for (path, expected) in [
+			("Array#filter", "[2, 4]"),
+			("Array#find", "2"),
+			("Array#some", "true"),
+			("Array#every", "false"),
+		] {
+			let expression = Expr::Builtin(path, vec![values(), callback(20)]);
+			assert_eq!(
+				run(&mut host, &expression, 0).map(|value| value.to_text()),
+				Ok(expected.into())
+			);
+		}
+		let reduce = Expr::Builtin("Array#reduce", vec![values(), callback(21), int(0)]);
+		assert_eq!(run(&mut host, &reduce, 0), Ok(Value::int(10)));
+		let set = Expr::Set(
+			[1, 2, 3, 4]
+				.into_iter()
+				.map(|n| Item::One(int(n)))
+				.collect(),
+		);
+		let filtered = Expr::Builtin("Set#filter", vec![set, callback(20)]);
+		assert_eq!(
+			run(&mut host, &filtered, 0),
+			Ok(Value::Set(Arc::new(vec![Value::int(2), Value::int(4)])))
+		);
+		host.0.insert(
+			FnKey(0, 24),
+			Arc::new(Function {
+				name: "evenKeyWithValue".into(),
+				params: (0..2)
+					.map(|slot| Param {
+						slot,
+						default: None,
+					})
+					.collect(),
+				captures: Vec::new(),
+				slots: 2,
+				body: Expr::If(
+					Expr::CallFunction(FnKey(0, 20), vec![Arg::Value(*local(0))]).boxed(),
+					Expr::Equals(
+						local(1),
+						Expr::Arith(ArithOp::Multiply, INTEGER, local(0), int(10).boxed()).boxed(),
+						false,
+					)
+					.boxed(),
+					Some(Expr::Const(Value::Boolean(false)).boxed()),
+				),
+			}),
+		);
+		let map = Expr::Map(
+			[1, 2]
+				.into_iter()
+				.map(|n| Item::One(Expr::Tuple(vec![int(n), int(n * 10)])))
+				.collect(),
+		);
+		let filtered = Expr::Builtin("Map#filter", vec![map, callback(24)]);
+		assert_eq!(
+			run(&mut host, &filtered, 0),
+			Ok(Value::Map(Arc::new(vec![(Value::int(2), Value::int(20))])))
+		);
+		for compare in [None, Some(callback(22))] {
+			let mut arguments = vec![Expr::Array(
+				[3, 1, 2].into_iter().map(|n| Item::One(int(n))).collect(),
+			)];
+			arguments.extend(compare);
+			assert_eq!(
+				run(&mut host, &Expr::Builtin("Array#sort", arguments), 0)
+					.map(|value| value.to_text()),
+				Ok("[1, 2, 3]".into())
+			);
+		}
+		let place = Place {
+			slot: 0,
+			steps: Vec::new(),
+		};
+		let unchanged = Expr::Block(vec![
+			Expr::Let(0, values().boxed()),
+			Expr::Catch {
+				body: Expr::Mutate("Array#deleteWhere", place.clone(), vec![callback(23)]).boxed(),
+				slot: None,
+				handler: Expr::none().boxed(),
+			},
+			Expr::Read(place.clone()),
+		]);
+		assert_eq!(
+			run(&mut host, &unchanged, 1).map(|value| value.to_text()),
+			Ok("[1, 2, 3, 4]".into())
+		);
+		let changed = Expr::Block(vec![
+			Expr::Let(0, values().boxed()),
+			Expr::Mutate("Array#deleteWhere", place.clone(), vec![callback(20)]),
+			Expr::Mutate("Array#sortInPlace", place.clone(), vec![callback(22)]),
+			Expr::Read(place),
+		]);
+		assert_eq!(
+			run(&mut host, &changed, 1).map(|value| value.to_text()),
+			Ok("[1, 3]".into())
+		);
 	}
 }

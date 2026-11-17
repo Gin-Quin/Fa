@@ -89,7 +89,7 @@ A relation has two sides:
 - the **direct side** is a reference field: `bestFriend: (Person in people)?`;
 - the **reverse side** names the collection, then the field it mirrors: `bestFriendOf: Pool<people->bestFriend>`. It reads as *the elements of `people` whose `bestFriend` points at me*.
 
-The reverse side is always declared. There is no one-way reference: a reference field without a reverse side is a compile error (the only exception is an [owner field](#example-a-linked-list), stored on the object that owns the collection).
+The reverse side is always declared. Without the explicit `link` modifier, a reference field without a reverse side is a compile error (the only exception is an [owner field](#example-a-linked-list), stored on the object that owns the collection).
 
 ```fa
 type Person = {
@@ -429,7 +429,7 @@ type LinkedList<Data> = {
 }
 ```
 
-`firstChild` and `lastChild` are not stored in a node, but in the list that owns `#nodes`. They are **owner fields**: fields of the type that owns a collection, pointing into that collection. An owner field has exactly one holder, the owner itself, so it has no reverse side to declare: when a node is deleted from `#nodes`, the owner fields that pointed at it become `none`. This is the only kind of reference field without a reverse side.
+`firstChild` and `lastChild` are not stored in a node, but in the list that owns `#nodes`. They are **owner fields**: fields of the type that owns a collection, pointing into that collection. An owner field has exactly one holder, the owner itself, so it has no reverse side to declare: when a node is deleted from `#nodes`, the owner fields that pointed at it become `none`. This is the only relation field without a reverse side; explicit `link` fields follow the separate containment contract below.
 
 - An owner field is optional. Several owner fields may point at the same element: here, `firstChild` and `lastChild` both point at the only node of a one-node list.
 - A collection that owner fields point into is only modified through its owner: an operation that adds, deletes or mutates its elements names it from the owner (`self.#nodes.delete(node)`, `list.#nodes`), never through a parameter or an alias that designates the collection alone: such a collection can't be aliased with `use` or `mutable use`, nor passed to a parameter that a function mutates or invalidates, while the built-in operations called on the full path are allowed. This is how a deletion finds the owner fields to clear.
@@ -461,6 +461,258 @@ Notice what you did *not* have to write: `previous` is never assigned. Declaring
 
 Storing all the nodes in one pool has two further benefits: destroying the list frees every node in one step, and iterating over `#nodes` walks through every node contiguously, which is much faster than following `next` references through scattered memory.
 
+## Links without a reverse side
+
+A **link** is a non-owning stored reference whose validity rests on a growing target collection and containment inside a complete declared owner. Write `link` before the field name, including in a union member record. It is contextual: `link` remains an ordinary identifier elsewhere, and a field can itself be named `link`.
+
+```fa
+-- Acceptance: stored links (implemented in subsequent link slices).
+type Model = {
+	nodes: GrowingPool<Node> = []
+	labels: GrowingPool<Label> = []
+	link root: (Node in nodes)? = none
+	type Label = { text: String }
+	type Node = {
+		value: Int32
+		link next: (Node in nodes)? = none
+		link label: (Label in labels)? = none
+	}
+}
+mutable first: Model = {}
+mutable second: Model = {}
+use label = first.labels.add({ text = "one" })
+use node = first.nodes.add({ value = 1, label = label })
+first.root = node
+-- second.root = node -- error: expected Node in second.nodes, got Node in first.nodes
+```
+
+Allowed shapes are `T in path`, `(T in path)?`, `Array<T in path>` and `InlineArray<T in path, capacity>`. T is the target's complete element type. Required links must be supplied; optional/list links start empty only with an explicit `= none`/`= []`. Cycles, self-links, repeated targets and sharing are allowed. Seed cycles through initialized optional/list fields or a link-free union member, then patch or replace the element. No uninitialized element or constructor-self reference can seed an always-required cycle.
+
+A link is initialized like an ordinary field: supply a required link at construction, or write `= none` to give an optional link a default. A relation side is maintained by its collection and starts empty, so it does not take an explicit `= none` initializer.
+
+| Promise or cost | Relation | Explicit link |
+| --- | --- | --- |
+| Target | Stable relation collection, including deletable Pool | Whole element of GrowingPool/GrowingArray |
+| Validity | Maintained inverse finds and clears incoming sides on deletion | All surviving holders stay within the target's complete owner |
+| Write | Updates direct and old/new reverse sides; may allocate reverse state | Stores the target, no reverse state or implied reverse writes |
+| Read | No liveness check | No liveness check |
+| Deletion | Cleanup O(k) for k memberships | Individual deletion absent |
+| Ordered children | A linked list/relation structure | Array or InlineArray, preserving order and duplicates |
+| Detached element copy | Erases relation sides | Refused; borrow or project ordinary data |
+| Whole-element assignment | Keeps relation sides | Replaces outgoing link fields; incoming links still designate the place |
+| Complete-owner copy | Remaps jointly copied relation sides | Preserves sharing/cycles within the independent copy |
+
+Choose relations for objects that disappear individually, reverse queries or automatic partner maintenance. Choose links for graphs built and discarded together, ordered adjacency lists and low storage/write costs. A link does not promise a tree or acyclicity. A bare reference field keeps relation semantics even in GrowingPool, and absence of a reverse side remains an error. Ordinary fields cannot hide a reference in an optional, tuple, collection, alias or generic argument (`REF010`); local reference collections remain forbidden.
+
+These operations would leave a link without its target collection and are rejected:
+
+```fa
+-- Acceptance: link containment is implemented in subsequent link slices.
+use { Json } = std.json
+type Graph = {
+	nodes: GrowingPool<Node, UInt16> = []
+	link root: (Node in nodes)? = none
+	type Node = { value: Integer, link next: (Node in nodes)? = none }
+}
+mutable graph: Graph = {}
+use a = graph.nodes.add({ value = 1 })
+use b = graph.nodes.add({ value = 2, next = a })
+graph.root = b
+let detached = copy b -- error: this node has links into graph.nodes; borrow it or copy graph
+graph.nodes = [] -- error: graph.root may outlive graph.nodes; replace the complete graph
+let encoded = Json.stringify(graph) -- error: project the data and node identifiers into a separate type
+```
+
+A deletable pool needs a relation so that deleting a target can clear its incoming sides:
+
+```fa
+-- Acceptance: link target validation is implemented in subsequent link slices.
+type Wrong = {
+	nodes: Pool<Node> = []
+	type Node = {
+		link next: (Node in nodes)? = none -- error: nodes can remove elements; use GrowingPool or a relation
+	}
+}
+```
+
+Reading a scalar link with `use` binds its target; a later write does not reseat that alias. Link-list iteration and indexing bind target references, never addresses of encoded fields. Following a link restarts an effect path at its target collection. Printing, interpolation, equality and hashing omit link fields, as they omit relations: data equality is not graph-isomorphism equality. A reactive read of the list observes list writes; a read of target data observes those data writes, without a reverse-side notification.
+
+### Complete tree
+
+The complete owner below builds left, then right, then parent, and computes eight pre-order sums. It needs no reverse sides. Links are inert on destruction; this flat payload requires only page cleanup.
+
+```fa
+-- Acceptance: complete linked tree.
+function xorshift = (x: UInt64): UInt64 => {
+	mutable v = x
+	v = v.bitXor(v.shiftLeft(13))
+	v = v.bitXor(v.shiftRight(7))
+	v.bitXor(v.shiftLeft(17))
+}
+type Tree = {
+	nodes: GrowingPool<Node> = []
+	type Node = {
+		value: Int32
+		link left: (Node in nodes)? = none
+		link right: (Node in nodes)? = none
+	}
+	function build = (self, depth: Integer<min = 0>, seed: UInt64): Node in self.nodes
+		mutates self.nodes.size => {
+		if depth == 0 {
+			return self.nodes.add({ value = Int32(seed %% 1000) })
+		}
+		use left = self.build(depth - 1, xorshift(seed))
+		use right = self.build(depth - 1, xorshift(seed.wrappingAdd(1)))
+		self.nodes.add({ value = Int32(seed %% 1000), left = left, right = right })
+	}
+	function sum = (self, node: Node in self.nodes, pass: Integer): Integer => {
+		mutable total = Integer(node.value).bitXor(pass)
+		use left = node.left
+		if left is not none { total += self.sum(left, pass) }
+		use right = node.right
+		if right is not none { total += self.sum(right, pass) }
+		total
+	}
+}
+mutable tree: Tree = {}
+use root = tree.build(21, 12345)
+mutable total = 0
+for pass in 0..8 { total += tree.sum(root, pass) }
+console.log(tree.nodes.size)
+console.log(total)
+```
+
+### Complete scene
+
+This scene allocates each parent first, animates by insertion-order scans, recursively updates world transforms, then checksums by another scan. Children use [InlineArray](/collections/inline-arrays); `try` remains on pushes whose remaining capacity is not proven. The Transform snapshot before recursion is essential: a child may designate its parent, so borrowing `node.world` across a call mutating every world would overlap.
+
+```fa
+-- Acceptance: complete linked scene.
+function xorshift = (x: UInt64): UInt64 => {
+	mutable v = x
+	v = v.bitXor(v.shiftLeft(13))
+	v = v.bitXor(v.shiftRight(7))
+	v.bitXor(v.shiftLeft(17))
+}
+function randomBelow = (x: UInt64, bound: Integer<min = 1>): Integer =>
+	Integer(x %% UInt64(bound))
+
+type Vector = { x: Float32, y: Float32, z: Float32 }
+type Transform = { matrix: CArray<Float32, 9>, translation: Vector }
+let identity = Transform {
+	matrix = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+	translation = { x = 0.0, y = 0.0, z = 0.0 }
+}
+function rotation = (seed: UInt64): CArray<Float32, 9> => {
+	let axis = randomBelow(seed, 3)
+	let quarter = randomBelow(seed.shiftRight(8), 4)
+	mutable c: Float32 = 1.0
+	mutable s: Float32 = 0.0
+	if quarter == 1 {
+		c = 0.0
+		s = 1.0
+	} else if quarter == 2 {
+		c = -1.0
+		s = 0.0
+	} else if quarter == 3 {
+		c = 0.0
+		s = -1.0
+	}
+	if axis == 0 {
+		return [1.0, 0.0, 0.0, 0.0, c, 0.0 - s, 0.0, s, c]
+	}
+	if axis == 1 {
+		return [c, 0.0, s, 0.0, 1.0, 0.0, 0.0 - s, 0.0, c]
+	}
+	[c, 0.0 - s, 0.0, s, c, 0.0, 0.0, 0.0, 1.0]
+}
+function compose = (parent: Transform, local: Transform): Transform throws IndexError => {
+	mutable matrix: CArray<Float32, 9> = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+	for i in 0..3 {
+		for j in 0..3 {
+			mutable sum: Float32 = 0.0
+			for k in 0..3 {
+				sum += (try parent.matrix[i * 3 + k]) * (try local.matrix[k * 3 + j])
+			}
+			matrix[i * 3 + j] = sum
+		}
+	}
+	let p = parent.matrix
+	let t = local.translation
+	Transform {
+		matrix = matrix
+		translation = {
+			x = p[0] * t.x + p[1] * t.y + p[2] * t.z + parent.translation.x
+			y = p[3] * t.x + p[4] * t.y + p[5] * t.z + parent.translation.y
+			z = p[6] * t.x + p[7] * t.y + p[8] * t.z + parent.translation.z
+		}
+	}
+}
+
+type Scene = {
+	nodes: GrowingPool<Node> = []
+	type Node = {
+		id: Int32
+		local: Transform
+		world: Transform
+		link children: InlineArray<Node in nodes, 4> = []
+	}
+	function build = (self, depth: Integer<min = 0>, seed: UInt64): Node in self.nodes
+		throws CapacityError | ArithmeticError
+		mutates self.nodes.size, self.nodes[..].children => {
+		let state = xorshift(seed)
+		use node = self.nodes.add({
+			id = try Int32(self.nodes.size)
+			local = {
+				matrix = rotation(state)
+				translation = {
+					x = Float32(randomBelow(state.shiftRight(16), 9))
+					y = Float32(randomBelow(state.shiftRight(24), 9))
+					z = Float32(randomBelow(state.shiftRight(32), 9))
+				}
+			}
+			world = identity
+			children = []
+		})
+		if depth == 0 { return node }
+		let count = 1 + randomBelow(state.shiftRight(40), 4)
+		for index in 0..count {
+			use child = try self.build(depth - 1, xorshift(state.wrappingAdd(UInt64(index))))
+			try node.children.push(child)
+		}
+		node
+	}
+	function update = (self, node: Node in self.nodes, parent: Transform)
+		throws IndexError mutates self.nodes[..].world => {
+		node.world = try compose(parent, node.local)
+		let world = node.world -- ordinary inline value snapshot; no heap copy
+		for child in node.children {
+			try self.update(child, world)
+		}
+	}
+}
+
+mutable scene: Scene = {}
+use root = try scene.build(12, 12345)
+mutable total = 0
+for frame in 0..16 {
+	let step = Float32(frame %% 5)
+	for node in scene.nodes {
+		if node.id %% 7 == frame %% 7 {
+			node.local.translation.x = step
+			node.local.translation.z = 8.0 - step
+		}
+	}
+	try scene.update(root, identity)
+	for node in scene.nodes {
+		let t = node.world.translation
+		total += try Integer.truncate(t.x + t.y + t.z)
+	}
+}
+console.log(scene.nodes.size)
+console.log(total)
+```
+
 :::implementation
 ## Implementation details
 
@@ -473,5 +725,10 @@ The type store marks relation sides as links, so ownership classification follow
 ### JavaScript
 
 - Runtime relation helpers notify observers through callbacks. An element carries a symbol-keyed description of its sides, used by generic copies, printing, equality and hashing in erased generic code.
+
+
+### Link storage and observation
+
+Link fields are classified separately from relation sides and carry their exact symbolic collection path, shape and Index. They never call inverse-maintenance helpers. Generic and imported operations retain that classification. Native following resolves the target ordinal through its pages/segments; JavaScript stores the object itself (primitive targets use slot indices), including in erased callbacks. Whole-element assignment preserves target identity but initializes outgoing links from the written value. Reactive sources belong to the modified link field/list or target data field, with no implied reverse source. Copy/print/equality/hash metadata skips links instead of traversing cycles. Unsupported link storage must produce an actionable not-implemented diagnostic until all engines implement its contract.
 
 :::

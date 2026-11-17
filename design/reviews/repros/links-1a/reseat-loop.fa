@@ -1,0 +1,12 @@
+type Node = { value: Integer }
+function wrong = (owner: GrowingPool<Node>, other: GrowingPool<Node>): Node in owner mutates owner.size, other.size => {
+	mutable use result = owner.add({ value = 1 })
+	for i in 0..3 { reuse result = other.add({ value = i }) }
+	result
+}
+mutable a: GrowingPool<Node> = []
+mutable b: GrowingPool<Node> = []
+use r = wrong(a, b)
+b = []
+b.add({ value = 99 })
+console.log(r.value)

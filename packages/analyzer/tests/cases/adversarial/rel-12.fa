@@ -1,4 +1,3 @@
--- pending: M3 (`invalidates` of a reference parameter, as adv-8.10-15)
 -- deleting while iterating a relation, through a user function with `invalidates`
 type Town = {
 	people: Pool<Person> = []

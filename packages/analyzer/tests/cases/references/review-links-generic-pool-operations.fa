@@ -1,0 +1,49 @@
+-- An erased pool still removes the designated slot when equal values coexist.
+type Node = { value: Integer }
+function add = <Item>(values: Pool<Item>, value: Item): Item in values mutates values.size => values.add(copy value)
+function remove = <Item>(values: Pool<Item>, value: Item in values) invalidates value => values.delete(value)
+function take = <Item>(values: Pool<Item>, value: Item in values): Item invalidates value => values.take(value)
+function select = <Item>(values: Pool<Item>): Pool<Item> => values.filter((_item) => true)
+function empty = <Item>(values: Pool<Item>) mutates values => values.clear()
+function create = <Item>(value: Item): Pool<Item> => {
+ mutable values: Pool<Item> = []
+ values.add(copy value)
+ values
+}
+mutable values = create(7)
+use second = add(values, 7)
+remove(values, second)
+console.log(values) -- prints: [7]
+use third = add(values, 9)
+console.log(take(values, third)) -- prints: 9
+let kept = select(values)
+console.log(kept) -- prints: [7]
+empty(values)
+console.log(values.size) -- prints: 0
+mutable nodes = create(Node { value = 7 })
+use node = add(nodes, Node { value = 9 })
+console.log(take(nodes, node).value) -- prints: 9
+console.log(select(nodes)) -- prints: [{ value = 7 }]
+
+function exercise = (): Array<Integer> => {
+ mutable numbers = create(7)
+ use duplicate = add(numbers, 7)
+ remove(numbers, duplicate)
+ use last = add(numbers, 9)
+ let taken = take(numbers, last)
+ mutable kept = select(numbers)
+ use saved = kept.find((_n) => true)
+ if saved is not none { saved = 9 }
+ let mapped = kept.map((n) => n + 1)
+ let total = kept.reduce((a, b) => a + b, 0)
+ let sum = kept.sum()
+ let yes = kept.includes(9) and kept.some((n) => n == 9) and kept.every((n) => n == 9)
+ mutable before = 0
+ for _value in kept.values() { before += 1 }
+ kept.deleteWhere((n) => n == 9)
+ let after = if kept.isEmpty() { 0 } else { 1 }
+ [taken, total, sum, if yes { 9 } else { 0 }, before, after, mapped.length]
+}
+static summary = @exercise()
+console.log(summary) -- prints: [9, 9, 9, 9, 1, 0, 1]
+console.log(exercise()) -- prints: [9, 9, 9, 9, 1, 0, 1]

@@ -118,9 +118,10 @@ impl Walker<'_> {
 			self.set_type(target, ty);
 			// the constraint and the default may name the earlier parameters
 			self.constraint_depth += 1;
-			let constraint_ty = constraint.map_or(TypeId::UNKNOWN, |c| self.check_type_expr(c));
+			let constraint_ty =
+				constraint.map_or(TypeId::UNKNOWN, |c| self.check_owned_type_expr(c));
 			self.constraint_depth -= 1;
-			let default_ty = default.map_or(TypeId::UNSET, |d| self.check_type_expr(d));
+			let default_ty = default.map_or(TypeId::UNSET, |d| self.check_owned_type_expr(d));
 			if !default_ty.is_unset()
 				&& constraint_ty != TypeId::UNKNOWN
 				&& !self.s.types.is_recovering(default_ty)
@@ -191,12 +192,12 @@ impl Walker<'_> {
 	/// The generic parameters of the declaration of another file a proxy
 	/// symbol stands for.
 	pub(super) fn exported_generics(&mut self, symbol: SymbolId) -> Vec<ParamId> {
-		let Some(exported) = self.proxy_exported(symbol) else {
+		let Some(generics) = self.proxy_generics(symbol) else {
 			return Vec::new();
 		};
 		self.s
 			.types
-			.list_items(exported.generics)
+			.list_items(generics)
 			.iter()
 			.filter_map(|&generic| match self.s.types.kind(generic) {
 				TypeKind::Param(param) => Some(param),
@@ -231,13 +232,16 @@ impl Walker<'_> {
 				&& w.rec_references.get(&symbol) == Some(&generic)
 			{
 				let own = w.s.types.rec_info(rec).args;
+				// Captured enclosing parameters follow the declaration's own
+				// parameters and are implicit in its recursive applications.
+				let own = w.s.types.list_items(own).get(..params.len());
 				// the whole definition is the application: a type function
 				// applying itself at new arguments never stops (TF001)
 				let whole = match syntax::view(&w.tree, w.a.symbols.symbol(symbol).decl_node) {
 					View::TypeDecl { value, .. } => w.strip_groups(value) == n,
 					_ => false,
 				};
-				if whole && w.s.types.list_items(own) != args.as_slice() {
+				if whole && own != Some(args.as_slice()) {
 					let name = w.display(generic);
 					let message = format!(
 						"`{name}` applies itself at new arguments each time: its applications nest without end (more than 256)"
@@ -246,7 +250,7 @@ impl Walker<'_> {
 					w.report(diagnostic);
 					return TypeId::UNKNOWN;
 				}
-				if w.s.types.list_items(own) != args.as_slice() {
+				if own != Some(args.as_slice()) {
 					let name = w.display(generic);
 					let message = format!(
 						"`{name}` refers to itself with other type arguments (polymorphic recursion): use its own parameters, `{name}`"

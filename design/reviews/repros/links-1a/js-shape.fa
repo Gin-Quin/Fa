@@ -1,0 +1,15 @@
+type Model = {
+	nodes: GrowingPool<Node> = []
+	values: Array<Integer> = []
+	type Node = { value: Integer }
+	function add = (self, value: Integer): Node in self.nodes mutates self.nodes.size => self.nodes.add({ value })
+	function firstValue = (self): Integer in self.values throws IndexError => try self.values[0]
+}
+function bump = (model: Model, node: Model.Node in model.nodes) mutates node => { node.value += 1 }
+mutable model: Model = { values = [4] }
+use n = model.add(3)
+bump(model, n)
+use v = try model.firstValue()
+v = 8
+console.log(n.value)
+console.log(try model.values[0])

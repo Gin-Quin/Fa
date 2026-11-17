@@ -1,4 +1,3 @@
--- pending: M3 (relations are checked; missing: references returned by a function (`Node in self.#nodes`), `invalidates` of a reference parameter, the effects of private pool paths)
 -- the LinkedList of the relations page, verbatim, then:
 type LinkedList<Data> = {
 	-- every node lives here (private field)

@@ -736,10 +736,17 @@ impl Generator<'_> {
 		let place_ty = target_place.ty;
 		let name = target_place.text.clone();
 		let place = Expr::name(name.clone(), false);
+		let place = if target_place.choice.is_some() || target_place.reference.is_some() {
+			self.keep_value_part(place)
+		} else {
+			place
+		};
 		let operand = self.expr(value);
 		let kind = self.number_kind(place_ty);
 		// `x op= v`, unless the place is a value of a map (`map.set`)
-		let direct = target_place.map.is_none();
+		let direct = target_place.map.is_none()
+			&& target_place.reference.is_none()
+			&& target_place.choice.is_none();
 		let simple = |op: ArithOp| match op {
 			ArithOp::Add if direct => Some("+="),
 			ArithOp::Subtract if direct => Some("-="),

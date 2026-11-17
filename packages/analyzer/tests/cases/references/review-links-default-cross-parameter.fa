@@ -1,0 +1,14 @@
+-- Regression from the links 1a review.
+type Node = { value: Integer }
+function wrong = (
+	a: GrowingPool<Node>
+	b: GrowingPool<Node>
+	n: Node in a = b.add({ value = 7 }) -- error: REF020
+): Node in a mutates b.size => n
+function escape = (owner: GrowingPool<Node>): Node in owner => {
+	mutable local: GrowingPool<Node> = []
+	wrong(owner, local)
+}
+mutable a: GrowingPool<Node> = []
+use n = escape(a)
+console.log(n.value)

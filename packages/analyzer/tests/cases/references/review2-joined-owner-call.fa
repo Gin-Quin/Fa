@@ -1,0 +1,16 @@
+-- error: EFF004
+-- error: REF009
+-- Expected: REF009; owner substitution must join the call argument's origins.
+type Node = { value: Integer }
+type Model = { a: GrowingPool<Node> = [], b: GrowingPool<Node> = [] }
+function add = (values: GrowingPool<Node>): Node in values mutates values.size => values.add({ value = 7 })
+function wrong = (model: Model, chooseA: Boolean): Node in model.a mutates model.a.size => {
+ mutable use owner = model.b
+ if chooseA { reuse owner = model.a }
+ add(owner)
+}
+mutable model: Model = {}
+use returned = wrong(model, false)
+model.b = []
+model.b.add({ value = 99 })
+console.log(returned.value)

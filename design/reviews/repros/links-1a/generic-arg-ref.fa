@@ -1,0 +1,7 @@
+type Node = { value: Integer }
+mutable nodes: GrowingPool<Node> = []
+function wrap = <T>(x: T): Array<T> => [x]
+use a = nodes.add({ value = 1 })
+let xs = wrap<Node in nodes>(a)
+a.value = 5
+console.log(try xs[0].value)

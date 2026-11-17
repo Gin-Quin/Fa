@@ -75,7 +75,7 @@ impl Walker<'_> {
 				self.nominal_decl(n, symbol, &text, kind, members);
 			}
 			_ => {
-				let ty = self.check_type_expr(value);
+				let ty = self.check_owned_type_expr(value);
 				// `type Permissions = Fields { … }`: named in messages (fields.rs)
 				if matches!(self.s.types.kind(ty), crate::types::TypeKind::Fields(_)) {
 					self.s.types.name_type(ty, &text);
@@ -267,6 +267,11 @@ impl Walker<'_> {
 			let mut reactive = false;
 			let (field, readonly) = match syntax::view(&tree, item) {
 				View::Readonly(inner) => (inner, true),
+				View::Link(_) => {
+					self.unsupported_with_message(item, "stored `link` fields are not implemented yet: use a relation with its reverse side until then");
+					parts.incomplete = true;
+					continue;
+				}
 				// `reactive count: Integer` (advanced brief §11.2)
 				View::Declaration {
 					kind: BindingKind::Reactive,
@@ -351,6 +356,11 @@ impl Walker<'_> {
 				Some(ty) => Some(ty),
 				None => annotation.map(|annotation| self.check_type_expr(annotation)),
 			};
+			if relation.is_none()
+				&& let Some(annotation) = annotation
+			{
+				self.check_reference_annotation(annotation);
+			}
 			// a relation side has no initializer (REL013, reported)
 			let default = if relation.is_some() { None } else { default };
 			let field_names: Vec<&str> = items
@@ -668,12 +678,30 @@ impl Walker<'_> {
 			return ty;
 		}
 		let data = self.a.symbols.symbol(symbol);
+		let enclosing_scope = data.scope;
 		let name = self.s.types.syms.resolve(data.name).to_string();
 		let object = matches!(
 			self.view(data.decl_node),
 			View::TypeDecl { value, .. } if matches!(self.view(value), View::Object { .. })
 		);
-		let params = self.type_generics(symbol).unwrap_or_default();
+		let mut params = self.type_generics(symbol).unwrap_or_default();
+		// A nested recursive type also captures its enclosing type parameters.
+		// They must be arguments of the recursive edge, so instantiating the
+		// owner substitutes every traversal back into that nested type.
+		let mut scope = Some(enclosing_scope);
+		while let Some(current) = scope {
+			let current = self.a.symbols.scope(current);
+			for &symbol in &current.symbols {
+				let symbol = self.a.symbols.symbol(symbol);
+				if symbol.kind == SymbolKind::TypeParameter
+					&& let crate::types::TypeKind::Param(param) = self.s.types.kind(symbol.ty)
+					&& !params.contains(&param)
+				{
+					params.push(param);
+				}
+			}
+			scope = current.parent;
+		}
 		let args: Vec<TypeId> = params
 			.iter()
 			.map(|&param| self.s.types.intern(crate::types::TypeKind::Param(param)))

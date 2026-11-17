@@ -86,7 +86,7 @@ impl Walker<'_> {
 	/// The collection an iterator expression reads, and whether its items
 	/// are still the collection's elements (no `map` in the chain):
 	/// `people.values().filter(…)` reads `people`. `None` when unknown.
-	pub(crate) fn iterator_source(&mut self, n: NodeId) -> Option<(PlaceId, bool)> {
+	pub(crate) fn iterator_source(&mut self, n: NodeId) -> Option<(Vec<PlaceId>, bool)> {
 		let n = self.strip_groups(n);
 		let tree = Arc::clone(&self.tree);
 		match syntax::view(&tree, n) {
@@ -94,7 +94,7 @@ impl Walker<'_> {
 				let Resolution::Local(symbol) = self.a.resolution(n) else {
 					return None;
 				};
-				self.iterator_locals.get(&symbol).copied()
+				self.iterator_locals.get(&symbol).cloned()
 			}
 			View::Call { callee, .. } => {
 				let callee = self.strip_groups(callee);
@@ -118,7 +118,7 @@ impl Walker<'_> {
 					("Iterator", "map") => self
 						.iterator_source(receiver)
 						.map(|(place, _)| (place, false)),
-					(_, "values" | "keys") => Some((self.place_of(receiver)?, true)),
+					(_, "values" | "keys") => Some((self.evaluated_origins(receiver).places, true)),
 					_ => None,
 				}
 			}
@@ -162,18 +162,29 @@ impl Walker<'_> {
 		let Some((collection, elements)) = self.iterator_source(value) else {
 			return;
 		};
-		self.iterator_locals.insert(symbol, (collection, elements));
+		self.iterator_locals
+			.insert(symbol, (collection.clone(), elements));
 		if self.body.flow.reachable {
-			let elements = self.places.child(
-				collection,
-				crate::flow::Step::Index(crate::flow::Identity::Unknown),
-			);
-			let state = self
-				.facts
-				.refs
-				.state(crate::flow::refs::RefState::valid(elements));
-			self.record_alias_origins(symbol, value, Some(elements));
+			let places: Vec<_> = collection
+				.into_iter()
+				.map(|collection| {
+					self.places.child(
+						collection,
+						crate::flow::Step::Index(crate::flow::Identity::Unknown),
+					)
+				})
+				.collect();
+			self.record_alias_origins(symbol, value, places.first().copied());
+			let state = self.facts.refs.state(crate::flow::refs::RefState {
+				places: places.into(),
+				opaque: false,
+				bounds: Default::default(),
+				readonly: false,
+				invalidated: None,
+				reported: false,
+			});
 			self.body.flow.set_ref_state(symbol, state);
+			self.body.flow.bind_reference_alias(symbol, None);
 		}
 	}
 }

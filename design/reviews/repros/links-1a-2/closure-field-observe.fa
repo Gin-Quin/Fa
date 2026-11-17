@@ -1,0 +1,13 @@
+-- Expected: MEM004; the escaping closure leaves inside a record field.
+type Node = { value: Integer }
+type Callback = () => Integer
+type Holder = { callback: Callback }
+function make = (): Callback => {
+ mutable values: GrowingPool<Node> = []
+ use node = values.add({ value = 7 })
+ let holder: Holder = { callback = () => node.value }
+ node.value = 8
+ holder.callback
+}
+let read = make()
+console.log(read())

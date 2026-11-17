@@ -16,14 +16,6 @@ The single list of open work, in the order of [the journal's Next roadmap](journ
 - **Native conversion between recursive object types overflows the compiler's stack.** Found on `perf/aggregates`, present on trunk `864167d6`: `type Node = { value: Integer, next: Node? }`, `type Other = { value: Int8, next: Other? }`, `let converted: Node = Other { value = 1, next = Other { value = 2 } }` passes `fa check` and builds for Bun, but `fa build --target=native` aborts with a Rust stack overflow (the field conversion recurses over the type pair without a helper per pair). Emit one conversion helper per (source, target) pair, or report a diagnostic; add the program to the native fixtures. Coordinate with `feature/ownership` (copies and conversions).
 - **Review m3 refactoring.** Split the long `readonly_table`, `build_composition_body`, `lower_function_body`, `builtin_call` and `for_items` by responsibility, preserving their tested behavior. See the lead's `trunk-merge-review.md`.
 
-- **Analyzer: reject Array fields of stored references.**
-  `benchmarks/audit/ports/scene-children/main.fa` declares
-  `children: Array<SceneNode in nodes>`. It is accepted and prints 0 on native,
-  wasm and Bun after the original child changes to 2, silently storing owned
-  copies. The reference/relation rules prohibit this field: reject it with a
-  diagnostic instead of erasing its reference type. The pool-link language
-  study does not authorize this current missing rejection; do not fix it in
-  the benchmark-port task.
 
 ## 2. Language semantics
 
@@ -106,7 +98,7 @@ One item per ordered slice of [the WIP assessment §3.4](reviews/ownership-wip-2
 
 One entry per work package of [the dated inventory §4](reviews/inventory-2026-11-15.md#4-proposed-work-packages-native-first-then-js), with completed portions removed. Cross-references to semantics above describe the same work, not a second assignment.
 
-- **WP1 — Native expected-skips to zero.** Returned primitive references/use/reuse, anonymous-union fields and method values, Enum/Optional conversions, rest patterns, range writes/equality, optional-array get, checkedPow/float constants and Fa type names. Also close the new deep-recursion runtime entries: js-million-copy on all LLVM targets and js-deep-values on wasm; audit unbounded copy/equality/format helpers. Sets/string slices follow O17–18/WP9. See native/wasm ratchet files.
+- **WP1 — Native expected-skips to zero.** Primitive use/reuse of remaining built-in reference producers, anonymous-union fields and method values, Enum/Optional conversions, rest patterns, range writes/equality, optional-array get, checkedPow/float constants and Fa type names. Also close the new deep-recursion runtime entries: js-million-copy on all LLVM targets and js-deep-values on wasm; audit unbounded copy/equality/format helpers. Sets/string slices follow O17–18/WP9. See native/wasm ratchet files.
 - **WP2 — Native compile-time values.** Lower Schema named members, @readDirectory and per-item @for; remove the five genuine native/wasm compile-time skips only when their fixtures pass. TypeFromSchema inside generic types has InlineArray round-trip cases. Generic function bodies still freeze @typeToSchema before instantiation: Array<Item> reflects Item as Never, and an InlineArray capacity parameter becomes none. Carry reflection metadata through those erased calls; repros: design/reviews/repros/inline-array/schema-generic-function{,-array-control}.fa.
 - **WP3 — Native/wasm leftovers.** Non-scalar while-let, relation assignment, async lambdas/function-value awaits, wasm async-function-values, O0 large-parameter limits and a wasm shadow-stack overflow trap (verify stack-first). The large-payload fixture has 8,196 parameters, above Node's O0 limit; floats_and_strings is already fixed.
 - **WP4 — Native run/test residuals.** ORC, fork isolation and O0 tests are integrated. Native/wasm tests still need build.link/libraryPaths and per-unit package coverage. Confirm whether native run should keep O3; C-library runs and develop currently retain linked execution (possible dlopen/JIT follow-ups). See the JIT decision and WP13.
@@ -116,7 +108,7 @@ One entry per work package of [the dated inventory §4](reviews/inventory-2026-1
 - **WP8 — Analyzer pending batch B.** Types/advanced M2/M3, references/relations, callable/type assignability, configuration/dependencies and the remaining diagnostic registry codes. Split by rule; require zero unaccounted pending cases/codes and enforce the registry contract. Deferred key-loop thrown/copy summaries and caller refresh are O33.
 - **WP9 — Strings/Bytes.** The integration branch and remaining native/final acceptance work are in section 2; the redesign is not yet on main.
 - **WP10 — Generics.** The remaining GN030, messages, async ordering, formatter and recovery work is in section 2. The merge settled tuple-ending block lambdas as WFN001 and E-DECL-6 already emits once; neither is a missing feature.
-- **WP11 — JavaScript completeness.** Gaps branch is integrated: guards, deep values, detached snapshots, worker cancellation, enum equality, console spreads, tuple pools and async declarations have regressions. Remaining refusal families: mixed/composite pools, user-returned primitive references, first-class builtins, recursive JSON parse schemas and missing erased generic/key-set metadata. Resource destruction belongs to ownership; generic pointers and CStruct-by-value ABI remain separate gaps. JSON schemas also reject constrained generic items (`Item: Integer`) in ordinary Array and InlineArray; resolve the constraint when checking JSON compatibility and lowering its schema (capacity-only generic InlineArray JSON is covered). See the exhaustive js-gaps report.
+- **WP11 — JavaScript completeness.** Gaps branch is integrated: guards, deep values, detached snapshots, worker cancellation, enum equality, console spreads, tuple pools and async declarations have regressions. Remaining refusal families: mixed/composite pools, first-class builtins, recursive JSON parse schemas and missing erased generic/key-set metadata. Resource destruction belongs to ownership; generic pointers and CStruct-by-value ABI remain separate gaps. JSON schemas also reject constrained generic items (`Item: Integer`) in ordinary Array and InlineArray; resolve the constraint when checking JSON compatibility and lowering its schema (capacity-only generic InlineArray JSON is covered). See the exhaustive js-gaps report.
 - **WP12 — Node/web residuals.** Harness and web exclusions are integrated. Close the six remaining target entries listed below; preserve sandbox global/worker/clone restrictions and exact ratchets.
 - **WP13 — CLI/project shapes.** Complete per-test include/timeout, decide LCOV coverage versus documentation, standalone-file test discovery and native/wasm workspace package-name resolution. Exercise the full command/shape matrix and dependencies described in section 5.
 - **WP14 — Interpreter coverage.** Patterns/rest, when/then, conversions, members/receivers, effect/type values, assignments, imported statics and compile-time parameters, one focused construct per slice. The continuation stack is already integrated; preserve exact step/heap/depth accounting and check the ulimit regression before reopening it.
@@ -139,6 +131,23 @@ One entry per work package of [the dated inventory §4](reviews/inventory-2026-1
 - **Resource-safe deep helpers and transport.** Ordinary JS copy/equality/assignment/format/JSON-write are iterative; recursive resource destruction and finite-schema JSON parsing still need their separately scoped work. Preserve prototype shared-handle identity, helper dependency isolation and clean generated output while landing ownership.
 - **Other inventory/review coverage.** Implement the provisional std.http surface; verify full-Unicode case conversion and JSON lone-surrogate output. Add regressions for move-mutable-use-branch and callback-capture-overlap when ownership lands. Reconcile pending-documentation implementation notes and stale historical spec-review entries when their subjects change.
 
+- **Cross-unit composition coverage.** Cover another unit’s function in a composition.
+
+## Contained links (adopted, 2026-11-16)
+
+Owner-path function references, reference defaults/structured results, dependent effect coverage, escaping local-reference capture rejection and reference-type rejection in every owned type position are implemented across checking, JavaScript, native/wasm and compile-time evaluation.
+Next slices follow [Pool links](pool-links.md): link binding,
+containment diagnostics and effects; dense paged native storage and Index limits;
+JavaScript direct-object links; whole-owner copy/move relinking; interpreter,
+reflection/JSON/worker boundaries. Acceptance programs are
+`references/links-acceptance-{model,tree,scene,chain-index-copy,containment-errors,target-errors}.fa` in the analyzer cases. InlineArray of owned items and its documentation are integrated.
+
+Native storage facts remain conservative for types containing synchronization
+or FFI handles whose stable names are not yet defined (`Sync`, `Pointer`,
+`CString`, `CArray`). Extend that naming format in a separate reviewed change,
+with cache-version invalidation; physical layout equality already uses canonical
+types and must not be replaced by fact-name equality.
+
 ## 4. Performance
 
 - **Wide asynchronous aggregate compilation.** Profile optimized compilation of
@@ -150,12 +159,11 @@ One entry per work package of [the dated inventory §4](reviews/inventory-2026-1
 - **Deferred Goose pool ports (lead, 2026-11-16).** The
   [sixteen-port audit](../benchmarks/audit/ports/README.md) records all structures,
   passes and intended Rust rows. Scene/interp/sexp/calc/tree/binary-trees/graph
-  wait for the language study of one-way growing-pool links, compact widths and
-  bounded inline ordered lists (`InlineArray` of owned items is implemented). Do not
+  wait for implementation of the adopted one-way growing-pool links, compact widths and
+  bounded inline link lists ([decision](pool-links.md); `InlineArray` of owned items is implemented). Do not
   use CArray integer-link approximations. Retain the current main rows until then; when replacing them, keep recursive
   variants and change Rust pairings together. Sexp needs reverse sibling order
-  and its parser error path. The separate missing Array-reference-field
-  rejection is an analyzer bug in section 1.
+  and its parser error path. The scene-children probe now rejects unsupported Array reference fields as REF010; convert it to explicit links when their storage is implemented.
 - **Stored borrowed slice keys for explicit words.** Standard Map remains the
   main comparator with a 1.10-times-Goose goal (Int32 counters are delivered).
   `benchmarks/audit/ports/words-slice-key/main.fa` gets REL001/REL002 for a
@@ -217,3 +225,8 @@ Ranked by the sum of CPU gap budgets over the 25 distinct ports at default sizes
 - **Command/shape matrix (WP13).** Standalone, package and workspace: check/build/run/test/develop/preview where supported, on every target. Cover native/wasm workspace package lookup, sibling/Git/remote dependencies on native/wasm/web, per-unit versus whole builds, link settings, standalone tests, watch and whole-workspace development/preview; make intentional target refusals explicit.
 - **CLI diagnostics and coverage policy.** Add CLI002/003/005/009, deno, missing-LLVM and fa update CLI001 cases; implement or revise advertised coverage and per-test configuration without silently ignoring options.
 - **Final reviews.** Schedule the second analyzer review after M2/M3, tooling review after the shape matrix, and final backend reviews after completeness. The trunk merge review is delivered; preserve its repros.
+
+### Findings outside the links reference branch (second review)
+
+- Destructured loop variables must keep their element places: `for { value } in values { value += 10 }` currently assigns to a JavaScript `const`, the evaluator keeps 1, and native/wasm correctly produce 11. Reproduction: `design/reviews/repros/links-1a-2/pre-existing-destructured-loop-write.fa`; the loops specification requires references.
+- Methods of a nested type must resolve the enclosing owner's fields: `World.Node` cannot currently read `owner.nodes` for a `World` parameter (EFF008/AN001). Reproduction: `design/reviews/repros/links-1a-2/pre-existing-nested-type-outer-field.fa` (also blocks `nested-default-effects.fa`).

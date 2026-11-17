@@ -1,0 +1,15 @@
+type Node = { value: Integer }
+function wrong = (
+	outer: GrowingPool<Node>
+	other: GrowingPool<Node>
+): Node in other mutates outer.size => {
+	function captured = (_fake: GrowingPool<Node>): Node in outer => outer.add({ value = 7 })
+	captured(other)
+}
+function escape = (owner: GrowingPool<Node>): Node in owner => {
+	mutable local: GrowingPool<Node> = []
+	wrong(local, owner)
+}
+mutable b: GrowingPool<Node> = []
+use node = escape(b)
+console.log(node.value)

@@ -1,0 +1,31 @@
+-- InlineArray capacity capabilities and reference locators share generic calls.
+type Node = { value: Integer }
+function first = <Item, capacity: UInt32>(
+	values: InlineArray<Item, capacity>
+): Item in values throws IndexError => try values[0]
+function replace = <Item, capacity: UInt32>(
+	values: InlineArray<Item, capacity>
+	value: Item
+) throws IndexError mutates values[..] => {
+	use target = try first<Item, capacity>(values)
+	target = copy value
+}
+function check = (): Integer throws IndexError => {
+	mutable numbers: InlineArray<Integer, 4> = [3]
+	try replace<Integer, 4>(numbers, 7)
+	type Reader = (values: InlineArray<Integer, 4>) => Integer in values throws IndexError
+	let read: Reader = first<Integer, 4>
+	use number = try read(numbers)
+	numbers.push(11)
+	number += 2
+	mutable nodes: InlineArray<Node, 4> = [{ value = 1 }]
+	use node = try first<Node, 4>(nodes)
+	try replace<Node, 4>(nodes, { value = 13 })
+	mutable mixed: InlineArray<Integer | Node, 4> = [{ value = 2 }]
+	try replace<Integer | Node, 4>(mixed, 17)
+	let item = mixed[0]
+	if item is Integer { number + node.value + item + numbers[1] } else { 0 }
+}
+static result = @check()
+console.log(result)      -- prints: 50
+console.log(try check()) -- prints: 50

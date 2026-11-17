@@ -594,3 +594,75 @@ fn ranged_values_keep_their_type() {
 	assert_eq!(symbol_type(&session, file, "c"), "Integer<min = 0>");
 	assert_eq!(symbol_type(&session, file, "e"), "Integer<min = 0>");
 }
+
+#[test]
+fn function_types_reject_defaults_at_the_parameter() {
+	for source in [
+		"type F = (x: Integer = 1) => Integer",
+		"function apply = (f: <T>(x: T, y: T = x) => T) => 0",
+	] {
+		let (session, file) = analyze_source(source);
+		let errors: Vec<_> = session
+			.diagnostics(file)
+			.iter()
+			.filter(|diagnostic| diagnostic.severity == crate::Severity::Error)
+			.collect();
+		assert_eq!(errors.len(), 1, "{errors:?}");
+		assert_eq!(errors[0].code.id, "FN030");
+		assert!(errors[0].message.contains("pass this argument explicitly"));
+	}
+}
+
+#[test]
+fn reference_function_mismatches_show_the_owner_and_a_fix() {
+	for name in ["fnvalue-owned-result", "fnvalue-wrong-owner"] {
+		let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+			.join("../../design/reviews/repros/links-1a-2");
+		let source = std::fs::read_to_string(root.join(format!("{name}.fa"))).unwrap();
+		let (session, file) = analyze_source(&source);
+		let diagnostic = session
+			.diagnostics(file)
+			.iter()
+			.find(|diagnostic| diagnostic.code.id == "E-TYPE-1")
+			.unwrap();
+		assert!(
+			diagnostic.message.contains(" in values"),
+			"{}",
+			diagnostic.message
+		);
+		assert!(
+			diagnostic.message.contains("in owner"),
+			"{}",
+			diagnostic.message
+		);
+		if name == "fnvalue-wrong-owner" {
+			assert!(
+				diagnostic.message.contains(" in other"),
+				"{}",
+				diagnostic.message
+			);
+		}
+	}
+}
+
+#[test]
+fn captured_reference_owner_names_the_inner_function() {
+	let source =
+		include_str!("../../tests/cases/references/review-links-closure-captured-owner.fa");
+	let (session, file) = analyze_source(source);
+	let diagnostic = session
+		.diagnostics(file)
+		.iter()
+		.find(|diagnostic| diagnostic.code.id == "REF008")
+		.unwrap();
+	assert!(
+		diagnostic.message.contains("parameter of `captured`"),
+		"{}",
+		diagnostic.message
+	);
+	assert!(
+		diagnostic.message.contains("pass `outer` as a parameter"),
+		"{}",
+		diagnostic.message
+	);
+}

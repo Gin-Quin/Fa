@@ -32,6 +32,7 @@ mod jit;
 mod link;
 #[cfg(fa_llvm)]
 mod lower;
+mod map_facts;
 #[cfg(fa_llvm)]
 mod optimize;
 mod options;

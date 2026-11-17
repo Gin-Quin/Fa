@@ -1,0 +1,6 @@
+type Node = { value: Integer }
+mutable nodes: GrowingPool<Node> = []
+function add = (value: Integer): Node in nodes mutates nodes.size => nodes.add({ value })
+use a = add(3)
+nodes = []
+console.log(a.value)

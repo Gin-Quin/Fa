@@ -28,6 +28,12 @@ use crate::symbols::{DeclState, Resolution, Symbol, SymbolKind};
 use crate::syntax::{self, Name, View};
 use crate::types::{CollKind, TypeKind};
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReferenceReach {
+	Owned,
+	ReadOnly,
+}
+
 impl Walker<'_> {
 	// ── declaring references ──────────────────────────────────────────────
 
@@ -48,18 +54,13 @@ impl Walker<'_> {
 		if !mutable && self.is_module_path(value) {
 			return self.check_use_alias(n, name, value);
 		}
-		let declared = annotation.map(|annotation| self.check_type_expr(annotation));
+		let declared = annotation.map(|annotation| self.check_reference_type_expr(annotation));
 		let actual = self.check(value, declared);
 		if let Some(declared) = declared {
 			self.sink(value, actual, declared);
 		}
 		let place = self.reference_place(value);
-		// An alias snapshots every possible target of a reseated reference,
-		// including whether one branch designates a slice rather than its owner.
-		let targets = self
-			.read_local(self.reference_operand(value))
-			.and_then(|source| self.body.flow.ref_state(source))
-			.map(|state| self.facts.refs.get(state).places.clone());
+		let origins = self.reference_origins(value);
 		let kind = if mutable {
 			SymbolKind::MutableUse
 		} else {
@@ -97,12 +98,19 @@ impl Walker<'_> {
 		if let Some(place) = place {
 			self.aliases.insert(symbol, place);
 			if self.body.flow.reachable {
-				let mut state = RefState::valid(place);
-				if let Some(targets) = targets {
-					state.places = targets;
-				}
-				let state = self.facts.refs.state(state);
+				let designated = place;
+				let places = origins.into_iter().collect();
+				let evaluated = self.evaluated_origins(value);
+				let opaque = evaluated.opaque;
+				let state = self.facts.refs.state(RefState {
+					opaque,
+					bounds: evaluated.bounds.into_iter().collect(),
+					readonly: evaluated.readonly,
+					places,
+					..RefState::valid(designated)
+				});
 				self.body.flow.set_ref_state(symbol, state);
+				self.bind_reference_identity(symbol, value);
 				// the narrowing of the place, as a fact of the alias
 				let declared_ty = self.a.symbols.symbol(symbol).ty;
 				let narrowed = self.s.types.widen(actual);
@@ -127,6 +135,13 @@ impl Walker<'_> {
 	pub(super) fn is_slice_assignment_target(&self, target: NodeId) -> bool {
 		let target = self.strip_groups(target);
 		let slice_place = |place| {
+			let entry = self.places.get(place);
+			if matches!(entry.step, Some(Step::Index(_)))
+				&& self.type_of(target) == TypeId::BYTES
+				&& entry.parent.and_then(|parent| self.place_type(parent)) == Some(TypeId::BYTES)
+			{
+				return true;
+			}
 			matches!(
 				self.places.get(place).step,
 				Some(Step::All | Step::Range(..) | Step::Characters)
@@ -166,7 +181,26 @@ impl Walker<'_> {
 				.places
 				.iter()
 				.copied()
-				.any(matches);
+				.any(|mut place| {
+					for _ in 0..=self.reference_parameters.len() {
+						if matches(place) {
+							return true;
+						}
+						let Some(owner) = self
+							.places
+							.get(place)
+							.parent
+							.is_none()
+							.then(|| self.place_symbol(place))
+							.flatten()
+							.and_then(|symbol| self.reference_parameters.get(&symbol))
+						else {
+							return false;
+						};
+						place = *owner;
+					}
+					false
+				});
 		}
 		self.aliases.get(&symbol).copied().is_some_and(&mut matches)
 	}
@@ -242,91 +276,820 @@ impl Walker<'_> {
 		true
 	}
 
-	/// The owner of a reference return type `T in owner`: its path must
-	/// start at a parameter or a module-level value (`REF008`).
-	pub(super) fn reference_return_owner(&mut self, returns: NodeId) -> Option<PlaceId> {
-		let View::RefType { owner, .. } = self.view(returns) else {
-			return None;
-		};
-		// the root name of the path
+	/// A reference annotation, optionally parenthesized/optional. Containers
+	/// of references are storage, not a dependent reference parameter/result.
+	pub(super) fn reference_annotation(&self, n: NodeId) -> Option<NodeId> {
+		match self.view(n) {
+			View::Group(inner) | View::Optional(inner) => self.reference_annotation(inner),
+			View::RefType { owner, .. } => Some(owner),
+			_ => None,
+		}
+	}
+
+	/// The portable collection path of an explicitly borrowed result/parameter.
+	pub(super) fn reference_contract(&mut self, annotation: NodeId) -> Option<crate::ids::PathId> {
+		let owner = self.reference_annotation(annotation)?;
+		let mut type_nodes = vec![owner];
+		while let Some(node) = type_nodes.pop() {
+			self.set_flag(node, NodeFlags::TYPE_EXPR);
+			type_nodes.extend(syntax::children(&self.tree, node));
+		}
 		let mut root = self.strip_groups(owner);
 		while let View::Access { target, .. } = self.view(root) {
 			root = self.strip_groups(target);
 		}
-		let View::Name(name) = self.view(root) else {
-			return None;
+		let allowed = if let View::Name(name) = self.view(root) {
+			let sym = self.s.types.syms.intern(self.tree.name(name));
+			self.a
+				.symbols
+				.lookup(self.body.scope, sym)
+				.is_some_and(|symbol| {
+					let entry = self.a.symbols.symbol(symbol);
+					matches!(
+						entry.kind,
+						SymbolKind::Parameter { .. } | SymbolKind::SelfParameter
+					) && entry.scope == self.body.scope
+						|| self.declared_outside_functions(symbol)
+				})
+		} else {
+			false
 		};
-		let sym = self.s.types.syms.intern(self.tree.name(name));
-		let symbol = self.a.symbols.lookup(self.body.scope, sym);
-		let allowed = symbol.is_some_and(|symbol| {
-			let entry = self.a.symbols.symbol(symbol);
-			matches!(
-				entry.kind,
-				SymbolKind::Parameter { .. } | SymbolKind::SelfParameter
-			) || self.declared_outside_functions(symbol)
-		});
-		if !allowed {
-			if self.reported_once.insert((owner, "REF008")) {
-				let text = self.tree.text(owner.index()).to_string();
-				let diagnostic = self.diagnostic(
-					&crate::diagnostics::codes::advanced::REF008,
-					owner,
-					format!(
-						"`{text}` is not a parameter nor a module-level value: a returned reference must point into something that outlives the call"
-					),
-				);
-				self.report(diagnostic);
-			}
-			return None;
+		let path = if allowed {
+			self.signature_path(owner).filter(|(_, ty)| {
+				matches!(
+					self.s.types.kind(*ty),
+					TypeKind::Collection(..) | TypeKind::String | TypeKind::Bytes
+				)
+			})
+		} else {
+			None
+		};
+		if path.is_none() && self.reported_once.insert((owner, "REF008")) {
+			let text = self.tree.text(owner.index()).to_string();
+			let mut context_node = self.a.symbols.scope(self.body.scope).owner;
+			let function = loop {
+				if let Some(symbol) = self.a.symbols.symbol_of_decl(context_node)
+					&& self.a.symbols.symbol(symbol).kind == SymbolKind::Function
+				{
+					break Some(
+						self.s
+							.types
+							.syms
+							.resolve(self.a.symbols.symbol(symbol).name)
+							.to_string(),
+					);
+				}
+				let Some(parent) = self.parent(context_node) else {
+					break None;
+				};
+				context_node = parent;
+			};
+			let context = function
+				.map(|name| format!(" of `{name}`"))
+				.unwrap_or_else(|| " of this function".into());
+			let diagnostic = self.diagnostic(&crate::diagnostics::codes::advanced::REF008, owner,
+				format!("`{text}` must name a collection or string reached from a parameter{context} or a module-level value: pass `{text}` as a parameter of this function, then return a reference into it"));
+			self.report(diagnostic);
 		}
+		path.map(|(path, _)| {
+			let (data, steps) = self.s.types.path_data(path);
+			if data.root == crate::types::PathRoot::SelfParam {
+				let steps = steps.to_vec();
+				self.s.types.path(crate::types::PathRoot::Param(0), &steps)
+			} else {
+				path
+			}
+		})
+	}
+
+	/// The flow place of that collection in the function's own scope.
+	pub(super) fn reference_return_owner(&mut self, returns: NodeId) -> Option<PlaceId> {
+		let owner = self.reference_annotation(returns)?;
+		self.reference_contract(returns)?;
 		self.quiet += 1;
 		self.check(owner, None);
 		self.quiet -= 1;
 		self.place_of(owner)
 	}
 
-	/// `REF009`: a returned reference must designate a place below the
-	/// declared owner.
+	pub(super) fn reference_is_fresh(&mut self, value: NodeId, owner: Option<PlaceId>) -> bool {
+		let Some(owner) = owner else {
+			return false;
+		};
+		let owner = self.canonical_reference_place(owner);
+		let depth = self.place_steps(owner).len();
+		let origins = self.evaluated_origins(value);
+		!origins.owned
+			&& origins.places.iter().all(|&place| {
+				let place = self.canonical_reference_place(place);
+				self.may_be_at_or_below(place, owner)
+					&& matches!(
+						self.place_steps(place).get(depth),
+						Some(Step::Index(crate::flow::Identity::Fresh(_)))
+					)
+			})
+	}
+
+	fn bind_reference_identity(&mut self, symbol: SymbolId, value: NodeId) {
+		let mut value = self.strip_groups(value);
+		while let View::Try(inner) = self.view(value) {
+			value = self.strip_groups(inner);
+		}
+		let source = match self.view(value) {
+			View::Name(_) => match self.a.resolution(value) {
+				Resolution::Local(source) if self.body.flow.ref_state(source).is_some() => {
+					Some(source)
+				}
+				_ => None,
+			},
+			_ => None,
+		};
+		self.body.flow.bind_reference_alias(symbol, source);
+	}
+
+	/// Reference origins use the same flow places as effects and calls.
+	pub(super) fn reference_origins(&mut self, value: NodeId) -> Vec<PlaceId> {
+		if let Some(origins) = self.value_origins.get(&value) {
+			return origins
+				.places
+				.clone()
+				.into_iter()
+				.map(|place| self.reference_field_target(place))
+				.collect();
+		}
+		self.ensure_builtin_reference(value);
+		self.places_of(value)
+			.into_iter()
+			.map(|place| self.reference_field_target(place))
+			.collect()
+	}
+
+	/// The result must cross an element of its declared owner. Metadata such
+	/// as `values.length` is below the collection but is not an owned element.
+	fn reference_is_inside(&mut self, place: PlaceId, owner: PlaceId) -> bool {
+		let owner = self.canonical_reference_place(owner);
+		let place = self.canonical_reference_place(place);
+		self.may_be_at_or_below(place, owner)
+			&& matches!(
+				self.place_steps(place).get(self.place_steps(owner).len()),
+				Some(Step::Index(_) | Step::All | Step::Range(..) | Step::Characters)
+			)
+	}
+
+	pub(super) fn reference_result_valid(&mut self, value: NodeId, owner: Option<PlaceId>) -> bool {
+		let Some(owner) = owner else {
+			return true;
+		};
+		let origins = self.evaluated_origins(value);
+		!origins.owned
+			&& self
+				.reference_origins(value)
+				.into_iter()
+				.all(|place| self.reference_is_inside(place, owner))
+	}
+
+	/// Validate reference results with the same owner/identity paths used by
+	/// local aliases. None carries no place; every other result must borrow.
 	pub(super) fn check_returned_reference(&mut self, value: NodeId, owner: Option<PlaceId>) {
 		let Some(owner) = owner else {
 			return;
 		};
-		if !self.body.flow.reachable {
+		if !self.body.flow.reachable || matches!(self.view(self.strip_groups(value)), View::None) {
 			return;
 		}
-		let Some(place) = self.reference_place(value) else {
-			return;
-		};
-		if self.may_be_at_or_below(place, owner) || self.may_be_at_or_below(owner, place) {
-			return;
-		}
-		// a reference given by a parameter or a module-level value of the
-		// same owner: unknown, accepted
-		if let Some(symbol) = self.place_symbol(place)
-			&& self.aliases.contains_key(&symbol)
+		let summary = self.reference_value_summary(value);
+		let valid = self.reference_result_valid(value, Some(owner));
+		let fresh = self.reference_is_fresh(value, Some(owner));
+		let layout = self.reference_result_layout(value, owner);
+		if let Some(cx) = self.body.functions.last_mut()
+			&& cx.ref_owner == Some(owner)
 		{
+			cx.ref_valid &= valid;
+			cx.ref_origins.extend(summary);
+			cx.ref_origins.sort_unstable();
+			cx.ref_origins.dedup();
+			cx.ref_fresh &= fresh;
+			if let Some(layout) = layout {
+				cx.ref_layout = Some(cx.ref_layout.map_or(layout, |old| old.joined(layout)));
+			}
+		}
+		let origins = self.evaluated_origins(value);
+		let places = self.reference_origins(value);
+		if origins.owned {
+			let diagnostic = self.diagnostic(&crate::diagnostics::codes::advanced::REF008, value,
+				"this result has no borrowed place: return a reference into the declared collection, or declare an ordinary owned result");
+			self.report_flow(diagnostic);
+		}
+		if places.into_iter().all(|place| {
+			let place = self.canonical_reference_place(place);
+			self.reference_is_inside(place, owner)
+		}) {
 			return;
 		}
 		let text = self.tree.text(value.index()).to_string();
 		let owner_text = self.place_text(owner);
-		let diagnostic = self.diagnostic(
-			&crate::diagnostics::codes::advanced::REF009,
-			value,
-			format!(
-				"`{text}` is not inside `{owner_text}`, the owner the return type declares: return an element of `{owner_text}`, or change the return type"
-			),
-		);
+		let diagnostic = self.diagnostic(&crate::diagnostics::codes::advanced::REF009, value,
+			format!("`{text}` is not inside `{owner_text}`, the declared owner: return an element of `{owner_text}`, or change the return type"));
 		self.report_flow(diagnostic);
 	}
 
-	/// The place a `use` designates: a place expression (through `try`).
-	fn reference_place(&mut self, value: NodeId) -> Option<PlaceId> {
-		let value = self.reference_operand(value);
+	pub(super) fn reference_result_layout(
+		&mut self,
+		value: NodeId,
+		owner: PlaceId,
+	) -> Option<crate::analysis::ReferenceLayout> {
+		use crate::analysis::ReferenceLayout;
+		let origins = self.evaluated_origins(value);
+		if origins.places.is_empty() {
+			return None;
+		}
+		if origins.opaque || origins.owned {
+			return Some(ReferenceLayout::General);
+		}
+		if self.place_type(owner).is_some_and(|ty| {
+			matches!(
+				self.s.types.kind(ty),
+				TypeKind::Collection(CollKind::Set | CollKind::GrowingSet, ..)
+					| TypeKind::String
+					| TypeKind::StringLit(_)
+			)
+		}) {
+			return Some(ReferenceLayout::General);
+		}
+
+		if self
+			.place_type(owner)
+			.is_some_and(|ty| match self.s.types.kind(ty) {
+				TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, _, key) => {
+					self.s.types.union_members(&key).contains(&TypeId::NONE)
+						|| matches!(
+							self.s.types.kind(key),
+							TypeKind::Param(_) | TypeKind::Unknown
+						)
+				}
+				_ => false,
+			}) {
+			return Some(ReferenceLayout::General);
+		}
+		if origins.places.iter().all(|&place| {
+			self.places.get(place).parent == Some(owner)
+				&& matches!(self.places.get(place).step, Some(Step::Index(_)))
+		}) {
+			return Some(ReferenceLayout::Owner);
+		}
+		let mut layout = None;
+		for place in origins.places {
+			let entry = self.places.get(place);
+			let parent_is_map = entry
+				.parent
+				.and_then(|parent| self.place_type(parent))
+				.is_some_and(|ty| {
+					matches!(
+						self.s.types.kind(ty),
+						TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, ..)
+					)
+				});
+			let map_key = entry
+				.parent
+				.and_then(|parent| self.place_type(parent))
+				.and_then(|ty| match self.s.types.kind(ty) {
+					TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, _, key)
+						if !matches!(
+							self.s.types.kind(key),
+							TypeKind::Param(_) | TypeKind::Unknown
+						) =>
+					{
+						Some(key)
+					}
+					_ => None,
+				});
+			let candidate = match (entry.step, map_key) {
+				(Some(Step::Field(name)), _) => ReferenceLayout::Field(name),
+				(Some(Step::Index(crate::flow::Identity::Exact(value))), Some(ty)) => {
+					ReferenceLayout::Entry {
+						key: self
+							.s
+							.types
+							.constant(crate::types::ConstValue::Int(ethnum::I256::from(value))),
+						ty,
+					}
+				}
+				(Some(Step::Index(crate::flow::Identity::Key(key))), Some(ty))
+					if !matches!(
+						self.s.types.const_value(key),
+						crate::types::ConstValue::Binding(_)
+					) =>
+				{
+					ReferenceLayout::Entry { key, ty }
+				}
+				(Some(Step::Index(crate::flow::Identity::Exact(value))), None)
+					if value >= 0 && !parent_is_map =>
+				{
+					ReferenceLayout::Index(value)
+				}
+				_ => ReferenceLayout::General,
+			};
+			layout = Some(layout.map_or(candidate, |old: ReferenceLayout| old.joined(candidate)));
+		}
+		layout
+	}
+
+	/// Check dependent arguments before the call effects; publish the result
+	/// place afterwards. Runtime item types remain erased for the engines.
+	pub(super) fn check_reference_default(&mut self, value: NodeId, owner: PlaceId) {
+		if matches!(self.view(self.strip_groups(value)), View::None) {
+			return;
+		}
+		let origins = self.reference_origins(value);
+		if !origins.is_empty()
+			&& origins.into_iter().all(|place| {
+				let place = self.canonical_reference_place(place);
+				self.reference_is_inside(place, owner)
+			}) {
+			return;
+		}
+		let owner = self.place_text(owner);
+		let diagnostic = self.diagnostic(&crate::diagnostics::codes::advanced::REF020, value,
+			format!("this default is not a reference into `{owner}`: borrow an element of `{owner}`, or pass the reference explicitly"));
+		self.report_flow(diagnostic);
+	}
+
+	pub(super) fn check_reference_arguments(&mut self, n: NodeId, sig: crate::types::FnSig) {
+		self.invalid_reference_arguments.remove(&n);
+		let Some(call) = self.a.calls.get(&n).cloned() else {
+			return;
+		};
+		let params = self.s.types.params(sig.params).to_vec();
+		for (param, argument) in params.iter().zip(
+			call.arguments
+				.iter()
+				.skip(call.arguments.len().saturating_sub(params.len())),
+		) {
+			let Some(path) = param.reference else {
+				continue;
+			};
+			let crate::analysis::Argument::Given(value) = argument else {
+				continue;
+			};
+			let owner = self
+				.substitute_places(path, &call.arguments, None, (n, "reference argument"))
+				.into_iter()
+				.map(|(owner, _, _)| owner)
+				.collect::<Vec<_>>();
+			if matches!(self.view(self.strip_groups(*value)), View::None) {
+				continue;
+			}
+			let origins = self.reference_origins(*value);
+			let actual: Vec<_> = origins
+				.into_iter()
+				.map(|place| self.canonical_reference_place(place))
+				.collect();
+			if !owner.is_empty()
+				&& owner.iter().all(|&owner| {
+					!actual.is_empty()
+						&& actual
+							.iter()
+							.all(|&place| self.reference_is_inside(place, owner))
+				}) {
+				continue;
+			}
+			let expected = if owner.is_empty() {
+				"the owner argument (a temporary)".into()
+			} else {
+				owner
+					.into_iter()
+					.map(|owner| self.place_text(owner))
+					.collect::<Vec<_>>()
+					.join(" or ")
+			};
+			let actual = actual
+				.first()
+				.map(|&place| self.place_text(place))
+				.unwrap_or_else(|| "an owned temporary".into());
+			let diagnostic = self.diagnostic(
+				&crate::diagnostics::codes::advanced::REF020,
+				*value,
+				format!(
+					"expected a reference into `{expected}`; got `{actual}`: pass a reference from the same owner"
+				),
+			);
+			self.invalid_reference_arguments.insert(n);
+			self.report_flow(diagnostic);
+		}
+	}
+
+	/// A whole dependent parameter denotes a collection element even after
+	/// its ordinary runtime item type is erased.
+	pub(super) fn declared_reference_parameter(
+		&self,
+		path: crate::ids::PathId,
+	) -> Option<SymbolId> {
+		let (data, steps) = self.s.types.path_data(path);
+		if !steps.is_empty() {
+			return None;
+		}
+		let crate::types::PathRoot::Param(index) = data.root else {
+			return None;
+		};
+		self.reference_parameters.keys().copied().find(|&symbol| {
+			let data = self.a.symbols.symbol(symbol);
+			data.scope == self.body.scope
+				&& matches!(data.kind, SymbolKind::Parameter { index: position } if position == index)
+		})
+	}
+
+	/// The signature explicitly relates a dependent element and its owner.
+	/// Other pairs of element arguments still need the ordinary disjointness proof.
+	pub(super) fn declared_reference_overlap(
+		&mut self,
+		n: NodeId,
+		from: Option<NodeId>,
+		other: NodeId,
+	) -> bool {
+		self.dependent_reference_pairs(n)
+			.iter()
+			.any(|&(dependent, owner)| {
+				from == Some(dependent) && other == owner
+					|| from == Some(owner) && other == dependent
+			})
+	}
+
+	pub(super) fn declared_reference_owner(&mut self, n: NodeId, argument: NodeId) -> bool {
+		self.dependent_reference_pairs(n)
+			.iter()
+			.any(|&(_, owner)| owner == argument)
+	}
+
+	fn dependent_reference_pairs(&mut self, n: NodeId) -> Vec<(NodeId, NodeId)> {
+		let View::Call { callee, .. } = self.view(n) else {
+			return Vec::new();
+		};
+		let TypeKind::Function(sig) = self.s.types.kind(self.type_of(callee)) else {
+			return Vec::new();
+		};
+		let sig = self.s.types.sig(sig);
+		let Some(call) = self.a.calls.get(&n).cloned() else {
+			return Vec::new();
+		};
+		let mut pairs = Vec::new();
+		let params = self.s.types.params(sig.params).to_vec();
+		let skip = call.arguments.len().saturating_sub(params.len());
+		for (param, arg) in params.iter().zip(call.arguments.iter().skip(skip)) {
+			let Some(path) = param.reference else {
+				continue;
+			};
+			let crate::analysis::Argument::Given(dependent) = arg else {
+				continue;
+			};
+			for (_, _, owner) in
+				self.substitute_places(path, &call.arguments, None, (n, "dependent reference"))
+			{
+				pairs.push((*dependent, owner));
+			}
+		}
+		pairs
+	}
+
+	/// Snapshot the evaluated leaves into portable formal paths. Unknown callable
+	/// results retain their descendant bound, rather than inventing an element.
+	pub(super) fn reference_value_summary(
+		&mut self,
+		value: NodeId,
+	) -> Vec<crate::analysis::ReferenceOrigin> {
+		let origins = self.evaluated_origins(value);
+		let mut summary = Vec::new();
+		for place in origins.places {
+			if let Some(path) = self.effect_path(place) {
+				summary.push(crate::analysis::ReferenceOrigin {
+					path,
+					slice: matches!(
+						self.places.get(place).step,
+						Some(Step::Range(..) | Step::All | Step::Characters)
+					),
+					descendant: false,
+					readonly: origins.readonly || self.readonly_place(place),
+				});
+			}
+		}
+		for bound in origins.bounds {
+			if bound.formal.is_none()
+				&& let Some(path) = self.effect_path(bound.place)
+			{
+				summary.push(crate::analysis::ReferenceOrigin {
+					path,
+					slice: false,
+					descendant: true,
+					readonly: origins.readonly,
+				});
+			}
+		}
+		summary.sort_unstable();
+		summary.dedup();
+		summary
+	}
+
+	pub(super) fn reference_callee_resolution(&mut self, callee: NodeId) -> Resolution {
+		let mut callee = self.strip_groups(callee);
+		if let View::Call { callee: inner, .. } = self.view(callee)
+			&& self.a.has_flags(callee, NodeFlags::GENERIC_APPLICATION)
+		{
+			callee = inner;
+		}
+		let resolved = match self.view(callee) {
+			View::Access { members, .. } => members.last().unwrap_or(callee),
+			_ => callee,
+		};
+		match self.a.resolution(resolved) {
+			Resolution::Local(symbol) => self
+				.external_value_key(symbol)
+				.map_or(Resolution::Local(symbol), Resolution::External),
+			other => other,
+		}
+	}
+
+	fn direct_reference_callee(&mut self, callee: NodeId) -> bool {
+		match self.reference_callee_resolution(callee) {
+			Resolution::Local(symbol) => self.a.symbols.symbol(symbol).kind == SymbolKind::Function,
+			Resolution::External(key) => self
+				.s
+				.interface(self.s.types.decl_key_data(key).module)
+				.is_some_and(|interface| {
+					interface
+						.keys
+						.get(&key)
+						.and_then(|entry| interface.declared.get(&entry.node))
+						.is_some_and(|decl| decl.kind == SymbolKind::Function)
+				}),
+			_ => false,
+		}
+	}
+
+	fn external_reference_summary(
+		&self,
+		key: crate::ids::DeclKey,
+	) -> Option<Vec<crate::analysis::ReferenceOrigin>> {
+		let interface = self.s.interface(self.s.types.decl_key_data(key).module)?;
+		let decl = interface.keys.get(&key)?.node;
+		interface
+			.reference_origins
+			.get(&decl)
+			.or_else(|| {
+				interface
+					.declared
+					.get(&decl)
+					.and_then(|decl| decl.function)
+					.and_then(|function| interface.reference_origins.get(&function))
+			})
+			.cloned()
+	}
+
+	fn callee_reference_summary(
+		&mut self,
+		call: NodeId,
+		callee: NodeId,
+	) -> Option<Vec<crate::analysis::ReferenceOrigin>> {
+		use crate::flow::values::CallableOrigin;
+		if let Resolution::External(key) = self.reference_callee_resolution(callee) {
+			return self.external_reference_summary(key);
+		}
+		if let Some(crate::analysis::Callee::Function(decl)) =
+			self.a.calls.get(&call).map(|info| info.callee)
+		{
+			return self.a.reference_origins.get(&decl).cloned();
+		}
+		let origins = self.evaluated_origins(callee);
+		if origins.closures.is_empty() {
+			return None;
+		}
+		let expected = match self.s.types.kind(self.type_of(callee)) {
+			TypeKind::Function(sig) => self.s.types.sig(sig).reference,
+			_ => return None,
+		};
+		let mut summary = Vec::new();
+		for closure in origins.closures {
+			if !closure.projection.is_empty() {
+				return None;
+			}
+			match closure.callable {
+				CallableOrigin::Local(lambda) => {
+					if self
+						.a
+						.functions
+						.get(&lambda)
+						.and_then(|info| info.sig)
+						.is_some_and(|sig| self.s.types.sig(sig).reference != expected)
+					{
+						return None;
+					}
+					summary.extend(self.a.reference_origins.get(&lambda)?.iter().copied());
+				}
+				CallableOrigin::External { key, reference } => {
+					if reference != expected {
+						return None;
+					}
+					summary.extend(self.external_reference_summary(key)?);
+				}
+			}
+		}
+		summary.sort_unstable();
+		summary.dedup();
+		Some(summary)
+	}
+
+	pub(super) fn record_reference_result(
+		&mut self,
+		n: NodeId,
+		callee: NodeId,
+		sig: crate::types::FnSig,
+	) {
+		use crate::flow::values::{ReferenceBound, ValueOrigins};
+		self.reference_results.remove(&n);
+		let Some(path) = sig.reference else {
+			return;
+		};
+		self.set_flag(n, NodeFlags::PLACE);
+		let Some(call) = self.a.calls.get(&n).cloned() else {
+			return;
+		};
+		let owners =
+			self.substitute_places(path, &call.arguments, Some(callee), (n, "reference result"));
+		let mut result = ValueOrigins::default();
+		let summary = if self.invalid_reference_arguments.contains(&n) {
+			None
+		} else {
+			self.callee_reference_summary(n, callee)
+		};
+		if let Some(summary) = summary {
+			for origin in summary {
+				let root = self.s.types.path_data(origin.path).0.root;
+				if let crate::types::PathRoot::Param(index) = root
+					&& let Some(crate::analysis::Argument::Given(argument)) =
+						call.arguments.get(index as usize)
+				{
+					let actual = self.evaluated_origins(*argument);
+					result.bounds.extend(actual.bounds);
+					result.readonly |= actual.readonly;
+				}
+				result.readonly |= origin.readonly;
+				for (place, _, _) in self.substitute_places(
+					origin.path,
+					&call.arguments,
+					Some(callee),
+					(n, "reference projection"),
+				) {
+					if origin.descendant {
+						result.bounds.push(ReferenceBound {
+							place,
+							formal: None,
+						});
+					} else {
+						let place = if origin.slice {
+							self.places.get(place).parent.map_or(place, |parent| {
+								self.places.child(
+									parent,
+									Step::Range(
+										crate::flow::Identity::Unknown,
+										crate::flow::Identity::Unknown,
+										false,
+									),
+								)
+							})
+						} else {
+							place
+						};
+						result.places.push(place);
+					}
+				}
+			}
+		}
+		if result.places.is_empty() {
+			for &(owner, _, _) in &owners {
+				if let Some(owner_ty) = self.place_type(owner) {
+					result.readonly |=
+						self.type_reference_reaches(owner_ty, sig.ret, ReferenceReach::ReadOnly);
+				}
+				result.places.push(
+					self.places
+						.child(owner, Step::Index(crate::flow::Identity::Unknown)),
+				);
+				result.bounds.push(ReferenceBound {
+					place: owner,
+					formal: None,
+				});
+			}
+		}
+		if sig.fresh && self.direct_reference_callee(callee) {
+			self.body.flow.time += 1;
+			let identity = crate::flow::Identity::Fresh(self.body.flow.time);
+			for bound in &mut result.bounds {
+				if bound.formal.is_none()
+					&& owners.iter().any(|&(owner, _, _)| owner == bound.place)
+				{
+					bound.place = self.places.child(bound.place, Step::Index(identity));
+				}
+			}
+			for place in &mut result.places {
+				for &(owner, _, _) in &owners {
+					if self.may_be_at_or_below(*place, owner) {
+						let steps = self.place_steps(*place);
+						let owner_depth = self.place_steps(owner).len();
+						if matches!(steps.get(owner_depth), Some(Step::Index(_) | Step::All)) {
+							let mut fresh = self.places.child(owner, Step::Index(identity));
+							for &step in &steps[owner_depth + 1..] {
+								fresh = self.places.child(fresh, step);
+							}
+							*place = fresh;
+							break;
+						}
+					}
+				}
+			}
+		}
+		result.places.sort_unstable();
+		result.places.dedup();
+		result.bounds.sort_unstable();
+		result.bounds.dedup();
+		self.reference_results.insert(n, result);
+	}
+
+	/// Reference parameters keep independent roots for their declared effects,
+	/// but their validity and returned owner use the declared collection path.
+	pub(super) fn canonical_reference_place(&mut self, place: PlaceId) -> PlaceId {
+		let mut place = if let Some(owner) = self
+			.place_symbol(place)
+			.and_then(|symbol| self.reference_parameters.get(&symbol).copied())
+		{
+			let mut owner = owner;
+			for step in self.place_steps(place) {
+				owner = self.places.child(owner, step);
+			}
+			owner
+		} else {
+			place
+		};
+		let mut current = place;
+		let mut suffix = Vec::new();
+		while let Some(parent) = self.places.get(current).parent {
+			let step = self.places.get(current).step.expect("child step");
+			if matches!(step, Step::Index(_) | Step::All)
+				&& self.relation_pool_places.contains(&parent)
+				&& let Some((target, _)) = self.reference_field_collection(parent)
+			{
+				place = self.places.child(target, step);
+				for step in suffix.into_iter().rev() {
+					place = self.places.child(place, step);
+				}
+				break;
+			}
+			suffix.push(step);
+			current = parent;
+		}
+		place
+	}
+
+	/// A representative for the alias declaration's runtime type metadata.
+	/// Validity and ownership always use `reference_origins` instead.
+	pub(super) fn reference_place(&mut self, value: NodeId) -> Option<PlaceId> {
+		let node = self.reference_operand(value);
+		if !matches!(
+			self.view(node),
+			View::Name(_) | View::Access { .. } | View::Index { .. } | View::Call { .. }
+		) {
+			return None;
+		}
+		self.reference_origins(value).first().copied()
+	}
+
+	pub(super) fn ensure_builtin_reference(&mut self, value: NodeId) {
+		let value = self.strip_groups(value);
+		if let View::Try(inner) = self.view(value) {
+			self.ensure_builtin_reference(inner);
+			return;
+		}
 		let tree = Arc::clone(&self.tree);
-		match syntax::view(&tree, value) {
-			View::Name(_) | View::Access { .. } | View::Index { .. } => self.place_of(value),
-			View::Call { callee, arguments } => self.returned_reference(callee, arguments),
-			_ => None,
+		if let View::Call { callee, arguments } = syntax::view(&tree, value)
+			&& !self.reference_results.contains_key(&value)
+		{
+			let places = self.returned_reference(callee, arguments);
+			if !places.is_empty() {
+				let source = self.evaluated_origins(callee);
+				let readonly = source.readonly
+					|| self.callee_receiver_type(callee).is_some_and(|ty| {
+						matches!(
+							self.s.types.kind(ty),
+							TypeKind::Collection(CollKind::Set | CollKind::GrowingSet, ..)
+						)
+					});
+				self.reference_results.insert(
+					value,
+					crate::flow::values::ValueOrigins {
+						places,
+						bounds: source.bounds,
+						readonly,
+						..Default::default()
+					},
+				);
+			}
 		}
 	}
 
@@ -346,21 +1109,23 @@ impl Walker<'_> {
 		&mut self,
 		callee: NodeId,
 		arguments: crate::syntax::NodeList<'_>,
-	) -> Option<PlaceId> {
+	) -> Vec<PlaceId> {
 		let callee = self.strip_groups(callee);
 		let View::Access { target, members } = self.view(callee) else {
-			return None;
+			return Vec::new();
 		};
 		let members: Vec<NodeId> = members.iter().collect();
-		let member = *members.last()?;
+		let Some(&member) = members.last() else {
+			return Vec::new();
+		};
 		let Resolution::Builtin(builtin) = self.a.resolution(member) else {
-			return None;
+			return Vec::new();
 		};
 		let path = crate::builtins::get(builtin).path;
 		let method = path.rsplit('#').next().unwrap_or(path);
 		let identity = match method {
 			"get" | "getOrInsert" => match arguments.first() {
-				Some(key) => self.identity_of(key),
+				Some(key) => self.reference_index_identity(key, self.callee_receiver_type(callee)),
 				None => crate::flow::Identity::Unknown,
 			},
 			// an element that exists now: distinct from the ones added later
@@ -370,11 +1135,13 @@ impl Walker<'_> {
 				self.body.flow.time += 1;
 				crate::flow::Identity::Fresh(self.body.flow.time)
 			}
-			_ => return None,
+			_ => return Vec::new(),
 		};
 		// the collection: the target and the members before the method
-		let collection = self.access_place(target, &members[..members.len() - 1])?;
-		Some(self.places.child(collection, Step::Index(identity)))
+		self.access_places(target, &members[..members.len() - 1])
+			.into_iter()
+			.map(|collection| self.places.child(collection, Step::Index(identity)))
+			.collect()
 	}
 
 	/// `REF004`: `use`/`reuse` of something that is not a place.
@@ -451,6 +1218,7 @@ impl Walker<'_> {
 			.filter(|ty| !ty.is_unset());
 		let is_none = matches!(self.view(self.strip_groups(value)), View::None);
 		let actual = self.check(value, expected);
+		let origins = self.reference_origins(value);
 		let place = if is_none {
 			None
 		} else {
@@ -508,27 +1276,49 @@ impl Walker<'_> {
 		};
 		self.record_alias_origins(symbol, value, place);
 		if let Some(place) = place {
-			// the owner must be the same collection (`REF006`)
-			if let Some(&current) = self.aliases.get(&symbol)
-				&& let (Some(old), Some(new)) = (self.owner_place(current), self.owner_place(place))
-				&& self.places.get(old).root != self.places.get(new).root
-			{
-				let message = format!(
-					"`{}` designates an element of `{}`: it can't designate an element of `{}`",
-					self.tree.name(name),
-					self.place_text(old),
-					self.place_text(new)
-				);
-				let diagnostic = self.diagnostic(&REF006, value, message);
-				self.report_flow(diagnostic);
-			}
 			self.aliases.insert(symbol, place);
 		}
+		// Every reachable old/new origin must have the same declared owner root.
+		let current = self.symbol_places(symbol);
+		let old_owners: Vec<_> = current
+			.into_iter()
+			.filter_map(|place| self.owner_place(place))
+			.collect();
+		let new_owners: Vec<_> = origins
+			.iter()
+			.filter_map(|&place| self.owner_place(place))
+			.collect();
+		if let Some((old, new)) = old_owners
+			.iter()
+			.flat_map(|&old| new_owners.iter().map(move |&new| (old, new)))
+			.find(|&(old, new)| self.places.get(old).root != self.places.get(new).root)
+		{
+			let message = format!(
+				"`{}` designates an element of `{}`: it can't designate an element of `{}`",
+				self.tree.name(name),
+				self.place_text(old),
+				self.place_text(new)
+			);
+			let diagnostic = self.diagnostic(&REF006, value, message);
+			self.report_flow(diagnostic);
+		}
+
 		if self.body.flow.reachable {
 			let place = place.or_else(|| self.aliases.get(&symbol).copied());
 			if let Some(place) = place {
-				let state = self.facts.refs.state(RefState::valid(place));
+				let designated = place;
+				let places = origins.into_iter().collect();
+				let evaluated = self.evaluated_origins(value);
+				let opaque = evaluated.opaque;
+				let state = self.facts.refs.state(RefState {
+					opaque,
+					bounds: evaluated.bounds.into_iter().collect(),
+					readonly: evaluated.readonly,
+					places,
+					..RefState::valid(designated)
+				});
 				self.body.flow.set_ref_state(symbol, state);
+				self.bind_reference_identity(symbol, value);
 				// the facts known of the old place are not the new one's
 				let own = self.places.symbol(symbol);
 				self.body.flow.drop_below(&self.places, own);
@@ -551,6 +1341,58 @@ impl Walker<'_> {
 				return Some(parent);
 			}
 			current = parent;
+		}
+	}
+
+	/// Capturing an alias cannot extend its collection's lifetime. Check the
+	/// same collection origins as returned references, including joined aliases.
+	pub(super) fn check_escaping_references(&mut self, lambda: NodeId, at: NodeId) {
+		let mut pending = vec![lambda];
+		let mut visited = rustc_hash::FxHashSet::default();
+		while let Some(lambda) = pending.pop() {
+			if !visited.insert(lambda) {
+				continue;
+			}
+			let captures = self
+				.capture_origins
+				.get(&lambda)
+				.cloned()
+				.unwrap_or_default();
+			for super::provenance::CapturedOrigins {
+				symbol,
+				places: origins,
+				closures,
+			} in captures
+			{
+				pending.extend(closures);
+				for place in origins {
+					let place = self.canonical_reference_place(place);
+					let Some(owner) = self.owner_place(place) else {
+						continue;
+					};
+					if self.place_symbol(owner).is_some_and(|root| {
+						self.declared_outside_functions(root)
+							&& matches!(
+								self.a.symbols.symbol(root).kind,
+								SymbolKind::Let | SymbolKind::Static
+							)
+					}) {
+						continue;
+					}
+					if !self.reported_once.insert((at, "MEM004")) {
+						continue;
+					}
+					let owner = self.place_text(owner);
+					let name = self
+						.s
+						.types
+						.syms
+						.resolve(self.a.symbols.symbol(symbol).name);
+					let diagnostic = self.diagnostic(&crate::diagnostics::codes::advanced::MEM004, at,
+					format!("this escaping closure captures `{name}`, a reference into `{owner}`, whose elements may not outlive the closure: capture the value's data instead, or keep `{owner}` in an owner that outlives the closure"));
+					self.report(diagnostic);
+				}
+			}
 		}
 	}
 
@@ -606,6 +1448,7 @@ impl Walker<'_> {
 			cx.captures.push(symbol);
 		}
 		if !matches!(kind, SymbolKind::Use | SymbolKind::MutableUse)
+			&& !self.reference_parameters.contains_key(&symbol)
 			&& !self.iterator_locals.contains_key(&symbol)
 		{
 			return;
@@ -648,7 +1491,14 @@ impl Walker<'_> {
 		else {
 			return;
 		};
+
 		for symbol in captures {
+			if self.is_captured(symbol)
+				&& let Some(cx) = self.body.functions.last_mut()
+				&& !cx.captures.contains(&symbol)
+			{
+				cx.captures.push(symbol);
+			}
 			// a captured task (worker's handle, resource) moved away since
 			if self.body.flow.reachable
 				&& let Some(&(_, at)) = self
@@ -864,30 +1714,70 @@ impl Walker<'_> {
 		if self.body.flow.refs.is_empty() {
 			return;
 		}
+		let raw_place = place;
+		let place = self.canonical_reference_place(place);
 		let refs = self.body.flow.refs.clone();
 		for (symbol, state) in refs {
 			let current = self.facts.refs.get(state).clone();
 			if current.invalidated == Some((n, false)) {
 				continue;
 			}
-			let reached = current.places.iter().any(|&designated| {
-				if invalidates {
-					self.may_be_at_or_below(designated, place)
-				} else {
-					self.mutation_invalidates(designated, place)
-				}
-			});
-			let touched = reached
-				|| current
-					.places
-					.iter()
-					.any(|&designated| self.may_overlap(designated, place));
+			let designated_places: Vec<_> = current
+				.places
+				.iter()
+				.map(|&place| self.canonical_reference_place(place))
+				.collect();
+			let link_write = !invalidates && self.reference_field_collection(raw_place).is_some();
+			let bounded = !link_write
+				&& current.bounds.iter().any(|bound| {
+					if bound
+						.formal
+						.is_some_and(|formal| self.place_symbol(raw_place) == Some(formal))
+					{
+						return false;
+					}
+					let owner = self.canonical_reference_place(bound.place);
+					self.may_overlap(owner, place)
+						&& (invalidates
+							|| self
+								.effect_type
+								.or_else(|| self.place_type(raw_place))
+								.is_none_or(|ty| {
+									self.type_reference_reaches(
+										ty,
+										self.a.symbols.symbol(symbol).ty,
+										ReferenceReach::Owned,
+									)
+								}))
+				});
+			// A descendant bound's representative is metadata, not an exact place.
+			// A formal root remains exact relative to effects through that same root.
+			let precise = current.bounds.is_empty()
+				|| current.bounds.iter().any(|bound| {
+					bound
+						.formal
+						.is_some_and(|formal| self.place_symbol(raw_place) == Some(formal))
+				});
+			let reached = !self.effect_protected_references.contains(&symbol)
+				&& (bounded
+					|| precise
+						&& designated_places.iter().any(|&designated| {
+							if invalidates {
+								self.may_be_at_or_below(designated, place)
+							} else {
+								self.mutation_invalidates(designated, place)
+							}
+						}));
+			let touched = bounded
+				|| reached || designated_places
+				.iter()
+				.any(|&designated| self.may_overlap(designated, place));
 			if touched {
 				// the facts read through the alias may be stale; its narrowing
 				// stays when the effect is below what it designates, or changes
 				// its payload only (`found.count = 1`, `found.add(1)`)
 				let depth = self.place_steps(place).len();
-				let payload_only = current.places.iter().all(|&designated| {
+				let payload_only = designated_places.iter().all(|&designated| {
 					self.place_steps(designated).len() < depth
 						|| designated == place && self.kept_narrowings.contains(&designated)
 				});
@@ -917,6 +1807,104 @@ impl Walker<'_> {
 			});
 			self.body.flow.set_ref_state(symbol, next);
 		}
+	}
+
+	/// Follow type projections, distinguishing owning edges from read-only
+	/// set elements and map keys. Relation fields never own their targets.
+	fn type_reference_reaches(
+		&mut self,
+		owner: TypeId,
+		referent: TypeId,
+		property: ReferenceReach,
+	) -> bool {
+		let mut pending = vec![(owner, false)];
+		let mut seen = rustc_hash::FxHashSet::default();
+		while let Some((ty, reached)) = pending.pop() {
+			if !seen.insert((ty, reached)) {
+				continue;
+			}
+			if reached
+				&& (self.s.types.satisfies(ty, referent) || self.s.types.satisfies(referent, ty))
+			{
+				return true;
+			}
+			match self.s.types.kind(ty) {
+				TypeKind::Collection(kind, item, key) => {
+					let item_reached = reached
+						|| property == ReferenceReach::Owned
+						|| matches!(kind, CollKind::Set | CollKind::GrowingSet);
+					pending.push((item, item_reached));
+					if matches!(kind, CollKind::Map | CollKind::GrowingMap) {
+						pending.push((key, true));
+					}
+				}
+				TypeKind::Object(_) => pending.extend(
+					self.s
+						.types
+						.fields_of(ty)
+						.iter()
+						.filter(|field| !field.flags.contains(crate::types::FieldFlags::RELATION))
+						.map(|field| (field.ty, reached)),
+				),
+				TypeKind::Tuple(list) | TypeKind::Union(list) => {
+					let reached = reached
+						|| property == ReferenceReach::Owned
+							&& matches!(self.s.types.kind(ty), TypeKind::Union(_));
+					pending.extend(
+						self.s
+							.types
+							.list_items(list)
+							.iter()
+							.map(|&item| (item, reached)),
+					);
+				}
+				TypeKind::Rec(_) => pending.push((self.s.types.unfold(ty), reached)),
+				TypeKind::NamedUnion(nominal, mask) => {
+					if property == ReferenceReach::Owned
+						&& matches!(self.s.types.kind(referent), TypeKind::Member(target, index) if target == nominal && self.s.types.mask_has(mask, index))
+					{
+						return true;
+					}
+					let reached = reached || property == ReferenceReach::Owned;
+					for index in 0..self
+						.s
+						.types
+						.sym_list(self.s.types.nominal(nominal).members)
+						.len()
+					{
+						if self.s.types.mask_has(mask, index as u16) {
+							pending.push((self.s.types.payload(nominal, index as u16), reached));
+						}
+					}
+				}
+				TypeKind::Member(nominal, index) => {
+					pending.push((self.s.types.payload(nominal, index), reached))
+				}
+				TypeKind::String | TypeKind::StringLit(_) => {
+					if property == ReferenceReach::Owned
+						&& self.s.types.satisfies(TypeId::STRING, referent)
+					{
+						return true;
+					}
+				}
+				TypeKind::Bytes => {
+					if property == ReferenceReach::Owned
+						&& (self.s.types.satisfies(TypeId::BYTE, referent)
+							|| self.s.types.satisfies(TypeId::BYTES, referent))
+					{
+						return true;
+					}
+				}
+				TypeKind::Param(_) | TypeKind::Unknown => {
+					if reached || property == ReferenceReach::Owned {
+						return true;
+					}
+				}
+				TypeKind::CArray(item, _) => pending.push((item, reached)),
+				_ => {}
+			}
+		}
+		false
 	}
 
 	/// `mutates p` invalidates `r` when `r` is strictly below `p` and the
@@ -999,7 +1987,7 @@ impl Walker<'_> {
 
 	/// A flat value owns no memory (advanced brief §3.2): a primitive, a
 	/// union of literals, an enumeration, an object of flat fields.
-	fn is_flat(&self, ty: TypeId) -> bool {
+	pub(super) fn is_flat(&self, ty: TypeId) -> bool {
 		match self.s.types.kind(ty) {
 			TypeKind::Int(_)
 			| TypeKind::Float(_)

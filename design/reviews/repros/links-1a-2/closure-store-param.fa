@@ -1,0 +1,12 @@
+-- Expected: MEM004; the closure is stored into a caller-owned array.
+type Node = { value: Integer }
+type Callback = () => Integer
+function register = (callbacks: Array<Callback>) mutates callbacks => {
+ mutable values: GrowingPool<Node> = []
+ use node = values.add({ value = 7 })
+ callbacks.push(() => node.value)
+ node.value = 8
+}
+mutable callbacks: Array<Callback> = []
+register(callbacks)
+for callback in callbacks { console.log(callback()) }

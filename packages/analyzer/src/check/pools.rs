@@ -24,7 +24,7 @@ use crate::flow::Step;
 use crate::ids::{NodeId, TypeId};
 use crate::symbols::Resolution;
 use crate::syntax::View;
-use crate::types::{CollKind, IntStorage, TypeKind};
+use crate::types::{CollKind, IntStorage};
 
 /// The builtin family of a pool or columnar kind: the owner of its paths.
 pub(crate) fn pool_owner(kind: CollKind) -> Option<&'static str> {
@@ -201,31 +201,31 @@ impl Walker<'_> {
 		if !self.body.flow.reachable {
 			return;
 		}
-		let Some(collection) = self.callee_receiver_place(callee) else {
+		let collections = self.callee_receiver_places(callee);
+		if collections.is_empty() {
 			return;
-		};
-		let element = self.place_of(argument);
-		let inside = element.is_some_and(|element| {
-			let entry = self.places.get(element);
-			entry.parent == Some(collection) && matches!(entry.step, Some(Step::Index(_)))
-		});
+		}
+		let elements: Vec<_> = self
+			.reference_origins(argument)
+			.into_iter()
+			.map(|place| self.canonical_reference_place(place))
+			.collect();
+		let inside = !elements.is_empty()
+			&& collections.iter().all(|&collection| {
+				elements.iter().all(|&element| {
+					let entry = self.places.get(element);
+					entry.parent == Some(collection) && matches!(entry.step, Some(Step::Index(_)))
+				})
+			});
 		if inside || self.s.types.is_recovering(self.type_of(argument)) {
 			return;
 		}
-		// a target read from a relation (`for friend in ana.friends`): an
-		// element of the relation's collection
-		if let Some(element) = element
-			&& let Some(parent) = self.places.get(element).parent
-			&& self.relation_pool_places.contains(&parent)
-		{
-			return;
-		}
-		// a reference parameter `element: T in pool` (relations.rs)
-		if self.is_reference_into(argument, collection) {
-			return;
-		}
 		let text = self.tree.text(argument.index()).to_string();
-		let collection_text = self.place_text(collection);
+		let collection_text = collections
+			.into_iter()
+			.map(|place| self.place_text(place))
+			.collect::<Vec<_>>()
+			.join(" or ");
 		let message = format!(
 			"`{text}` is not an element of `{collection_text}`: `{method}` takes a reference into it, from `use {text} = {collection_text}.add(…)`, `find` or a loop"
 		);
@@ -233,14 +233,13 @@ impl Walker<'_> {
 		self.report_flow(diagnostic);
 	}
 
-	/// The place of the receiver of a method call `a.b.method(…)`: `a.b`.
-	pub(crate) fn callee_receiver_place(&mut self, callee: NodeId) -> Option<crate::ids::PlaceId> {
+	pub(crate) fn callee_receiver_places(&mut self, callee: NodeId) -> Vec<crate::ids::PlaceId> {
 		let callee = self.strip_groups(callee);
 		let View::Access { target, members } = self.view(callee) else {
-			return None;
+			return Vec::new();
 		};
-		let members: Vec<NodeId> = members.iter().collect();
-		self.access_place(target, &members[..members.len().saturating_sub(1)])
+		let members: Vec<_> = members.iter().collect();
+		self.access_places(target, &members[..members.len().saturating_sub(1)])
 	}
 
 	/// The receiver's last node (`text` in `self.text.method()`), whose type
@@ -290,11 +289,5 @@ impl Walker<'_> {
 		);
 		let diagnostic = self.diagnostic(&WCL002, value, message);
 		self.report(diagnostic);
-	}
-
-	/// Whether `argument` is a reference parameter or a value whose type is
-	/// a reference into `collection` (relations, M3).
-	fn is_reference_into(&self, argument: NodeId, _collection: crate::ids::PlaceId) -> bool {
-		matches!(self.s.types.kind(self.type_of(argument)), TypeKind::Ref(..))
 	}
 }

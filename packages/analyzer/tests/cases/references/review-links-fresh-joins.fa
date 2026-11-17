@@ -1,0 +1,12 @@
+type Node = { value: Integer }
+function fresh = (nodes: Pool<Node>, yes: Boolean): Node in nodes mutates nodes.size => {
+	mutable use result = nodes.add({ value = 2 })
+	if yes { reuse result = nodes.add({ value = 3 }) }
+	use alias = result
+	alias
+}
+mutable nodes: Pool<Node> = []
+use original = nodes.add({ value = 1 })
+use kept = fresh(nodes, false)
+nodes.delete(original)
+console.log(kept.value) -- prints: 2

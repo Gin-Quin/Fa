@@ -103,6 +103,7 @@ pub struct Lowerer<'a> {
 	borrowed_results: FxHashSet<NodeId>,
 	/// The function whose frame is being lowered, for self handles.
 	owner: Option<NodeId>,
+	borrowed_values: FxHashSet<NodeId>,
 	value_slots: FxHashMap<ParamId, Slot>,
 	next: Slot,
 	/// Lowering a compile-time expression: no enclosing function's frame.
@@ -137,6 +138,7 @@ impl<'a> Lowerer<'a> {
 			borrowed_symbols: FxHashSet::default(),
 			borrowed_results: FxHashSet::default(),
 			owner: None,
+			borrowed_values: FxHashSet::default(),
 			value_slots: FxHashMap::default(),
 			next: 0,
 			compile_time: true,
@@ -194,6 +196,21 @@ impl<'a> Lowerer<'a> {
 			});
 		}
 		let info = self.a.function(node)?.clone();
+		if info
+			.sig
+			.is_some_and(|sig| self.types().sig(sig).reference.is_some())
+		{
+			self.mark_reference_result(info.body);
+			let mut nodes = vec![info.body];
+			while let Some(node) = nodes.pop() {
+				match syntax::view(self.tree, node) {
+					View::Return(Some(value)) => self.mark_reference_result(value),
+					View::Lambda { .. } | View::Function { .. } => continue,
+					_ => {}
+				}
+				nodes.extend(syntax::children(self.tree, node));
+			}
+		}
 		let name = match info.symbol {
 			Some(symbol) => self
 				.session
@@ -255,8 +272,19 @@ impl<'a> Lowerer<'a> {
 			.collect();
 		// the defaults, then the patterns of destructured parameters
 		for (index, param) in info.params.iter().enumerate() {
-			params[hidden_count + index].default =
-				param.default.map(|default| self.bound_argument(default));
+			let reference = info.sig.is_some_and(|sig| {
+				self.types()
+					.params(self.types().sig(sig).params)
+					.get(index)
+					.is_some_and(|param| param.reference.is_some())
+			});
+			params[hidden_count + index].default = param.default.map(|default| {
+				if reference {
+					self.borrow_value(default)
+				} else {
+					self.bound_argument(default)
+				}
+			});
 		}
 		let mut prologue = Vec::new();
 		if let Some(symbol) = info.symbol {
@@ -749,6 +777,9 @@ impl<'a> Lowerer<'a> {
 
 	/// Lowers an expression or a statement.
 	pub fn expr(&mut self, n: NodeId) -> Expr {
+		if self.borrowed_values.contains(&n) {
+			return self.borrow_value(n);
+		}
 		if self.borrowed_results.contains(&n)
 			&& !self
 				.a
@@ -849,7 +880,14 @@ impl<'a> Lowerer<'a> {
 			View::Index { target, index } => {
 				Expr::Index(self.expr(target).boxed(), self.expr(index).boxed())
 			}
-			View::Call { callee, arguments } => self.call(n, callee, arguments),
+			View::Call { callee, arguments } => {
+				let call = self.call(n, callee, arguments);
+				if self.call_borrows(callee) {
+					Expr::Dereference(call.boxed())
+				} else {
+					call
+				}
+			}
 			View::Arithmetic { op, operands } => self.arithmetic(n, op, operands),
 			View::Negate(value) => {
 				if let View::Integer(integer) = syntax::view(self.tree, value) {
@@ -1032,6 +1070,7 @@ impl<'a> Lowerer<'a> {
 			| View::ArrayPattern { .. }
 			| View::TuplePattern { .. }
 			| View::Readonly(_)
+			| View::Link(_)
 			| View::ErrorType
 			| View::Union { .. }
 			| View::Optional(_)
@@ -1058,6 +1097,13 @@ impl<'a> Lowerer<'a> {
 	fn array(&mut self, n: NodeId, items: NodeList<'_>) -> Expr {
 		let lowered = self.items(items.iter());
 		match self.types().kind(self.a.type_of(n)) {
+			TypeKind::Collection(
+				CollKind::Pool
+				| CollKind::GrowingPool
+				| CollKind::Columnar
+				| CollKind::GrowingColumnar,
+				..,
+			) => Expr::Pool(lowered),
 			TypeKind::Collection(CollKind::Set | CollKind::GrowingSet, ..) => Expr::Set(lowered),
 			TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, ..) => Expr::Map(lowered),
 			_ => Expr::Array(lowered),
@@ -1202,6 +1248,236 @@ impl<'a> Lowerer<'a> {
 		let slot = self.bind(symbol);
 		self.borrowed_symbols.insert(symbol);
 		Expr::Bind(slot, self.bound(value).boxed())
+	}
+
+	fn call_borrows(&self, callee: NodeId) -> bool {
+		matches!(self.types().kind(self.a.type_of(callee)), TypeKind::Function(sig) if self.types().sig(sig).reference.is_some())
+	}
+
+	fn builtin_borrows(path: &str) -> bool {
+		matches!(
+			path,
+			"Pool#add"
+				| "Set#find" | "Pool#find"
+				| "Columnar#add"
+				| "Columnar#find"
+				| "OrderedColumnar#add"
+				| "OrderedColumnar#find"
+				| "OrderedColumnar#get"
+				| "Array#get"
+				| "Array#find"
+				| "Map#get" | "Map#getOrInsert"
+		)
+	}
+
+	fn mark_reference_result(&mut self, value: NodeId) {
+		match syntax::view(self.tree, value) {
+			View::Group(inner) | View::Try(inner) | View::Do(inner) | View::Return(Some(inner)) => {
+				self.mark_reference_result(inner)
+			}
+			View::Block { statements } => {
+				if let Some(last) = statements.last() {
+					self.mark_reference_result(last);
+				}
+			}
+			View::If {
+				then_body,
+				else_body,
+				..
+			} => {
+				self.mark_reference_result(then_body);
+				if let Some(body) = else_body {
+					self.mark_reference_result(body);
+				}
+			}
+			View::When { arms, .. } => {
+				for arm in arms.iter() {
+					self.mark_reference_result(arm.value);
+				}
+			}
+			View::Loop(_) => {
+				for value in self.a.loop_results.get(&value).cloned().unwrap_or_default() {
+					self.mark_reference_result(value);
+				}
+			}
+			View::Catch {
+				expression,
+				handler,
+				..
+			} => {
+				self.mark_reference_result(expression);
+				self.mark_reference_result(handler);
+			}
+			View::None
+			| View::Name(_)
+			| View::Access { .. }
+			| View::Index { .. }
+			| View::Call { .. } => {
+				self.borrowed_values.insert(value);
+			}
+			_ => {}
+		}
+	}
+
+	fn receiver_place(&mut self, callee: NodeId) -> Option<Place> {
+		let View::Access { target, members } = syntax::view(self.tree, callee) else {
+			return None;
+		};
+		let mut place = self.place(target)?;
+		for member in members.iter().take(members.len().saturating_sub(1)) {
+			let View::Name(name) = syntax::view(self.tree, member) else {
+				return None;
+			};
+			place
+				.steps
+				.push(Step::Field(Arc::from(self.tree.name(name))));
+		}
+		Some(place)
+	}
+
+	fn borrow_value(&mut self, value: NodeId) -> Expr {
+		match syntax::view(self.tree, value) {
+			View::If { .. }
+			| View::When { .. }
+			| View::Catch { .. }
+			| View::Do(_)
+			| View::Block { .. }
+			| View::Loop(_) => {
+				self.mark_reference_result(value);
+				return self.expr(value);
+			}
+			View::Group(inner) | View::Try(inner) => return self.borrow_value(inner),
+			View::None => return Expr::none(),
+			View::Call { callee, arguments } if self.call_borrows(callee) => {
+				return self.call(value, callee, arguments);
+			}
+			View::Call { callee, .. } => {
+				if let Some(info) = self.a.call(value)
+					&& let Callee::Builtin(builtin) = info.callee
+					&& Self::builtin_borrows(builtins::get(builtin).path)
+				{
+					let values = info
+						.arguments
+						.iter()
+						.filter_map(|argument| match argument {
+							Argument::Given(value) => Some(self.expr(*value)),
+							_ => None,
+						})
+						.collect();
+					return self.borrow_builtin(callee, builtins::get(builtin).path, values);
+				}
+			}
+			_ => {}
+		}
+		if let Some(place) = self.place(value) {
+			let optional = matches!(syntax::view(self.tree, value), View::Name(_))
+				&& self
+					.types()
+					.union_members(&self.a.type_of(value))
+					.contains(&TypeId::NONE);
+			return Expr::Borrow(place, optional);
+		}
+		match syntax::view(self.tree, value) {
+			View::Name(_) => {
+				let read = match self.a.resolution(value) {
+					Resolution::Local(symbol) => self.read_symbol(value, symbol),
+					resolution @ Resolution::External(_) => self.external(value, resolution),
+					_ => self.unsupported("this reference"),
+				};
+				match read {
+					Expr::Global(key) => Expr::BorrowGlobal(key),
+					other @ (Expr::Impure(_) | Expr::Unsupported(_)) => other,
+					Expr::Const(value) => {
+						let slot = self.temp();
+						Expr::Block(vec![
+							Expr::Let(slot, Expr::Const(value).boxed()),
+							Expr::Borrow(
+								Place {
+									slot,
+									steps: Vec::new(),
+								},
+								false,
+							),
+						])
+					}
+					_ => self.unsupported("a reference to this constant"),
+				}
+			}
+			View::Access { target, members } => {
+				let owner = self.borrow_value(target);
+				let slot = self.temp();
+				let mut steps = Vec::new();
+				for member in members.iter() {
+					let View::Name(name) = syntax::view(self.tree, member) else {
+						return self.unsupported("this reference field");
+					};
+					steps.push(Step::Field(Arc::from(self.tree.name(name))));
+				}
+				Expr::Block(vec![
+					Expr::Bind(slot, owner.boxed()),
+					Expr::Borrow(Place { slot, steps }, false),
+				])
+			}
+			View::Index { target, index } => {
+				let owner = self.borrow_value(target);
+				let slot = self.temp();
+				let index = self.expr(index);
+				Expr::Block(vec![
+					Expr::Bind(slot, owner.boxed()),
+					Expr::Borrow(
+						Place {
+							slot,
+							steps: vec![Step::Index(index)],
+						},
+						false,
+					),
+				])
+			}
+			_ => {
+				// A builtin may borrow an owned receiver temporary, e.g.
+				// `[value].find(predicate)`. Keep it until its result is read.
+				let marked = self.borrowed_values.remove(&value);
+				let data = self.expr(value);
+				if marked {
+					self.borrowed_values.insert(value);
+				}
+				let slot = self.temp();
+				Expr::Block(vec![
+					Expr::Let(slot, data.boxed()),
+					Expr::Borrow(
+						Place {
+							slot,
+							steps: Vec::new(),
+						},
+						false,
+					),
+				])
+			}
+		}
+	}
+
+	/// Borrow a builtin's receiver, including immutable module owners and
+	/// nested reference-returning expressions, without copying its data.
+	fn borrow_builtin(&mut self, callee: NodeId, path: &'static str, values: Vec<Expr>) -> Expr {
+		if let Some(place) = self.receiver_place(callee) {
+			return Expr::BorrowBuiltin(path, place, values);
+		}
+		let View::Access { target, members } = syntax::view(self.tree, callee) else {
+			return self.unsupported("this borrowed receiver");
+		};
+		let owner = self.borrow_value(target);
+		let slot = self.temp();
+		let mut steps = Vec::new();
+		for member in members.iter().take(members.len().saturating_sub(1)) {
+			let View::Name(name) = syntax::view(self.tree, member) else {
+				return self.unsupported("this borrowed receiver");
+			};
+			steps.push(Step::Field(Arc::from(self.tree.name(name))));
+		}
+		Expr::Block(vec![
+			Expr::Bind(slot, owner.boxed()),
+			Expr::BorrowBuiltin(path, Place { slot, steps }, values),
+		])
 	}
 
 	/// `target = value`.
@@ -1602,23 +1878,25 @@ impl<'a> Lowerer<'a> {
 			return Expr::Const(value);
 		}
 		// the target: a value, or a type or namespace whose member is named
-		let static_target = match self.a.resolution(target) {
-			Resolution::Local(symbol) => matches!(
-				self.a.symbols.symbol(symbol).kind,
-				SymbolKind::Type | SymbolKind::Namespace
-			),
-			Resolution::Builtin(id) => {
-				!matches!(builtins::get(id).kind, builtins::BuiltinKind::Value(_))
-			}
-			Resolution::Folder(_) => true,
-			Resolution::External(..) => {
-				self.declared_of(self.a.resolution(target))
+		let static_target = self
+			.a
+			.has_flags(target, crate::analysis::NodeFlags::TYPE_EXPR)
+			|| match self.a.resolution(target) {
+				Resolution::Local(symbol) => matches!(
+					self.a.symbols.symbol(symbol).kind,
+					SymbolKind::Type | SymbolKind::Namespace
+				),
+				Resolution::Builtin(id) => {
+					!matches!(builtins::get(id).kind, builtins::BuiltinKind::Value(_))
+				}
+				Resolution::Folder(_) => true,
+				Resolution::External(..) => self
+					.declared_of(self.a.resolution(target))
 					.is_some_and(|(_, declared)| {
 						matches!(declared.kind, SymbolKind::Type | SymbolKind::Namespace)
-					})
-			}
-			_ => false,
-		};
+					}),
+				_ => false,
+			};
 		let mut current = if let Some(count) = count {
 			Some(count)
 		} else if static_target {
@@ -1779,6 +2057,17 @@ impl<'a> Lowerer<'a> {
 				if let Some(impure) = self.builtin_impurity(path) {
 					return impure;
 				}
+				if Self::builtin_borrows(path) {
+					let values = info
+						.arguments
+						.iter()
+						.filter_map(|argument| match argument {
+							Argument::Given(value) => Some(self.expr(*value)),
+							_ => None,
+						})
+						.collect();
+					return Expr::Dereference(self.borrow_builtin(callee, path, values).boxed());
+				}
 				let method = path.contains('#');
 				let mut values = Vec::new();
 				let place = if method {
@@ -1811,7 +2100,16 @@ impl<'a> Lowerer<'a> {
 				}
 				for argument in arguments {
 					match argument {
-						Argument::Given(value) => values.push(self.expr(*value)),
+						Argument::Given(value) => values.push(
+							if matches!(
+								path,
+								"Pool#delete" | "Pool#take" | "Columnar#delete" | "Columnar#take"
+							) {
+								self.borrow_value(*value)
+							} else {
+								self.expr(*value)
+							},
+						),
 						Argument::Variadic(items) => {
 							let items = self.items(items.iter().copied());
 							values.push(Expr::Array(items));

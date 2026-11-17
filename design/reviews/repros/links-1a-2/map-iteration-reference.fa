@@ -1,0 +1,12 @@
+-- Map loop values are references, including inside a function returning a reference.
+type Node = { value: Integer }
+function first = (values: Map<String, Node>): (Node in values)? => values.get("a")
+function exercise = (): Integer => {
+ mutable values: Map<String, Node> = [("a", { value = 1 }), ("b", { value = 2 })]
+ for (_key, node) in values { node.value += 10 }
+ use node = first(values)
+ if node is not none { node.value } else { 0 }
+}
+static result = @exercise()
+console.log(result) -- prints: 11
+console.log(exercise()) -- prints: 11

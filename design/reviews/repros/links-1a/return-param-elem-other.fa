@@ -1,0 +1,2 @@
+type Node = { value: Integer }
+function wrong = (a: GrowingPool<Node>, b: GrowingPool<Node>, n: Node in b): Node in a => n

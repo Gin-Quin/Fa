@@ -96,6 +96,19 @@ impl Generator<'_> {
 
 	/// A statement or an expression whose value goes to `dest`.
 	pub(crate) fn into(&mut self, n: NodeId, dest: Dest) {
+		if dest == Dest::Return
+			&& self.returns_reference()
+			&& matches!(
+				self.view(n),
+				View::Name(_)
+					| View::Access { .. }
+					| View::Index { .. }
+					| View::Call { .. }
+					| View::None
+			) {
+			self.reference_return(n);
+			return;
+		}
 		match self.view(n) {
 			View::Group(inner) | View::Try(inner) => self.into(inner, dest),
 			View::Error => {}
@@ -952,12 +965,20 @@ impl Generator<'_> {
 			) {
 			let values = self.in_order(&[container, index, value], |g, node| g.expr(node));
 			let stored = self.copy_stored(value, values[2].clone());
-			self.out.line(format!(
-				"{}.set({}, {});",
-				values[0].primary_text(),
-				values[1].text,
-				stored.text
-			));
+			if self.map_value_may_be_borrowed(target_node) {
+				let helper = self.helper("faMapAssign");
+				self.out.line(format!(
+					"{helper}({}, {}, {});",
+					values[0].text, values[1].text, stored.text
+				));
+			} else {
+				self.out.line(format!(
+					"{}.set({}, {});",
+					values[0].primary_text(),
+					values[1].text,
+					stored.text
+				));
+			}
 			return;
 		}
 		if let View::Index { index, .. } = self.view(target_node)
@@ -990,7 +1011,7 @@ impl Generator<'_> {
 			return;
 		};
 		if self.needs_statements(value) {
-			if place.map.is_some() {
+			if place.map.is_some() || place.reference.is_some() || place.choice.is_some() {
 				// a value of a map: computed into a temporary, then `set`
 				let temp = self.temp();
 				self.out.line(format!("let {temp};"));

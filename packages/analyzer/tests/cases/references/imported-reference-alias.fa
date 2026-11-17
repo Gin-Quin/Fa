@@ -1,0 +1,19 @@
+-- file: nodes.fa
+export mutable: GrowingPool<{ id: Integer }> = []
+-- file: Ref.fa
+export type = { id: Integer } in nodes -- error: REF010
+-- file: Refs.fa
+export type = Array<Ref> -- error: REF010
+-- file: Default.fa
+export type<Item = Ref> = Array<Item> -- error: REF010
+-- file: Box.fa
+export type<Item> = { value: Item }
+-- file: Hidden.fa
+export type = Box<Ref> -- error: REF010
+-- file: main.fa
+type Holder = { children: Refs } -- error: REF010
+type Other = { children: Default } -- error: REF010
+type Owned = { children: Default<Integer> }
+
+use node = nodes.add({ id = 1 })
+let hidden = Hidden { value = node } -- error: REF010

@@ -226,6 +226,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let pool = self.collection_new(&self.builder, repr, element)?;
 				Val::new(repr, pool)
 			}
+			(Value::Pool(items), Repr::Pool(item_type) | Repr::Columnar(item_type)) => {
+				let element = self.pool_element(repr, node)?;
+				let place = self.pool_place(repr, node)?;
+				let pool = self.collection_new(&self.builder, repr, element)?;
+				for item in items.values() {
+					let value = self.constant_value(item, item_type, node)?;
+					let value = self.convert(value, element, node.index())?;
+					let slot = self
+						.call_value(self.runtime.function("fa_pool_add_slot")?, &[pool.into()])?
+						.into_pointer_value();
+					if let Some(raw) = value.value {
+						self.element_write(&self.builder, place, slot, raw)?;
+					}
+				}
+				Val::new(repr, pool)
+			}
 			(Value::Array(items), Repr::Array(item_type) | Repr::Growing(item_type)) => {
 				let item = self.item_repr(item_type, node)?;
 				let count = self.context.i64_type().const_int(items.len() as u64, false);

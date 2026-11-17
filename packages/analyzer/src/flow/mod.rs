@@ -12,6 +12,7 @@ pub mod facts;
 pub mod map;
 pub(crate) mod ownership;
 pub mod refs;
+pub mod values;
 
 use smallvec::SmallVec;
 
@@ -65,15 +66,21 @@ pub enum PlaceRoot {
 
 /// What an index designates (advanced brief §5.4): taken when the place is
 /// built, so that two places can be told apart (`distinct`).
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, PartialOrd, Ord)]
 pub enum Identity {
 	/// A known value: a literal, or the exact fact of the index.
 	Exact(i64),
+	/// A negative sequence index, normalized against its container at evaluation.
+	/// Its position cannot be compared with a raw numeric index.
+	FromEnd(i64),
+	/// An immutable index that may have needed normalization at evaluation.
+	NormalizedSymbol(SymbolId, i32),
 	/// An immutable binding (`let`, parameter, range loop variable) plus an
 	/// offset: its interval is its current fact plus the offset.
 	Symbol(SymbolId, i32),
 	/// `c.length + k` while the length of `c` hasn't changed.
 	LengthOf(PlaceId, i32),
+	LengthSnapshot(PlaceId, i32, u32),
 	/// A snapshot of the interval of a value that may change (a `mutable`).
 	Interval(crate::ids::IntervalId),
 	/// A reference returned by a call that returns fresh ones, at this time.
@@ -88,7 +95,7 @@ pub enum Identity {
 }
 
 /// A step from a place to a place below it.
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, PartialOrd, Ord)]
 pub enum Step {
 	/// `.field`.
 	Field(Sym),
@@ -265,10 +272,16 @@ pub struct FlowState {
 	pub vacuous: bool,
 	/// Reference validity per symbol (M2, advanced brief §5.1).
 	pub refs: SmallVec<[(SymbolId, RefStateId); 4]>,
+	/// Definite reference equivalence classes; equal may-origin sets are not
+	/// evidence of equivalence. Joins intersect these partitions.
+	pub same_references: SmallVec<[(SymbolId, SymbolId); 4]>,
+	/// Function values contained in local storage, including field projections.
+	pub values: SmallVec<[(PlaceId, u32); 4]>,
 	/// The places being iterated (M2, advanced brief §5.8).
 	pub iterating: SmallVec<[PlaceId; 2]>,
 	/// The freshness clock (M2).
 	pub time: u32,
+	pub reference_epochs: SmallVec<[(PlaceId, u32); 2]>,
 	/// The move-only locals consumed on some path (`subscription.stop()`,
 	/// advanced brief §11.3), with the consuming node: a later use is `MEM002`.
 	pub consumed: SmallVec<[(SymbolId, NodeId); 1]>,
@@ -306,8 +319,11 @@ impl FlowState {
 			vacuous: false,
 			facts: FactMap::new(),
 			refs: SmallVec::new(),
+			same_references: SmallVec::new(),
+			values: SmallVec::new(),
 			iterating: SmallVec::new(),
 			time: 0,
+			reference_epochs: SmallVec::new(),
 			consumed: SmallVec::new(),
 			moved_fields: SmallVec::new(),
 			callable_values: SmallVec::new(),
@@ -414,6 +430,103 @@ impl FlowState {
 	/// The state where two branches meet. Unreachable states are the
 	/// identity; otherwise only places known on both sides keep a fact, the
 	/// pointwise join of the two. With a shared base, only the places either
+	pub fn reference_epoch(&self, place: PlaceId) -> u32 {
+		self.reference_epochs
+			.iter()
+			.find(|entry| entry.0 == place)
+			.map_or(0, |entry| entry.1)
+	}
+	pub fn track_reference_epoch(&mut self, place: PlaceId) -> u32 {
+		if !self.reference_epochs.iter().any(|entry| entry.0 == place) {
+			self.reference_epochs.push((place, 0));
+		}
+		self.reference_epoch(place)
+	}
+
+	fn reference_class(&self, symbol: SymbolId) -> SymbolId {
+		self.same_references
+			.binary_search_by_key(&symbol, |entry| entry.0)
+			.ok()
+			.map_or(symbol, |index| self.same_references[index].1)
+	}
+
+	pub fn reference_equivalents(&self, symbol: SymbolId) -> Vec<SymbolId> {
+		let class = self.reference_class(symbol);
+		let mut members: Vec<_> = self
+			.same_references
+			.iter()
+			.filter(|entry| entry.1 == class)
+			.map(|entry| entry.0)
+			.collect();
+		if !members.contains(&symbol) {
+			members.push(symbol);
+		}
+		members
+	}
+
+	/// Rebinding separates the destination from its former class. A `use` of
+	/// a reference snapshots the selected location, preserving definite aliasing.
+	pub fn bind_reference_alias(&mut self, symbol: SymbolId, source: Option<SymbolId>) {
+		if source == Some(symbol) {
+			return;
+		}
+		let old = self.reference_class(symbol);
+		self.same_references.retain(|entry| entry.0 != symbol);
+		let remaining = self
+			.same_references
+			.iter()
+			.filter(|entry| entry.1 == old)
+			.map(|entry| entry.0)
+			.min();
+		if let Some(representative) = remaining {
+			for entry in &mut self.same_references {
+				if entry.1 == old {
+					entry.1 = representative;
+				}
+			}
+		}
+		let Some(source) = source else {
+			return;
+		};
+		let mut members = self.reference_equivalents(source);
+		members.push(symbol);
+		let representative = *members.iter().min().expect("nonempty reference class");
+		self.same_references
+			.retain(|entry| !members.contains(&entry.0));
+		self.same_references
+			.extend(members.into_iter().map(|member| (member, representative)));
+		self.same_references.sort_unstable();
+	}
+
+	fn joined_reference_aliases(
+		&self,
+		other: &Self,
+		refs: &[(SymbolId, RefStateId)],
+	) -> SmallVec<[(SymbolId, SymbolId); 4]> {
+		let mut classes: rustc_hash::FxHashMap<_, Vec<SymbolId>> = rustc_hash::FxHashMap::default();
+		for &(symbol, _) in refs {
+			classes
+				.entry((self.reference_class(symbol), other.reference_class(symbol)))
+				.or_default()
+				.push(symbol);
+		}
+		let mut result: SmallVec<[_; 4]> = classes
+			.into_values()
+			.filter(|members| members.len() > 1)
+			.flat_map(|members| {
+				let representative = *members
+					.iter()
+					.min()
+					.expect("nonempty joined reference class");
+				members
+					.into_iter()
+					.map(move |symbol| (symbol, representative))
+			})
+			.collect();
+		result.sort_unstable();
+		result
+	}
+
 	/// side changed are visited.
 	pub fn join(
 		&self,
@@ -471,6 +584,30 @@ impl FlowState {
 		}
 		joined.refs = refs::join_refs(&mut facts.refs, &self.refs, &other.refs);
 		joined.ownership_aliases = ownership::AliasOrigins::join(self, other, &facts.refs);
+		joined.same_references = self.joined_reference_aliases(other, &joined.refs);
+		joined.reference_epochs = self.reference_epochs.clone();
+		for &(place, _) in &other.reference_epochs {
+			if !joined.reference_epochs.iter().any(|entry| entry.0 == place) {
+				joined.reference_epochs.push((place, 0));
+			}
+		}
+		for entry in &mut joined.reference_epochs {
+			let (left, right) = (
+				self.reference_epoch(entry.0),
+				other.reference_epoch(entry.0),
+			);
+			entry.1 = if left == right { left } else { u32::MAX };
+		}
+		joined.reference_epochs.sort_unstable();
+		joined.values = self.values.clone();
+		for &(place, value) in &other.values {
+			match joined.values.binary_search_by_key(&place, |entry| entry.0) {
+				Ok(index) => {
+					joined.values[index].1 = facts.origins.join(joined.values[index].1, value)
+				}
+				Err(index) => joined.values.insert(index, (place, value)),
+			}
+		}
 		joined.iterating = self
 			.iterating
 			.iter()
@@ -552,6 +689,32 @@ mod tests {
 
 	use super::*;
 	use crate::types::IntStorage;
+
+	#[test]
+	fn reference_equivalence_survives_copies_and_intersects_at_joins() {
+		let mut left = FlowState::new();
+		let mut facts = FactStore::new();
+		let mut types = TypeStore::new();
+		for symbol in [SymbolId(0), SymbolId(1), SymbolId(2)] {
+			let state = facts.refs.state(refs::RefState::valid(PlaceId(0)));
+			left.set_ref_state(symbol, state);
+		}
+		left.bind_reference_alias(SymbolId(1), Some(SymbolId(0)));
+		left.bind_reference_alias(SymbolId(2), Some(SymbolId(1)));
+		let mut right = left.clone();
+		right.bind_reference_alias(SymbolId(0), None);
+		assert_eq!(
+			right.reference_equivalents(SymbolId(1)),
+			vec![SymbolId(1), SymbolId(2)]
+		);
+		assert_eq!(right.reference_equivalents(SymbolId(0)), vec![SymbolId(0)]);
+		let joined = left.join(&right, &mut facts, &mut types);
+		assert_eq!(
+			joined.reference_equivalents(SymbolId(1)),
+			vec![SymbolId(1), SymbolId(2)]
+		);
+		assert_eq!(joined.reference_equivalents(SymbolId(0)), vec![SymbolId(0)]);
+	}
 
 	fn i(lo: i128, hi: i128) -> Interval {
 		Interval::from_i128(lo, hi)

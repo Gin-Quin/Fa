@@ -1,0 +1,11 @@
+-- A compile-time call must retain exactly the same place as a runtime call.
+function first = (values: Array<Integer>): Integer in values throws IndexError => try values[0]
+function check = (): Integer throws IndexError => {
+	mutable values: Array<Integer> = [7]
+	use value = try first(values)
+	value = 9
+	values[0]
+}
+static result = @check()
+console.log(result) -- prints: 9
+console.log(try check()) -- prints: 9

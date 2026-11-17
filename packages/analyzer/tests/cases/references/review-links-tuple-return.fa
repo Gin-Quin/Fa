@@ -1,0 +1,8 @@
+-- Regression from the links 1a review.
+type Node = { value: Integer }
+mutable nodes: GrowingPool<Node> = []
+function pair = (n: Node in nodes): (Node in nodes, Integer) => (n, 1) -- error: REF010
+use a = nodes.add({ value = 1 })
+let p = pair(a)
+a.value = 5
+console.log(p[0].value)

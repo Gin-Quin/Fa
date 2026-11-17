@@ -246,6 +246,8 @@ pub enum Expr {
 	Own(Box<Expr>),
 	/// A module-level value (evaluated once by the host).
 	Global(GlobalKey),
+	/// Retain an immutable module value for this evaluation's lifetime.
+	BorrowGlobal(GlobalKey),
 	/// A named function as a value.
 	Function(FnKey),
 	/// The running callable, retaining its existing environment. The key
@@ -268,6 +270,10 @@ pub enum Expr {
 	Lend(Place),
 	/// Installs an owned result or a loan without changing its provenance.
 	Bind(Slot, Box<Expr>),
+	/// Retain a place across a call; an optional lookup may give `none`.
+	Borrow(Place, bool),
+	/// Materialize the data designated by an explicitly borrowed call result.
+	Dereference(Box<Expr>),
 	/// Statements; the value of the last one (`none` when empty).
 	Block(Vec<Expr>),
 	/// `if`: the value of the branch taken (`none` without `else`).
@@ -339,8 +345,12 @@ pub enum Expr {
 	Builtin(&'static str, Vec<Expr>),
 	/// A built-in method changing its receiver (`Array#push`, `Set#add`).
 	Mutate(&'static str, Place, Vec<Expr>),
+	/// A collection operation whose result is its element place.
+	BorrowBuiltin(&'static str, Place, Vec<Expr>),
 	/// A list literal.
 	Array(Vec<Item>),
+	/// A stable collection, whose element indices survive unrelated deletions.
+	Pool(Vec<Item>),
 	/// A set literal.
 	Set(Vec<Item>),
 	/// A map literal: tuples of key and value.

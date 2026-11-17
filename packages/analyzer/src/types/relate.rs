@@ -360,11 +360,17 @@ impl TypeStore {
 			return Err(Reason::Arity);
 		}
 		for (actual, expected) in source_params.iter().zip(&target_params) {
+			if actual.reference != expected.reference {
+				return Err(Reason::Mismatch);
+			}
 			if actual.variadic != expected.variadic {
 				return Err(Reason::Arity);
 			}
 			// parameters are contravariant
 			self.assignable(expected.ty, actual.ty, Mode::Read)?;
+		}
+		if source.reference != target.reference {
+			return Err(Reason::Mismatch);
 		}
 		self.assignable(source.ret, target.ret, Mode::Read)?;
 		self.assignable(source.throws, target.throws, Mode::Read)?;

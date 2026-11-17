@@ -1,0 +1,12 @@
+type Values = Array<Integer>
+type Model = { first: Values, second: Values }
+function clear = () requires values: Values mutates values => { values.clear() }
+function exercise = (flag: Boolean): Integer throws IndexError => {
+ mutable model: Model = { first = [1], second = [2] }
+ use kept = try model.second[0]
+ mutable use owner = model.second
+ if flag { reuse owner = model.first }
+ provide Values = owner
+ clear()
+ kept -- error: REF001
+}

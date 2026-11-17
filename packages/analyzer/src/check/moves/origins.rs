@@ -69,7 +69,7 @@ impl Walker<'_> {
 	/// Freeze a capture's sources in the enclosing context, rather than
 	/// resolving it later through the walk-order alias table. A nested
 	/// creation may itself read an enclosing function's capture input.
-	pub(crate) fn record_capture_origins(
+	pub(crate) fn record_ownership_capture_origins(
 		&mut self,
 		lambda: NodeId,
 		symbol: SymbolId,

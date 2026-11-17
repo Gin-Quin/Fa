@@ -1095,11 +1095,14 @@ impl TypeStore {
 		let params: smallvec::SmallVec<[ParamSig; 4]> = params
 			.iter()
 			.map(|&ty| ParamSig {
+				reference: None,
 				ty,
 				variadic: false,
 			})
 			.collect();
 		FnSig {
+			reference: None,
+			fresh: false,
 			params: self.param_list(&params),
 			ret,
 			throws,
@@ -1968,9 +1971,12 @@ impl TypeStore {
 				for param in self.params(sig.params) {
 					hasher
 						.hash(self.stable_hash(param.ty))
-						.byte(param.variadic as u8);
+						.byte(param.variadic as u8)
+						.hash(param.reference.map_or(0, |path| self.path_hash(path)));
 				}
 				hasher
+					.hash(sig.reference.map_or(0, |path| self.path_hash(path)))
+					.byte(sig.fresh as u8)
 					.hash(self.stable_hash(sig.ret))
 					.hash(self.stable_hash(sig.throws));
 				for requirement in self.requirements(sig.requires) {
@@ -2061,7 +2067,7 @@ impl TypeStore {
 	}
 
 	/// The stable hash of an effect path (from names, never from ids).
-	fn path_hash(&self, path: PathId) -> u128 {
+	pub(crate) fn path_hash(&self, path: PathId) -> u128 {
 		let (data, steps) = self.path_data(path);
 		let mut hasher = StableHasher::new();
 		match data.root {
@@ -2102,7 +2108,7 @@ impl TypeStore {
 		hasher.finish()
 	}
 
-	fn const_hash(&self, value: ConstId) -> u128 {
+	pub(crate) fn const_hash(&self, value: ConstId) -> u128 {
 		let mut hasher = StableHasher::new();
 		match self.const_value(value) {
 			ConstValue::Bool(value) => hasher.tag(0).byte(value as u8),

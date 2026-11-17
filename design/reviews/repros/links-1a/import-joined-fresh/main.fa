@@ -1,0 +1,5 @@
+mutable nodes: Pool<Node> = []
+use original = nodes.add({ value = 7 })
+use returned = pick(nodes, original, false)
+nodes.delete(original)
+console.log(returned.value)

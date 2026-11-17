@@ -1746,9 +1746,8 @@ impl Walker<'_> {
 			if matches!(
 				self.view(value),
 				View::Name(_) | View::Access { .. } | View::Index { .. }
-			) && let Some(place) = self.place_of(value)
-			{
-				reads.push(place);
+			) {
+				reads.extend(self.places_of(value));
 			}
 		}
 		self.add_task(
@@ -1855,7 +1854,7 @@ impl Walker<'_> {
 		let reads = cx
 			.captures
 			.iter()
-			.filter_map(|&symbol| self.symbol_target(symbol))
+			.flat_map(|&symbol| self.symbol_places(symbol))
 			.collect();
 		self.add_task(
 			n,

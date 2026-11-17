@@ -2,24 +2,22 @@
 -- its tasks start later (`concurrency.md`). Called blocking, they run at
 -- once. A detached task reads a module-level `mutable`, it doesn't copy it.
 -- (backends review 2026-11-05, findings 9 and 10)
-use { sleep } = std.time
-
-mutable awaitedDone = false
+mutable completed = 0
 
 async function run = (name: String) => {
 	start do {
 		console.log("{name} task starts")
 		await Task.yield()
 		console.log("{name} task ends")
-		if name == "awaited" { awaitedDone = true }
+		completed += 1
 	}
 	console.log("{name} returns")
 }
 
 await run("awaited")
 console.log("after awaited")
--- Wait for completion: Task.yield has no wall-clock completion deadline.
-while not awaitedDone { await sleep(1) }
+-- Wait for completion rather than assuming a timer drains the ready tasks.
+while completed < 1 { await Task.yield() }
 -- prints: awaited returns
 -- prints: after awaited
 -- prints: awaited task starts
@@ -33,12 +31,11 @@ console.log("after blocking")
 -- prints: after blocking
 
 mutable shared = 1
-mutable sharedDone = false
 start do {
-	await sleep(5)
+	await Task.yield()
 	console.log("shared", shared) -- prints: shared 2
-	sharedDone = true
+	completed += 1
 }
 shared = 2
-while not sharedDone { await sleep(1) }
+while completed < 3 { await Task.yield() }
 console.log("end", shared) -- prints: end 2

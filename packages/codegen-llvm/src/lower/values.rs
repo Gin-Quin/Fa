@@ -773,6 +773,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			(Repr::Optional(a), Repr::Optional(b)) => {
 				return a != b && self.same_layout(a.repr(), b.repr());
 			}
+			(Repr::Sync(a), Repr::Sync(b)) => return self.same_concrete_type(a, b),
 			(Repr::Map(_), Repr::Map(_)) | (Repr::Set(_), Repr::Set(_)) => {
 				return match (self.table_of(from), self.table_of(to)) {
 					(Ok(a), Ok(b)) => {
@@ -788,6 +789,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			// pools too (a generic `Pool<Item>` parameter of another file)
 			(Repr::Array(a), Repr::Array(b))
 			| (Repr::Growing(a), Repr::Growing(b))
+			| (Repr::Columnar(a), Repr::Columnar(b))
 			| (Repr::Pool(a), Repr::Pool(b)) => {
 				return match (self.repr_of(a, 0), self.repr_of(b, 0)) {
 					(Ok(a), Ok(b)) => a == b || self.same_layout(a, b),
@@ -799,12 +801,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let (Repr::Object(a), Repr::Object(b)) = (from, to) else {
 			return false;
 		};
-		if a == b {
+		if a == b || (self.same_concrete_type(a, b) && self.object_type(a) == self.object_type(b)) {
 			return true;
 		}
 		let types = self.types();
-		let names =
-			|ty: TypeId| -> Vec<_> { types.fields_of(ty).iter().map(|field| field.name).collect() };
+		let names = |ty: TypeId| -> Vec<_> {
+			types
+				.fields_of(ty)
+				.iter()
+				.map(|field| types.syms.resolve(field.name))
+				.collect()
+		};
 		names(a) == names(b) && self.object_type(a) == self.object_type(b)
 	}
 
@@ -1100,7 +1107,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			// tables of the same keys and values (`GrowingMap`, literal types)
 			(Repr::Map(_), Repr::Map(_)) | (Repr::Set(_), Repr::Set(_)) => {
 				let (a, b) = (self.table_of(value.repr)?, self.table_of(to)?);
-				if a.key != b.key || a.value != b.value || a.growing != b.growing {
+				let same = |from, to| from == to || self.same_layout(from, to);
+				let same_value = match (a.value, b.value) {
+					(Some(from), Some(to)) => same(from, to),
+					(None, None) => true,
+					_ => false,
+				};
+				if !same(a.key, b.key)
+					|| !same_value || a.growing != b.growing
+					|| a.dense != b.dense
+					|| a.inline != b.inline
+				{
 					return Err(self.unsupported(node, "converting this collection"));
 				}
 				Val::new(to, raw)

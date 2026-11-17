@@ -5,10 +5,8 @@ use ethnum::I256;
 
 use crate::analysis::{Callee, NodeFlags};
 use crate::check::Walker;
-use crate::diagnostics::codes::{advanced::REF010, types::TY003, values::E_TYPE_1};
+use crate::diagnostics::codes::{types::TY003, values::E_TYPE_1};
 use crate::ids::{NodeId, TypeId};
-use crate::symbols::{Resolution, SymbolKind};
-use crate::syntax;
 use crate::syntax::{NodeList, View};
 use crate::types::{CollKind, FnSig, Interval, TypeKind};
 
@@ -50,70 +48,11 @@ impl Walker<'_> {
 			self.report(diagnostic);
 			return self.memo(n, |_| TypeId::UNKNOWN);
 		}
-		if self.inline_reference_item(arguments.first().expect("checked item")) {
-			let diagnostic = self.diagnostic(&REF010, n,
-				"an `InlineArray` cannot store references yet: store owned data; lists of references require a declared link field");
-			self.report(diagnostic);
-		}
 		self.check_stored_iterator_type(n, item, "stored in an inline array");
 		let capacity = capacity.expect("checked capacity");
 		self.memo(n, |w| {
 			w.s.types.collection(CollKind::InlineArray, item, capacity)
 		})
-	}
-
-	/// Follow aliases before their reference annotations erase to owned
-	/// target types. Stop at records: a complete owner may own relations.
-	fn inline_reference_item(&mut self, node: NodeId) -> bool {
-		let mut stack = vec![(self.file, node)];
-		let mut seen = rustc_hash::FxHashSet::default();
-		while let Some((file, node)) = stack.pop() {
-			if !seen.insert((file, node)) {
-				continue;
-			}
-			let tree = if file == self.file {
-				std::sync::Arc::clone(&self.tree)
-			} else {
-				std::sync::Arc::clone(&self.s.source_file(file).tree)
-			};
-			match syntax::view(&tree, node) {
-				View::RefType { .. } => return true,
-				View::Object { .. } | View::TypedObject { .. } => continue,
-				_ => {}
-			}
-			let mut resolution = if file == self.file {
-				self.a.resolution(node)
-			} else {
-				self.s.analysis(file).resolution(node)
-			};
-			if file == self.file
-				&& let Resolution::Local(symbol) = resolution
-			{
-				resolution = self.external_resolution(symbol).unwrap_or(resolution);
-			}
-			match resolution {
-				Resolution::Local(symbol) => {
-					let data = if file == self.file {
-						self.a.symbols.symbol(symbol)
-					} else {
-						self.s.analysis(file).symbols.symbol(symbol)
-					};
-					if data.kind == SymbolKind::Type {
-						stack.push((file, data.decl_node));
-					}
-				}
-				Resolution::External(_) => {
-					if let Some((module, node)) = self.s.external_node(resolution)
-						&& let Some(file) = self.s.file_of(module)
-					{
-						stack.push((file, node));
-					}
-				}
-				_ => {}
-			}
-			stack.extend(syntax::children(&tree, node).map(|node| (file, node)));
-		}
-		false
 	}
 
 	pub(super) fn check_inline_literal(
@@ -133,7 +72,7 @@ impl Walker<'_> {
 			} else {
 				let ty = self.check(value, Some(item));
 				self.sink(value, ty, item);
-				self.escape(value, n);
+				self.store_closures(value, n);
 			}
 		}
 		if items.len() > capacity as usize {

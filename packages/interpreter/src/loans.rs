@@ -229,6 +229,24 @@ impl Loan {
 		steps
 	}
 
+	pub fn same_place(&self, other: &Self) -> bool {
+		self.owner == other.owner
+			&& self.depth == other.depth
+			&& self
+				.steps()
+				.into_iter()
+				.zip(other.steps())
+				.all(|(left, right)| match (left, right) {
+					(Step::Field(left), Step::Field(right)) => left == right,
+					(Step::Index(left), Step::Index(right)) => crate::value::equals(left, right),
+					(Step::Capture(left), Step::Capture(right))
+					| (Step::Bound(left), Step::Bound(right))
+					| (Step::Item(left), Step::Item(right))
+					| (Step::Entry(left), Step::Entry(right)) => left == right,
+					_ => false,
+				})
+	}
+
 	pub fn lookup_bytes(&self) -> usize {
 		self.depth.saturating_mul(size_of::<&Step>())
 	}

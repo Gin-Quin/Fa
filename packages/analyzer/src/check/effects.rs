@@ -3,8 +3,8 @@
 //! and calls, their coverage by the declared effects, the iteration rule.
 //!
 //! - An expression designating a place (`player.score`, `bodies[j].vx`, a
-//!   `use` alias, a `for` variable over a collection) has a flow place
-//!   ([`Walker::place_of`]): a root symbol and steps, an index step carrying
+//!   `use` alias, a `for` variable over a collection) has evaluated flow places
+//!   ([`Walker::places_of`]): a root symbol and steps, an index step carrying
 //!   the identity of its index (advanced brief §5.4).
 //! - Every write and every call with effects goes through
 //!   [`Walker::record_effect`]: the facts at and below the place go, the
@@ -77,63 +77,84 @@ pub(crate) enum Writable {
 impl Walker<'_> {
 	// ── places ────────────────────────────────────────────────────────────
 
-	/// The flow place an expression designates, with the identities of its
-	/// index steps taken now; `None` for a value that is not a place (a
-	/// call result, a literal: a temporary).
-	pub(crate) fn place_of(&mut self, n: NodeId) -> Option<PlaceId> {
+	/// Every place the expression may designate in the current flow state.
+	/// Consumers of effects and ownership must inspect the complete set.
+	pub(crate) fn places_of(&mut self, n: NodeId) -> Vec<PlaceId> {
 		let n = self.strip_groups(n);
 		let tree = Arc::clone(&self.tree);
 		match syntax::view(&tree, n) {
-			View::Name(_) => {
-				let Resolution::Local(symbol) = self.a.resolution(n) else {
-					return None;
-				};
-				self.symbol_target(symbol)
-			}
+			View::Try(inner) => self.places_of(inner),
+			View::Call { .. } => self
+				.reference_results
+				.get(&n)
+				.map(|value| value.places.clone())
+				.unwrap_or_default(),
+			View::Name(_) => match self.a.resolution(n) {
+				Resolution::Local(symbol) => self.symbol_places(symbol),
+				_ => Vec::new(),
+			},
 			View::Access { target, members } => {
-				let members: Vec<NodeId> = members.iter().collect();
-				self.access_place(target, &members)
+				self.access_places(target, &members.iter().collect::<Vec<_>>())
 			}
 			View::Index { target, index } => {
-				let place = self.place_of(target)?;
+				let places = self.places_of(target);
 				let step = if self.type_of(self.strip_groups(index)) == TypeId::RANGE {
 					Step::All
 				} else {
-					Step::Index(self.identity_of(index))
+					Step::Index(self.reference_index_identity(index, Some(self.type_of(target))))
 				};
-				Some(self.places.child(place, step))
+				places
+					.into_iter()
+					.map(|place| self.places.child(place, step))
+					.collect()
 			}
-			_ => None,
+			_ => self.evaluated_origins(n).places,
 		}
 	}
-
-	/// The place of `target.members…`. A value of another file reached
-	/// through namespaces (`library.people`) is the place of its proxy.
-	pub(crate) fn access_place(&mut self, target: NodeId, members: &[NodeId]) -> Option<PlaceId> {
+	pub(crate) fn access_places(&mut self, target: NodeId, members: &[NodeId]) -> Vec<PlaceId> {
 		let mut members = members.iter().copied();
-		let mut place = match self.place_of(target) {
-			Some(place) => place,
-			None => loop {
-				let member = members.next()?;
-				let Resolution::Local(symbol) = self.a.resolution(member) else {
-					return None;
-				};
-				if !self.is_namespace(symbol) {
-					break self.symbol_target(symbol)?;
-				}
-			},
-		};
-		for member in members {
-			place = self.member_step(place, member)?;
+		let mut places = self.places_of(target);
+		while places.is_empty() {
+			let Some(member) = members.next() else {
+				return places;
+			};
+			let Resolution::Local(symbol) = self.a.resolution(member) else {
+				return places;
+			};
+			if !self.is_namespace(symbol) {
+				places = self.symbol_places(symbol);
+				break;
+			}
 		}
-		Some(place)
+		for member in members {
+			places = places
+				.into_iter()
+				.filter_map(|place| {
+					let place = self.reference_field_target(place);
+					self.member_step(place, member)
+				})
+				.collect();
+		}
+		places
 	}
 
-	/// The place a symbol stands for: the place a `use` or a `for` variable
-	/// designates, else the symbol's own. `None` for a non-value (a function).
-	pub(crate) fn symbol_target(&mut self, symbol: SymbolId) -> Option<PlaceId> {
+	/// A singleton proof for numeric facts and narrowing only.
+	pub(crate) fn place_of(&mut self, node: NodeId) -> Option<PlaceId> {
+		let places = self.places_of(node);
+		if let [place] = places.as_slice() {
+			Some(*place)
+		} else {
+			None
+		}
+	}
+
+	pub(crate) fn symbol_places(&mut self, symbol: SymbolId) -> Vec<PlaceId> {
+		if let Some(state) = self.body.flow.ref_state(symbol) {
+			return self.facts.refs.get(state).places.to_vec();
+		}
+		// Fixed iteration aliases and captures have a single entry place.
 		if let Some(&place) = self.aliases.get(&symbol) {
-			return Some(place);
+			return vec![place];
 		}
 		match self.a.symbols.symbol(symbol).kind {
 			SymbolKind::Function
@@ -141,8 +162,17 @@ impl Walker<'_> {
 			| SymbolKind::TypeParameter
 			| SymbolKind::Namespace
 			| SymbolKind::Test
-			| SymbolKind::NameAlias => None,
-			_ => Some(self.places.symbol(symbol)),
+			| SymbolKind::NameAlias => Vec::new(),
+			_ => vec![self.places.symbol(symbol)],
+		}
+	}
+
+	pub(crate) fn symbol_target(&mut self, symbol: SymbolId) -> Option<PlaceId> {
+		let places = self.symbol_places(symbol);
+		if let [place] = places.as_slice() {
+			Some(*place)
+		} else {
+			None
 		}
 	}
 
@@ -198,6 +228,55 @@ impl Walker<'_> {
 				Identity::Interval(self.facts.interval(set.hull))
 			}
 			_ => Identity::Unknown,
+		}
+	}
+
+	/// References save the evaluated sequence index. A negative value is not
+	/// numerically distinct from its normalized positive position; map keys keep
+	/// their raw value. Length-based indices retain an interval snapshot.
+	pub(super) fn reference_index_identity(
+		&mut self,
+		index: NodeId,
+		container: Option<TypeId>,
+	) -> Identity {
+		let identity = self.identity_of(index);
+		self.normalize_reference_index(identity, container)
+	}
+
+	fn normalize_reference_index(
+		&mut self,
+		identity: Identity,
+		container: Option<TypeId>,
+	) -> Identity {
+		if container.is_some_and(|ty| {
+			matches!(
+				self.s.types.kind(ty),
+				TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, ..)
+			)
+		}) {
+			return identity;
+		}
+		match identity {
+			Identity::Exact(value) if value < 0 => Identity::FromEnd(value),
+			Identity::Symbol(symbol, offset)
+				if self
+					.identity_interval(identity)
+					.is_none_or(|range| range.lo < I256::ZERO) =>
+			{
+				Identity::NormalizedSymbol(symbol, offset)
+			}
+			Identity::Interval(id) if self.facts.interval_value(id).lo < I256::ZERO => {
+				Identity::Unknown
+			}
+			Identity::LengthOf(place, offset)
+				if self
+					.identity_interval(identity)
+					.is_some_and(|range| range.lo >= I256::ZERO) =>
+			{
+				Identity::LengthSnapshot(place, offset, self.body.flow.track_reference_epoch(place))
+			}
+			Identity::LengthOf(..) => Identity::Unknown,
+			other => other,
 		}
 	}
 
@@ -286,6 +365,9 @@ impl Walker<'_> {
 			return Writable::Yes;
 		};
 		let entry = self.a.symbols.symbol(symbol);
+		if self.readonly_place(place) {
+			return Writable::No(symbol);
+		}
 		if self.s.types.is_recovering(entry.ty) {
 			return Writable::Yes;
 		}
@@ -300,6 +382,35 @@ impl Walker<'_> {
 			| SymbolKind::LoopVariable { copy: false } => Writable::Yes,
 			_ => Writable::No(symbol),
 		}
+	}
+
+	pub(super) fn readonly_place(&self, mut place: PlaceId) -> bool {
+		// Inspect the complete projection before following a formal's owner. A
+		// dependent object parameter may itself contain a set field.
+		for _ in 0..=self.reference_parameters.len() {
+			while let Some(parent) = self.places.parent(place) {
+				if matches!(
+					self.places.get(place).step,
+					Some(Step::Index(_) | Step::All)
+				) && self.place_type(parent).is_some_and(|ty| {
+					matches!(
+						self.s.types.kind(ty),
+						TypeKind::Collection(CollKind::Set | CollKind::GrowingSet, ..)
+					)
+				}) {
+					return true;
+				}
+				place = parent;
+			}
+			let Some(owner) = self
+				.place_symbol(place)
+				.and_then(|symbol| self.reference_parameters.get(&symbol))
+			else {
+				return false;
+			};
+			place = *owner;
+		}
+		true
 	}
 
 	// ── owners ────────────────────────────────────────────────────────────
@@ -367,7 +478,19 @@ impl Walker<'_> {
 		if !self.body.flow.reachable {
 			return;
 		}
-		if let Some(place) = self.place_of(target) {
+		let evaluated = self.evaluated_origins(target);
+		for bound in evaluated.bounds {
+			if bound.formal.is_none() {
+				self.record_bounded_effect(
+					bound.place,
+					Some(self.type_of(target)),
+					target,
+					n,
+					false,
+				);
+			}
+		}
+		for place in self.places_of(target) {
 			self.record_effect(place, false, n, false);
 			// `map[key] = value` may add the key: `mutates self[key], self.size`
 			if let View::Index { target: map, .. } = self.view(self.strip_groups(target))
@@ -378,6 +501,30 @@ impl Walker<'_> {
 				self.record_effect(size, false, n, true);
 			}
 		}
+	}
+
+	fn protect_reference_argument(&mut self, argument: NodeId) -> Vec<SymbolId> {
+		let protected = self
+			.root_symbol(argument)
+			.filter(|&symbol| self.body.flow.ref_state(symbol).is_some())
+			.map(|symbol| self.body.flow.reference_equivalents(symbol))
+			.unwrap_or_default();
+		std::mem::replace(&mut self.effect_protected_references, protected)
+	}
+
+	fn record_bounded_effect(
+		&mut self,
+		owner: PlaceId,
+		ty: Option<TypeId>,
+		argument: NodeId,
+		n: NodeId,
+		call: bool,
+	) {
+		let protected = self.protect_reference_argument(argument);
+		let effect_type = std::mem::replace(&mut self.effect_type, ty);
+		self.record_effect(owner, false, n, call);
+		self.effect_type = effect_type;
+		self.effect_protected_references = protected;
 	}
 
 	/// An effect on `place` at node `n` (advanced brief §5.7 steps 6–8):
@@ -410,6 +557,7 @@ impl Walker<'_> {
 			self.check_iteration(place, invalidates, n, call);
 			self.invalidate_references(place, invalidates, n);
 		}
+		self.advance_reference_epochs(place, invalidates, n);
 		if matches!(owner, Owner::Local | Owner::Outside) {
 			return;
 		}
@@ -518,9 +666,45 @@ impl Walker<'_> {
 		}
 	}
 
+	fn advance_reference_epochs(&mut self, place: PlaceId, invalidates: bool, node: NodeId) {
+		if self.body.flow.reference_epochs.is_empty() {
+			return;
+		}
+		let entry = self.places.get(place);
+		let changed = match entry.step {
+			Some(Step::Length | Step::Size) => entry.parent,
+			Some(Step::Capacity) => None,
+			Some(Step::Index(_) | Step::Range(..)) if invalidates => entry.parent,
+			_ if invalidates
+				|| self
+					.effect_type
+					.or_else(|| self.place_type(place))
+					.is_none_or(|ty| !self.is_flat(ty)) =>
+			{
+				Some(place)
+			}
+			_ => None,
+		};
+		let Some(changed) = changed else {
+			return;
+		};
+		let changed = self.canonical_reference_place(changed);
+		let epochs = self.body.flow.reference_epochs.clone();
+		for (index, &(place, epoch)) in epochs.iter().enumerate() {
+			let normalized = self.canonical_reference_place(place);
+			if self.may_be_at_or_below(normalized, changed) {
+				self.body.flow.reference_epochs[index].1 = if epoch == 0 {
+					node.0.saturating_add(1)
+				} else {
+					u32::MAX
+				};
+			}
+		}
+	}
+
 	/// The effect path of a place for the innermost function: its root is a
 	/// parameter, `self` or a module-level value.
-	fn effect_path(&mut self, place: PlaceId) -> Option<PathId> {
+	pub(super) fn effect_path(&mut self, place: PlaceId) -> Option<PathId> {
 		let symbol = self.place_symbol(place)?;
 		let entry = self.a.symbols.symbol(symbol);
 		let root = match entry.kind {
@@ -539,14 +723,19 @@ impl Walker<'_> {
 				Step::Length => PathStep::Length,
 				Step::Size => PathStep::Size,
 				Step::Capacity => PathStep::Capacity,
-				Step::Index(Identity::Exact(value)) => {
+				Step::Index(Identity::Exact(value) | Identity::FromEnd(value)) => {
 					PathStep::IndexConst(self.s.types.constant(ConstValue::Int(I256::from(value))))
 				}
-				Step::Index(Identity::Symbol(index, 0)) => {
+				Step::Index(Identity::Symbol(index, 0) | Identity::NormalizedSymbol(index, 0)) => {
 					match self.a.symbols.symbol(index).kind {
 						SymbolKind::Parameter { index } => PathStep::IndexParam(index),
 						_ => PathStep::All,
 					}
+				}
+				Step::Index(Identity::Key(key))
+					if !matches!(self.s.types.const_value(key), ConstValue::Binding(_)) =>
+				{
+					PathStep::IndexConst(key)
 				}
 				Step::Payload(_) | Step::Characters => continue,
 				Step::Index(_) | Step::Range(..) | Step::All | Step::Child => PathStep::All,
@@ -614,6 +803,12 @@ impl Walker<'_> {
 			return;
 		};
 		if set_covers(&self.s.types, declared, path, entry.invalidates) {
+			return;
+		}
+		let canonical = self.canonical_reference_place(entry.place);
+		if let Some(path) = self.effect_path(canonical)
+			&& set_covers(&self.s.types, declared, path, entry.invalidates)
+		{
 			return;
 		}
 		let text = path_text(&self.s.types, path, &|index| self.effect_param_name(index));
@@ -760,7 +955,7 @@ impl Walker<'_> {
 	}
 
 	/// Whether two steps from the same place are proven to lead to different places.
-	fn steps_distinct(&self, a: Step, b: Step) -> bool {
+	pub(super) fn steps_distinct(&self, a: Step, b: Step) -> bool {
 		match (a, b) {
 			(Step::Field(x), Step::Field(y)) => x != y,
 			(Step::Field(_), _) | (_, Step::Field(_)) => true,
@@ -782,6 +977,17 @@ impl Walker<'_> {
 		match (a, b) {
 			(Identity::Symbol(x, i), Identity::Symbol(y, j)) if x == y => i != j,
 			(Identity::LengthOf(x, i), Identity::LengthOf(y, j)) if x == y => i != j,
+			(Identity::LengthSnapshot(x, i, a), Identity::LengthSnapshot(y, j, b))
+				if x == y && a == b && a != u32::MAX =>
+			{
+				i != j
+			}
+			(Identity::LengthSnapshot(x, i, epoch), Identity::LengthOf(y, j))
+			| (Identity::LengthOf(y, j), Identity::LengthSnapshot(x, i, epoch))
+				if x == y && epoch != u32::MAX && epoch == self.body.flow.reference_epoch(x) =>
+			{
+				i != j
+			}
 			(Identity::Fresh(x), Identity::Fresh(y)) => x != y,
 			(Identity::Key(x), Identity::Key(y)) => x != y,
 			(Identity::Existing(before), Identity::Fresh(after))
@@ -850,6 +1056,13 @@ impl Walker<'_> {
 				}
 				Some(offset(self.facts.interval_set_value(int).hull, k))
 			}
+			Identity::LengthSnapshot(place, offset, epoch) => {
+				if epoch != u32::MAX && epoch == self.body.flow.reference_epoch(place) {
+					self.identity_interval(Identity::LengthOf(place, offset))
+				} else {
+					None
+				}
+			}
 			Identity::LengthOf(place, k) => {
 				let fact = self.body.flow.fact(place).or_else(|| {
 					self.place_symbol(place)
@@ -859,9 +1072,12 @@ impl Walker<'_> {
 				(length != crate::ids::IntervalId::NONE)
 					.then(|| offset(self.facts.interval_value(length), k))
 			}
-			Identity::Fresh(_) | Identity::Existing(_) | Identity::Key(_) | Identity::Unknown => {
-				None
-			}
+			Identity::Fresh(_)
+			| Identity::Existing(_)
+			| Identity::Key(_)
+			| Identity::Unknown
+			| Identity::FromEnd(_)
+			| Identity::NormalizedSymbol(..) => None,
 		}
 	}
 
@@ -887,8 +1103,10 @@ impl Walker<'_> {
 				let Some((path, ty)) = self.signature_path(node) else {
 					continue;
 				};
+				let reference_parameter = self.declared_reference_parameter(path);
 				let (data, steps) = self.s.types.path_data(path);
-				if steps.is_empty()
+				if reference_parameter.is_none()
+					&& steps.is_empty()
 					&& !kind && !matches!(data.root, PathRoot::ModuleValue(_))
 					&& self.is_primitive(ty)
 				{
@@ -923,6 +1141,7 @@ impl Walker<'_> {
 				});
 				if kind
 					&& !names_element
+					&& reference_parameter.is_none()
 					&& !matches!(self.s.types.kind(ty), TypeKind::Ref(..))
 					&& !self.s.types.is_recovering(ty)
 				{
@@ -942,6 +1161,17 @@ impl Walker<'_> {
 					continue;
 				}
 				if kind {
+					if let Some(symbol) = reference_parameter
+						&& let View::Assignment {
+							annotation: Some(annotation),
+							..
+						} = self.view(self.a.symbols.symbol(symbol).decl_node)
+						&& let Some((owner, _)) = self
+							.reference_annotation(annotation)
+							.and_then(|owner| self.signature_path(owner))
+					{
+						mutated.push(self.extend_path(owner, PathStep::Size));
+					}
 					invalidated.push(path);
 				} else {
 					mutated.push(path);
@@ -954,7 +1184,7 @@ impl Walker<'_> {
 	}
 
 	/// A path of a signature and the declared type it designates.
-	fn signature_path(&mut self, node: NodeId) -> Option<(PathId, TypeId)> {
+	pub(super) fn signature_path(&mut self, node: NodeId) -> Option<(PathId, TypeId)> {
 		let tree = Arc::clone(&self.tree);
 		match syntax::view(&tree, node) {
 			View::Group(inner) => self.signature_path(inner),
@@ -1254,8 +1484,13 @@ impl Walker<'_> {
 		let saved = std::mem::take(&mut self.body.functions);
 		self.body.functions.push(cx.clone());
 		let mut own: Vec<(PathId, bool)> = Vec::new();
+		let mut coverage_own = Vec::new();
 		let mut captured: Vec<EffectEntry> = Vec::new();
 		for entry in &cx.effects {
+			let canonical = self.canonical_reference_place(entry.place);
+			if let Some(path) = self.effect_path(canonical) {
+				coverage_own.push((path, entry.invalidates));
+			}
 			let Some(symbol) = self.place_symbol(entry.place) else {
 				continue;
 			};
@@ -1289,6 +1524,7 @@ impl Walker<'_> {
 						})
 						.filter(|&(path, invalidates)| {
 							!covers_any(&self.s.types, path, invalidates, &own)
+								&& !covers_any(&self.s.types, path, invalidates, &coverage_own)
 						})
 						.collect();
 					for (path, invalidates) in unused {
@@ -1373,14 +1609,31 @@ impl Walker<'_> {
 		let name = self.callee_name(callee);
 		// the local functions it calls or is given: the references they
 		// capture are read here
-		let closures = self.called_closures(&info);
+		let mut closures = self.called_closures(&info);
+		closures.extend(
+			self.evaluated_origins(callee)
+				.closures
+				.into_iter()
+				.filter_map(|origin| origin.callable.local())
+				.map(|lambda| {
+					self.a
+						.functions
+						.get(&lambda)
+						.and_then(|info| info.declaration)
+						.unwrap_or(lambda)
+				}),
+		);
+		closures.sort_unstable();
+		closures.dedup();
 		for &function in &closures {
 			self.check_captured_references(n, function);
 		}
 		// the places the call changes, with the argument each one comes from
+		let mut bound_protections: rustc_hash::FxHashMap<(PlaceId, NodeId), bool> =
+			rustc_hash::FxHashMap::default();
 		let mut changed: Vec<(PlaceId, bool, Option<NodeId>)> = Vec::new();
 		let mut builtin_effects: Vec<BuiltinEffect> = Vec::new();
-		let mut receiver_place = None;
+		let mut receiver_places = Vec::new();
 		// the places changed in place, never replaced: they keep their narrowing
 		let mut kept: Vec<PlaceId> = Vec::new();
 		match info.callee {
@@ -1401,40 +1654,43 @@ impl Walker<'_> {
 					}
 					None => crate::builtins::effects::effects_of(path),
 				};
-				if let Some(receiver) = receiver.filter(|_| !builtin_effects.is_empty())
-					&& let Some(base) = self.callee_receiver_place(callee)
-				{
-					let method = path.rsplit('#').next().unwrap_or(path).to_string();
-					// links and unlinks of relations (relations.rs)
-					self.check_relation_call(n, path, callee, &info.arguments);
-					// `pool.delete(element)`: an element of this very pool (REF020)
-					if matches!(
-						path,
-						"Pool#delete" | "Pool#take" | "Columnar#delete" | "Columnar#take"
-					) && let Some(Argument::Given(element)) = info.arguments.first()
-					{
-						self.check_element_of(callee, *element, &method);
-					}
-					if self.check_mutable_argument(base, receiver, &method, true) {
-						receiver_place = Some(base);
-						changed.push((base, false, Some(receiver)));
+				if let Some(receiver) = receiver.filter(|_| !builtin_effects.is_empty()) {
+					for base in self.callee_receiver_places(callee) {
+						let method = path.rsplit('#').next().unwrap_or(path).to_string();
+						// links and unlinks of relations (relations.rs)
+						self.check_relation_call(n, path, callee, &info.arguments);
+						// `pool.delete(element)`: an element of this very pool (REF020)
+						if matches!(
+							path,
+							"Pool#delete" | "Pool#take" | "Columnar#delete" | "Columnar#take"
+						) && let Some(Argument::Given(element)) = info.arguments.first()
+						{
+							self.check_element_of(callee, *element, &method);
+						}
+						if self.check_mutable_argument(base, receiver, &method, true) {
+							receiver_places.push(base);
+							changed.push((base, false, Some(receiver)));
+						}
 					}
 				}
 				// `stream.read(buffer)` mutates its argument (std_library.rs)
 				if path == "TcpStream#read"
 					&& let Some(Argument::Given(buffer)) = info.arguments.first()
-					&& let Some(place) = self.place_of(*buffer)
-					&& self.check_mutable_argument(place, *buffer, "read", false)
 				{
-					changed.push((place, false, Some(*buffer)));
+					for place in self.places_of(*buffer) {
+						if self.check_mutable_argument(place, *buffer, "read", false) {
+							changed.push((place, false, Some(*buffer)));
+						}
+					}
 				}
 				// a value stored into a collection escapes (closures)
 				if crate::builtins::effects::stores_arguments(path) {
 					// a collection that outlives the function (tasks.rs)
 					let outside = self
-						.callee_receiver_place(callee)
-						.and_then(|place| self.place_symbol(place))
-						.is_some_and(|symbol| !self.is_function_local(symbol));
+						.callee_receiver_places(callee)
+						.into_iter()
+						.filter_map(|place| self.place_symbol(place))
+						.any(|symbol| !self.is_function_local(symbol));
 					for argument in &info.arguments {
 						if let Argument::Given(value) = argument {
 							if outside {
@@ -1471,7 +1727,16 @@ impl Walker<'_> {
 								.collect()
 						})
 						.unwrap_or_default(),
-					_ => Vec::new(),
+					_ => match self.s.types.kind(self.type_of(callee)) {
+						TypeKind::Function(sig) => self
+							.s
+							.types
+							.params(self.s.types.sig(sig).params)
+							.iter()
+							.map(|param| param.ty)
+							.collect(),
+						_ => Vec::new(),
+					},
 				};
 				let mut path_types: Vec<Option<TypeId>> = Vec::new();
 				for &(path, _) in &paths {
@@ -1480,57 +1745,70 @@ impl Walker<'_> {
 				let mut refused: Vec<PlaceId> = Vec::new();
 				let mut checked: Vec<PlaceId> = Vec::new();
 				for (position, (path, invalidates)) in paths.into_iter().enumerate() {
-					let Some((place, base, argument)) =
-						self.substitute(path, &info.arguments, receiver, (n, &name))
-					else {
+					let places =
+						self.substitute_effect_places(path, &info.arguments, receiver, (n, &name));
+					if places.is_empty() {
 						self.temporary_mutated(path, &info.arguments, &name);
-						continue;
-					};
-					// a parameter of the payload's type changes the payload only:
-					// a parameter is never replaced (`EFF006`); one typed
-					// `Array?` or a union may stand for the optional itself
-					if matches!(
-						self.s.types.path_data(path).0.root,
-						PathRoot::Param(_) | PathRoot::SelfParam
-					) && path_types[position].is_some_and(|ty| !self.is_union_like(ty))
-					{
-						kept.push(base);
 					}
-					if let Some(ty) = path_types[position] {
-						self.effect_types.insert(place, ty);
-					}
-					if refused.contains(&base) {
-						continue;
-					}
-					if !checked.contains(&base) {
-						checked.push(base);
-						let method = receiver.is_some_and(|receiver| {
-							self.strip_groups(receiver) == self.strip_groups(argument)
-						});
-						// a C function's immutable argument is `FFI010` (foreign.rs)
-						let foreign = self.a.extern_calls.contains_key(&n);
-						if foreign && self.place_writable(base) != Writable::Yes
-							|| !foreign
-								&& !self.check_mutable_argument(base, argument, &name, method)
+					for (place, base, argument) in places {
+						if self
+							.evaluated_origins(argument)
+							.bounds
+							.iter()
+							.any(|bound| bound.formal.is_none() && bound.place == place)
 						{
-							refused.push(base);
+							let keeps_root =
+								!invalidates || !self.s.types.path_data(path).1.is_empty();
+							bound_protections
+								.entry((place, argument))
+								.and_modify(|old| *old &= keeps_root)
+								.or_insert(keeps_root);
+						}
+						// a parameter of the payload's type changes the payload only:
+						// a parameter is never replaced (`EFF006`); one typed
+						// `Array?` or a union may stand for the optional itself
+						if matches!(
+							self.s.types.path_data(path).0.root,
+							PathRoot::Param(_) | PathRoot::SelfParam
+						) && path_types[position].is_some_and(|ty| !self.is_union_like(ty))
+						{
+							kept.push(base);
+						}
+						if let Some(ty) = path_types[position] {
+							self.effect_types.insert(place, ty);
+						}
+						if refused.contains(&base) {
 							continue;
 						}
+						if !checked.contains(&base) {
+							checked.push(base);
+							let method = receiver.is_some_and(|receiver| {
+								self.strip_groups(receiver) == self.strip_groups(argument)
+							});
+							// a C function's immutable argument is `FFI010` (foreign.rs)
+							let foreign = self.a.extern_calls.contains_key(&n);
+							if foreign && self.place_writable(base) != Writable::Yes
+								|| !foreign
+									&& !self.check_mutable_argument(base, argument, &name, method)
+							{
+								refused.push(base);
+								continue;
+							}
+						}
+						// a `readonly` field the callee writes (structural.rs)
+						if let Some(declared) = path_types[position] {
+							self.check_readonly_written(argument, path, declared, &name);
+						}
+						// a collection that owner fields point into (relations.rs)
+						let (data, steps) = self.s.types.path_data(path);
+						if matches!(data.root, PathRoot::Param(_))
+							&& !steps.iter().any(|step| {
+								matches!(step, PathStep::Field(_) | PathStep::Private(_))
+							}) {
+							self.check_owned_collection_alias(argument);
+						}
+						changed.push((place, invalidates, Some(argument)));
 					}
-					// a `readonly` field the callee writes (structural.rs)
-					if let Some(declared) = path_types[position] {
-						self.check_readonly_written(argument, path, declared, &name);
-					}
-					// a collection that owner fields point into (relations.rs)
-					let (data, steps) = self.s.types.path_data(path);
-					if matches!(data.root, PathRoot::Param(_))
-						&& !steps
-							.iter()
-							.any(|step| matches!(step, PathStep::Field(_) | PathStep::Private(_)))
-					{
-						self.check_owned_collection_alias(argument);
-					}
-					changed.push((place, invalidates, Some(argument)));
 				}
 			}
 			_ => {}
@@ -1559,7 +1837,7 @@ impl Walker<'_> {
 			}
 		}
 		// the relation sides the changes also write (relations.rs, §8.6, D47)
-		let implied = if receiver_place.is_none() {
+		let implied = if receiver_places.is_empty() {
 			self.implied_by_changes(&changed)
 		} else {
 			Vec::new()
@@ -1579,30 +1857,59 @@ impl Walker<'_> {
 		}
 		// the effects
 		self.kept_narrowings = kept;
-		if let Some(base) = receiver_place {
-			self.kept_narrowings.push(base);
-			let length = self.place_length(base);
-			// `push` and `insert` only add elements: `i < c.length` holds
-			self.growing_only = matches!(
-				info.callee,
-				Callee::Builtin(builtin) if matches!(
-					crate::builtins::get(builtin).path,
-					"Array#push" | "Array#insert" | "OrderedColumnar#add"
-				)
-			);
+		if !receiver_places.is_empty() {
+			let bounds = self.evaluated_origins(callee).bounds;
 			for &effect in &builtin_effects {
-				self.builtin_effect(effect, base, &info.arguments, n);
+				let receiver_ty = self.callee_receiver_type(callee);
+				let ty = match effect {
+					BuiltinEffect::MutatesSize
+					| BuiltinEffect::MutatesLength
+					| BuiltinEffect::MutatesCapacity => Some(TypeId::INTEGER),
+					BuiltinEffect::MutatesKey(_) => {
+						receiver_ty.and_then(|ty| match self.s.types.kind(ty) {
+							TypeKind::Collection(_, item, _) => Some(item),
+							_ => None,
+						})
+					}
+					_ => receiver_ty,
+				};
+				for bound in &bounds {
+					if bound.formal.is_none() {
+						self.record_bounded_effect(bound.place, ty, callee, n, true);
+					}
+				}
 			}
-			self.growing_only = false;
-			if let (Callee::Builtin(builtin), Some(length)) = (info.callee, length) {
-				let path = crate::builtins::get(builtin).path;
-				self.track_length(base, path, length);
+			for base in receiver_places {
+				self.kept_narrowings.push(base);
+				let length = self.place_length(base);
+				// `push` and `insert` only add elements: `i < c.length` holds
+				self.growing_only = matches!(
+					info.callee,
+					Callee::Builtin(builtin) if matches!(
+						crate::builtins::get(builtin).path,
+						"Array#push" | "Array#insert" | "OrderedColumnar#add"
+					)
+				);
+				for &effect in &builtin_effects {
+					self.builtin_effect(effect, base, &info.arguments, n);
+				}
+				self.growing_only = false;
+				if let (Callee::Builtin(builtin), Some(length)) = (info.callee, length) {
+					let path = crate::builtins::get(builtin).path;
+					self.track_length(base, path, length);
+				}
 			}
 		} else {
-			for (place, invalidates, _) in changed {
+			for (place, invalidates, argument) in changed {
+				let previous = argument
+					.filter(|&argument| bound_protections.get(&(place, argument)) == Some(&true))
+					.map(|argument| self.protect_reference_argument(argument));
 				self.effect_type = self.effect_types.get(&place).copied();
 				self.record_effect(place, invalidates, n, true);
 				self.effect_type = None;
+				if let Some(previous) = previous {
+					self.effect_protected_references = previous;
+				}
 			}
 			let cause = format!("`{name}`");
 			for place in implied {
@@ -1622,19 +1929,32 @@ impl Walker<'_> {
 
 	/// The local functions a call runs or is given (by declaration).
 	fn called_closures(&self, info: &crate::analysis::CallInfo) -> Vec<NodeId> {
-		let mut closures: Vec<NodeId> = Vec::new();
+		let mut closures = Vec::new();
 		if let Callee::Function(declaration) = info.callee {
 			closures.push(declaration);
 		}
 		for argument in &info.arguments {
-			if let Argument::Given(value) = argument
-				&& let View::Name(_) = self.view(self.strip_groups(*value))
-				&& let Resolution::Local(symbol) = self.a.resolution(self.strip_groups(*value))
-				&& let Some(declaration) = self.direct_function(symbol)
-			{
-				closures.push(declaration);
+			if let Argument::Given(value) = argument {
+				if matches!(self.view(self.strip_groups(*value)), View::Lambda { .. }) {
+					continue;
+				}
+				closures.extend(
+					self.evaluated_origins(*value)
+						.closures
+						.into_iter()
+						.filter_map(|origin| origin.callable.local())
+						.map(|lambda| {
+							self.a
+								.functions
+								.get(&lambda)
+								.and_then(|info| info.declaration)
+								.unwrap_or(lambda)
+						}),
+				);
 			}
 		}
+		closures.sort_unstable();
+		closures.dedup();
 		closures
 	}
 
@@ -1689,27 +2009,29 @@ impl Walker<'_> {
 				stack.extend(syntax::children(&self.tree, node));
 			}
 			for symbol in captures {
-				let Some(&captured) = self.aliases.get(&symbol) else {
-					continue;
-				};
-				for &(place, _, _) in changed {
-					if !self.may_overlap(place, captured) {
-						continue;
+				for captured in self.symbol_places(symbol) {
+					for &(place, _, _) in changed {
+						if !self.may_overlap(place, captured) {
+							continue;
+						}
+						let changed_text = self.place_text(place);
+						let name = self
+							.s
+							.types
+							.syms
+							.resolve(self.a.symbols.symbol(symbol).name)
+							.to_string();
+						let message = format!(
+							"`{callee}` changes `{changed_text}`, and the function given to it reads `{name}`, which may designate an element of it: copy what the function needs first with `let`"
+						);
+						let diagnostic = self.diagnostic(
+							&crate::diagnostics::codes::advanced::REF013,
+							n,
+							message,
+						);
+						self.report_flow(diagnostic);
+						return;
 					}
-					let changed_text = self.place_text(place);
-					let name = self
-						.s
-						.types
-						.syms
-						.resolve(self.a.symbols.symbol(symbol).name)
-						.to_string();
-					let message = format!(
-						"`{callee}` changes `{changed_text}`, and the function given to it reads `{name}`, which may designate an element of it: copy what the function needs first with `let`"
-					);
-					let diagnostic =
-						self.diagnostic(&crate::diagnostics::codes::advanced::REF013, n, message);
-					self.report_flow(diagnostic);
-					return;
 				}
 			}
 		}
@@ -1718,31 +2040,33 @@ impl Walker<'_> {
 				if Some(self.strip_groups(argument)) == from.map(|from| self.strip_groups(from)) {
 					continue;
 				}
-				let Some(other) = self.place_of(argument) else {
-					continue;
-				};
-				if matches!(
-					self.places.get(other).step,
-					Some(Step::Length | Step::Size | Step::Capacity)
-				) || !self.may_overlap(place, other)
-				{
-					continue;
+				for other in self.places_of(argument) {
+					if matches!(
+						self.places.get(other).step,
+						Some(Step::Length | Step::Size | Step::Capacity)
+					) || !self.may_overlap(place, other)
+					{
+						continue;
+					}
+					if self.declared_reference_overlap(n, from, argument) {
+						continue;
+					}
+					let changed_text = self.place_text(place);
+					let argument_text = self.tree.text(argument.index()).to_string();
+					let message = if other != place && self.may_be_at_or_below(other, place) {
+						format!(
+							"`{callee}` changes `{changed_text}`, and its argument `{argument_text}` is inside it: copy it first with `let`"
+						)
+					} else {
+						format!(
+							"`{callee}` changes `{changed_text}`, which its argument `{argument_text}` may also designate: pass different values, or copy one first with `let`"
+						)
+					};
+					let diagnostic =
+						self.diagnostic(&crate::diagnostics::codes::advanced::REF013, n, message);
+					self.report_flow(diagnostic);
+					return;
 				}
-				let changed_text = self.place_text(place);
-				let argument_text = self.tree.text(argument.index()).to_string();
-				let message = if other != place && self.may_be_at_or_below(other, place) {
-					format!(
-						"`{callee}` changes `{changed_text}`, and its argument `{argument_text}` is inside it: copy it first with `let`"
-					)
-				} else {
-					format!(
-						"`{callee}` changes `{changed_text}`, which its argument `{argument_text}` may also designate: pass different values, or copy one first with `let`"
-					)
-				};
-				let diagnostic =
-					self.diagnostic(&crate::diagnostics::codes::advanced::REF013, n, message);
-				self.report_flow(diagnostic);
-				return;
 			}
 		}
 	}
@@ -1769,6 +2093,9 @@ impl Walker<'_> {
 		let mut stack = vec![body];
 		while let Some(node) = stack.pop() {
 			if let View::Name(_) = self.view(node)
+				&& !self
+					.a
+					.has_flags(node, crate::analysis::NodeFlags::TYPE_EXPR)
 				&& let Resolution::Local(symbol) = self.a.resolution(node)
 				&& self.a.symbols.symbol(symbol).kind == SymbolKind::Mutable
 				&& self.is_module_level(symbol)
@@ -1874,11 +2201,12 @@ impl Walker<'_> {
 		read: Vec<SymbolId>,
 	) {
 		for symbol in read {
-			let Some(module_place) = self.symbol_target(symbol) else {
-				continue;
-			};
+			let module_places = self.symbol_places(symbol);
 			for &(place, _, _) in changed {
-				if !self.may_overlap(place, module_place) {
+				if !module_places
+					.iter()
+					.any(|&module_place| self.may_overlap(place, module_place))
+				{
 					continue;
 				}
 				let name = self
@@ -1945,13 +2273,13 @@ impl Walker<'_> {
 
 	/// A callee's effect path with its root replaced by the argument's place:
 	/// the place, the argument's place, and the argument node.
-	fn substitute(
+	pub(super) fn substitute_places(
 		&mut self,
 		path: PathId,
 		arguments: &[Argument],
 		receiver: Option<NodeId>,
 		call: (NodeId, &str),
-	) -> Option<(PlaceId, PlaceId, NodeId)> {
+	) -> Vec<(PlaceId, PlaceId, NodeId)> {
 		let (data, steps) = self.s.types.path_data(path);
 		let steps = steps.to_vec();
 		let tree = Arc::clone(&self.tree);
@@ -1965,17 +2293,25 @@ impl Walker<'_> {
 				_ => None,
 			}
 		};
-		let (base, node) = match data.root {
+		let (bases, node) = match data.root {
 			PathRoot::Param(index) => {
-				let node = argument_node(index as usize)?;
-				(self.place_of(node)?, node)
+				let Some(node) = argument_node(index as usize) else {
+					return Vec::new();
+				};
+				let place = match arguments.get(index as usize) {
+					Some(Argument::Receiver(callee)) => self.callee_receiver_places(*callee),
+					_ => self.evaluated_origins(node).places,
+				};
+				(place, node)
 			}
 			PathRoot::SelfParam => {
-				let node = argument_node(0).or(receiver)?;
+				let Some(node) = argument_node(0).or(receiver) else {
+					return Vec::new();
+				};
 				// `a.b.method()`: the receiver is `a.b`, not `a`
 				let place = match arguments.first() {
-					Some(Argument::Receiver(callee)) => self.callee_receiver_place(*callee)?,
-					_ => self.place_of(node)?,
+					Some(Argument::Receiver(callee)) => self.callee_receiver_places(*callee),
+					_ => self.evaluated_origins(node).places,
 				};
 				(place, node)
 			}
@@ -1983,44 +2319,83 @@ impl Walker<'_> {
 				let symbol = match self.module_values.get(&key) {
 					Some(&symbol) => symbol,
 					// a value of another file this one doesn't name: a proxy of it
-					None => self.module_value_proxy(key)?,
+					None => match self.module_value_proxy(key) {
+						Some(symbol) => symbol,
+						None => return Vec::new(),
+					},
 				};
-				(self.symbol_target(symbol)?, receiver.unwrap_or(NodeId(0)))
+				(self.symbol_places(symbol), receiver.unwrap_or(NodeId(0)))
 			}
 			PathRoot::Requirement(index) => {
 				let provider = self.call_providers.get(index as usize).copied().flatten();
-				let place = self.mutated_requirement_place(call.0, call.1, provider)?;
-				(place, call.0)
+				let places = self.mutated_requirement_places(call.0, call.1, provider);
+				(places, call.0)
 			}
 		};
-		let mut place = base;
-		for step in steps {
-			let step = match step {
-				PathStep::Field(name) | PathStep::Private(name) => Step::Field(name),
-				PathStep::Length => Step::Length,
-				PathStep::Size => Step::Size,
-				PathStep::Capacity => Step::Capacity,
-				PathStep::All => Step::Index(Identity::Unknown),
-				PathStep::IndexConst(value) => match self.s.types.const_value(value) {
-					ConstValue::Int(value) => {
-						Step::Index(i64::try_from(value).map_or(Identity::Unknown, Identity::Exact))
-					}
-					_ => Step::Index(Identity::Unknown),
-				},
-				PathStep::IndexParam(index) => match argument_node(index as usize) {
-					Some(node) => Step::Index(self.identity_of(node)),
-					None => Step::Index(Identity::Unknown),
-				},
-				PathStep::IndexFrom(index) => {
-					let start = argument_node(index as usize)
-						.map_or(Identity::Unknown, |node| self.identity_of(node));
-					Step::Range(start, Identity::Unknown, false)
+		bases
+			.into_iter()
+			.map(|base| {
+				let mut place = base;
+				for &step in &steps {
+					let step = match step {
+						PathStep::Field(name) | PathStep::Private(name) => Step::Field(name),
+						PathStep::Length => Step::Length,
+						PathStep::Size => Step::Size,
+						PathStep::Capacity => Step::Capacity,
+						PathStep::All => Step::Index(Identity::Unknown),
+						PathStep::IndexConst(value) => match self.s.types.const_value(value) {
+							ConstValue::Int(value) => Step::Index(
+								i64::try_from(value).map_or(Identity::Unknown, Identity::Exact),
+							),
+							ConstValue::String(_) | ConstValue::Bool(_) => {
+								Step::Index(Identity::Key(value))
+							}
+							_ => Step::Index(Identity::Unknown),
+						},
+						PathStep::IndexParam(index) => match argument_node(index as usize) {
+							Some(node) => Step::Index(self.identity_of(node)),
+							None => Step::Index(Identity::Unknown),
+						},
+						PathStep::IndexFrom(index) => {
+							let start = argument_node(index as usize)
+								.map_or(Identity::Unknown, |node| self.identity_of(node));
+							Step::Range(start, Identity::Unknown, false)
+						}
+						PathStep::Last => Step::Index(Identity::LengthOf(place, -1)),
+					};
+					let step = match step {
+						Step::Index(identity) => Step::Index(
+							self.normalize_reference_index(identity, self.place_type(place)),
+						),
+						other => other,
+					};
+					place = self.places.child(place, step);
 				}
-				PathStep::Last => Step::Index(Identity::LengthOf(place, -1)),
-			};
-			place = self.places.child(place, step);
+				(place, base, node)
+			})
+			.collect()
+	}
+
+	/// Effects through an opaque result can reach any descendant of its
+	/// owner. Formal dependent parameters retain their distinct narrow roots.
+	fn substitute_effect_places(
+		&mut self,
+		path: PathId,
+		arguments: &[Argument],
+		receiver: Option<NodeId>,
+		call: (NodeId, &str),
+	) -> Vec<(PlaceId, PlaceId, NodeId)> {
+		let mut places = self.substitute_places(path, arguments, receiver, call);
+		for (_, base, argument) in places.clone() {
+			for bound in self.evaluated_origins(argument).bounds {
+				if bound.formal.is_none() {
+					places.push((bound.place, base, argument));
+				}
+			}
 		}
-		Some((place, base, node))
+		places.sort_unstable();
+		places.dedup();
+		places
 	}
 
 	/// The places a call of a function of the program changes by its own
@@ -2052,9 +2427,10 @@ impl Walker<'_> {
 		let name = self.callee_name(callee);
 		paths
 			.into_iter()
-			.filter_map(|(path, invalidates)| {
-				self.substitute(path, arguments, receiver, (n, &name))
-					.map(|(place, _, _)| (place, invalidates, n))
+			.flat_map(|(path, invalidates)| {
+				self.substitute_effect_places(path, arguments, receiver, (n, &name))
+					.into_iter()
+					.map(move |(place, _, _)| (place, invalidates, n))
 			})
 			.collect()
 	}
@@ -2074,7 +2450,7 @@ impl Walker<'_> {
 			self.view(argument),
 			View::Object { .. } | View::TypedObject { .. }
 		);
-		if !temporary || self.place_of(argument).is_some() {
+		if !temporary || !self.places_of(argument).is_empty() {
 			return;
 		}
 		let message = format!(
@@ -2095,7 +2471,9 @@ impl Walker<'_> {
 	) -> bool {
 		// a set element or a map key is read-only (`CL031`, collections.rs)
 		if let Some(symbol) = self.root_symbol(node)
-			&& self.readonly_elements.contains(&symbol)
+			&& (self.readonly_elements.contains(&symbol)
+				|| self.readonly_place(base)
+				|| self.evaluated_origins(node).readonly)
 		{
 			let name = self
 				.s
@@ -2200,10 +2578,15 @@ impl Walker<'_> {
 			BuiltinEffect::InvalidatesArgument(index) => {
 				// `pool.delete(element)`: the references that may designate
 				// the element (its place, from the reference given)
-				let element = argument(index)
-					.and_then(|node| self.place_of(node))
-					.unwrap_or_else(|| self.places.child(base, Step::Index(Identity::Unknown)));
-				self.record_effect(element, true, n, true);
+				let mut elements = argument(index)
+					.map(|node| self.places_of(node))
+					.unwrap_or_default();
+				if elements.is_empty() {
+					elements.push(self.places.child(base, Step::Index(Identity::Unknown)));
+				}
+				for element in elements {
+					self.record_effect(element, true, n, true);
+				}
 				let size = self.places.child(base, Step::Size);
 				self.record_effect(size, false, n, true);
 			}
@@ -2230,6 +2613,15 @@ impl Walker<'_> {
 		if self.s.types.is_recovering(self.a.symbols.symbol(symbol).ty) {
 			return true;
 		}
+		if let Some(state) = self.body.flow.ref_state(symbol) {
+			let state = self.facts.refs.get(state);
+			let places = &state.places;
+			return !state.readonly
+				&& !places.is_empty()
+				&& places
+					.iter()
+					.all(|&place| self.place_writable(place) == Writable::Yes);
+		}
 		match self.aliases.get(&symbol) {
 			Some(&place) => self.place_writable(place) == Writable::Yes,
 			None => false,
@@ -2250,7 +2642,20 @@ impl Walker<'_> {
 		let entry = self.a.symbols.symbol(symbol);
 		let name = self.s.types.syms.resolve(entry.name).to_string();
 		let loop_variable = matches!(entry.kind, SymbolKind::LoopVariable { .. });
-		let designated = self.aliases.get(&symbol).copied();
+		let designated = self
+			.body
+			.flow
+			.ref_state(symbol)
+			.and_then(|state| {
+				self.facts
+					.refs
+					.get(state)
+					.places
+					.iter()
+					.copied()
+					.find(|&place| self.place_writable(place) != Writable::Yes)
+			})
+			.or_else(|| self.aliases.get(&symbol).copied());
 		let (code, message) = match designated {
 			Some(place) => {
 				let text = self.place_text(place);
@@ -2339,12 +2744,22 @@ impl Walker<'_> {
 	/// captures, so it can't write any of it (`REF021`). `value` is a lambda,
 	/// or the name of a local function; `at` where it escapes.
 	pub(crate) fn escape(&mut self, value: NodeId, at: NodeId) {
-		let ty = self.a.type_of(value);
-		if !ty.is_unset() && !self.callable_slot_type(ty) {
-			return;
-		}
 		for function in self.callable_source_facts(value).functions {
 			self.escape_closure(function, at);
+		}
+		for closure in self.evaluated_origins(value).closures {
+			if let Some(lambda) = closure.callable.local() {
+				self.escape_closure(lambda, at);
+			}
+		}
+	}
+
+	/// Stored closures retain the reference owner's capture-lifetime checks.
+	pub(crate) fn store_closures(&mut self, value: NodeId, at: NodeId) {
+		for closure in self.evaluated_origins(value).closures {
+			if let Some(lambda) = closure.callable.local() {
+				self.snapshot_closure(lambda, at);
+			}
 		}
 	}
 
@@ -2352,6 +2767,11 @@ impl Walker<'_> {
 	/// which copy their captures too) that escapes: `REF021` on its writes
 	/// of what it captures.
 	pub(crate) fn escape_closure(&mut self, lambda: NodeId, at: NodeId) {
+		self.check_escaping_references(lambda, at);
+		self.snapshot_closure(lambda, at);
+	}
+
+	fn snapshot_closure(&mut self, lambda: NodeId, at: NodeId) {
 		self.a.escapes.insert(lambda);
 		// requirements are not captured (requirements.rs)
 		self.check_stored_lambda(lambda);

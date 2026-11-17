@@ -1,0 +1,10 @@
+type Model = {
+	nodes: Pool<Node> = []
+	type Node = { value: Integer, next: (Node in nodes)?, previous: (nodes->next)? }
+}
+function same = <T>(nodes: Pool<T>, n: T in nodes): T in nodes => n
+mutable a: Model = {}
+mutable b: Model = {}
+use x = a.nodes.add({ value = 1 })
+use y = b.nodes.add({ value = 2 })
+x.next = same(b.nodes, y)

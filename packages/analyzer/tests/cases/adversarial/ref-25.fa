@@ -1,4 +1,3 @@
--- pending: M2 (user functions returning references; see adv-4.5-10)
 -- a function whose returned reference may be an existing element is not fresh
 type Person = { name: String }
 function makeOrFirst = (pool: Pool<Person>, name: String): Person in pool mutates pool.size => {

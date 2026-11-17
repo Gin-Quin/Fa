@@ -481,9 +481,19 @@ An explicit copy cannot consume a unique value (`MEM003`):
 function invalid = (task: Task<Integer>): Task<Integer> => copy task -- error: MEM003
 ```
 
+## Complete owners of links
+
+A [link](/advanced/relations#links-without-a-reverse-side) borrows its target; it never owns, recursively copies or destroys that target. The **complete declared owner** contains every target collection and holder below one ordinary record. Its ordinary category still governs moves/copies: unique payloads make it unique (`MEM003`), a borrowed parameter cannot give it away, and keeping two structure owners requires explicit `copy`.
+
+Moving/returning that complete owner transfers its storage and invalidates old aliases. `copy owner` copies each owned payload once and makes every internal link designate the copied target, preserving cycles and shared children. A record containing just one pool and its internal links can also be copied as a whole. Relation fields inside the owner retain their existing remapping rules.
+
+A link-bearing element or Array of holders cannot move/copy out independently, be returned as ordinary data, thrown or captured in an escaping closure. Borrow with `use`, return `T in parameter.path`, or explicitly construct a projection of ordinary data. `copy model.nodes` is refused when its element template needs the enclosing binding or another pool; copy model instead. You can move or copy holders between places within the same owner, including when an Array shifts its elements. The same restrictions apply through a generic function or a structural view: neither can turn a borrowed node into an independent owner. Replacing a linked node writes its outgoing links from the replacement and keeps its element place for incoming links, unlike relation-side preservation.
+
+Target-only reset is permitted only when all its incoming holders die with it. Otherwise replace the complete owner; clearing a visible optional field is not a proof about all possible holders. The [containment rules and diagnostics](/advanced/reference-checking#link-containment) also constrain broad mutation helpers and destructors. A destructor cannot access a pool dying in its same boundary. Error/cancellation cleanup destroys only initialized owned payloads, never follows edges, and performs unique cleanup once.
+
 ## References
 
-Local references name their owner and are checked statically. Stored references are [relations](/advanced/relations), with declared reverse sides kept consistent by the compiler. Moving an owner invalidates its local references, even when the physical address stays the same. No raw pointer or lifetime annotation is needed outside foreign code. See [reference checking](/advanced/reference-checking).
+Local references name their owner and are checked statically. Stored references are [relations](/advanced/relations), with maintained reverse sides, or explicit links contained by a complete growing-collection owner. Moving an owner invalidates its local references, even when the physical address stays the same. No raw pointer or lifetime annotation is needed outside foreign code. See [reference checking](/advanced/reference-checking).
 
 ## Summary
 
@@ -529,4 +539,10 @@ Demand-time checking and finished-file evaluation share revisioned function code
 ### Integration status
 
 The `copy` syntax and existing copy operations are available in this slice. The category predicates and concrete `MEM005` payload checks are available. Generic-dependent error payload constraints are checked by the subsequent instantiation-conditions slice. `MEM004`, complete `MEM003`, alias/branch/loop moves, unique-resource borrows, portable generic/capture conditions, recursive moves and binary transport are the subsequent ownership slices. The rules above are the specification those slices must satisfy; current acceptance of a prohibited copy is not permission to rely on it.
+### Complete-owner link operations
+
+Native copies of flat linked payloads copy runs once per page/segment, rebuild headers/directories and preserve ordinal bytes without edge fixups; owning payloads and ordinary relations still use specialized operations. Moves transfer headers. Stable fixed-stride union slots copy/drop only their active payload. Never use recursive owning-child copy/drop for links or assume TLS root builders/near-far addressing.
+
+JavaScript complete-owner copies allocate all destination nodes first, then fill owned data and edges through one temporary old-to-new map; reads and stores need no map. Whole-element replacement mutates the target object rather than swapping its collection entry. Erased generic operations receive the analyzed storage/copy contract. Interpreter owner IDs/ordinals become symbolic graph constants, not host pointers. These link operations land after the shared ownership enforcement; unsupported detached copies remain rejected throughout.
+
 :::

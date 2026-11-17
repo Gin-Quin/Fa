@@ -1,0 +1,13 @@
+-- Expected: REF001; evaluating a later default invalidates the earlier borrowed default.
+function clear = (values: Array<Integer>): Integer mutates values => {
+ values.clear()
+ 0
+}
+function pick = (
+ values: Array<Integer>
+ node: Integer in values = try values[0]
+ _ignored: Integer = clear(values)
+): Integer in values throws IndexError mutates values => node
+mutable values: Array<Integer> = [7]
+use node = try pick(values)
+console.log(node)

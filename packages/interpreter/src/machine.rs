@@ -15,7 +15,7 @@ use crate::eval::{self, Error, Interpreter};
 use crate::ir::{ArithOp, CompareOp, CopyPlan, FnKey, Num, Slot, TypeTest};
 use crate::loans::{Loan, Out, Owner, Step as PlaceStep, View as PlaceView};
 use crate::text::Text;
-use crate::value::{Closure, Member, MemberKind, Object, Value, equals};
+use crate::value::{Closure, Member, MemberKind, Object, Pool, Value, equals};
 use crate::{builtins, memory};
 
 static FRAME_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -92,6 +92,8 @@ enum Finish {
 	Arguments(Target, Vec<usize>),
 	Builtin(&'static str),
 	Mutate(&'static str, Loan),
+	BorrowBuiltin(&'static str, Loan),
+	Pool,
 	Array,
 	Set,
 	Map,
@@ -104,6 +106,8 @@ enum Finish {
 enum PlaceAction {
 	Read,
 	Lend,
+	Borrow(bool),
+	BorrowBuiltin(&'static str, Vec<Node>),
 	Assign(Node),
 	Mutate(&'static str, Vec<Node>),
 }
@@ -417,8 +421,15 @@ impl<'i, 'h> Machine<'i, 'h> {
 			Op::Copy(plan, value) => {
 				self.evaluate_after(*value, Continuation::Unary(Unary::Copy(Arc::clone(plan))))
 			}
-			Op::Own(value) => self.evaluate_after(*value, Continuation::Unary(Unary::Own)),
+			Op::Own(value) | Op::Dereference(value) => {
+				self.evaluate_after(*value, Continuation::Unary(Unary::Own))
+			}
 			Op::Global(key) => Self::done(self.interpreter.host.global(*key)?),
+			Op::BorrowGlobal(key) => {
+				let value = self.interpreter.host.global(*key)?;
+				let (loan, _) = self.rooted(value.into())?;
+				Self::done(Out::Loan(loan))
+			}
 			Op::Function(function) => Self::done(Value::Function(Arc::new(Closure::new(
 				*function,
 				Vec::new(),
@@ -480,6 +491,13 @@ impl<'i, 'h> Machine<'i, 'h> {
 			Op::Assign(place, value) => self.place(place.clone(), PlaceAction::Assign(*value)),
 			Op::Read(place) => self.place(place.clone(), PlaceAction::Read),
 			Op::Lend(place) => self.place(place.clone(), PlaceAction::Lend),
+			Op::Borrow(place, optional) => {
+				self.place(place.clone(), PlaceAction::Borrow(*optional))
+			}
+			Op::BorrowBuiltin(path, place, arguments) => self.place(
+				place.clone(),
+				PlaceAction::BorrowBuiltin(path, arguments.clone()),
+			),
 			Op::Bind(slot, value) => {
 				self.evaluate_after(*value, Continuation::Unary(Unary::Bind(*slot)))
 			}
@@ -574,6 +592,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 				self.place(place.clone(), PlaceAction::Mutate(path, arguments.clone()))
 			}
 			Op::Array(items) => self.gather_items(items.clone(), Finish::Array),
+			Op::Pool(items) => self.gather_items(items.clone(), Finish::Pool),
 			Op::Set(items) => self.gather_items(items.clone(), Finish::Set),
 			Op::Map(items) => self.gather_items(items.clone(), Finish::Map),
 			Op::Tuple(nodes) => self.gather(
@@ -729,9 +748,23 @@ impl<'i, 'h> Machine<'i, 'h> {
 		}
 		match state.action {
 			PlaceAction::Read => Self::done(self.view_value(self.read_loan(&state.loan)?)?),
-			PlaceAction::Lend => {
+			PlaceAction::Lend | PlaceAction::Borrow(false) => {
 				self.read_loan(&state.loan)?;
 				Self::done(Out::Loan(state.loan))
+			}
+			PlaceAction::Borrow(true) => {
+				if matches!(self.read_loan(&state.loan)?, PlaceView::Value(Value::None)) {
+					Self::done(Value::None)
+				} else {
+					Self::done(Out::Loan(state.loan))
+				}
+			}
+			PlaceAction::BorrowBuiltin(path, arguments) => {
+				self.read_loan(&state.loan)?;
+				self.gather(
+					arguments.into_iter().map(Input::Expr).collect(),
+					Finish::BorrowBuiltin(path, state.loan),
+				)
 			}
 			PlaceAction::Assign(value) => {
 				self.evaluate_after(value, Continuation::Assign(state.loan))
@@ -856,6 +889,47 @@ impl<'i, 'h> Machine<'i, 'h> {
 				false,
 			);
 		}
+		if let Finish::Mutate(
+			path @ ("Pool#delete" | "Pool#take" | "Columnar#delete" | "Columnar#take"),
+			receiver,
+		) = &finish
+		{
+			let Some(Some(Out::Loan(item))) = values.first() else {
+				return Err(
+					Error::Stop("removing a pool element needs its borrowed place".into()).into(),
+				);
+			};
+			let Some((parent, PlaceStep::Index(key))) = item.parent() else {
+				return Err(
+					Error::Stop("removing a pool element needs its borrowed place".into()).into(),
+				);
+			};
+			if !parent.same_place(receiver) {
+				return Err(
+					Error::Stop("the removed element belongs to a different pool".into()).into(),
+				);
+			}
+			let index = builtins::integer(key)?.as_u64();
+			let index = usize::try_from(index)
+				.map_err(|_| Error::Stop("a pool slot is too large".into()))?;
+			self.reserve_write(receiver, true)?;
+			let Value::Pool(pool) = Self::locate(&mut self.frames, receiver)? else {
+				return Err(Error::Stop("removing a pool element needs a pool".into()).into());
+			};
+			let pool = Arc::make_mut(pool);
+			let value = pool
+				.slots
+				.get_mut(index)
+				.and_then(Option::take)
+				.ok_or_else(|| Error::Stop("this pool element was already removed".into()))?;
+			pool.len -= 1;
+			return Self::done(if path.ends_with("#take") {
+				value
+			} else {
+				Value::None
+			});
+		}
+
 		let values: Vec<Value> = values
 			.into_iter()
 			.map(|value| self.value(value.expect("a supplied value")))
@@ -863,6 +937,12 @@ impl<'i, 'h> Machine<'i, 'h> {
 		match finish {
 			Finish::Arguments(..) => unreachable!(),
 			Finish::Array => Self::done(Value::Array(Arc::new(values))),
+			Finish::Pool => {
+				self.interpreter
+					.reserve(values.len().saturating_mul(size_of::<Option<Value>>()))?;
+				Self::done(Value::Pool(Arc::new(Pool::new(values))))
+			}
+			Finish::BorrowBuiltin(path, loan) => self.borrow_builtin(path, loan, values),
 			Finish::Tuple => Self::done(Value::Tuple(Arc::new(values))),
 			Finish::Set => {
 				let mut set = Vec::new();
@@ -937,6 +1017,64 @@ impl<'i, 'h> Machine<'i, 'h> {
 					)?)
 				}
 			}
+		}
+	}
+
+	fn borrow_builtin(
+		&mut self,
+		path: &'static str,
+		mut loan: Loan,
+		arguments: Vec<Value>,
+	) -> Result<Action, Flow> {
+		match path {
+			"Array#find" | "Set#find" | "Pool#find" | "Columnar#find" | "OrderedColumnar#find" => {
+				let mut values = vec![Out::Loan(loan)];
+				values.extend(arguments.into_iter().map(Out::Value));
+				self.start_callback(path, values, false)
+			}
+			"Pool#add" | "Columnar#add" | "OrderedColumnar#add" => {
+				let index = match self.read_loan(&loan)? {
+					PlaceView::Value(Value::Pool(pool)) => pool.slots.len(),
+					PlaceView::Value(value) => value.items().map_or(0, <[Value]>::len),
+					_ => {
+						return Err(
+							Error::Stop("an inserted reference needs a collection".into()).into(),
+						);
+					}
+				};
+				self.reserve_write(&loan, true)?;
+				builtins::mutate_internal(
+					self.interpreter,
+					path,
+					Self::locate(&mut self.frames, &loan)?,
+					arguments,
+				)?;
+				self.extend_loan(&mut loan, PlaceStep::Index(Value::int(index as i64)), false)?;
+				Self::done(Out::Loan(loan))
+			}
+			"Array#get" | "OrderedColumnar#get" | "Map#get" | "Map#getOrInsert" => {
+				let key = arguments
+					.first()
+					.cloned()
+					.ok_or_else(|| Error::Stop("a reference lookup needs a key".into()))?;
+				if path == "Map#getOrInsert" {
+					self.reserve_write(&loan, true)?;
+					builtins::mutate_internal(
+						self.interpreter,
+						path,
+						Self::locate(&mut self.frames, &loan)?,
+						arguments,
+					)?;
+				}
+				match self.extend_loan(&mut loan, PlaceStep::Index(key), false) {
+					Ok(()) => Self::done(Out::Loan(loan)),
+					Err(Flow::Error(Error::Thrown(_))) if path != "Map#getOrInsert" => {
+						Self::done(Value::None)
+					}
+					Err(flow) => Err(flow),
+				}
+			}
+			_ => Err(Error::Unsupported(format!("a reference from `{path}`")).into()),
 		}
 	}
 
@@ -1713,7 +1851,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 	fn unary(&mut self, op: Unary, value: Out) -> Result<Action, Flow> {
 		match op {
 			Unary::Own => return Self::done(self.value(value)?),
-			Unary::Bind(slot) => {
+			Unary::Bind(slot) | Unary::Let(slot) => {
 				// An empty optional reference has no designated place. Keep it
 				// empty when the source reference is subsequently reseated.
 				let value = if let Out::Loan(loan) = &value
@@ -1762,11 +1900,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 				}
 				Value::None
 			}
-			Unary::Let(slot) => {
-				self.locals()[slot as usize] = value.into();
-				Value::None
-			}
-			Unary::Break | Unary::Return | Unary::Bind(_) | Unary::Own => {
+			Unary::Break | Unary::Return | Unary::Bind(_) | Unary::Let(_) | Unary::Own => {
 				unreachable!("forwarded before inspecting the value")
 			}
 			Unary::Throw => return Err(Error::Thrown(value).into()),

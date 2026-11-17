@@ -630,6 +630,11 @@ pub struct Analysis {
 	/// `pick(value, { foo })`, `omit(value, { foo })` (the backends copy the
 	/// value's fields that the node's type has).
 	pub forwards: FxHashMap<NodeId, NodeId>,
+	/// Reachable break values of each loop expression, targeting that loop.
+	pub loop_results: FxHashMap<NodeId, Vec<NodeId>>,
+	pub reference_layouts: FxHashMap<NodeId, ReferenceLayout>,
+	pub reference_origins: FxHashMap<NodeId, Vec<ReferenceOrigin>>,
+	pub reference_sensitive: FxHashMap<NodeId, Vec<ParamId>>,
 	/// The compositions (`f then g`, a slice of a known chain): their steps,
 	/// in order, flat (a step is a node of this file evaluating to a
 	/// function). A `function` declared with one is a known chain.
@@ -1317,6 +1322,36 @@ pub struct TypeDecl {
 	pub generics: Vec<ParamId>,
 }
 
+/// Portable evaluated result provenance, expressed in the callee's formal roots.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct ReferenceOrigin {
+	/// The final projection is a slice view, rather than one element.
+	pub slice: bool,
+	pub path: crate::ids::PathId,
+	pub descendant: bool,
+	pub readonly: bool,
+}
+
+/// A proven compression of the JavaScript primitive-reference result pair.
+/// Function values always use the general convention, independently of this fact.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub enum ReferenceLayout {
+	Owner,
+	Field(Sym),
+	Index(i64),
+	Entry {
+		key: crate::ids::ConstId,
+		ty: TypeId,
+	},
+	#[default]
+	General,
+}
+impl ReferenceLayout {
+	pub fn joined(self, other: Self) -> Self {
+		if self == other { self } else { Self::General }
+	}
+}
+
 /// What fills a field of an object literal.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum FieldValue {
@@ -1775,6 +1810,10 @@ impl Analysis {
 			coercions: FxHashMap::default(),
 			copy_inputs: FxHashMap::default(),
 			forwards: FxHashMap::default(),
+			loop_results: FxHashMap::default(),
+			reference_layouts: FxHashMap::default(),
+			reference_origins: FxHashMap::default(),
+			reference_sensitive: FxHashMap::default(),
 			compositions: FxHashMap::default(),
 			intervals: FxHashMap::default(),
 			interval_values: Interner::new(),

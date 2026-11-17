@@ -53,7 +53,7 @@ unsafe extern "C" {
 /// compiler is never reused.
 const VERSION: &str = concat!(
 	env!("CARGO_PKG_VERSION"),
-	"-split-7-platform-1-effects-1-errors-1-regions-1-packed-capacity-1-frame-1-sync-payload-1-region-string-view-1-region-edges-1-inline-length-4-template-size-1-coroutine-decimal-1-frozen-ascii-2-array-capacities-1-strings-review-6-map-probes-3-key32-sentinel-3-map-headers-3-map-positive-probes-1-map-scalar64-1-map-generic-layout-2-unique-sections-1"
+	"-split-7-platform-1-effects-1-errors-1-regions-1-packed-capacity-1-frame-1-sync-payload-1-region-string-view-1-region-edges-1-inline-length-4-template-size-1-coroutine-decimal-1-frozen-ascii-2-array-capacities-1-strings-review-6-map-probes-3-key32-sentinel-3-map-headers-3-map-positive-probes-1-map-scalar64-1-map-generic-layout-2-unique-sections-1-reference-results-8-links-inline-merge-2-links-strings-merge-1-reference-views-1"
 );
 
 /// A file name made of a module path.
@@ -1334,10 +1334,15 @@ struct UnitRecorder {
 	units: std::sync::Mutex<Vec<Vec<String>>>,
 	/// The whole-program facts of the units so far, merged (`facts.rs`).
 	facts: std::sync::Mutex<crate::facts::ProgramFacts>,
+	map_facts: std::sync::Mutex<crate::map_facts::MapFacts>,
 }
 
 impl fa_analyzer::pipeline::UnitSink for UnitRecorder {
 	fn unit(&self, session: &mut Session, files: &[FileId]) {
+		self.map_facts
+			.lock()
+			.unwrap_or_else(|poisoned| poisoned.into_inner())
+			.collect(session, files);
 		let facts = crate::facts::ProgramFacts::of_unit(session, files);
 		self.facts
 			.lock()
@@ -1657,6 +1662,13 @@ pub fn compile_package(
 		.facts
 		.into_inner()
 		.unwrap_or_else(|poisoned| poisoned.into_inner());
+	facts.resolve_maps(
+		recorder
+			.map_facts
+			.into_inner()
+			.unwrap_or_else(|poisoned| poisoned.into_inner())
+			.resolve(root.types()),
+	);
 	facts.finish();
 	let split = &SplitOptions {
 		facts: Some(std::sync::Arc::new(facts)),

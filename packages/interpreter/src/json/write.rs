@@ -165,7 +165,7 @@ pub(crate) fn stringify(
 							_ => writer.push("}")?,
 						}
 					}
-					Value::Bytes(_) | Value::Range { .. } => {
+					Value::Bytes(_) | Value::Pool(_) | Value::Range { .. } => {
 						return Err(Error::Unsupported(
 							"JSON serialization of this value".into(),
 						));

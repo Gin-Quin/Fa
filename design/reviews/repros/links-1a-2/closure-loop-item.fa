@@ -1,0 +1,11 @@
+-- Expected: MEM004: a returned iteration item aliases a local collection.
+type Callback = () => Integer
+function make = (): Callback => {
+ mutable values: Array<Integer> = [7]
+ for value in values {
+  return () => value
+ }
+ () => 0
+}
+let read = make()
+console.log(read())

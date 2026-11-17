@@ -1,0 +1,8 @@
+type Model = { nodes: GrowingPool<Node> = [], type Node = { value: Integer } }
+function wrong = (
+	model: Model
+	n: Model.Node in model.nodes
+): Model.Node in model.nodes mutates model.nodes => {
+	model.nodes = []
+	n
+}

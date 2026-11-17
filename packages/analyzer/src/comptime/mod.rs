@@ -149,6 +149,11 @@ fn exact(types: &mut TypeStore, value: &Value, depth: u32) -> TypeId {
 			let item = join(types, items, depth);
 			types.array(item)
 		}
+		Value::Pool(pool) => {
+			let values: Vec<_> = pool.values().cloned().collect();
+			let item = join(types, &values, depth);
+			types.collection(crate::types::CollKind::Pool, item, TypeId::NONE)
+		}
 		Value::Set(items) => {
 			let item = join(types, items, depth);
 			types.collection(crate::types::CollKind::Set, item, TypeId::NONE)
@@ -289,6 +294,7 @@ pub fn visit(expr: &Expr, f: &mut dyn FnMut(&Expr)) {
 		| Expr::Local(_)
 		| Expr::Move(_)
 		| Expr::Global(_)
+		| Expr::BorrowGlobal(_)
 		| Expr::Function(_)
 		| Expr::CurrentFunction(_)
 		| Expr::Closure { .. }
@@ -308,17 +314,18 @@ pub fn visit(expr: &Expr, f: &mut dyn FnMut(&Expr)) {
 		| Expr::Is(value, ..)
 		| Expr::MemberData(value)
 		| Expr::Field(value, ..) => visit(value, f),
+		Expr::Dereference(value) => visit(value, f),
 		Expr::Assign(target, value) => {
 			place(target, f);
 			visit(value, f);
 		}
-		Expr::Read(target) | Expr::Lend(target) => place(target, f),
+		Expr::Read(target) | Expr::Lend(target) | Expr::Borrow(target, _) => place(target, f),
 		Expr::Block(values) | Expr::Tuple(values) | Expr::Builtin(_, values) => {
 			for value in values {
 				visit(value, f);
 			}
 		}
-		Expr::Mutate(_, target, values) => {
+		Expr::Mutate(_, target, values) | Expr::BorrowBuiltin(_, target, values) => {
 			place(target, f);
 			for value in values {
 				visit(value, f);
@@ -367,7 +374,9 @@ pub fn visit(expr: &Expr, f: &mut dyn FnMut(&Expr)) {
 				visit_argument(argument, f);
 			}
 		}
-		Expr::Array(values) | Expr::Set(values) | Expr::Map(values) => items(values, f),
+		Expr::Array(values) | Expr::Pool(values) | Expr::Set(values) | Expr::Map(values) => {
+			items(values, f)
+		}
 		Expr::Object(fields) => {
 			for (_, value) in fields {
 				visit(value, f);

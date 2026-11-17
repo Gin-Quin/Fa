@@ -1,0 +1,12 @@
+-- JS shape: a local `use` of a primitive place, with no call involved (declaring-values.md: rewritten into the place).
+type Player = { score: Integer }
+function exercise = (i: Integer): Integer throws IndexError => {
+ mutable player: Player = { score = 1 }
+ use score = player.score
+ score += 1
+ mutable values: Array<Integer> = [1, 2]
+ use cell = try values[i]
+ cell += 10
+ player.score + cell
+}
+console.log(try exercise(1))

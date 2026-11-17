@@ -100,6 +100,17 @@ impl Walker<'_> {
 				self.check_stmt(statement);
 			}
 		}
+		// Value blocks are also checked directly by branches and function bodies,
+		// outside `check`, so publish their evaluated result at this boundary.
+		let origins = if result.0 == TypeId::NEVER {
+			Default::default()
+		} else {
+			result
+				.1
+				.map(|value| self.evaluated_origins(value))
+				.unwrap_or_default()
+		};
+		self.value_origins.insert(n, origins);
 		// a task bound in the block ends with it: its borrows too (tasks.rs)
 		self.end_block_tasks(scope, result.1);
 		self.body.scope = parent;
@@ -661,6 +672,9 @@ impl Walker<'_> {
 		self.restore_moved_fields(target);
 		// a relation side: written through its direct side (relations.rs)
 		self.check_relation_write(n, target, value);
+		// Keep evaluated storage origins and the ownership retention decision.
+		let destinations = self.places_of(target);
+		self.store_value_origins(destinations, value);
 		// a closure stored into a place escapes; a copy, maybe a move (moves.rs)
 		if self.retention_target_outlives_call(target, n) {
 			self.escape(value, n);

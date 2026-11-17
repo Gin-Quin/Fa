@@ -1,0 +1,12 @@
+-- Regression from the links 1a review.
+type Node = { value: Integer }
+mutable foreign: GrowingPool<Node> = []
+function get = (
+	owner: GrowingPool<Node>
+	node: Node in owner = foreign.add({ value = 7 }) -- error: REF020
+): Node in owner mutates foreign.size => node
+function escape = (owner: GrowingPool<Node>): Node in owner => get(owner)
+mutable owner: GrowingPool<Node> = []
+use result = escape(owner)
+foreign = []
+console.log(result.value)

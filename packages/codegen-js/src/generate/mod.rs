@@ -31,6 +31,7 @@ mod numbers;
 mod objects;
 mod patterns;
 mod reactivity;
+mod reference_variants;
 pub(crate) mod references;
 mod relations;
 mod resources;
@@ -133,6 +134,8 @@ struct FnCx {
 	/// The identity of an exception coming from a non-stored callback:
 	/// catches of this function pass it back to their caller unchanged.
 	callback_error: Option<String>,
+	reference_layout: fa_analyzer::analysis::ReferenceLayout,
+	reference_result: Option<(String, String, String)>,
 }
 
 /// The generator of one file.
@@ -157,6 +160,11 @@ pub(crate) struct Generator<'s> {
 	pub(crate) out: Writer,
 	/// The key whose fields an unrolled `@for` over a key set reads (fields.rs).
 	pub(crate) direct_key: Option<String>,
+	/// Evaluated keys of dependent reference arguments.
+	pub(crate) reference_argument_keys: HashMap<NodeId, Expr>,
+	pub(crate) reference_call_keys: HashMap<NodeId, Expr>,
+	pub(crate) call_arguments: HashMap<NodeId, Vec<Option<String>>>,
+	reference_layout: fa_analyzer::analysis::ReferenceLayout,
 	/// The current function.
 	fcx: FnCx,
 	/// The scope of the module.
@@ -242,6 +250,7 @@ pub(crate) struct Generator<'s> {
 	/// The integer storages of the numeric-union parameters of the variant
 	/// being generated.
 	numeric_bindings: HashMap<fa_analyzer::ids::ParamId, fa_analyzer::types::IntStorage>,
+	reference_bindings: HashMap<fa_analyzer::ids::ParamId, bool>,
 	/// The parameters of the reactive instance whose parameters are being
 	/// declared (taken by `function_parts`).
 	instance_params: Option<Vec<SymbolId>>,
@@ -311,6 +320,10 @@ pub(crate) fn generate_module(
 		scopes: Scopes::new(),
 		out: Writer::new(),
 		direct_key: None,
+		reference_argument_keys: HashMap::new(),
+		reference_call_keys: HashMap::new(),
+		call_arguments: HashMap::new(),
+		reference_layout: fa_analyzer::analysis::ReferenceLayout::General,
 		fcx: FnCx::default(),
 		module_scope: None,
 		module_values: HashSet::new(),
@@ -346,6 +359,7 @@ pub(crate) fn generate_module(
 		reactive_instances: HashSet::new(),
 		integer_variants: HashMap::new(),
 		numeric_bindings: HashMap::new(),
+		reference_bindings: HashMap::new(),
 		instance_params: None,
 		untracked: 0,
 		top_statements: HashSet::new(),
@@ -458,13 +472,7 @@ impl<'s> Generator<'s> {
 		self.plan_instances();
 		let mut module_values: Vec<SymbolId> = self.module_values.iter().copied().collect();
 		module_values.sort();
-		module_values.retain(|&symbol| {
-			// a reference to a primitive place has no name of its own
-			!matches!(
-				self.analysis.symbols.symbol(symbol).kind,
-				SymbolKind::Use | SymbolKind::MutableUse
-			) || self.module_reference_has_name(symbol)
-		});
+
 		let module_lets: Vec<String> = module_values
 			.iter()
 			.map(|&symbol| self.declare(symbol))
@@ -805,12 +813,18 @@ impl<'s> Generator<'s> {
 			},
 		);
 		let hidden = self.hidden_names.clone();
+		let aliases = self.aliases.clone();
+		let maps = self.map_aliases.clone();
+		let references = self.references.clone();
 		let guards = std::mem::take(&mut self.guard_frames);
 		let guard_bindings = std::mem::take(&mut self.guard_bindings);
 		self.scopes.push();
 		let result = f(self);
 		self.scopes.pop();
 		self.hidden_names = hidden;
+		self.aliases = aliases;
+		self.map_aliases = maps;
+		self.references = references;
 		self.guard_frames = guards;
 		self.guard_bindings = guard_bindings;
 		let fcx = std::mem::replace(&mut self.fcx, saved);

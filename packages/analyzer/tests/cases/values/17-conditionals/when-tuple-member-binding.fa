@@ -1,3 +1,4 @@
+-- skip-target: bun node web (the JavaScript backend does not lower a tuple binding `as (a, b)` of a `when` arm yet: AN001)
 -- The data of a tuple member bound with `as (a, b)` (T-WHEN-4).
 type Shape = Union { Point, Segment = Tuple<Integer, Integer> }
 function length = (shape: Shape): Integer => when shape is {

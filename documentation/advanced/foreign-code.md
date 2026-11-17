@@ -320,6 +320,8 @@ If the module imports C functions from its host, pass them to `open({ functionNa
 
 To support several targets, branch with [`@if target`](/advanced/metaprogramming) around the code that uses the binding.
 
+`Pointer.allocate` and `pointer.free()` also require the target's C interface: on `node` and `web`, calling either is a compile error (`FFI008`).
+
 A fixed inline `CArray` inherits the ownership category of its items; inline scalar storage alone does not require `copy`. A `CArray<T, n>` is initialized with an array literal of exactly `n` items. It has `length`, supports indexing (negative indices count from the end), writes and iteration. Copying its `CStruct` copies the array.
 
 `CArray` is the fixed-count array, including for non-foreign code. For a bounded list with a changing initialized length, use [InlineArray](/collections/inline-arrays); it is a Fa collection rather than a C array layout.
@@ -351,6 +353,7 @@ A fixed inline `CArray` inherits the ownership category of its items; inline sca
 - On `bun`, the libraries of `build.link` are opened with `dlopen` from `bun:ffi`, with one symbol table generated from the `@extern` declarations. A `Pointer` is a number; `read` and `write` go through a `DataView` over `toArrayBuffer`. Callbacks are `JSCallback`s.
 - A `CString` argument is encoded with a `TextEncoder`, plus the final zero byte.
 - `Pointer.allocate` uses C `malloc`, and `free` uses C `free`. C-compatible values use their C layout in the block. Other Fa values are rooted in a map keyed by the C address until freed; `read` copies them, `write` destroys the previous value, and `value` borrows it. A view of a C struct or fixed array uses getters and setters over its memory, including nested fields. A target that still contains an unresolved generic parameter is not compiled yet.
+- The analyzer rejects `Pointer.allocate` and `free` on `node` and `web` with `FFI008`, using the same target-dependence tracking and conditional-compilation guidance as an `@extern` call.
 
 ### State of the implementation
 

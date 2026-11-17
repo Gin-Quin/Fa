@@ -941,6 +941,85 @@ mod tests {
 	}
 
 	#[test]
+	fn self_handles_share_the_running_closure() {
+		let key = FnKey(0, 91);
+		let mut host = Functions::default();
+		host.0.insert(
+			key,
+			Arc::new(Function {
+				name: "itself".into(),
+				params: Vec::new(),
+				captures: vec![0],
+				slots: 1,
+				body: Expr::CurrentFunction(key),
+			}),
+		);
+		let closure = Arc::new(crate::value::Closure::new(
+			key,
+			vec![Value::int(7)],
+			Vec::new(),
+		));
+		let result = Interpreter::new(&mut host, Limits::default())
+			.call_value(&Value::Function(Arc::clone(&closure)), Vec::new())
+			.unwrap();
+		let Value::Function(result) = result else {
+			panic!("a self handle")
+		};
+		assert!(Arc::ptr_eq(&closure, &result));
+	}
+
+	#[test]
+	fn a_self_handle_does_not_keep_the_entry_partial_arguments() {
+		let key = FnKey(0, 92);
+		let mut host = Functions::default();
+		host.0.insert(
+			key,
+			Arc::new(Function {
+				name: "full".into(),
+				params: vec![Param {
+					slot: 0,
+					default: None,
+				}],
+				captures: vec![1],
+				slots: 2,
+				body: Expr::CurrentFunction(key),
+			}),
+		);
+		let closure =
+			crate::value::Closure::new(key, vec![Value::int(7)], vec![(0, Value::int(3))]);
+		let result = Interpreter::new(&mut host, Limits::default())
+			.call_value(&Value::Function(Arc::new(closure)), Vec::new())
+			.unwrap();
+		let Value::Function(result) = result else {
+			panic!("a self handle")
+		};
+		assert!(result.bound.is_empty());
+		assert_eq!(result.captured, vec![Value::int(7)]);
+	}
+
+	#[test]
+	fn a_captureless_direct_call_can_return_its_self_handle() {
+		let key = FnKey(0, 93);
+		let mut host = Functions::default();
+		host.0.insert(
+			key,
+			Arc::new(Function {
+				name: "plain".into(),
+				params: Vec::new(),
+				captures: Vec::new(),
+				slots: 0,
+				body: Expr::CurrentFunction(key),
+			}),
+		);
+		let result = run(&mut host, &Expr::CallFunction(key, Vec::new().into()), 0).unwrap();
+		let Value::Function(result) = result else {
+			panic!("a self handle")
+		};
+		assert_eq!(result.function, key);
+		assert!(result.captured.is_empty());
+	}
+
+	#[test]
 	fn copies_are_independent() {
 		let mut host = Functions::default();
 		// let a = { x = 1 }; mutable b = a; b.x = 2; (a.x, b.x)

@@ -151,6 +151,23 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn recursive_calls_reuse_the_running_environment() {
+		let source =
+			include_str!("../../analyzer/tests/cases/ownership-recursive-function-environment.fa");
+		for (name, target) in [
+			("recursive-environment-native", Target::Native),
+			("recursive-environment-wasm", Target::Wasm),
+		] {
+			let ir = ir_at_target(name, source, true, OptLevel::O0, target);
+			for name in ["fa.recur", "fa.throughHandle"] {
+				let body = function(&ir, name);
+				assert!(!body.contains("@fa_alloc("), "{body}");
+				assert!(!body.contains("@fa.environment.drop"), "{body}");
+			}
+		}
+	}
+
+	#[test]
 	fn primitive_item_widening_moves_without_a_collection_copy() {
 		let source = include_str!("../../analyzer/tests/cases/ownership-primitive-widening.fa");
 		for (name, target) in [

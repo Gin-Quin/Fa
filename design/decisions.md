@@ -1968,3 +1968,7 @@ layouts and all value assertions. No expected-skip list changes.
 ### Ownership enforcement: published capture creation types (implementation, 2026-11-17)
 
 Store creation-time captured types in the file analysis, keyed by lambda and captured binding, rather than in a private walk table. The ownership diagnostics and retained-handle traversal read the same facts. Analysis cloning preserves them automatically, including key-loop snapshots. A captured logical type retains flow narrowing independently of the binding's declared type and of a native physical layout; it is not a move decision. Capture-transfer modes, callable readiness and target declaration bindings remain the coordinated next change.
+
+### Ownership enforcement: recursive function environments (2026-11-17)
+
+Recursive calls borrow the running concrete entry's environment; self handles retain it. They do not construct another capture snapshot. The VM carries a `CurrentFunction` operation resolved from its invocation's retained callable; it denotes the full function, without the partial arguments that may have entered that invocation. Native entry identity distinguishes generic instances. This is a lifetime prerequisite; declaration-time stores, readiness and capture transfers still activate together in the following ownership work.

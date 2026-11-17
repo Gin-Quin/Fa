@@ -101,6 +101,8 @@ pub struct Lowerer<'a> {
 	slots: FxHashMap<SymbolId, Slot>,
 	borrowed_symbols: FxHashSet<SymbolId>,
 	borrowed_results: FxHashSet<NodeId>,
+	/// The function whose frame is being lowered, for self handles.
+	owner: Option<NodeId>,
 	next: Slot,
 	/// Lowering a compile-time expression: no enclosing function's frame.
 	compile_time: bool,
@@ -133,6 +135,7 @@ impl<'a> Lowerer<'a> {
 			slots: FxHashMap::default(),
 			borrowed_symbols: FxHashSet::default(),
 			borrowed_results: FxHashSet::default(),
+			owner: None,
 			next: 0,
 			compile_time: true,
 			globals: false,
@@ -171,6 +174,7 @@ impl<'a> Lowerer<'a> {
 	/// Lowers the function or lambda declared at `node`.
 	pub fn function(mut self, node: NodeId) -> Option<Function> {
 		self.compile_time = false;
+		self.owner = Some(node);
 		self.globals = true;
 		let info = self.a.function(node)?.clone();
 		let name = match info.symbol {
@@ -469,6 +473,9 @@ impl<'a> Lowerer<'a> {
 				None => self.not_known(n, &name),
 			},
 			SymbolKind::Function => {
+				if self.owner == Some(data.decl_node) {
+					return Expr::CurrentFunction(fn_key(self.file, data.decl_node));
+				}
 				let info = self.a.function(data.decl_node);
 				let captures = info.map(|info| info.captures.clone()).unwrap_or_default();
 				let key = fn_key(self.file, data.decl_node);

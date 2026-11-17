@@ -203,7 +203,7 @@ pub fn impurity(
 		}
 		match expr {
 			Expr::Impure(what) => found = Some(what.to_string()),
-			Expr::Function(key) | Expr::CallFunction(key, _) => {
+			Expr::Function(key) | Expr::CurrentFunction(key) | Expr::CallFunction(key, _) => {
 				if let Some(Some(what)) = functions(*key) {
 					found = Some(what);
 				}
@@ -242,6 +242,7 @@ pub fn visit(expr: &Expr, f: &mut dyn FnMut(&Expr)) {
 		| Expr::Move(_)
 		| Expr::Global(_)
 		| Expr::Function(_)
+		| Expr::CurrentFunction(_)
 		| Expr::Closure { .. }
 		| Expr::Continue
 		| Expr::Impure(_)

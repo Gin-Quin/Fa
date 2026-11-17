@@ -1,0 +1,26 @@
+-- prints: 7 11
+-- prints: 7 11
+
+type Reader = (Integer) => Integer
+
+function direct = (seed: Integer): Reader => {
+	function recur = (remaining: Integer): Integer =>
+		if remaining == 0 { seed } else { recur(remaining - 1) }
+	recur
+}
+
+function indirect = (seed: Integer): Reader => {
+	function throughHandle = (remaining: Integer): Integer => {
+		if remaining == 0 { return seed }
+		let again = throughHandle
+		again(remaining - 1)
+	}
+	throughHandle
+}
+
+function summary = (): Integer => direct(7)(3) + indirect(11)(3)
+static compiled = @summary()
+let first = direct(7)
+let second = indirect(11)
+console.log(first(3), second(3))
+console.log(compiled - second(3), summary() - first(3))

@@ -246,6 +246,9 @@ pub enum Expr {
 	Global(GlobalKey),
 	/// A named function as a value.
 	Function(FnKey),
+	/// The running callable, retaining its existing environment. The key
+	/// supplies a captureless handle for a direct invocation without one.
+	CurrentFunction(FnKey),
 	/// A lambda or local function: borrow slots for a nonescaping
 	/// environment, otherwise own their values at the checked creation site.
 	Closure {

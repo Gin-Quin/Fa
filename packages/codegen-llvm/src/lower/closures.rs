@@ -258,6 +258,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		})
 	}
 
+	/// A recursive call or self handle borrows the running invocation's
+	/// environment. Comparing the concrete entry also distinguishes generic
+	/// instances; a call to another instance still needs its own environment.
+	pub(super) fn running_environment(
+		&self,
+		function: &super::Function<'ctx>,
+	) -> Option<PointerValue<'ctx>> {
+		(function.lambda && self.frame().function == function.value).then(|| {
+			function
+				.value
+				.get_nth_param(0)
+				.expect("a closure environment")
+				.into_pointer_value()
+		})
+	}
+
 	/// The drop and the copy of an environment in a frame: nothing to free,
 	/// and a copy shares it (the closure doesn't outlive the frame).
 	fn shared_environment_functions(&self) -> (FunctionValue<'ctx>, FunctionValue<'ctx>) {
@@ -407,7 +423,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				function.captures.clone(),
 				function.by_reference,
 			);
-			let environment = self.build_environment(&captures, by_reference, node)?;
+			let running = self.running_environment(&function);
+			let environment = match running {
+				Some(environment) => environment,
+				None => self.build_environment(&captures, by_reference, node)?,
+			};
 			let entry = self.async_value_entry(
 				&function,
 				target.as_global_value().as_pointer_value(),
@@ -418,6 +438,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let closure = if by_reference {
 				closure
 			} else {
+				// A self handle is an additional owner of the existing block;
+				// a newly built environment already carries its initial owner.
+				let closure = if running.is_some() {
+					self.emit_copy(closure)?
+				} else {
+					closure
+				};
 				self.fresh(closure)
 			};
 			// given where more errors are allowed: adapted (`adapt_function_errors`)

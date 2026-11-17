@@ -408,6 +408,28 @@ impl<'i, 'h> Machine<'i, 'h> {
 				Vec::new(),
 				Vec::new(),
 			)))),
+			Op::CurrentFunction(function) => {
+				match self.frame().locals.get(code.slots as usize) {
+					Some(Out::Value(Value::Function(closure))) if closure.function == *function => {
+						let closure = if closure.bound.is_empty() {
+							Arc::clone(closure)
+						} else {
+							// A self name denotes the full function, not the
+							// partial application that entered this invocation.
+							let mut full = (**closure).clone();
+							full.bound.clear();
+							Arc::new(full)
+						};
+						Self::done(Value::Function(closure))
+					}
+					None if code.captures.is_empty() => Self::done(Value::Function(Arc::new(
+						Closure::new(*function, Vec::new(), Vec::new()),
+					))),
+					_ => {
+						Err(Error::Stop("internal: the running callable is missing".into()).into())
+					}
+				}
+			}
 			Op::Closure(function, captures, borrow) => {
 				self.interpreter
 					.reserve(captures.len().saturating_mul(if *borrow {

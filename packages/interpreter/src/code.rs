@@ -107,6 +107,7 @@ pub(crate) enum Op {
 	Own(Node),
 	Global(GlobalKey),
 	Function(FnKey),
+	CurrentFunction(FnKey),
 	Closure(FnKey, Vec<Slot>, bool),
 	Let(Slot, Node),
 	Assign(Place, Node),
@@ -239,6 +240,7 @@ impl<'a> Builder<'a> {
 				ir::Expr::Own(value) => Op::Own(self.add(value)),
 				ir::Expr::Global(key) => Op::Global(*key),
 				ir::Expr::Function(key) => Op::Function(*key),
+				ir::Expr::CurrentFunction(key) => Op::CurrentFunction(*key),
 				ir::Expr::Closure {
 					function,
 					captures,

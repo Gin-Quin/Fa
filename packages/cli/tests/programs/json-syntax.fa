@@ -447,3 +447,18 @@ console.log(quotedMessage("null " + high)) -- prints: quoted: "JSON Parse error:
 static errorUnit7 = quotedMessage("\"\\q" + high)
 console.log(errorUnit7)                    -- prints: quoted: "JSON Parse error: Unterminated string"
 console.log(quotedMessage("\"\\q" + high)) -- prints: quoted: "JSON Parse error: Unterminated string"
+
+-- Obtain lone units through a runtime call as well as a static constant.
+function inputUnit = (text: String, index: Integer): String throws IndexError => try text[index]
+static dynamicUnitError0 = quotedMessage(inputUnit("\u{10000}", 0))
+console.log(dynamicUnitError0)                            -- prints: quoted: "JSON Parse error: Unrecognized token '\ud800'"
+console.log(quotedMessage(try inputUnit("\u{10000}", 0))) -- prints: quoted: "JSON Parse error: Unrecognized token '\ud800'"
+static dynamicUnitError1 = quotedMessage(inputUnit("\u{10000}", 1))
+console.log(dynamicUnitError1)                            -- prints: quoted: "JSON Parse error: Unrecognized token '\udc00'"
+console.log(quotedMessage(try inputUnit("\u{10000}", 1))) -- prints: quoted: "JSON Parse error: Unrecognized token '\udc00'"
+static dynamicUnitError2 = quotedMessage("\"\\" + (inputUnit("\u{10000}", 0)) + "\"")
+console.log(dynamicUnitError2)                                              -- prints: quoted: "JSON Parse error: Invalid escape character \ud800"
+console.log(quotedMessage("\"\\" + (try inputUnit("\u{10000}", 0)) + "\"")) -- prints: quoted: "JSON Parse error: Invalid escape character \ud800"
+static dynamicUnitError3 = quotedMessage("\"\\" + (inputUnit("\u{10000}", 1)) + "\"")
+console.log(dynamicUnitError3)                                              -- prints: quoted: "JSON Parse error: Invalid escape character \udc00"
+console.log(quotedMessage("\"\\" + (try inputUnit("\u{10000}", 1)) + "\"")) -- prints: quoted: "JSON Parse error: Invalid escape character \udc00"

@@ -2782,3 +2782,13 @@ engine parsing for short successful String input. A potentially over-deep valid
 document needs at least 2002 code units, so only inputs at least that long need
 the iterative Fa check before engine parsing. Bytes check their existing explicit
 container stack. Syntax failures continue to use the native-compatible scan.
+
+Invalid-escape diagnostics retain a complete scalar or lone UTF-16 unit, rather
+than a UTF-8 byte or half of an astral scalar. Malformed interpreter String
+input uses byte-position markers, restored in values and error text, without
+rewriting invalid escapes into valid ones. JSON-quoted diagnostic fixtures make
+lone-unit preservation observable through static and runtime calls.
+
+Native optional imported/constraint calls use the analyzed present receiver;
+worker calls reuse the value retained by the guard. Native capture discovery
+visits a named argument's value and excludes its navigation-only parameter label.

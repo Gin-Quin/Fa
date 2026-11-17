@@ -49,6 +49,8 @@ wall time. All preparation, builds, tests and profilers use CPUs 0–4. The driv
 itself runs on CPUs 0–4. Each child retains microsecond user/system CPU via wait4,
 wall time and GNU-time child peak RSS; Fa checks are monitored against 512 MiB RSS.
 The identical GNU-time launcher is included in both tools' CPU/wall measurements.
+The launcher samples resident memory for both tools with the same polling work;
+only Fa has the 512 MiB rejection limit.
 Its child is forked after exec, avoiding Linux wait4's inherited Python-parent
 high-water floor. The uncorrected wait4 RSS is retained as `launcher_peak_rss_kib`.
 The first CPU-5 series predates this correction: its small-input CPU/wall samples

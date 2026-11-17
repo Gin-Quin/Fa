@@ -29,19 +29,18 @@ def sample(command, expected, timeout=300, max_rss_kib=None, *, allowed_exits=(0
                 if pid:
                     child.returncode = os.waitstatus_to_exitcode(status)
                     break
-                if max_rss_kib is not None:
-                    try:
-                        if tool_pid is None:
-                            children = Path(f"/proc/{child.pid}/task/{child.pid}/children").read_text().split()
-                            tool_pid = int(children[0]) if children else None
-                        proc = Path(f"/proc/{tool_pid}/status").read_text() if tool_pid else ""
-                        rss = next((int(line.split()[1]) for line in proc.splitlines()
-                                    if line.startswith("VmRSS:")), 0)
-                        observed_peak = max(observed_peak, rss)
-                        if rss > max_rss_kib:
-                            failure = f"resident memory exceeded {max_rss_kib} KiB"
-                    except (FileNotFoundError, ProcessLookupError):
-                        pass
+                try:
+                    if tool_pid is None:
+                        children = Path(f"/proc/{child.pid}/task/{child.pid}/children").read_text().split()
+                        tool_pid = int(children[0]) if children else None
+                    proc = Path(f"/proc/{tool_pid}/status").read_text() if tool_pid else ""
+                    rss = next((int(line.split()[1]) for line in proc.splitlines()
+                                if line.startswith("VmRSS:")), 0)
+                    observed_peak = max(observed_peak, rss)
+                    if max_rss_kib is not None and rss > max_rss_kib:
+                        failure = f"resident memory exceeded {max_rss_kib} KiB"
+                except (FileNotFoundError, ProcessLookupError):
+                    pass
                 if time.perf_counter() - started > timeout:
                     failure = f"timeout after {timeout}s"
                 if failure:

@@ -1972,3 +1972,7 @@ Store creation-time captured types in the file analysis, keyed by lambda and cap
 ### Ownership enforcement: recursive function environments (2026-11-17)
 
 Recursive calls borrow the running concrete entry's environment; self handles retain it. They do not construct another capture snapshot. The VM carries a `CurrentFunction` operation resolved from its invocation's retained callable; it denotes the full function, without the partial arguments that may have entered that invocation. Native entry identity distinguishes generic instances. This is a lifetime prerequisite; declaration-time stores, readiness and capture transfers still activate together in the following ownership work.
+
+### Ownership enforcement: native collection union moves (2026-11-17)
+
+Keep the declared result union available through native return injection. A type-erased `Repr::Union` cannot identify a collection alternative. Collection injection selects a language-compatible item type, with generic arguments resolved, and separately checks its physical layout. The shared implicit-destination query refuses conversions inside a structure, while explicit converting copies keep their existing destination query. Primitive literal/range widening transfers storage; it never authorizes a deep conversion because two layouts happen to match.

@@ -133,6 +133,27 @@ pub fn copy_destination(
 	source: TypeId,
 	target: TypeId,
 ) -> Option<TypeId> {
+	destination(types, module, source, target, true)
+}
+
+/// A union destination for a move or borrowed view. Unlike a converting
+/// copy, it cannot change collection items or recursive parts.
+pub fn implicit_destination(
+	types: &TypeStore,
+	module: ModuleId,
+	source: TypeId,
+	target: TypeId,
+) -> Option<TypeId> {
+	destination(types, module, source, target, false)
+}
+
+fn destination(
+	types: &TypeStore,
+	module: ModuleId,
+	source: TypeId,
+	target: TypeId,
+	copy_inside: bool,
+) -> Option<TypeId> {
 	let target = types.rec_target(target).unwrap_or(target);
 	let choices = types.union_members(&target).to_vec();
 	if let Some(&choice) = choices
@@ -150,10 +171,9 @@ pub fn copy_destination(
 		.into_iter()
 		.zip(global)
 		.find_map(|(original, target)| {
-			scratch
-				.assignable(source, target, Mode::Copy)
-				.is_ok()
-				.then_some(original)
+			(scratch.assignable(source, target, Mode::Copy).is_ok()
+				&& (copy_inside || scratch.structure_conversion(source, target).is_none()))
+			.then_some(original)
 		})
 }
 
@@ -309,6 +329,39 @@ pub fn copies(
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn an_implicit_union_destination_never_converts_collection_items() {
+		for (target, expected) in [
+			("Array<Integer> | String", Some("Array<Integer>")),
+			("Array<Int64> | String", None),
+			("Array<Integer | String> | String", None),
+		] {
+			let source = format!(
+				"let narrow: Array<Integer<min = 0, max = 10>> = [1]\nlet wide: {target} = copy narrow\nconsole.log(narrow.length, wide)\n"
+			);
+			let (session, file) = crate::analyze_source(&source);
+			assert!(
+				session.diagnostics(file).is_empty(),
+				"{:?}",
+				session.diagnostics(file)
+			);
+			let input = session
+				.analysis(file)
+				.copy_inputs
+				.values()
+				.find(|input| input.produces)
+				.unwrap();
+			let types = session.types();
+			let module = session.module_id(file);
+			let selected = implicit_destination(types, module, input.source, input.target);
+			assert_eq!(
+				selected.map(|ty| types.display(ty).to_string()).as_deref(),
+				expected
+			);
+			assert!(copy_destination(types, module, input.source, input.target).is_some());
+		}
+	}
 
 	#[test]
 	fn converting_union_copies_retain_written_members_across_store_views() {

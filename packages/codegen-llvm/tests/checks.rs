@@ -168,6 +168,27 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn collection_moves_select_the_semantic_union_alternative() {
+		let source = include_str!("../../analyzer/tests/cases/ownership-union-moves.fa");
+		for (name, target) in [
+			("collection-union-native", Target::Native),
+			("collection-union-wasm", Target::Wasm),
+		] {
+			let ir = ir_at_target(name, source, true, OptLevel::O0, target);
+			for name in [
+				"fa.pack",
+				"fa.ranged",
+				"fa.mapPack",
+				"fa.setPack",
+				"fa.packGeneric",
+			] {
+				let body = function(&ir, name);
+				assert!(!body.contains("@fa.copy"), "{body}");
+			}
+		}
+	}
+
+	#[test]
 	fn primitive_item_widening_moves_without_a_collection_copy() {
 		let source = include_str!("../../analyzer/tests/cases/ownership-primitive-widening.fa");
 		for (name, target) in [

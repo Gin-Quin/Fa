@@ -2041,6 +2041,21 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Ok(());
 		}
 		let ret = self.frame().ret;
+		// Block results do not necessarily carry a coercion on their tail.
+		// Select the semantic union tag before erasing the result type.
+		let value = if ret == Repr::Union
+			&& value.repr != Repr::Union
+			&& let Some(sig) = self
+				.frame()
+				.owner
+				.and_then(|owner| self.analysis.function(owner))
+				.and_then(|info| info.sig)
+		{
+			let target = self.concrete_type(self.types().sig(sig).ret);
+			self.inject(value, target, node)?
+		} else {
+			value
+		};
 		// the result is owned by the caller; what the function owns is dropped
 		let value = if ret.has_value() && value.repr.has_value() {
 			self.owned_as(value, ret, Some(node))?

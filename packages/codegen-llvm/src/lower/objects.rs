@@ -295,7 +295,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let repr = self.repr_of(item, node.index())?;
 			let matches = match (repr, value.repr) {
 				(Repr::Int(_), Repr::Int(_)) => true,
-				(a, b) => a == b,
+				(a, b) => a == b || self.implicit_collection_view(b, a),
 			};
 			if matches {
 				chosen = Some((item, repr));
@@ -315,6 +315,35 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder
 			.build_store(data_pointer, value.value.expect("data"))?;
 		Ok(self.fresh(Val::new(Repr::Union, pointer)))
+	}
+
+	/// Select the language's collection alternative before considering layout.
+	/// The representation keeps the source item even at a block whose checked
+	/// result type is already the destination union.
+	fn implicit_collection_view(&self, from: Repr, to: Repr) -> bool {
+		let (source, target) = match (from, to) {
+			(Repr::Array(a), Repr::Array(b))
+			| (Repr::Growing(a), Repr::Growing(b))
+			| (Repr::Pool(a), Repr::Pool(b))
+			| (Repr::Columnar(a), Repr::Columnar(b)) => {
+				let (a, b) = (self.concrete_type(a), self.concrete_type(b));
+				if !self.types().same_structure_item(a, b) {
+					return false;
+				}
+				(a, b)
+			}
+			(Repr::Map(a), Repr::Map(b)) | (Repr::Set(a), Repr::Set(b)) => (a, b),
+			_ => return false,
+		};
+		let (source, target) = (self.concrete_type(source), self.concrete_type(target));
+		self.same_layout(from, to)
+			&& fa_analyzer::lower::copies::implicit_destination(
+				self.types(),
+				self.session.module_id(self.file),
+				source,
+				target,
+			)
+			.is_some()
 	}
 
 	/// The value of a box narrowed to a member type of its union.

@@ -1,0 +1,51 @@
+-- prints: 4 9
+-- prints: 4 9
+-- prints: 1 1
+-- prints: 5
+
+type Result = Array<Integer> | String
+
+function pack = (input: Integer): Result => {
+	let items = [input]
+	items
+}
+
+function ranged = (input: Integer<min = 0, max = 10>): Result => {
+	let items = [input]
+	items
+}
+
+function inspect = (result: Result): Integer =>
+	if result is String { result.length } else { result[0] catch _error => 0 }
+
+function summary = (): Integer => inspect(pack(4)) + inspect(ranged(9))
+static compiled = @summary()
+console.log(inspect(pack(4)), inspect(ranged(9)))
+console.log(compiled - 9, summary() - 4)
+
+type MapResult = Map<Integer, Integer> | String
+type SetResult = Set<Integer> | String
+
+function mapPack = (input: Integer): MapResult => {
+	let entries: Map<Integer, Integer> = [(0, input)]
+	entries
+}
+
+function setPack = (input: Integer): SetResult => {
+	let entries: Set<Integer> = [input]
+	entries
+}
+
+let mapping = mapPack(4)
+let distinct = setPack(9)
+function mapSize = (mapping: MapResult): Integer =>
+	if mapping is String { 0 } else { mapping.size }
+function setSize = (distinct: SetResult): Integer =>
+	if distinct is String { 0 } else { distinct.size }
+console.log(mapSize(mapping), setSize(distinct))
+
+function packGeneric = <Item>(input: Item): Array<Item> | String => {
+	let items = [input]
+	items
+}
+console.log(inspect(packGeneric(5)))

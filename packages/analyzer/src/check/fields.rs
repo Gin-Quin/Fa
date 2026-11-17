@@ -330,7 +330,9 @@ impl Walker<'_> {
 				let count = types.sym_list(types.nominal(nominal).members).len() as u16;
 				(
 					nominal,
-					(0..count).filter(|&index| types.mask_has(mask, index)).collect(),
+					(0..count)
+						.filter(|&index| types.mask_has(mask, index))
+						.collect(),
 				)
 			}
 			_ => return false,

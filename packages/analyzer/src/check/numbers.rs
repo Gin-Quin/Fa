@@ -1867,8 +1867,8 @@ impl Walker<'_> {
 				| (K::Percentage, K::Int(_) | K::Float(_))
 		) || (matches!(to, K::Int(_)) && self.enum_fits(source, target))
 			|| (matches!(to, K::Int(_))
-			&& self.is_fields(source)
-			&& self.fields_fit(source, target));
+				&& self.is_fields(source)
+				&& self.fields_fit(source, target));
 
 		if !exists {
 			let hint = match (to, from) {

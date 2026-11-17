@@ -463,6 +463,22 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn pending_task_borrows_preserve_ordinary_owners_and_end_at_await() {
+		let source = include_str!("../../analyzer/tests/cases/ownership-pending-task-copies.fa");
+		for target in [Target::Native, Target::Wasm] {
+			let ir = ir_at_target("pending-task-owner", source, true, OptLevel::O0, target);
+			let text = function(&ir, "fa.ordinaryText.async");
+			assert!(text.lines().any(|line| line.contains("@fa_string_assign_local(") && line.ends_with("i32 1, i32 0)")), "{target:?}: {text}");
+			let record = function(&ir, "fa.ordinaryRecord.async");
+			assert!(record.contains("@fa.copy"), "{target:?}: {record}");
+			for name in ["fa.afterCompletion.async", "fa.afterMovedTask.async"] {
+				let body = function(&ir, name);
+				assert!(!body.contains("@fa.copy"), "{target:?}: {body}");
+			}
+		}
+	}
+
+	#[test]
 	fn collection_stores_choose_transferable_storage_before_construction() {
 		let source =
 			include_str!("../../analyzer/tests/cases/ownership-collection-storage-moves.fa");

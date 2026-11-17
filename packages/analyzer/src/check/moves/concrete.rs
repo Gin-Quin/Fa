@@ -17,6 +17,7 @@ impl Walker<'_> {
 		let borrowed_calls = self.borrowed_call_observations();
 		self.collect_store_values();
 		let reads = self.ownership_reads();
+		self.finish_ownership_task_borrows(&reads);
 		let mut commits: FxHashMap<NodeId, Vec<NodeId>> = FxHashMap::default();
 		for value in self.copy_sites.iter().copied() {
 			commits.entry(value).or_default().push(value);
@@ -55,6 +56,11 @@ impl Walker<'_> {
 			for (symbol, values) in sources {
 				let later = graph.later_uses(symbol);
 				for value in values {
+					if self.pending_ownership_task(value, symbol).is_some() {
+						self.clear_flag(value, NodeFlags::MOVE);
+						self.a.moved_reads.remove(&value);
+						continue;
+					}
 					let positions = &graph.stores[&value];
 					let reachable = positions.iter().any(|&index| graph.reachable[index]);
 					let conflict = positions
@@ -690,6 +696,95 @@ mod tests {
 					.then(|| analysis.has_flags(node, NodeFlags::MOVE))
 			})
 			.collect()
+	}
+
+	#[test]
+	fn a_pending_task_keeps_its_borrowed_owner_live() {
+		for source in [
+			"let items: Array<Integer> = [1, 2]\nasync function read = (): Integer => { await Task.yield()\nitems.length }\nlet pending = start read()\nmutable target = items\ntarget.push(3)\nconsole.log(await pending, target.length)\n",
+			"async function read = (items: Array<Integer>): Integer => { await Task.yield()\nitems.length }\nlet items = [1, 2]\nlet pending = start read(items)\nmutable target = items\ntarget.push(3)\nconsole.log(await pending, target.length)\n",
+		] {
+			let codes = crate::check::test_support::codes(source);
+			assert_eq!(codes, ["MEM004"], "{source}");
+		}
+	}
+
+	#[test]
+	fn pending_task_diagnostic_offers_a_checked_independent_copy() {
+		let source = "async function read = (items: Array<Integer>): Integer => { await Task.yield()\nitems.length }\nlet items = [1, 2]\nlet pending = start read(items)\nmutable target = items\ntarget.push(3)\nconsole.log(await pending, target.length)\n";
+		let (session, file) = crate::analyze_source(source);
+		let diagnostics = session.diagnostics(file);
+		assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
+		let diagnostic = &diagnostics[0];
+		assert_eq!(diagnostic.code.id, "MEM004");
+		assert!(
+			diagnostic
+				.message
+				.contains("pending task started on line 4")
+		);
+		assert!(!diagnostic.related.is_empty());
+		let mut fixed = source.to_string();
+		let mut edits = diagnostic.fixes[0].edits.clone();
+		edits.sort_by_key(|edit| std::cmp::Reverse(edit.location.span.start));
+		for edit in edits {
+			fixed.replace_range(
+				edit.location.span.start as usize..edit.location.span.end as usize,
+				&edit.replacement,
+			);
+		}
+		crate::check::test_support::analyzed(&fixed);
+	}
+
+	#[test]
+	fn a_pending_task_prevents_an_owned_capture_from_transferring_its_source() {
+		let source = "type Reader = () => Integer\nasync function count = (items: Array<Integer>): Integer => { await Task.yield()\nitems.length }\nasync function make = (): Reader => {\nlet items = [1, 2]\nlet pending = start count(items)\nfunction saved = (): Integer => items.length\nconsole.log(await pending)\nsaved\n}\n";
+		assert_eq!(crate::check::test_support::codes(source), ["MEM004"]);
+	}
+
+	#[test]
+	fn a_pending_task_borrow_of_a_resource_forbids_its_move() {
+		let source = "type Held = { value: Integer, function destroy = (self) => {} }\nasync function read = (held: Held): Integer => { await Task.yield()\nheld.value }\nlet held = Held { value = 1 }\nlet pending = start read(held)\nlet moved = held\nconsole.log(await pending, moved.value)\n";
+		let mut session = crate::Session::new();
+		let file = session.set_source("pending.foreign", std::sync::Arc::from(source));
+		session.analyze_file(file);
+		let errors: Vec<_> = session
+			.diagnostics(file)
+			.iter()
+			.filter(|d| d.severity == crate::Severity::Error)
+			.collect();
+		assert_eq!(errors.len(), 1, "{errors:#?}");
+		assert_eq!(errors[0].code.id, "MEM002");
+		assert!(errors[0].message.contains("pending task"));
+	}
+
+	#[test]
+	fn awaiting_a_moved_task_ends_its_owner_borrow() {
+		crate::check::test_support::analyzed(
+			"async function read = (items: Array<Integer>): Integer => { await Task.yield()\nitems.length }\nasync function run = (): Integer => {\nlet items = [1, 2]\nlet pending = start read(items)\nlet next = pending\nlet before = await next\nmutable target = items\ntarget.push(3)\nbefore + target.length\n}\n",
+		);
+	}
+
+	#[test]
+	fn an_ordinary_pending_borrow_prevents_last_use_optimizations() {
+		let source = "async function read = (text: String): String => { await Task.yield()\ntext }\nasync function run = (count: Integer<min = 0>): Integer => {\nlet text = \"ab\".repeat(count)\nlet pending = start read(text)\nmutable other = text\nother += \"X\"\nlet received = await pending\nreceived.length + other.length\n}\n";
+		let (session, file) = crate::check::test_support::analyzed(source);
+		let tree = session.tree(file);
+		let analysis = session.analysis(file);
+		let node = (0..tree.nodes.len())
+			.map(NodeId::new)
+			.find(|&node| {
+				tree.text(node.index()) == "text"
+					&& analysis.has_flags(node, NodeFlags::BORROWED_OWNER)
+			})
+			.expect("the retained source read");
+		assert!(!analysis.has_flags(node, NodeFlags::MOVE));
+		assert_eq!(analysis.flags_of(node), analysis.clone().flags_of(node));
+	}
+
+	#[test]
+	fn a_task_moved_out_of_a_block_keeps_its_source_borrow_live() {
+		let source = "async function read = (items: Array<Integer>): Integer => { await Task.yield()\nitems.length }\nasync function run = (): Integer => {\nlet items = [1, 2]\nlet pending = do { let inner = start read(items)\nlet next = inner\nnext }\nmutable target = items\ntarget.push(3)\nlet before = await pending\nbefore + target.length\n}\n";
+		assert_eq!(crate::check::test_support::codes(source), ["MEM004"]);
 	}
 
 	#[test]

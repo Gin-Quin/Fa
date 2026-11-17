@@ -14,6 +14,7 @@ impl Walker<'_> {
 	/// Take the place snapshot while aliases and narrowing still describe
 	/// this read. Later `reuse` must not rewrite an earlier observation.
 	pub(crate) fn note_place_read(&mut self, node: NodeId) {
+		self.snapshot_ownership_tasks(node);
 		if !self.body.flow.reachable {
 			return;
 		}

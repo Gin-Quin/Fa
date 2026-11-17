@@ -98,6 +98,7 @@ impl Walker<'_> {
 
 	/// The use of a name node: a local itself, or the place an alias designates.
 	pub(crate) fn note_name_use(&mut self, n: NodeId, symbol: SymbolId) {
+		self.snapshot_ownership_tasks(n);
 		let kind = self.a.symbols.symbol(symbol).kind;
 		let places = if matches!(
 			kind,
@@ -173,6 +174,7 @@ impl Walker<'_> {
 			if !last.movable
 				|| last.node.0 == u32::MAX
 				|| !self.copy_sites.contains(&last.node)
+				|| self.a.has_flags(last.node, NodeFlags::BORROWED_OWNER)
 				|| self.pinned_captures.contains(&symbol)
 			{
 				continue;

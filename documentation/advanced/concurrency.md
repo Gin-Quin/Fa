@@ -218,8 +218,10 @@ A task uses:
 
 - the arguments of the started call,
 - the local values a `start do` block uses,
-- the module-level values in the effects of the started function (`mutates people.size`),
+- the module-level values it reads or changes (`mutates people.size`),
 - its [requirements](/advanced/requirements#requirements-and-concurrency).
+
+A kept task keeps those owners live until it ends, including when its Task handle moves. Storing a structure it borrows requires `copy` (`MEM004`), or awaiting/cancelling the task before the store; a borrowed unique owner cannot be transferred (`MEM002`). Ordinary values keep implicit independent value semantics.
 
 **Thread-safe values are the exception**: the methods of a `Mutex`, an atomic or a `Channel` don't declare `mutates self`, so several tasks can use the same one at once (see [thread safety](#thread-safety-and-synchronization)).
 

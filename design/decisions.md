@@ -3051,3 +3051,7 @@ ownership fixtures when they land on main.
 ### Ownership enforcement: collection storage before transfer (implementation, 2026-11-17)
 
 Read-only native collection backing uses the same closed borrowing proof as frame backing. A constant local that will be stored into another owner constructs transferable storage before that store; an immutable intermediate never reconstructs the source initializer as static data. Proven returned bindings retain the caller-buffer offer contract. A replacement store uses ordinary ownership transfer and destroys its former destination; the legacy array-assignment item copier cannot bypass the analyzer's move fact. Purely borrowed constants still use read-only data.
+
+### Ownership enforcement: pending task source lifetimes (implementation, 2026-11-17)
+
+A move proof includes the outstanding borrows of kept tasks, frozen at each read or capture declaration and resolved through the final source-observation summaries. Moving a Task handle does not end its source borrows; awaiting or cancelling that handle does. Collection/resource transfer diagnostics identify the task start, and the collection diagnostic offers the checked independent-copy edit. Ordinary values retain implicit value semantics; a retained-owner fact prevents native last-use heuristics from moving their String or aggregate storage while a task still borrows it. Immutable Task-origin chains use an iterative lookup.

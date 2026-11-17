@@ -2225,6 +2225,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		while let View::Group(group) = self.view(inner) {
 			inner = group;
 		}
+		if self.analysis.has_flags(inner, NodeFlags::BORROWED_OWNER) {
+			return None;
+		}
 		if !matches!(self.view(inner), View::Name(_)) {
 			return None;
 		}

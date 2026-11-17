@@ -263,6 +263,8 @@ impl Walker<'_> {
 		};
 		let lambda = info.lambda;
 		let captures = info.captures.clone();
+		let creation = info.declaration.unwrap_or(lambda);
+		self.snapshot_ownership_tasks(creation);
 		for symbol in captures {
 			let place = match self.aliases.get(&symbol) {
 				Some(&place) => place,

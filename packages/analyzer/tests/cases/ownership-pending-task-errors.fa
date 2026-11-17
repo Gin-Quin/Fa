@@ -1,0 +1,31 @@
+let original: Array<Integer> = [1, 2]
+async function readGlobal = (): Integer => {
+	await Task.yield()
+	original.length
+}
+let globalTask = start readGlobal()
+mutable independent = original -- error: MEM004
+independent.push(3)
+console.log(await globalTask, independent.length)
+
+async function count = (items: Array<Integer>): Integer => {
+	await Task.yield()
+	items.length
+}
+async function badStore = (): Integer => {
+	let items = [1, 2]
+	let pending = start count(items)
+	mutable target = items -- error: MEM004
+	target.push(3)
+	let before = await pending
+	before + target.length
+}
+
+type Reader = () => Integer
+async function badCapture = (): Reader => {
+	let items = [1, 2]
+	let pending = start count(items)
+	function saved = (): Integer => items.length -- error: MEM004
+	console.log(await pending)
+	saved
+}

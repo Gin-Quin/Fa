@@ -1,0 +1,72 @@
+let original: Array<Integer> = [1, 2]
+async function readGlobal = (): Integer => {
+	await Task.yield()
+	original.length
+}
+let globalTask = start readGlobal()
+mutable independent = copy original
+independent.push(3)
+console.log(await globalTask, independent.length) -- prints: 2 3
+
+async function count = (items: Array<Integer>): Integer => {
+	await Task.yield()
+	items.length
+}
+async function afterCompletion = (): Integer => {
+	let items = [1, 2]
+	let pending = start count(items)
+	let before = await pending
+	mutable target = items
+	target.push(3)
+	before * 10 + target.length
+}
+console.log(await afterCompletion()) -- prints: 23
+
+async function afterMovedTask = (): Integer => {
+	let items = [1, 2]
+	let pending = start count(items)
+	let next = pending
+	let before = await next
+	mutable target = items
+	target.push(3)
+	before * 10 + target.length
+}
+console.log(await afterMovedTask()) -- prints: 23
+
+type Reader = () => Integer
+async function captureAfterCompletion = (): Reader => {
+	let items = [1, 2]
+	let pending = start count(items)
+	let before = await pending
+	function saved = (): Integer => items.length + before
+	saved
+}
+let saved = await captureAfterCompletion()
+console.log(saved()) -- prints: 4
+
+async function readText = (text: String): String => {
+	await Task.yield()
+	text
+}
+async function ordinaryText = (count: Integer<min = 0>): Integer => {
+	let text = "ab".repeat(count)
+	let pending = start readText(text)
+	mutable other = text
+	other += "X"
+	let received = await pending
+	if received == "ab".repeat(count) and other == "ab".repeat(count) + "X" { 1 } else { 0 }
+}
+type Label = { text: String, count: Integer }
+async function readLabel = (label: Label): String => {
+	await Task.yield()
+	label.text
+}
+async function ordinaryRecord = (count: Integer<min = 0>): Integer => {
+	let label = Label { text = "ab".repeat(count), count }
+	let pending = start readLabel(label)
+	mutable other = label
+	other.text += "X"
+	let received = await pending
+	if received == "ab".repeat(count) and other.text.length == count * 2 + 1 { 1 } else { 0 }
+}
+console.log(await ordinaryText(40), await ordinaryRecord(40)) -- prints: 1 1

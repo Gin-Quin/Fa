@@ -68,10 +68,13 @@ impl Walker<'_> {
 					})
 				};
 
-				let witness = events
-					.iter()
-					.filter(|&&index| graph.reachable[index])
-					.find_map(|&index| later[index]);
+				let pending = self.pending_ownership_task(creation, symbol);
+				let witness = pending.or_else(|| {
+					events
+						.iter()
+						.filter(|&&index| graph.reachable[index])
+						.find_map(|&index| later[index])
+				});
 				if !owned || witness.is_some() {
 					copies.push((symbol, ty, witness));
 				} else if self.capture_observations_complete(creation)
@@ -91,16 +94,25 @@ impl Walker<'_> {
 						.types
 						.syms
 						.resolve(self.a.symbols.symbol(*symbol).name);
-					let reason = later
-						.map(|node| {
-							if node == creation {
-								format!(
-									"used again on the next loop iteration (line {})",
-									self.line_of(node)
-								)
-							} else {
-								format!("used again on line {}", self.line_of(node))
-							}
+					let reason = self
+						.pending_ownership_task(creation, *symbol)
+						.map(|start| {
+							format!(
+								"still borrowed by the pending task started on line {}",
+								self.line_of(start)
+							)
+						})
+						.or_else(|| {
+							later.map(|node| {
+								if node == creation {
+									format!(
+										"used again on the next loop iteration (line {})",
+										self.line_of(node)
+									)
+								} else {
+									format!("used again on line {}", self.line_of(node))
+								}
+							})
 						})
 						.unwrap_or_else(|| "borrowed from its owner".to_string());
 					format!("`{name}` (`{}`), {reason}", self.display(*ty))
@@ -121,7 +133,11 @@ impl Walker<'_> {
 							file: self.file,
 							span: self.span(node),
 						},
-						"this later use keeps the source alive",
+						if self.pending_ownership_task(creation, symbol).is_some() {
+							"this pending task may still read the capture source"
+						} else {
+							"this later use keeps the source alive"
+						},
 					);
 				} else {
 					diagnostic = diagnostic.with_related(

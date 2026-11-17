@@ -25,7 +25,7 @@
 //!   can't be called blocking on the target is `CONC010`, with the call
 //!   chain down to the primitive.
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::analysis::{
 	Argument, AsyncSummary, AwaitInfo, AwaitKind, CallInfo, Callee, StartInfo, TargetSet,
@@ -104,6 +104,10 @@ pub(crate) struct TaskState {
 	awaited_calls: Vec<(NodeId, NodeId)>,
 	/// What each kept task uses, by `start` node (A2).
 	borrows: FxHashMap<NodeId, Borrow>,
+	/// Pending calls at each ownership read/closure creation. Freeze flow
+	/// here; final source summaries are available only after the walk.
+	ownership_pending: FxHashMap<NodeId, smallvec::SmallVec<[NodeId; 1]>>,
+	ownership_loans: FxHashMap<(NodeId, SymbolId), NodeId>,
 	/// The places the effects of the call being started change.
 	collected: Option<Vec<PlaceId>>,
 	/// The tasks moved into each combinator call (`Task.all(…)`).
@@ -690,6 +694,91 @@ impl Walker<'_> {
 	}
 
 	// ── calls ─────────────────────────────────────────────────────────────
+
+	pub(crate) fn snapshot_ownership_tasks(&mut self, node: NodeId) {
+		if self.body.flow.tasks.is_empty() || !self.body.flow.reachable {
+			self.tasks.ownership_pending.remove(&node);
+		} else {
+			self.tasks
+				.ownership_pending
+				.insert(node, self.body.flow.tasks.clone());
+		}
+	}
+
+	/// A task borrows its explicit arguments and the original sources its
+	/// selected invocation reads, including module values and transitive calls.
+	pub(super) fn finish_ownership_task_borrows(
+		&mut self,
+		reads: &FxHashMap<NodeId, Vec<SymbolId>>,
+	) {
+		let starts: FxHashSet<_> = self
+			.tasks
+			.ownership_pending
+			.values()
+			.flatten()
+			.copied()
+			.collect();
+		let mut sources: FxHashMap<NodeId, Vec<SymbolId>> = FxHashMap::default();
+		for start in starts {
+			let roots = sources.entry(start).or_default();
+			if let Some(borrow) = self.tasks.borrows.get(&start) {
+				roots.extend(
+					borrow
+						.reads
+						.iter()
+						.chain(&borrow.writes)
+						.filter_map(|&place| self.place_symbol(place)),
+				);
+			}
+			if let View::Start(operand) = self.view(start) {
+				roots.extend(reads.get(&operand).into_iter().flatten().copied());
+				if let Some(block) = self.a.starts.get(&start).and_then(|info| info.block) {
+					let body = self.ownership_body(block);
+					for (&node, observed) in reads {
+						if self.ownership_body(node) == body {
+							roots.extend(observed.iter().copied().filter(|&symbol| {
+								self.ownership_body(self.a.symbols.symbol(symbol).decl_node) != body
+							}));
+						}
+					}
+				}
+			}
+			roots.sort_unstable();
+			roots.dedup();
+		}
+		self.tasks.ownership_loans.clear();
+		for (&node, pending) in &self.tasks.ownership_pending {
+			for start in pending {
+				for &symbol in sources.get(start).into_iter().flatten() {
+					self.tasks
+						.ownership_loans
+						.entry((node, symbol))
+						.or_insert(*start);
+				}
+			}
+		}
+		for flags in &mut self.a.flags {
+			flags.remove(crate::analysis::NodeFlags::BORROWED_OWNER);
+		}
+		let retained: Vec<_> = self
+			.tasks
+			.ownership_pending
+			.keys()
+			.copied()
+			.filter(|&node| {
+				crate::lower::copies::place_root(&self.tree, &self.a, node)
+					.is_some_and(|symbol| self.pending_ownership_task(node, symbol).is_some())
+			})
+			.collect();
+		for node in retained {
+			self.clear_flag(node, crate::analysis::NodeFlags::MOVE);
+			self.set_flag(node, crate::analysis::NodeFlags::BORROWED_OWNER);
+		}
+	}
+
+	pub(crate) fn pending_ownership_task(&self, node: NodeId, symbol: SymbolId) -> Option<NodeId> {
+		self.tasks.ownership_loans.get(&(node, symbol)).copied()
+	}
 
 	/// After a call is checked: its contribution to the summary of the code
 	/// around it, and `CONC010` for a blocking call of a primitive or of
@@ -1892,7 +1981,11 @@ impl Walker<'_> {
 	fn task_starts(&self, n: NodeId) -> Vec<NodeId> {
 		let mut found = Vec::new();
 		let mut stack = vec![n];
+		let mut seen = FxHashSet::default();
 		while let Some(node) = stack.pop() {
+			if !seen.insert(node) {
+				continue;
+			}
 			match self.view(node) {
 				View::Start(_) => {
 					found.push(node);
@@ -1900,7 +1993,13 @@ impl Walker<'_> {
 				}
 				View::Name(_) => {
 					if let Resolution::Local(symbol) = self.a.resolution(node) {
-						found.extend(self.starts_of_symbol(symbol));
+						if self.a.symbols.symbol(symbol).kind == SymbolKind::Let {
+							if let Some(value) = self.task_initializer(symbol) {
+								stack.push(value);
+							}
+						} else {
+							found.extend(self.starts_of_symbol(symbol));
+						}
 					}
 					continue;
 				}
@@ -1911,24 +2010,36 @@ impl Walker<'_> {
 			}
 			stack.extend(crate::syntax::children(&self.tree, node));
 		}
+		found.sort_unstable();
+		found.dedup();
 		found
 	}
 
-	/// The `start` nodes of the task a local holds (its declaration's value).
-	fn starts_of_symbol(&self, symbol: SymbolId) -> Vec<NodeId> {
+	fn task_initializer(&self, symbol: SymbolId) -> Option<NodeId> {
 		let data = self.a.symbols.symbol(symbol);
 		if !matches!(data.kind, SymbolKind::Let | SymbolKind::Mutable)
 			|| !matches!(self.s.types.kind(data.ty), TypeKind::Task(..))
 		{
-			return Vec::new();
+			return None;
 		}
 		let View::Declaration {
 			value: Some(value), ..
 		} = self.view(data.decl_node)
 		else {
+			return None;
+		};
+		Some(self.strip_groups(value))
+	}
+
+	/// Immutable task transfers preserve their start identity. Resolve the
+	/// chain iteratively, so awaiting a moved handle ends the same borrow.
+	fn starts_of_symbol(&self, symbol: SymbolId) -> Vec<NodeId> {
+		let Some(value) = self.task_initializer(symbol) else {
 			return Vec::new();
 		};
-		let value = self.strip_groups(value);
+		if self.a.symbols.symbol(symbol).kind == SymbolKind::Let {
+			return self.task_starts(value);
+		}
 		match self.view(value) {
 			View::Start(_) => vec![value],
 			_ => self.tasks.groups.get(&value).cloned().unwrap_or_default(),
@@ -1956,7 +2067,16 @@ impl Walker<'_> {
 			});
 		let symbols = self.a.symbols.scope(scope).symbols.clone();
 		for symbol in symbols {
-			if Some(symbol) != kept {
+			// A moved-from binding owns no task to cancel. The transferred
+			// handle keeps its borrow until its actual owner awaits or drops it.
+			if Some(symbol) != kept
+				&& !self
+					.body
+					.flow
+					.consumed
+					.iter()
+					.any(|&(moved, _)| moved == symbol)
+			{
 				self.end_task_borrow(symbol);
 			}
 		}

@@ -260,6 +260,33 @@ impl Walker<'_> {
 			if !matches!(category, Ownership::Structure | Ownership::Unique) {
 				continue;
 			}
+			if let Some(symbol) = crate::lower::copies::value_place_root(&self.tree, &self.a, value)
+				&& let Some(start) = self.pending_ownership_task(value, symbol)
+			{
+				let text = self.tree.text(value.index());
+				let code = if category == Ownership::Unique {
+					&MEM002
+				} else {
+					&MEM004
+				};
+				let fix = if category == Ownership::Unique {
+					"await or cancel the task before transferring its owner".to_string()
+				} else {
+					format!(
+						"write `copy {text}` for an independent value, borrow with `use`, or await/cancel the task before this store"
+					)
+				};
+				let mut diagnostic = self.diagnostic(code, value, format!("`{text}` is still borrowed by the pending task started on line {}; transferring it would invalidate a value the task may still read: {fix}", self.line_of(start)))
+					.with_related(Location { file: self.file, span: self.span(start) }, "this task may still read the source");
+				if category == Ownership::Structure {
+					diagnostic = diagnostic.with_fix(Fix {
+						title: format!("Make an independent copy of `{text}`"),
+						edits: self.explicit_copy_edits(value),
+					});
+				}
+				self.report(diagnostic);
+				continue;
+			}
 			if self.a.has_flags(value, NodeFlags::MOVE) || self.a.moved_reads.contains(&value) {
 				continue;
 			}

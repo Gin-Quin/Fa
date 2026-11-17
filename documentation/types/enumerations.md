@@ -95,7 +95,7 @@ type Direction = "north" | "south" | "east" | "west"
 
 ### Native and WebAssembly
 
-- A member is a declaration index, stored as an `i32`. Names and iteration use
+- LLVM values carry a declaration index as an `i32`. Names and iteration use
   that index, independently of any pinned integer values.
 - An explicit integer conversion reads a private constant table of pinned
   values. For an unpinned enumeration, it widens the unsigned declaration index

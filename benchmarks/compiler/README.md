@@ -44,7 +44,9 @@ TS uses a class for Fa's object with a method, discriminated unions, an enum,
 generic arrays, throw/catch and ordinary constants for Fa's compile-time statics.
 It performs less proof work: TS does not check thrown-error sets, ownership or
 integer overflow/bounds. These are equivalent algorithmic workloads, not identical
-language guarantees. Neither fixture tests InlineArray or explicit owner-path
+language guarantees. Equivalence covers the generated program's bounded,
+nonnegative inputs and read-only returned items; TS uses ordinary Number/object
+semantics. Neither fixture tests InlineArray or explicit owner-path
 references; those are covered by the compiler's correctness suites.
 
 `bun check` is Bun's built-in checker. The driver requires its

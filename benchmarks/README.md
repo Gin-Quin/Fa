@@ -406,6 +406,13 @@ an identical-Fa control, CPU/wall/RSS and quartiles. Default parallelism on CPUs
 CPU-cost reference. The command, source equivalence, cache policy and profiling
 limits are documented in the linked guide.
 
+The [2026-11-17 audit](results/2026-11-17-check-speed.md) and its
+[raw samples/profile](results/2026-11-17-check-speed.json) retain the first
+interleaved series. **Every timing verdict is provisional**: one-minute load was
+well above six on the shared six-core host. The 67.16-billion-instruction profile,
+matched inputs, memory results and [ranked follow-ups](../design/todo.md#5-fa-check-and-the-three-project-shapes)
+are ready; a fresh-report quiet rerun is documented in the compiler guide.
+
 The historical compiler tables below compare Fa before/after pipeline changes.
 `packages/benchmark-typescript`'s 77-line TS6 API fixture is a separate experiment,
 not an equivalent TypeScript version of the generated Fa package.

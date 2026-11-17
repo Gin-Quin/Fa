@@ -6951,6 +6951,311 @@
           27.56396484375,
           22.580078125
         ]
+      },
+      "rss_note": "Independent GNU-time RSS supplement: original wait4 RSS is a launcher-contaminated upper bound; original CPU/wall preserved.",
+      "rss_samples": {
+        "fa": [
+          {
+            "wall": 0.14091025618836284,
+            "user": 0.014419999999999999,
+            "system": 0.016307,
+            "cpu": 0.030726999999999997,
+            "peak_rss_kib": 27296,
+            "launcher_peak_rss_kib": 27296,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 0,
+            "diagnostic_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 0.0909636807627976,
+            "user": 0.011809,
+            "system": 0.026765999999999998,
+            "cpu": 0.038575,
+            "peak_rss_kib": 27168,
+            "launcher_peak_rss_kib": 27168,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 0,
+            "diagnostic_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 0.0582685093395412,
+            "user": 0.01355,
+            "system": 0.014138,
+            "cpu": 0.027687999999999997,
+            "peak_rss_kib": 27168,
+            "launcher_peak_rss_kib": 27168,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 0,
+            "diagnostic_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 0.058539897203445435,
+            "user": 0.012119,
+            "system": 0.015087,
+            "cpu": 0.027206,
+            "peak_rss_kib": 27168,
+            "launcher_peak_rss_kib": 27168,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 0,
+            "diagnostic_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 0.052555523347109556,
+            "user": 0.011786999999999999,
+            "system": 0.012482,
+            "cpu": 0.024269,
+            "peak_rss_kib": 27036,
+            "launcher_peak_rss_kib": 27036,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 0,
+            "diagnostic_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 0.07698590913787484,
+            "user": 0.014086,
+            "system": 0.012033,
+            "cpu": 0.026119,
+            "peak_rss_kib": 27040,
+            "launcher_peak_rss_kib": 27040,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 0,
+            "diagnostic_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 0.0763097102753818,
+            "user": 0.012712,
+            "system": 0.009915,
+            "cpu": 0.022627,
+            "peak_rss_kib": 27040,
+            "launcher_peak_rss_kib": 27040,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 0,
+            "diagnostic_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 0.07756168581545353,
+            "user": 0.011915,
+            "system": 0.00979,
+            "cpu": 0.021705000000000002,
+            "peak_rss_kib": 27036,
+            "launcher_peak_rss_kib": 27036,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 0,
+            "diagnostic_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 0.43523094383999705,
+            "user": 0.043469,
+            "system": 0.078111,
+            "cpu": 0.12158,
+            "peak_rss_kib": 26908,
+            "launcher_peak_rss_kib": 26908,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 0,
+            "diagnostic_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 0.19847066886723042,
+            "user": 0.017518,
+            "system": 0.022178999999999997,
+            "cpu": 0.039696999999999996,
+            "peak_rss_kib": 27040,
+            "launcher_peak_rss_kib": 27040,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 0,
+            "diagnostic_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 0.11676670424640179,
+            "user": 0.019059,
+            "system": 0.024662,
+            "cpu": 0.043720999999999996,
+            "peak_rss_kib": 27036,
+            "launcher_peak_rss_kib": 27036,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 0,
+            "diagnostic_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "rss_method": "GNU time child"
+          }
+        ],
+        "bun": [
+          {
+            "wall": 0.18577874219045043,
+            "user": 0.039549,
+            "system": 0.050110999999999996,
+            "cpu": 0.08965999999999999,
+            "peak_rss_kib": 42380,
+            "launcher_peak_rss_kib": 42380,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 40,
+            "diagnostic_sha256": "58d8da6b1ef86f48e35e1884235441fa8d2588fd0897b83209a4dddf4a7f1882",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 0.19358249520882964,
+            "user": 0.048516,
+            "system": 0.045729,
+            "cpu": 0.094245,
+            "peak_rss_kib": 42404,
+            "launcher_peak_rss_kib": 42404,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 40,
+            "diagnostic_sha256": "0fb5aa853f146c14cb3932b4f9f6c6527d5b315496fb0a50f158d5d9b16b2d87",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 0.19145370880141854,
+            "user": 0.052383,
+            "system": 0.033086,
+            "cpu": 0.08546899999999999,
+            "peak_rss_kib": 42356,
+            "launcher_peak_rss_kib": 42356,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 40,
+            "diagnostic_sha256": "c0f34c14ca54129b3586a7dd6bff543d1d11278106ff6cbf3b9f8e03f1a17e7e",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 0.1478531127795577,
+            "user": 0.034744,
+            "system": 0.035036,
+            "cpu": 0.06978,
+            "peak_rss_kib": 42896,
+            "launcher_peak_rss_kib": 42896,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 40,
+            "diagnostic_sha256": "d052e2cd59e70b2ad029a346e153ce6983fd8ea990e4b4b6a9610c8a64ea6c16",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 0.22830760665237904,
+            "user": 0.059760999999999995,
+            "system": 0.054136,
+            "cpu": 0.113897,
+            "peak_rss_kib": 43592,
+            "launcher_peak_rss_kib": 43592,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 40,
+            "diagnostic_sha256": "0941e28b5a29277f37c323dbe8d4d9126a97415436590fe80d3a4ed14e86d581",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 0.326068805065006,
+            "user": 0.059545999999999995,
+            "system": 0.073645,
+            "cpu": 0.133191,
+            "peak_rss_kib": 43992,
+            "launcher_peak_rss_kib": 43992,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 40,
+            "diagnostic_sha256": "5474333da7520c49fd13b143e396d689203925966a66005735dfb3f1ca5c6bc1",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 0.2021261528134346,
+            "user": 0.039473,
+            "system": 0.032333,
+            "cpu": 0.07180600000000001,
+            "peak_rss_kib": 43276,
+            "launcher_peak_rss_kib": 43276,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 40,
+            "diagnostic_sha256": "0c90b986943b4abc9c8c7da19dc90987356e2464b0732fcf6651c34a412e6ea0",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 0.5000670845620334,
+            "user": 0.10148499999999999,
+            "system": 0.110621,
+            "cpu": 0.212106,
+            "peak_rss_kib": 44012,
+            "launcher_peak_rss_kib": 44012,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 40,
+            "diagnostic_sha256": "bfd690aa7601854eefaa2890ca49bae0c4e93593336ba7b8ad9efc4ff28c288d",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 0.2575318906456232,
+            "user": 0.057346999999999995,
+            "system": 0.057971999999999996,
+            "cpu": 0.11531899999999999,
+            "peak_rss_kib": 43356,
+            "launcher_peak_rss_kib": 43356,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 40,
+            "diagnostic_sha256": "882307571f1bbd9d2c760668bc333b51e19f3c7b84308636746014b84a9213e0",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 0.6873782961629331,
+            "user": 0.11971699999999999,
+            "system": 0.107111,
+            "cpu": 0.22682799999999997,
+            "peak_rss_kib": 44288,
+            "launcher_peak_rss_kib": 44288,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 40,
+            "diagnostic_sha256": "d07c0f0a93837455a7e081c69cd52bf6ad857a49bdc265fb6bdfc334a1874425",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 0.45232468005269766,
+            "user": 0.09831899999999999,
+            "system": 0.108236,
+            "cpu": 0.206555,
+            "peak_rss_kib": 42832,
+            "launcher_peak_rss_kib": 42832,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 40,
+            "diagnostic_sha256": "40294d49c9a57d3a87a4b5df2958de905e3072bdf2500957f1469f097eacda60",
+            "rss_method": "GNU time child"
+          }
+        ]
+      },
+      "rss_summary": {
+        "fa": {
+          "q1": 27036.0,
+          "median": 27040,
+          "q3": 27168.0
+        },
+        "bun": {
+          "q1": 42618.0,
+          "median": 43276,
+          "q3": 43792.0
+        }
       }
     },
     {
@@ -7476,6 +7781,311 @@
           29.63330078125,
           23.97265625
         ]
+      },
+      "rss_note": "Independent GNU-time RSS supplement: original wait4 RSS is a launcher-contaminated upper bound; original CPU/wall preserved.",
+      "rss_samples": {
+        "fa": [
+          {
+            "wall": 5.779632447753102,
+            "user": 1.595672,
+            "system": 0.839835,
+            "cpu": 2.435507,
+            "peak_rss_kib": 62932,
+            "launcher_peak_rss_kib": 62932,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 0,
+            "diagnostic_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 5.998564751818776,
+            "user": 1.293755,
+            "system": 1.260559,
+            "cpu": 2.5543139999999998,
+            "peak_rss_kib": 81480,
+            "launcher_peak_rss_kib": 81480,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 0,
+            "diagnostic_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 7.806164911948144,
+            "user": 1.503146,
+            "system": 1.447021,
+            "cpu": 2.950167,
+            "peak_rss_kib": 70372,
+            "launcher_peak_rss_kib": 70372,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 0,
+            "diagnostic_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 5.414158644620329,
+            "user": 1.6380759999999999,
+            "system": 0.230731,
+            "cpu": 1.8688069999999999,
+            "peak_rss_kib": 70056,
+            "launcher_peak_rss_kib": 70056,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 0,
+            "diagnostic_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 4.85753526026383,
+            "user": 1.6419139999999999,
+            "system": 0.337161,
+            "cpu": 1.979075,
+            "peak_rss_kib": 71028,
+            "launcher_peak_rss_kib": 71028,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 0,
+            "diagnostic_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 5.880587290972471,
+            "user": 1.654204,
+            "system": 0.478122,
+            "cpu": 2.132326,
+            "peak_rss_kib": 65600,
+            "launcher_peak_rss_kib": 65600,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 0,
+            "diagnostic_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 6.331519369967282,
+            "user": 1.549769,
+            "system": 0.6134539999999999,
+            "cpu": 2.163223,
+            "peak_rss_kib": 57588,
+            "launcher_peak_rss_kib": 57588,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 0,
+            "diagnostic_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 6.149802566040307,
+            "user": 1.554062,
+            "system": 0.6645989999999999,
+            "cpu": 2.218661,
+            "peak_rss_kib": 59536,
+            "launcher_peak_rss_kib": 59536,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 0,
+            "diagnostic_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 5.47826895210892,
+            "user": 1.521411,
+            "system": 0.348823,
+            "cpu": 1.870234,
+            "peak_rss_kib": 57804,
+            "launcher_peak_rss_kib": 57804,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 0,
+            "diagnostic_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 7.455714957788587,
+            "user": 1.670289,
+            "system": 0.533959,
+            "cpu": 2.2042479999999998,
+            "peak_rss_kib": 54680,
+            "launcher_peak_rss_kib": 54680,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 0,
+            "diagnostic_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 5.899531294126064,
+            "user": 1.430656,
+            "system": 0.424209,
+            "cpu": 1.854865,
+            "peak_rss_kib": 53200,
+            "launcher_peak_rss_kib": 53200,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 0,
+            "diagnostic_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "rss_method": "GNU time child"
+          }
+        ],
+        "bun": [
+          {
+            "wall": 2.4140358958393335,
+            "user": 0.7582599999999999,
+            "system": 0.109482,
+            "cpu": 0.8677419999999999,
+            "peak_rss_kib": 80716,
+            "launcher_peak_rss_kib": 80716,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 40,
+            "diagnostic_sha256": "e13bc7bb9ae5afc6242e1195fc4dc74c4b0364fb7965e84769e4f1e7c6df7d64",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 2.1813590098172426,
+            "user": 0.684348,
+            "system": 0.08522199999999999,
+            "cpu": 0.76957,
+            "peak_rss_kib": 80360,
+            "launcher_peak_rss_kib": 80360,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 40,
+            "diagnostic_sha256": "36495677977922df82d1a8366cb5a2eb46d9c89e0386052f888bacdeee52bfed",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 2.2966899001039565,
+            "user": 0.7811359999999999,
+            "system": 0.117432,
+            "cpu": 0.8985679999999999,
+            "peak_rss_kib": 75708,
+            "launcher_peak_rss_kib": 75708,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 40,
+            "diagnostic_sha256": "6638213b3d7412de30790dffd1fb989f6e541274709c4f6b0c92494ac6a84572",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 3.11693264124915,
+            "user": 0.732298,
+            "system": 0.16474899999999998,
+            "cpu": 0.8970469999999999,
+            "peak_rss_kib": 75348,
+            "launcher_peak_rss_kib": 75348,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 40,
+            "diagnostic_sha256": "b76a4ea4696856a9bb3909c42124c113d8d22924df034f33006895e00515a07f",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 3.0991772189736366,
+            "user": 0.790002,
+            "system": 0.124135,
+            "cpu": 0.914137,
+            "peak_rss_kib": 80284,
+            "launcher_peak_rss_kib": 80284,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 40,
+            "diagnostic_sha256": "b76a4ea4696856a9bb3909c42124c113d8d22924df034f33006895e00515a07f",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 3.476599548943341,
+            "user": 0.733131,
+            "system": 0.12939,
+            "cpu": 0.862521,
+            "peak_rss_kib": 75412,
+            "launcher_peak_rss_kib": 75412,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 40,
+            "diagnostic_sha256": "7e9027b5f193873b680abd4965809876d8c4a67ab6dc6a847a0f1a5ddb998ae4",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 1.8146927719935775,
+            "user": 0.559662,
+            "system": 0.097105,
+            "cpu": 0.656767,
+            "peak_rss_kib": 80716,
+            "launcher_peak_rss_kib": 80716,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 40,
+            "diagnostic_sha256": "9655379219df0d3f54daf97afcbe47550c37fbb98be93b8d453ee34a1ebebbf2",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 1.7093093018047512,
+            "user": 0.608533,
+            "system": 0.082411,
+            "cpu": 0.690944,
+            "peak_rss_kib": 79480,
+            "launcher_peak_rss_kib": 79480,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 40,
+            "diagnostic_sha256": "cc89d81680b5da2a14bfd9f7b4a315ebdfb611fb55090f9e61d6456fcf141edc",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 2.499218379147351,
+            "user": 0.7056049999999999,
+            "system": 0.129467,
+            "cpu": 0.8350719999999999,
+            "peak_rss_kib": 79480,
+            "launcher_peak_rss_kib": 79480,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 40,
+            "diagnostic_sha256": "14d1ff0e9a593bf126ca5f0b1b66d0b78733da762b9a72d410a9262d00996a60",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 2.5987494089640677,
+            "user": 0.623185,
+            "system": 0.13172,
+            "cpu": 0.7549049999999999,
+            "peak_rss_kib": 79372,
+            "launcher_peak_rss_kib": 79372,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 40,
+            "diagnostic_sha256": "2cad2ea4b585b8f4b15d7710d6b0970aaf4833d025330a2efa548a72404b14af",
+            "rss_method": "GNU time child"
+          },
+          {
+            "wall": 2.3364281551912427,
+            "user": 0.679759,
+            "system": 0.118223,
+            "cpu": 0.797982,
+            "peak_rss_kib": 80740,
+            "launcher_peak_rss_kib": 80740,
+            "exit": 0,
+            "failure": null,
+            "diagnostic_bytes": 40,
+            "diagnostic_sha256": "8a1bf2578fc9e698f41b41903ecaf226cdb5b0f992aa994911c3097bde20b218",
+            "rss_method": "GNU time child"
+          }
+        ]
+      },
+      "rss_summary": {
+        "fa": {
+          "q1": 57696.0,
+          "median": 62932,
+          "q3": 70214.0
+        },
+        "bun": {
+          "q1": 77540.0,
+          "median": 79480,
+          "q3": 80538.0
+        }
       }
     },
     {
@@ -8000,6 +8610,531 @@
           37.92822265625,
           36.75634765625,
           31.63427734375
+        ]
+      }
+    },
+    {
+      "files": 2000,
+      "mode": "single",
+      "start": {
+        "utc": "2026-11-17T15:37:16Z",
+        "local": "2026-11-17T16:37:16+0100",
+        "load_average": [
+          37.92822265625,
+          36.75634765625,
+          31.63427734375
+        ]
+      },
+      "samples": {
+        "fa": [
+          {
+            "cpu": 45.24793,
+            "user": 40.607288,
+            "system": 4.640642,
+            "wall": 233.9566985159181,
+            "peak_rss_kib": 244352
+          },
+          {
+            "cpu": 43.700917000000004,
+            "user": 39.523406,
+            "system": 4.177511,
+            "wall": 214.99574210355058,
+            "peak_rss_kib": 237772
+          },
+          {
+            "cpu": 41.385581,
+            "user": 38.410285,
+            "system": 2.975296,
+            "wall": 137.50260176695883,
+            "peak_rss_kib": 255460
+          },
+          {
+            "cpu": 39.14335,
+            "user": 37.399031,
+            "system": 1.744319,
+            "wall": 114.78863258194178,
+            "peak_rss_kib": 257824
+          },
+          {
+            "cpu": 38.854824,
+            "user": 36.285902,
+            "system": 2.5689219999999997,
+            "wall": 112.57520501688123,
+            "peak_rss_kib": 247036
+          },
+          {
+            "cpu": 44.145413,
+            "user": 40.30171,
+            "system": 3.843703,
+            "wall": 157.7368334690109,
+            "peak_rss_kib": 242848
+          },
+          {
+            "cpu": 42.753652,
+            "user": 38.690362,
+            "system": 4.06329,
+            "wall": 111.52986500784755,
+            "peak_rss_kib": 246020
+          },
+          {
+            "cpu": 40.440188,
+            "user": 37.420896,
+            "system": 3.019292,
+            "wall": 94.89321739599109,
+            "peak_rss_kib": 250588
+          },
+          {
+            "cpu": 39.095918,
+            "user": 36.60181,
+            "system": 2.4941079999999998,
+            "wall": 103.26910110283643,
+            "peak_rss_kib": 245548
+          },
+          {
+            "cpu": 41.600534,
+            "user": 38.659658,
+            "system": 2.940876,
+            "wall": 145.869755001273,
+            "peak_rss_kib": 243728
+          },
+          {
+            "cpu": 33.465886000000005,
+            "user": 32.061562,
+            "system": 1.404324,
+            "wall": 90.35826826980338,
+            "peak_rss_kib": 270088
+          }
+        ],
+        "bun": [
+          {
+            "cpu": 15.433810000000001,
+            "user": 13.862315,
+            "system": 1.571495,
+            "wall": 56.158914195839316,
+            "peak_rss_kib": 784260
+          },
+          {
+            "cpu": 16.831978,
+            "user": 15.096396,
+            "system": 1.735582,
+            "wall": 74.70721828797832,
+            "peak_rss_kib": 786372
+          },
+          {
+            "cpu": 15.890217,
+            "user": 14.312778,
+            "system": 1.577439,
+            "wall": 78.23393654590473,
+            "peak_rss_kib": 788552
+          },
+          {
+            "cpu": 15.962326,
+            "user": 14.307908,
+            "system": 1.654418,
+            "wall": 60.94405166385695,
+            "peak_rss_kib": 786576
+          },
+          {
+            "cpu": 15.563391,
+            "user": 14.13787,
+            "system": 1.425521,
+            "wall": 50.64222083007917,
+            "peak_rss_kib": 786004
+          },
+          {
+            "cpu": 15.949497,
+            "user": 14.614149,
+            "system": 1.335348,
+            "wall": 47.021758346352726,
+            "peak_rss_kib": 786740
+          },
+          {
+            "cpu": 16.086304,
+            "user": 14.231948,
+            "system": 1.8543560000000001,
+            "wall": 56.68761715386063,
+            "peak_rss_kib": 786784
+          },
+          {
+            "cpu": 14.281084,
+            "user": 12.893387,
+            "system": 1.387697,
+            "wall": 39.14801599876955,
+            "peak_rss_kib": 785180
+          },
+          {
+            "cpu": 15.62913,
+            "user": 14.156477,
+            "system": 1.472653,
+            "wall": 35.81021684082225,
+            "peak_rss_kib": 785896
+          },
+          {
+            "cpu": 15.706635,
+            "user": 14.089921,
+            "system": 1.616714,
+            "wall": 49.023790050297976,
+            "peak_rss_kib": 788008
+          },
+          {
+            "cpu": 15.200349999999998,
+            "user": 13.740685,
+            "system": 1.459665,
+            "wall": 36.78030269173905,
+            "peak_rss_kib": 786472
+          }
+        ],
+        "fa_control": [
+          {
+            "cpu": 44.654943,
+            "user": 40.393756,
+            "system": 4.261187,
+            "wall": 227.50120763666928,
+            "peak_rss_kib": 262272
+          },
+          {
+            "cpu": 37.50262,
+            "user": 35.815869,
+            "system": 1.6867510000000001,
+            "wall": 121.7204527137801,
+            "peak_rss_kib": 260196
+          },
+          {
+            "cpu": 43.504189999999994,
+            "user": 39.983799,
+            "system": 3.520391,
+            "wall": 189.28859294671565,
+            "peak_rss_kib": 250244
+          },
+          {
+            "cpu": 39.688725000000005,
+            "user": 37.008583,
+            "system": 2.680142,
+            "wall": 120.48794033192098,
+            "peak_rss_kib": 253880
+          },
+          {
+            "cpu": 40.978853,
+            "user": 37.47971,
+            "system": 3.499143,
+            "wall": 119.31548569211736,
+            "peak_rss_kib": 255508
+          },
+          {
+            "cpu": 42.378707,
+            "user": 38.765436,
+            "system": 3.613271,
+            "wall": 137.99442670075223,
+            "peak_rss_kib": 246804
+          },
+          {
+            "cpu": 49.84401,
+            "user": 44.206176,
+            "system": 5.637834,
+            "wall": 208.61899246601388,
+            "peak_rss_kib": 229864
+          },
+          {
+            "cpu": 40.389986,
+            "user": 36.890712,
+            "system": 3.4992739999999998,
+            "wall": 137.66693814704195,
+            "peak_rss_kib": 246620
+          },
+          {
+            "cpu": 41.597533,
+            "user": 38.327157,
+            "system": 3.270376,
+            "wall": 108.88407978788018,
+            "peak_rss_kib": 240264
+          },
+          {
+            "cpu": 40.780243,
+            "user": 37.089615,
+            "system": 3.6906280000000002,
+            "wall": 162.69439816381782,
+            "peak_rss_kib": 258288
+          },
+          {
+            "cpu": 35.120194,
+            "user": 33.511232,
+            "system": 1.608962,
+            "wall": 101.67676456505433,
+            "peak_rss_kib": 261940
+          }
+        ]
+      },
+      "orders": [
+        [
+          "fa",
+          "bun",
+          "fa_control"
+        ],
+        [
+          "fa_control",
+          "bun",
+          "fa"
+        ],
+        [
+          "bun",
+          "fa_control",
+          "fa"
+        ],
+        [
+          "fa",
+          "fa_control",
+          "bun"
+        ],
+        [
+          "fa_control",
+          "fa",
+          "bun"
+        ],
+        [
+          "bun",
+          "fa",
+          "fa_control"
+        ],
+        [
+          "fa",
+          "bun",
+          "fa_control"
+        ],
+        [
+          "fa_control",
+          "bun",
+          "fa"
+        ],
+        [
+          "bun",
+          "fa_control",
+          "fa"
+        ],
+        [
+          "fa",
+          "fa_control",
+          "bun"
+        ],
+        [
+          "fa_control",
+          "fa",
+          "bun"
+        ]
+      ],
+      "runner_sha256": "2f385943217b50090e295d267be8575dd397d782fdbc7f20e065f17bbf8b30a5",
+      "commands": {
+        "fa": [
+          "taskset",
+          "-c",
+          "5",
+          "env",
+          "-u",
+          "RAYON_NUM_THREADS",
+          "RAYON_NUM_THREADS=1",
+          "/home/claude-dev/.paseo/worktrees/0rhyrubi/check-speed/target/release/fa",
+          "check",
+          "/home/claude-dev/.paseo/worktrees/0rhyrubi/check-speed/benchmarks/build/check-speed/2000/fa"
+        ],
+        "bun": [
+          "taskset",
+          "-c",
+          "5",
+          "/home/claude-dev/.bun/bin/bun",
+          "check",
+          "--no-script",
+          "-p",
+          "/home/claude-dev/.paseo/worktrees/0rhyrubi/check-speed/benchmarks/build/check-speed/2000/ts",
+          "--threads=1"
+        ],
+        "fa_control": [
+          "taskset",
+          "-c",
+          "5",
+          "env",
+          "-u",
+          "RAYON_NUM_THREADS",
+          "RAYON_NUM_THREADS=1",
+          "/home/claude-dev/.paseo/worktrees/0rhyrubi/check-speed/target/release/fa",
+          "check",
+          "/home/claude-dev/.paseo/worktrees/0rhyrubi/check-speed/benchmarks/build/check-speed/2000/fa"
+        ]
+      },
+      "summary": {
+        "fa": {
+          "wall": {
+            "q1": 107.39948305534199,
+            "median": 114.78863258194178,
+            "q3": 151.80329423514195
+          },
+          "cpu": {
+            "q1": 39.119634,
+            "median": 41.385581,
+            "q3": 43.2272845
+          },
+          "user": {
+            "q1": 37.000420500000004,
+            "median": 38.410285,
+            "q3": 39.106884
+          },
+          "system": {
+            "q1": 2.5315149999999997,
+            "median": 2.975296,
+            "q3": 3.9534965
+          },
+          "peak_rss_kib": {
+            "q1": 244040.0,
+            "median": 246020,
+            "q3": 253024.0
+          }
+        },
+        "bun": {
+          "wall": {
+            "q1": 43.08488717256114,
+            "median": 50.64222083007917,
+            "q3": 58.81583440885879
+          },
+          "cpu": {
+            "q1": 15.4986005,
+            "median": 15.706635,
+            "q3": 15.9559115
+          },
+          "user": {
+            "q1": 13.976118,
+            "median": 14.156477,
+            "q3": 14.310343
+          },
+          "system": {
+            "q1": 1.442593,
+            "median": 1.571495,
+            "q3": 1.6355659999999999
+          },
+          "peak_rss_kib": {
+            "q1": 785950.0,
+            "median": 786472,
+            "q3": 786762.0
+          }
+        },
+        "fa_control": {
+          "wall": {
+            "q1": 119.90171301201917,
+            "median": 137.66693814704195,
+            "q3": 175.99149555526674
+          },
+          "cpu": {
+            "q1": 40.0393555,
+            "median": 40.978853,
+            "q3": 42.94144849999999
+          },
+          "user": {
+            "q1": 36.9496475,
+            "median": 37.47971,
+            "q3": 39.3746175
+          },
+          "system": {
+            "q1": 2.9752590000000003,
+            "median": 3.4992739999999998,
+            "q3": 3.6519495
+          },
+          "peak_rss_kib": {
+            "q1": 246712.0,
+            "median": 253880,
+            "q3": 259242.0
+          }
+        }
+      },
+      "controls": {
+        "wall": {
+          "ratio_of_medians": 1.1993081113564839,
+          "q1": 1.0110288901936002,
+          "median": 1.059873581169365,
+          "q3": 1.2509403472526222,
+          "ratios": [
+            0.9724073261411252,
+            0.5661528527162861,
+            1.3766182640494642,
+            1.049650454246075,
+            1.059873581169365,
+            0.8748395898784334,
+            1.870521339296294,
+            1.4507563546144226,
+            1.0543723013474504,
+            1.11534017564092,
+            1.12526243045578
+          ],
+          "passes": false
+        },
+        "cpu": {
+          "ratio_of_medians": 0.9901722293085604,
+          "q1": 0.9835882174326405,
+          "median": 1.0139327625254355,
+          "q3": 1.0529288665587857,
+          "ratios": [
+            0.9868947154046607,
+            0.858165516297976,
+            1.0511919598277475,
+            1.0139327625254355,
+            1.0546657732898237,
+            0.9599798511342503,
+            1.165842160103656,
+            0.9987586111122926,
+            1.063986603409594,
+            0.9802817194606203,
+            1.0494326670448824
+          ],
+          "passes": true
+        }
+      },
+      "comparisons": {
+        "wall": {
+          "ratio_of_medians": 2.266658742457096,
+          "q1": 2.0951991394742464,
+          "median": 2.4567026820607993,
+          "q3": 2.929638955037508,
+          "ratios": [
+            4.165976174326594,
+            2.8778442971172318,
+            1.7575825509723326,
+            1.8835083892201658,
+            2.2229515841062146,
+            3.3545498725750194,
+            1.9674466948422786,
+            2.4239598093291277,
+            2.8837887679337837,
+            2.975489142141232,
+            2.4567026820607993
+          ],
+          "threshold": 1.2,
+          "verdict": "behind"
+        },
+        "cpu": {
+          "ratio_of_medians": 2.634910724034779,
+          "q1": 2.499015072184069,
+          "median": 2.6044692152410507,
+          "q3": 2.7127960159295097,
+          "ratios": [
+            2.9317407691295925,
+            2.5963031201680518,
+            2.6044692152410507,
+            2.452233465223051,
+            2.4965525829171806,
+            2.767824778424047,
+            2.6577672534349723,
+            2.831730980645447,
+            2.5014775614509572,
+            2.64859621427505,
+            2.2016523303739723
+          ],
+          "threshold": 1.2,
+          "verdict": "behind"
+        }
+      },
+      "end": {
+        "utc": "2026-11-17T16:44:53Z",
+        "local": "2026-11-17T17:44:53+0100",
+        "load_average": [
+          17.67822265625,
+          22.81201171875,
+          24.05078125
         ]
       }
     }

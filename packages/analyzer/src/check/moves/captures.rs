@@ -31,6 +31,7 @@ impl Walker<'_> {
 			if !events.iter().any(|&index| graph.reachable[index]) {
 				continue;
 			}
+			let complete = self.capture_observations_complete(creation);
 			let mut copies = Vec::new();
 			for symbol in info.captures {
 				let Some(mut ty) = self.a.capture_types.get(&(info.lambda, symbol)).copied() else {
@@ -43,7 +44,7 @@ impl Walker<'_> {
 					continue;
 				}
 				let owned = self.ownership_source_owned(symbol, creation);
-				let later = if self.capture_observations_complete(creation) {
+				let later = if complete {
 					graph.later_uses(symbol)
 				} else {
 					graph.later_uses_where(symbol, |node| {
@@ -77,9 +78,7 @@ impl Walker<'_> {
 				});
 				if !owned || witness.is_some() {
 					copies.push((symbol, ty, witness));
-				} else if self.capture_observations_complete(creation)
-					&& self.a.capture_moves.insert((info.lambda, symbol))
-				{
+				} else if complete && self.a.capture_moves.insert((info.lambda, symbol)) {
 					self.retention_version += 1;
 				}
 			}
@@ -586,6 +585,22 @@ mod tests {
 		let source = "type Reader = () => Integer\nfunction make = (again: Boolean): Reader => {\n let items = [1]\n function saved = (): Integer => items.length\n if again { console.log(make(false)()) }\n saved\n}\n";
 		assert!(codes(source).is_empty());
 	}
+	#[test]
+	fn named_and_anonymous_creations_use_the_same_enclosing_source_context() {
+		for (declaration, result) in [
+			("function saved = (): Integer => items.length", "saved"),
+			(
+				"let saved: (Reader, Integer) = ((() => items.length), 0)",
+				"saved[0]",
+			),
+		] {
+			let source = format!(
+				"type Reader = () => Integer\nfunction make = (): Reader => {{\nmutable items = [1]\nfunction replace = (): Integer => {{ items = [2]\nitems.length }}\n{declaration}\nconsole.log(replace())\n{result}\n}}\n"
+			);
+			analyzed(&source);
+		}
+	}
+
 	#[test]
 	fn replacing_a_borrowed_binding_does_not_read_its_old_value() {
 		let source = "type Reader = () => Integer\nfunction make = (): Reader => {\n mutable items = [1]\n function replace = (): Integer => { items = [2]\n items.length }\n function saved = (): Integer => items.length\n console.log(replace())\n saved\n}\n";

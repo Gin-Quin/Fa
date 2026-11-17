@@ -1,0 +1,27 @@
+type Reader = () => Integer
+type Made = (Integer, Reader)
+function named = (): Made => {
+	mutable items = [1]
+	function replace = (): Integer => {
+		items = [2, 3]
+		items.length
+	}
+	function saved = (): Integer => items.length
+	(replace(), saved)
+}
+function anonymous = (): Made => {
+	mutable items = [1]
+	function replace = (): Integer => {
+		items = [2, 3]
+		items.length
+	}
+	let saved: (Reader, Integer) = ((() => items.length), 0)
+	(replace(), saved[0])
+}
+function summary = (): Integer => {
+	let first = named()
+	let second = anonymous()
+	(first[0] + second[0]) * 10 + first[1]() + second[1]()
+}
+static compiled = @summary()
+console.log(compiled, summary()) -- prints: 42 42

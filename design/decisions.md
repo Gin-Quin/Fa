@@ -3055,3 +3055,7 @@ Read-only native collection backing uses the same closed borrowing proof as fram
 ### Ownership enforcement: pending task source lifetimes (implementation, 2026-11-17)
 
 A move proof includes the outstanding borrows of kept tasks, frozen at each read or capture declaration and resolved through the final source-observation summaries. Moving a Task handle does not end its source borrows; awaiting or cancelling that handle does. Collection/resource transfer diagnostics identify the task start, and the collection diagnostic offers the checked independent-copy edit. Ordinary values retain implicit value semantics; a retained-owner fact prevents native last-use heuristics from moving their String or aggregate storage while a task still borrows it. Immutable Task-origin chains use an iterative lookup.
+
+### Ownership enforcement: invocation contexts and incoming owners (implementation, 2026-11-17)
+
+Original-source observations use the same Body/Default context identity as the invocation graph. An anonymous function creation belongs to the enclosing execution, and a lambda default's construction and body never share one summary key. A closed CFG proof for a direct captured-variable replacement distinguishes the incoming owner from the value assigned later; reads reachable without the definition still observe the incoming owner. Alias and transitive storage versions remain conservative rather than authorizing a transfer from a flat read set. Each capture creation computes its complete-proof predicate once.

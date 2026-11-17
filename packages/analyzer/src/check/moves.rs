@@ -28,6 +28,7 @@ mod readiness;
 mod readiness_calls;
 mod source_facts;
 mod validity;
+mod versions;
 
 /// The last use of a local seen so far.
 #[derive(Copy, Clone, Debug)]

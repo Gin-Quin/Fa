@@ -4,7 +4,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::graph::Graph;
-use crate::analysis::{Argument, Callee, FieldValue, NodeFlags};
+use crate::analysis::{Argument, Callee, FieldValue, NodeFlags, OwnershipContext};
 use crate::check::Walker;
 use crate::ids::{NodeId, PlaceId, SymbolId};
 use crate::symbols::{Resolution, SymbolKind};
@@ -304,23 +304,23 @@ impl Walker<'_> {
 				}
 			}
 		}
-		let mut free: FxHashMap<NodeId, FxHashSet<PlaceId>> = FxHashMap::default();
+		let incoming = self.incoming_source_reads(&reads, &defaults);
+		let mut free: FxHashMap<OwnershipContext, FxHashSet<PlaceId>> = FxHashMap::default();
 		for (&node, symbols) in &reads {
 			if self.access_roots.contains(&node) {
 				continue;
 			}
-			let body = self.ownership_read_context(node, &defaults);
-			let entry = self.ownership_observation_entry(body, &defaults);
+			let body = self.invocation_context(node, &defaults);
+			let entry = self.ownership_observation_entry(body);
 			if let Some(data) = self.a.ownership_source_graph.entries.get(&entry)
 				&& !data.pending
 			{
 				let sources = data.reads.get(&node).cloned().unwrap_or_default();
 				for source in sources {
 					if let crate::flow::PlaceRoot::Symbol(symbol) = source.root
-						&& self.ownership_read_context(
-							self.a.symbols.symbol(symbol).decl_node,
-							&defaults,
-						) != body
+						&& self
+							.invocation_context(self.a.symbols.symbol(symbol).decl_node, &defaults)
+							!= body && self.observes_incoming_owner(&incoming, body, node, symbol)
 					{
 						let paths: Vec<_> = self
 							.move_places
@@ -342,7 +342,10 @@ impl Walker<'_> {
 				continue;
 			}
 			for &symbol in symbols {
-				if self.ownership_read_context(self.a.symbols.symbol(symbol).decl_node, &defaults)
+				if !self.observes_incoming_owner(&incoming, body, node, symbol) {
+					continue;
+				}
+				if self.invocation_context(self.a.symbols.symbol(symbol).decl_node, &defaults)
 					== body
 				{
 					continue;
@@ -377,7 +380,10 @@ impl Walker<'_> {
 						continue;
 					};
 					let callee = callee.clone();
-					let mut places = free.get(&callee.lambda).cloned().unwrap_or_default();
+					let mut places = free
+						.get(&OwnershipContext::Body(callee.lambda))
+						.cloned()
+						.unwrap_or_default();
 					let mut bindings = FxHashMap::default();
 					for (param, argument) in callee.params.iter().zip(&info.arguments) {
 						let argument_places = match *argument {
@@ -386,7 +392,11 @@ impl Walker<'_> {
 							}
 							Argument::Default => {
 								if let Some(default) = param.default {
-									for &place in free.get(&default).into_iter().flatten() {
+									for &place in free
+										.get(&OwnershipContext::Default(default))
+										.into_iter()
+										.flatten()
+									{
 										places.extend(
 											self.substitute_argument_places(place, &bindings),
 										);
@@ -426,7 +436,7 @@ impl Walker<'_> {
 	fn borrowed_callback_argument_reads(
 		&self,
 		arguments: &[Argument],
-		free: &FxHashMap<NodeId, FxHashSet<PlaceId>>,
+		free: &FxHashMap<OwnershipContext, FxHashSet<PlaceId>>,
 	) -> FxHashSet<PlaceId> {
 		let mut places = FxHashSet::default();
 		for argument in arguments {
@@ -444,7 +454,12 @@ impl Walker<'_> {
 						continue;
 					}
 					if let Some(info) = self.a.function(function) {
-						places.extend(free.get(&info.lambda).into_iter().flatten().copied());
+						places.extend(
+							free.get(&OwnershipContext::Body(info.lambda))
+								.into_iter()
+								.flatten()
+								.copied(),
+						);
 					}
 				}
 			}
@@ -457,18 +472,16 @@ impl Walker<'_> {
 		call: NodeId,
 		places: FxHashSet<PlaceId>,
 		defaults: &FxHashSet<NodeId>,
-		free: &mut FxHashMap<NodeId, FxHashSet<PlaceId>>,
+		free: &mut FxHashMap<OwnershipContext, FxHashSet<PlaceId>>,
 		reads: &mut FxHashMap<NodeId, Vec<SymbolId>>,
 	) -> bool {
-		let body = self.ownership_read_context(call, defaults);
+		let body = self.invocation_context(call, defaults);
 		let mut changed = false;
 		for &place in &places {
 			let Some(symbol) = self.place_symbol(place) else {
 				continue;
 			};
-			if self.ownership_read_context(self.a.symbols.symbol(symbol).decl_node, defaults)
-				!= body
-			{
+			if self.invocation_context(self.a.symbols.symbol(symbol).decl_node, defaults) != body {
 				changed |= free.entry(body).or_default().insert(place);
 			}
 		}
@@ -482,7 +495,7 @@ impl Walker<'_> {
 	fn expand_callable_capture_reads(
 		&self,
 		call: NodeId,
-		free: &FxHashMap<NodeId, FxHashSet<PlaceId>>,
+		free: &FxHashMap<OwnershipContext, FxHashSet<PlaceId>>,
 		places: &mut FxHashSet<PlaceId>,
 	) {
 		let mut pending: Vec<_> = places.iter().copied().collect();
@@ -491,7 +504,11 @@ impl Walker<'_> {
 				let Some(info) = self.a.function(function) else {
 					continue;
 				};
-				for &source in free.get(&info.lambda).into_iter().flatten() {
+				for &source in free
+					.get(&OwnershipContext::Body(info.lambda))
+					.into_iter()
+					.flatten()
+				{
 					if places.insert(source) {
 						pending.push(source);
 					}
@@ -502,29 +519,24 @@ impl Walker<'_> {
 
 	fn ownership_observation_entry(
 		&self,
-		context: NodeId,
-		defaults: &FxHashSet<NodeId>,
+		context: OwnershipContext,
 	) -> crate::analysis::OwnershipEntry {
-		use crate::analysis::{OwnershipContext, OwnershipEntry, OwnershipEntryMode};
-		let owner = if defaults.contains(&context) {
-			self.a
+		use crate::analysis::{OwnershipEntry, OwnershipEntryMode};
+		let owner = match context {
+			OwnershipContext::Default(default) => self
+				.a
 				.functions
 				.values()
 				.find(|info| {
 					info.params
 						.iter()
-						.any(|param| param.default == Some(context))
+						.any(|param| param.default == Some(default))
 				})
-				.map_or(context, |info| info.lambda)
-		} else {
-			context
+				.map_or(default, |info| info.lambda),
+			OwnershipContext::Body(body) => body,
 		};
 		OwnershipEntry {
-			context: if defaults.contains(&context) {
-				OwnershipContext::Default(context)
-			} else {
-				OwnershipContext::Body(context)
-			},
+			context,
 			mode: if self.a.escapes.contains(&owner) {
 				OwnershipEntryMode::Owned
 			} else {
@@ -543,9 +555,10 @@ impl Walker<'_> {
 			.values()
 			.flat_map(|info| info.params.iter().filter_map(|param| param.default))
 			.collect();
-		let context = self.ownership_read_context(creation, &defaults);
-		let mut pending = vec![self.ownership_observation_entry(context, &defaults)];
+		let context = self.invocation_context(creation, &defaults);
+		let mut pending = vec![self.ownership_observation_entry(context)];
 		let mut seen = FxHashSet::default();
+		let versioned = self.versioned_source_roots(&defaults);
 		while let Some(entry) = pending.pop() {
 			if !seen.insert(entry) {
 				continue;
@@ -556,16 +569,17 @@ impl Walker<'_> {
 			if data.pending {
 				return false;
 			}
-			// A free read after replacement observes the new value, not the
-			// incoming owner. Such entries need versioned observations before
-			// their flat read set can prove a transfer.
+			// Direct whole-slot replacements have an incoming-owner CFG proof.
+			// Alias and transitive versions remain separate unresolved inputs.
 			if self.move_writes.iter().any(|(&node, &place)| {
-				self.ownership_read_context(node, &defaults) == entry.context.node()
+				self.invocation_context(node, &defaults) == entry.context
 					&& self.places.steps(place).is_empty()
 					&& self.place_symbol(place).is_some_and(|symbol| {
 						self.ownership_body(self.a.symbols.symbol(symbol).decl_node)
 							!= self.ownership_body(node)
-					})
+					}) && self
+					.place_symbol(place)
+					.is_some_and(|symbol| !versioned.contains(&(entry.context, symbol)))
 			}) {
 				return false;
 			}
@@ -583,26 +597,10 @@ impl Walker<'_> {
 	/// separate from the unconditional observations of the function body.
 	pub(super) fn ownership_read_context(
 		&self,
-		mut node: NodeId,
+		node: NodeId,
 		defaults: &FxHashSet<NodeId>,
 	) -> NodeId {
-		loop {
-			if defaults.contains(&node)
-				|| matches!(
-					self.view(node),
-					View::Lambda { .. } | View::Test { .. } | View::Watch(_)
-				) || (matches!(self.view(node), View::Do(_))
-				&& self
-					.parent(node)
-					.is_some_and(|parent| matches!(self.view(parent), View::Start(_))))
-			{
-				return node;
-			}
-			let Some(parent) = self.parent(node) else {
-				return node;
-			};
-			node = parent;
-		}
+		self.invocation_context(node, defaults).node()
 	}
 
 	fn ownership_result_places(&self, value: NodeId) -> Vec<PlaceId> {

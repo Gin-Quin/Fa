@@ -463,6 +463,21 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn captures_transfer_the_old_owner_before_a_borrowed_replacement() {
+		let source = include_str!("../../analyzer/tests/cases/ownership-capture-replacements.fa");
+		for target in [Target::Native, Target::Wasm] {
+			let ir = ir_at_target("capture-replacements", source, true, OptLevel::O0, target);
+			for name in ["fa.named", "fa.anonymous"] {
+				let body = function(&ir, name);
+				assert!(
+					!body.lines().any(|line| line.contains("call ptr @fa.copy")),
+					"{target:?}: {body}"
+				);
+			}
+		}
+	}
+
+	#[test]
 	fn pending_task_borrows_preserve_ordinary_owners_and_end_at_await() {
 		let source = include_str!("../../analyzer/tests/cases/ownership-pending-task-copies.fa");
 		for target in [Target::Native, Target::Wasm] {

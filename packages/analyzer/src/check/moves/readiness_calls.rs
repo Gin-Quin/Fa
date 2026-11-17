@@ -420,7 +420,7 @@ impl Walker<'_> {
 				.map_or(0, |index| propagation.phase(entry, index, edge.site))
 		}
 	}
-	fn invocation_context(&self, node: NodeId, defaults: &FxHashSet<NodeId>) -> Context {
+	pub(super) fn invocation_context(&self, node: NodeId, defaults: &FxHashSet<NodeId>) -> Context {
 		let mut current = node;
 		loop {
 			if current != node

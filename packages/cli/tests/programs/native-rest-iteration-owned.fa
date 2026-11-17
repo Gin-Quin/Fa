@@ -1,0 +1,31 @@
+-- Rest values with owned fields must be released on every iteration.
+type RowWithValues = { id: Integer, values: Array<String> }
+let rows: Array<RowWithValues> = [
+	{ id = 1, values = ["a"] },
+	{ id = 2, values = ["b", "c"] },
+	{ id = 3, values = ["d", "e", "f"] }
+]
+for { id as recordId, ...restValues } in copy rows {
+	console.log(recordId, restValues.values.length)
+	if recordId == 1 { continue }
+	if recordId == 3 { break }
+}
+-- prints: 1 1
+-- prints: 2 2
+-- prints: 3 3
+
+for { id as recordId, ...restValues } in Pool<RowWithValues>.from(copy rows) {
+	console.log(recordId, restValues.values.length)
+	if recordId == 1 { continue }
+	if recordId == 2 { break }
+}
+-- prints: 1 1
+-- prints: 2 2
+
+for { id as recordId, ...restValues } in Columnar<RowWithValues>.from(copy rows) {
+	console.log(recordId, restValues.values.length)
+	if recordId == 1 { continue }
+	if recordId == 2 { break }
+}
+-- prints: 1 1
+-- prints: 2 2

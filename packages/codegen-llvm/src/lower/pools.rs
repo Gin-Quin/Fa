@@ -836,6 +836,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			pointer: address,
 			repr: element,
 		};
+		let mark = self.mark();
 		match (variable, copy_slot) {
 			// the fields of an element of a columnar, straight from the runs
 			// of its chunk
@@ -868,7 +869,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			_ => {}
 		}
-		let mark = self.mark();
 		if let Some(copy) = copy_slot {
 			self.cleanups
 				.borrow_mut()

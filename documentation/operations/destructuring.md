@@ -216,7 +216,9 @@ received argument before later parameters and the body use those names. Object r
 their declared layout, using the existing value-copy helpers. Array rest uses
 the same owned slice operation as range indexing, after the pattern's single
 length check. Rest bindings participate in the ordinary local or module cleanup,
-including in loop bodies and async frames.
+including in loop bodies and async frames. A loop establishes its iteration
+cleanup scope before creating a rest binding, so owned fields are released on
+fallthrough, `continue` and `break`.
 An optional field with a default branches on presence and joins in storage of
 the binding's nonoptional type, including for a nested pattern. Only the absent
 branch evaluates the default; both branches use the ordinary ownership helpers.

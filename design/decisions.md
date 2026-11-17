@@ -2558,3 +2558,10 @@ JIT latency and host scheduling can exceed the 50 ms threshold without changing
 any Fa result. Exit status, all stdout lines, leaks and every other diagnostic
 remain strict, as do O3 diagnostics; a negative oracle test guards those cases.
 The dedicated async-long-turn runtime regression still requires the warning.
+
+Loop rest projections belong to the iteration's cleanup scope. Take the existing
+mark before binding the pattern in array and pool/columnar loops; keep iterable
+temporaries in their surrounding scope and retain the existing copy-slot cleanup.
+This covers fallthrough, continue and break without changing ownership rules,
+copy/drop helpers or collection layout/optimization decisions. The owned-array
+field regression exposed five leaked blocks before this integration fix.

@@ -2794,6 +2794,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.expect("llvm.assume");
 			self.builder.build_call(assume, &[external.into()], "")?;
 		}
+		// A rest binding owns its projection for this iteration, including
+		// when the body leaves through `break` or `continue`.
+		let mark = self.mark();
 		let destructured = pattern.and_then(|pattern| self.analysis.pattern(pattern).cloned());
 		match (variable, copy_slot) {
 			_ if destructured.is_some() => {
@@ -2816,7 +2819,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				node,
 			)?;
 		}
-		let mark = self.mark();
 		if let Some(copy) = copy_slot {
 			// dropped at the end of each round, and by `break` and `continue`
 			self.cleanups

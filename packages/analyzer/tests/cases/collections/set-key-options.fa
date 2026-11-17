@@ -1,0 +1,12 @@
+-- A separate key is a Map entry, never a Set constructor callback.
+let untyped = Set.from([1, 2], key = (value) => value) -- error FN023
+let untypedGrowing = GrowingSet.from([1, 2], key = (value) => value) -- error FN023
+let plain = Set.from([1, 2], key = (value: Integer) => value)          -- error FN023
+let growing = GrowingSet.from([1, 2], key = (value: Integer) => value) -- error FN023
+function identity = (value: Integer): Integer => value
+let named = Set.from([1, 2], key = identity)                                   -- error FN023
+let typed = Set<Integer>.from([1], key = identity)                             -- error FN023
+let typedGrowing = GrowingSet<Integer>.from([1], key = identity, capacity = 8) -- error FN023
+let nonCallback = Set.from([1], key = 1)                                       -- error FN023
+function generic = <Item>(items: Array<Item>): Set<Item> =>
+	Set.from(items, key = (value: Item) => value) -- error FN023

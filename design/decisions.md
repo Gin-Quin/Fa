@@ -42,7 +42,7 @@ Reference-return implementation: keep the ordinary item TypeId for data/layout a
 > **Superseded ownership wording.** Structural views borrow; this historical copy-in/writeback description does not authorize hidden structure copies under the November 16 policy.
 
 - **Parameters a function changes** (`mutates` / `invalidates` roots, `self` included) are passed by pointer to the caller's place; a structural view of another object type is copied in and written back after the call (equivalent under the alias rule). `use` / `mutable use` / `reuse` are pointers into places (a `mutable use` keeps its address in a slot); a `for` variable over an array or a table points at the item. Requirements are hidden pointer parameters after the regular ones, in the order of `FnSig::requires`; `provide` binds a place, or a temporary owned by its block. A closure that doesn't escape (`Analysis::escapes`) holds pointers to the captured variables (local functions included); an escaping one owns heap copies, its environment starting with its drop and its copy. (LLVM backend M2)
-- **Maps and sets** (native and wasm): a pointer to an insertion-ordered table of the runtime (entries `{ hash, live, key, value }` in order, an open-addressing index; a deleted entry stays dead until the entries are compacted, when full). Keys are hashed and compared by functions generated per shape: Fa `==`, floats with SameValueZero, like the JavaScript runtime's `FaHashMap`; an existing key keeps its place and its first spelling. `Set.from(…, key = …)` is not lowered yet. (LLVM backend M2)
+- **Maps and sets** (native and wasm): a pointer to an insertion-ordered table of the runtime (entries `{ hash, live, key, value }` in order, an open-addressing index; a deleted entry stays dead until the entries are compacted, when full). Keys are hashed and compared by functions generated per shape: Fa `==`, floats with SameValueZero, like the JavaScript runtime's `FaHashMap`; an existing key keeps its place and its first spelling. The `key` option was removed on 2026-11-17; this part is superseded by “Set standard hashing and equality (2026-11-17)” below. (LLVM backend M2)
 - **Leak checks**: `Options::leak_check` counts the live blocks; at the normal end of the program a nonzero count prints `leak: <n> blocks` and exits with 102 (and natively, freed blocks are filled with `0xAB`). Every end-to-end program of the native, wasm and freestanding tests runs with it. (LLVM backend M2)
 - **Stack overflow** (values brief D-26): on `native`, `main` installs a `SIGSEGV` handler on an alternate stack that prints `stop: stack overflow` and exits with 101; the wasm loader converts the engine's `RangeError`. Not handled yet when freestanding. (LLVM backend M1)
 - **Output buffering**: the standard output is buffered by the runtime (8 KiB) and flushed when full, before anything is written to the standard error, at exit and at a stop. (LLVM backend M1)
@@ -169,7 +169,7 @@ The parser decisions listed in the parser rework (see the "Parser Package Notes"
 - **Overflow checks off** on JavaScript: number operations are plain (precision is lost beyond 2^53), and the bigint-represented types (`Int64`…) are not wrapped either: they grow beyond their width, the cheapest choice; `wrappingAdd`… wrap explicitly. Divisor, index, shift and conversion checks stay.
 - **Tuples** are JavaScript arrays (`(1, "a")` is `[1, "a"]`, what a TypeScript developer expects); since printing can't tell them from arrays, a value whose JavaScript representation doesn't say how it prints (tuples, enumeration members, `Float32`, percentages, and the arrays, optionals, maps and objects holding them) prints through a formatter generated from its static type, a module-level constant.
 - **Ranges** are `FaRange` objects, copied like other composites (`copy$Range`); `for i in range` over a value iterates `faRangeValues`, which stops on a range without start.
-- **Sets and maps**: a JavaScript `Set`/`Map` when the elements (keys) are primitives (SameValueZero is Fa's `==` there, and `NaN` is one element, as the case se-9 expects), the runtime's `FaSet`/`FaHashMap` otherwise and for a set with a `key` function. `Array.from`, `Set.from` and `Map.from` take any collection, a range or a string.
+- **Sets and maps**: a JavaScript `Set`/`Map` when the elements (keys) are primitives (SameValueZero is Fa's `==` there, and `NaN` is one element, as the case se-9 expects), the runtime's `FaSet`/`FaHashMap` otherwise. The former set `key` function was removed on 2026-11-17; this part is superseded by “Set standard hashing and equality (2026-11-17)” below. `Array.from`, `Set.from` and `Map.from` take any collection, a range or a string.
 - **Structural typing**: a value stored as another object type (`coercions`) is copied with the target's fields only (`copy$Human`); `==` on an object type compares that type's fields (`equals$Human`).
 - **Generic functions are erased** (one JavaScript function); a compile-time value parameter and a method required by a constraint are *hidden leading parameters* (`repeatText(times, text)`, `describeAll($Item$describe, items)`), given by each call from its instantiation and forwarded by an enclosing generic function. The analyzer doesn't type arithmetic on an `Integer | Float` parameter yet (`E-NUM-18`), so there is no per-member code.
 - **Hot loops**: `a // b` and `a %% b` with a dividend proven `>= 0` and a divisor proven `> 0` are `a % b`, `(a / b) | 0` within 32 bits and `(a - a % b) / b` beyond; writes through a local array and index read them directly (no temporaries); a module value with a literal value is a module-level `const`. Inlining `faIndex` (`i >>> 0 < a.length ? a[i] : …`) was measured and gained nothing on Bun: the helper stays.
@@ -2724,7 +2724,6 @@ arguments still retain their place. Borrowing a compile-time constant gives it
 caller-lived temporary storage. JSON default closures capture their snapshot
 slots by value, matching their nonescaping parser lifetime.
 
-<<<<<<< HEAD
 ## Ownership enforcement: verdict on `feature/ownership` and language decisions (lead, 2026-11-17)
 
 The enforcement of the ownership rules was given on 2026-11-16 as one all-or-nothing task. After 36 hours the branch `feature/ownership` held 118 commits, 367 files and 25,000 added lines, and nothing that could be reviewed or merged. It was stopped and reviewed as a design: [`reviews/ownership-enforcement-2026-11-17.md`](reviews/ownership-enforcement-2026-11-17.md). Decisions:
@@ -2756,7 +2755,7 @@ From the audit [`reviews/tooling-2026-11-17.md`](reviews/tooling-2026-11-17.md):
 - **A Git tag whose `package.fa` version doesn't match its name (`DEP003`) is skipped with a warning** when versions are resolved; it is an error only when that exact version is requested. One bad tag of a library must not block every consumer's `fa update`.
 - **A distribution of Fa always ships `fa-native` next to `fa`.** A target that a package declares is never skipped silently: without `fa-native`, `fa build` builds the other targets, reports the native ones as failed (`CLI009`) and exits with 1, as today.
 - **Dependency cycles between packages are refused**, with a diagnostic that names the cycle. Files of one package may refer to each other freely; packages form an acyclic graph (they are compiled, cached and published as units).
-=======
+
 ## check-speed (2026-11-17)
 
 The checker audit uses the existing seeded compiler generator and a TypeScript
@@ -2807,7 +2806,7 @@ instruction profiling and memory first; timing requires one-minute load <6.
 Each completed timing round is retained if a load spike stops the run. An explicit
 --allow-busy produces one provisional series with observed load beside the
 figures, without a 20% acceptance claim. The lead reruns it in a quiet window.
->>>>>>> tooling/check-speed
+
 
 ## Diagnostics audit: style rules and decisions (lead, 2026-11-17)
 
@@ -2815,3 +2814,16 @@ From the audit [`reviews/diagnostics-2026-11-17.md`](reviews/diagnostics-2026-11
 
 - **An unused `catch` binding doesn't warn.** A `catch` names its error by syntax (`E-ERR-9`), and a `catch` that gives a fallback (`catch error => 0`) is the common, documented form: `W-DECL-2` is not reported for it.
 - Open: which code scheme is printed (the area codes such as `MEM004`, or the `E-…`/`W-…` names); the other becomes an alias.
+
+## Set standard hashing and equality (2026-11-17)
+
+`Set.from` and `GrowingSet.from` now use the common `[source, capacity]` constructor ABI. The removed `key` option emits `FN023` with a `Map` suggestion. No stored-key provenance or special sharing flag exists in the current analyzer; the obsolete callback slot and its type checks are removed. This ports only the Set slices from the ownership WIP, without changing ownership operations.
+
+The JavaScript runtime's `FaSet` stores the complete item as its hash-table key. Set operations probe the other set directly, since both sides use standard equality. Existing source/capacity evaluation and exceptional cleanup are preserved. The compile-time interpreter distinguishes ordinary IEEE equality from structural SameValueZero key equality, so NaN-containing items deduplicate, can be found and can be removed consistently with both backends; arrays retain IEEE membership. Map key lookup/insertion uses that same key equality when maps occur inside set items.
+
+The combined async/generic Set regression exposed a pre-existing JavaScript function-value ABI gap: an explicit application used as a value was mistaken for a call by the async instance planner. Such applications now request both function entries and bind their hidden arguments through the async-value descriptor, keeping the task argument first. The original compiler reproduces the failure. This changes only entry planning/binding, not capture ownership or function lifetime.
+
+A rejected `key` option does not contextualize or check its callback: no valid callback signature exists. This avoids an unrelated FN061 annotation suggestion on the old untyped callback syntax; the single FN023 instead directs the user to Map. Other unknown options retain their normal expression checking.
+
+The wasm regression also exposed the same classification error in the analyzer: after checking a generic application it recorded a blocking call of the underlying function. Generic applications now skip the runtime-call hook, while ordinary invocations still contribute their async/blocking summaries. A wasm-targeted negative fixture accepts creating/awaiting the function value and still rejects a real blocking invocation (CONC010).
+

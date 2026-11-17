@@ -86,7 +86,9 @@ impl Walker<'_> {
 		}
 		self.check_parallel_reduce(n, callee, ty);
 		// what it waits for, and where it can block (tasks.rs)
-		self.after_call(n, callee);
+		if !self.a.has_flags(n, NodeFlags::GENERIC_APPLICATION) {
+			self.after_call(n, callee);
+		}
 		// `pool.submit(…)` of a pool without `timeout` (concurrency.rs)
 		let ty = self.submit_without_timeout(n, callee, ty);
 		// `@add(2, 4)`: evaluated while compiling (comptime.rs)

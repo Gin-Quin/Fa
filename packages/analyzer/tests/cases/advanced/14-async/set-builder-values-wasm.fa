@@ -1,0 +1,11 @@
+-- analysis-target: wasm
+-- Specializing a function creates a value; only invoking it may wait.
+use { sleep } = std.time
+async function distinct = <Item>(items: Array<Item>): Set<Item> => {
+	await sleep(1)
+	Set.from(items, capacity = 16)
+}
+let make = distinct<Integer>
+let throughValue = await make([1, 2, 2])
+let direct = await distinct<Integer>([1, 2, 2])
+let blocking = distinct<Integer>([1, 2, 2]) -- error CONC010

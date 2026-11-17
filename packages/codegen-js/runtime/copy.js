@@ -18,7 +18,7 @@ import { faSides } from "./relations.js";
 // @fa-helper faCopyShell deps: FaHashMap FaSet
 /**
  * An empty container of the same kind as `source`: an array, a `Map`, a
- * `FaHashMap` or `FaSet` with the same hash and key function, a `Set`, or an
+ * `FaHashMap` or `FaSet` with the same standard hash and equality, a `Set`, or an
  * object with the same prototype.
  * @param {object} source
  * @returns {any}

@@ -16,3 +16,5 @@ let values = Set.from(["x".repeat(200)], capacity = fail()) catch _ => []
 console.log(values.size) -- prints: 0
 let mapping = Map.from([("x".repeat(200), "value")], capacity = fail()) catch _ => []
 console.log(mapping.size) -- prints: 0
+let growingValues = GrowingSet.from(["x".repeat(200)], capacity = fail()) catch _ => []
+console.log(growingValues.size) -- prints: 0

@@ -1,0 +1,8 @@
+-- The same union NaN as a map key, and ordinary `==` (IEEE) on a union holding NaN.
+let nan = 0.0 / 0.0
+mutable map: Map<Float | Boolean, Integer> = []
+map[nan] = 1
+map[nan] = 2
+let u: Float | Boolean = nan
+let v: Float | Boolean = nan
+console.log(map.size, map.get(nan) ?? 0, u == v, u == u) -- prints: 1 2 false false

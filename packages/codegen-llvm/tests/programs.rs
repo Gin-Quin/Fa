@@ -14,6 +14,7 @@
 //! ```
 //!
 //! `FA_PROGRAMS=filter` runs the programs whose path contains `filter`.
+//! `FA_LLVM_TEST_COMPILATIONS=1` serializes compilations on memory-limited hosts.
 //! `FA_NATIVE_TRIPLE`, a matching `CC`, and `FA_NATIVE_RUNNER` (an executable,
 //! e.g. qemu-aarch64 with QEMU_LD_PREFIX) also exercise the suite on AArch64.
 //!
@@ -513,9 +514,15 @@ mod with_llvm {
 
 	/// Runs `f` once fewer than [`COMPILATIONS`] others are running.
 	fn limited<R>(f: impl FnOnce() -> R) -> R {
+		let limit = std::env::var("FA_LLVM_TEST_COMPILATIONS")
+			.ok()
+			.and_then(|value| value.parse::<usize>().ok())
+			.filter(|&value| value > 0)
+			.unwrap_or(COMPILATIONS)
+			.min(COMPILATIONS);
 		let (running, changed) = &RUNNING;
 		let mut count = running.lock().unwrap_or_else(|poison| poison.into_inner());
-		while *count >= COMPILATIONS {
+		while *count >= limit {
 			count = changed
 				.wait(count)
 				.unwrap_or_else(|poison| poison.into_inner());

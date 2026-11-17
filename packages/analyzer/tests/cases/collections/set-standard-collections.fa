@@ -1,0 +1,203 @@
+-- Complete-item equality through generic code, at compile time and runtime.
+function exercise = <Item>(first: Item, second: Item): Boolean => {
+	mutable items: Set<Item> = [first, first]
+	assert items.size == 1
+	assert items.includes(first)
+	assert not items.includes(second)
+	assert not items.add(first)
+	assert items.add(second)
+	assert items.delete(first)
+	assert not items.delete(first)
+	assert not items.includes(first)
+	let taken = items.take(second) ?? first
+	assert items.isEmpty()
+	assert items.add(taken)
+	assert items.includes(second)
+	items.clear()
+	assert items.isEmpty()
+	mutable growing = GrowingSet<Item>.from([first, first], capacity = 8)
+	assert not growing.add(first)
+	assert growing.add(second)
+	assert growing.includes(first)
+	true
+}
+console.log(@exercise<Array<Integer>>([1, 2], [2, 1]), exercise<Array<Integer>>([1, 2], [2, 1])) -- prints: true true
+console.log(
+	@exercise<InlineArray<Integer, 4>>([1, 2], [2, 1])
+	exercise<InlineArray<Integer, 4>>([1, 2], [2, 1])
+) -- prints: true true
+console.log(
+	@exercise<GrowingArray<Integer>>([1, 2], [2, 1])
+	exercise<GrowingArray<Integer>>([1, 2], [2, 1])
+)                                                                                            -- prints: true true
+console.log(@exercise<Set<Integer>>([1, 2], [1, 3]), exercise<Set<Integer>>([1, 2], [1, 3])) -- prints: true true
+console.log(
+	@exercise<GrowingSet<Integer>>([1, 2], [1, 3])
+	exercise<GrowingSet<Integer>>([1, 2], [1, 3])
+) -- prints: true true
+console.log(
+	@exercise<Map<Integer, String>>([(1, "a"), (2, "b")], [(1, "a"), (2, "c")])
+	exercise<Map<Integer, String>>([(1, "a"), (2, "b")], [(1, "a"), (2, "c")])
+) -- prints: true true
+console.log(
+	@exercise<GrowingMap<Integer, String>>([(1, "a"), (2, "b")], [(1, "a"), (2, "c")])
+	exercise<GrowingMap<Integer, String>>([(1, "a"), (2, "b")], [(1, "a"), (2, "c")])
+) -- prints: true true
+console.log(
+	@exercise<Bytes>(Bytes.from([1, 2]), Bytes.from([1, 3]))
+	exercise<Bytes>(Bytes.from([1, 2]), Bytes.from([1, 3]))
+) -- prints: true true
+
+function unorderedItems = (): Boolean => {
+	mutable sets: Set<Set<Integer>> = [[1, 2], [2, 1]]
+	assert sets.size == 1
+	assert sets.includes([2, 1])
+	assert sets.delete([2, 1])
+	mutable maps: Set<Map<Integer, String>> = [[(1, "a"), (2, "b")], [(2, "b"), (1, "a")]]
+	assert maps.size == 1
+	assert maps.includes([(2, "b"), (1, "a")])
+	assert maps.delete([(2, "b"), (1, "a")])
+	true
+}
+console.log(@unorderedItems(), unorderedItems()) -- prints: true true
+
+static equal0 = Set<Array<Integer>>.from([[1, 2], [2, 1]])
+	== Set<Array<Integer>>.from([[2, 1], [1, 2]])
+static different0 = Set<Array<Integer>>.from([[1, 2]]) != Set<Array<Integer>>.from([[2, 1]])
+static growingEqual0 = GrowingSet<Array<Integer>>.from([[1, 2], [2, 1]])
+	== GrowingSet<Array<Integer>>.from([[2, 1], [1, 2]])
+console.log(
+	equal0
+	Set<Array<Integer>>.from([[1, 2], [2, 1]]) == Set<Array<Integer>>.from([[2, 1], [1, 2]])
+	different0
+	Set<Array<Integer>>.from([[1, 2]]) != Set<Array<Integer>>.from([[2, 1]])
+	growingEqual0
+	GrowingSet<Array<Integer>>.from([[1, 2], [2, 1]])
+		== GrowingSet<Array<Integer>>.from([[2, 1], [1, 2]])
+) -- prints: true true true true true true
+
+static equal1 = Set<InlineArray<Integer, 4>>.from([[1, 2], [2, 1]])
+	== Set<InlineArray<Integer, 4>>.from([[2, 1], [1, 2]])
+static different1 = Set<InlineArray<Integer, 4>>.from([[1, 2]])
+	!= Set<InlineArray<Integer, 4>>.from([[2, 1]])
+static growingEqual1 = GrowingSet<InlineArray<Integer, 4>>.from([[1, 2], [2, 1]])
+	== GrowingSet<InlineArray<Integer, 4>>.from([[2, 1], [1, 2]])
+console.log(
+	equal1
+	Set<InlineArray<Integer, 4>>.from([[1, 2], [2, 1]])
+		== Set<InlineArray<Integer, 4>>.from([[2, 1], [1, 2]])
+	different1
+	Set<InlineArray<Integer, 4>>.from([[1, 2]]) != Set<InlineArray<Integer, 4>>.from([[2, 1]])
+	growingEqual1
+	GrowingSet<InlineArray<Integer, 4>>.from([[1, 2], [2, 1]])
+		== GrowingSet<InlineArray<Integer, 4>>.from([[2, 1], [1, 2]])
+) -- prints: true true true true true true
+
+static equal2 = Set<GrowingArray<Integer>>.from([[1, 2], [2, 1]])
+	== Set<GrowingArray<Integer>>.from([[2, 1], [1, 2]])
+static different2 = Set<GrowingArray<Integer>>.from([[1, 2]])
+	!= Set<GrowingArray<Integer>>.from([[2, 1]])
+static growingEqual2 = GrowingSet<GrowingArray<Integer>>.from([[1, 2], [2, 1]])
+	== GrowingSet<GrowingArray<Integer>>.from([[2, 1], [1, 2]])
+console.log(
+	equal2
+	Set<GrowingArray<Integer>>.from([[1, 2], [2, 1]])
+		== Set<GrowingArray<Integer>>.from([[2, 1], [1, 2]])
+	different2
+	Set<GrowingArray<Integer>>.from([[1, 2]]) != Set<GrowingArray<Integer>>.from([[2, 1]])
+	growingEqual2
+	GrowingSet<GrowingArray<Integer>>.from([[1, 2], [2, 1]])
+		== GrowingSet<GrowingArray<Integer>>.from([[2, 1], [1, 2]])
+) -- prints: true true true true true true
+
+static equal3 = Set<Set<Integer>>.from([[1, 2], [1, 3]]) == Set<Set<Integer>>.from([[1, 3], [1, 2]])
+static different3 = Set<Set<Integer>>.from([[1, 2]]) != Set<Set<Integer>>.from([[1, 3]])
+static growingEqual3 = GrowingSet<Set<Integer>>.from([[1, 2], [1, 3]])
+	== GrowingSet<Set<Integer>>.from([[1, 3], [1, 2]])
+console.log(
+	equal3
+	Set<Set<Integer>>.from([[1, 2], [1, 3]]) == Set<Set<Integer>>.from([[1, 3], [1, 2]])
+	different3
+	Set<Set<Integer>>.from([[1, 2]]) != Set<Set<Integer>>.from([[1, 3]])
+	growingEqual3
+	GrowingSet<Set<Integer>>.from([[1, 2], [1, 3]])
+		== GrowingSet<Set<Integer>>.from([[1, 3], [1, 2]])
+) -- prints: true true true true true true
+
+static equal4 = Set<GrowingSet<Integer>>.from([[1, 2], [1, 3]])
+	== Set<GrowingSet<Integer>>.from([[1, 3], [1, 2]])
+static different4 = Set<GrowingSet<Integer>>.from([[1, 2]])
+	!= Set<GrowingSet<Integer>>.from([[1, 3]])
+static growingEqual4 = GrowingSet<GrowingSet<Integer>>.from([[1, 2], [1, 3]])
+	== GrowingSet<GrowingSet<Integer>>.from([[1, 3], [1, 2]])
+console.log(
+	equal4
+	Set<GrowingSet<Integer>>.from([[1, 2], [1, 3]])
+		== Set<GrowingSet<Integer>>.from([[1, 3], [1, 2]])
+	different4
+	Set<GrowingSet<Integer>>.from([[1, 2]]) != Set<GrowingSet<Integer>>.from([[1, 3]])
+	growingEqual4
+	GrowingSet<GrowingSet<Integer>>.from([[1, 2], [1, 3]])
+		== GrowingSet<GrowingSet<Integer>>.from([[1, 3], [1, 2]])
+) -- prints: true true true true true true
+
+static equal5 = Set<Map<Integer, String>>.from([[(1, "a"), (2, "b")], [(1, "a"), (2, "c")]])
+	== Set<Map<Integer, String>>.from([[(1, "a"), (2, "c")], [(1, "a"), (2, "b")]])
+static different5 = Set<Map<Integer, String>>.from([[(1, "a"), (2, "b")]])
+	!= Set<Map<Integer, String>>.from([[(1, "a"), (2, "c")]])
+static growingEqual5 = GrowingSet<Map<Integer, String>>.from([
+	[(1, "a"), (2, "b")]
+	[(1, "a"), (2, "c")]
+])
+	== GrowingSet<Map<Integer, String>>.from([[(1, "a"), (2, "c")], [(1, "a"), (2, "b")]])
+console.log(
+	equal5
+	Set<Map<Integer, String>>.from([[(1, "a"), (2, "b")], [(1, "a"), (2, "c")]])
+		== Set<Map<Integer, String>>.from([[(1, "a"), (2, "c")], [(1, "a"), (2, "b")]])
+	different5
+	Set<Map<Integer, String>>.from([[(1, "a"), (2, "b")]])
+		!= Set<Map<Integer, String>>.from([[(1, "a"), (2, "c")]])
+	growingEqual5
+	GrowingSet<Map<Integer, String>>.from([[(1, "a"), (2, "b")], [(1, "a"), (2, "c")]])
+		== GrowingSet<Map<Integer, String>>.from([[(1, "a"), (2, "c")], [(1, "a"), (2, "b")]])
+) -- prints: true true true true true true
+
+static equal6 = Set<GrowingMap<Integer, String>>.from([[(1, "a"), (2, "b")], [(1, "a"), (2, "c")]])
+	== Set<GrowingMap<Integer, String>>.from([[(1, "a"), (2, "c")], [(1, "a"), (2, "b")]])
+static different6 = Set<GrowingMap<Integer, String>>.from([[(1, "a"), (2, "b")]])
+	!= Set<GrowingMap<Integer, String>>.from([[(1, "a"), (2, "c")]])
+static growingEqual6 = GrowingSet<GrowingMap<Integer, String>>.from([
+	[(1, "a"), (2, "b")]
+	[(1, "a"), (2, "c")]
+])
+	== GrowingSet<GrowingMap<Integer, String>>.from([[(1, "a"), (2, "c")], [(1, "a"), (2, "b")]])
+console.log(
+	equal6
+	Set<GrowingMap<Integer, String>>.from([[(1, "a"), (2, "b")], [(1, "a"), (2, "c")]])
+		== Set<GrowingMap<Integer, String>>.from([[(1, "a"), (2, "c")], [(1, "a"), (2, "b")]])
+	different6
+	Set<GrowingMap<Integer, String>>.from([[(1, "a"), (2, "b")]])
+		!= Set<GrowingMap<Integer, String>>.from([[(1, "a"), (2, "c")]])
+	growingEqual6
+	GrowingSet<GrowingMap<Integer, String>>.from([[(1, "a"), (2, "b")], [(1, "a"), (2, "c")]])
+		== GrowingSet<GrowingMap<Integer, String>>.from([
+			[(1, "a"), (2, "c")]
+			[(1, "a"), (2, "b")]
+		])
+) -- prints: true true true true true true
+
+static equal7 = Set<Bytes>.from([Bytes.from([1, 2]), Bytes.from([1, 3])])
+	== Set<Bytes>.from([Bytes.from([1, 3]), Bytes.from([1, 2])])
+static different7 = Set<Bytes>.from([Bytes.from([1, 2])]) != Set<Bytes>.from([Bytes.from([1, 3])])
+static growingEqual7 = GrowingSet<Bytes>.from([Bytes.from([1, 2]), Bytes.from([1, 3])])
+	== GrowingSet<Bytes>.from([Bytes.from([1, 3]), Bytes.from([1, 2])])
+console.log(
+	equal7
+	Set<Bytes>.from([Bytes.from([1, 2]), Bytes.from([1, 3])])
+		== Set<Bytes>.from([Bytes.from([1, 3]), Bytes.from([1, 2])])
+	different7
+	Set<Bytes>.from([Bytes.from([1, 2])]) != Set<Bytes>.from([Bytes.from([1, 3])])
+	growingEqual7
+	GrowingSet<Bytes>.from([Bytes.from([1, 2]), Bytes.from([1, 3])])
+		== GrowingSet<Bytes>.from([Bytes.from([1, 3]), Bytes.from([1, 2])])
+) -- prints: true true true true true true

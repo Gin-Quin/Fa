@@ -571,7 +571,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 			Finish::Set => {
 				let mut set = Vec::new();
 				for value in values {
-					if !crate::value::contains(&set, &value) {
+					if !crate::value::set_contains(&set, &value) {
 						set.push(value);
 					}
 				}

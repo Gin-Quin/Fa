@@ -1,0 +1,20 @@
+-- A set compares the complete value; a map owns an independent key.
+type User = { id: Integer, email: String }
+let users = Set.from([
+	User { id = 1, email = "a" }
+	User { id = 1, email = "b" }
+	User { id = 1, email = "a" }
+	User { id = 2, email = "c" }
+])
+console.log(users.size) -- prints: 3
+let numbers = Set.from([1, 2, 2], capacity = 16)
+let growing = GrowingSet.from([1, 2, 2], capacity = 16)
+console.log(numbers.size, growing.size) -- prints: 2 2
+mutable evaluations = 0
+function reserveHint = (): Integer<min = 0, max = 16> mutates evaluations => {
+	evaluations += 1
+	16
+}
+let first = Set.from([1], capacity = reserveHint())
+let second = GrowingSet.from([2], capacity = reserveHint())
+console.log(first.size, second.size, evaluations) -- prints: 1 1 2

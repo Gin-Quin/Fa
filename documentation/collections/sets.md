@@ -38,8 +38,8 @@ A set always hashes and compares its complete item using the item's standard has
 ```fa
 type User = { id: Integer, name: String }
 mutable users: Map<Integer, User> = []
-users.set(1, User { id = 1, name = "Ana" })
-users.set(1, User { id = 1, name = "Bao" }) -- replaces the value at key 1
+users[1] = User { id = 1, name = "Ana" }
+users[1] = User { id = 1, name = "Bao" } -- replaces the value at key 1
 ```
 
 Storing a collection-valued item follows the [copy and move rules](/advanced/memory-management#structures). The hash/equality rule never authorizes copying unique data.
@@ -206,6 +206,10 @@ The call above compiles to three `console.log` lines with no runtime lookup at a
 :::implementation
 ## Implementation details
 
+### Constructor and compile-time evaluation
+
+`Set.from` and `GrowingSet.from` carry exactly `[source, capacity]` in the checked call. The analyzer rejects `key` with `FN023` and recommends a `Map` keyed by that value. The source is evaluated before the capacity hint, each once. JavaScript evaluates the hint even though it does not reserve storage; an exception releases the temporary source normally. Compile-time evaluation uses the same complete-item equality, including SameValueZero for floats nested inside items.
+
 ### Native
 
 - **Returned collections.** In synchronous compilation mode, collection functions receive an optional bounded caller buffer and return the final header pointer. Fresh literals, supported transforms and proven moved immutable locals forward it through calls and return branches. A mutable or escaping owner supplies no frame buffer, so construction starts on the heap. Constant returned locals can share read-only storage with a proven immutable caller. Arrays and growing arrays construct aggregate-returning literal items directly in their final slots; completed items still drop on an error. Object-columnar chunks retain their larger heap layout.
@@ -214,7 +218,7 @@ The call above compiles to three `console.log` lines with no runtime lookup at a
 
 - **Immutable literals (current LLVM backend).** Constant `let` literals with supported scalar keys use read-only entries and index. Runtime local literals use a fixed frame buffer when the header, entries, index and any stable chunk directory fit the 2 KiB collection and 4 KiB non-recursive frame budgets. Captured or asynchronous values and larger constructions keep heap storage. Static drops do nothing; frame drops destroy owned elements without freeing their storage. An explicit copy of static values constructs independent mutable storage. Proven moves choose suitable destination storage before construction. Runtime owning or uncertain uses choose the heap before construction, without frame-to-heap copy-out. Duplicate constant elements retain set semantics.
 
-The set is a **Swiss table** (Abseil's `flat_hash_set`, Rust's `hashbrown`, Go's maps since 1.24), with the values stored inline:
+The planned inline layout is a **Swiss table** (Abseil's `flat_hash_set`, Rust's `hashbrown`, Go's maps since 1.24), with the values stored inline:
 
 - **Layout.** One allocation holding an array of control bytes followed by an array of values. A control byte is empty, deleted, or 7 bits of the value's hash. The control array is padded with a copy of its first group, so that probing never wraps in the middle of a group.
 - **Probing.** The hash gives a starting group; a group is 16 control bytes compared at once with SIMD (SSE2, NEON; a portable 8-byte word otherwise). Each control byte equal to the hash's 7 bits is a candidate, compared with the value's `==`. A group with an empty byte ends the search. Groups are probed in triangular order.
@@ -223,11 +227,13 @@ The set is a **Swiss table** (Abseil's `flat_hash_set`, Rust's `hashbrown`, Go's
 - **Hashing.** Fast and non-cryptographic, with a random seed per set to resist hash flooding. Tests can fix the seed.
 - **References.** A reference into a set is a pointer to the value in the table, invalidated by any `add`, `delete` or `clear`, as declared.
 
-The current LLVM backend stores a set like a [map](/collections/maps) without values: its values in stable chunks, and an index of 32-bit hash tags and value numbers.
+The current LLVM backend stores a set like a [map](/collections/maps) without values: its values in stable chunks, and an index of 32-bit hash tags and value numbers. It uses the same generated hash and structural comparison functions as map keys. Float key comparison uses SameValueZero except for the boxed-union limitation below. Scalars, strings, arrays, inline arrays, objects, tuples, optionals and Bytes hash their content. Named unions currently hash their member tag; other collection representations use a conservative collision hash. In either case the complete item is compared before a candidate matches: collisions never select a subset of its fields as its identity. The constructor has no callback or unsupported-key path.
+
+**Known LLVM limitation (native, wasm and freestanding).** A float payload inside a boxed union still uses IEEE comparison in a set item or map key. NaN-valued unions can therefore be stored more than once and cannot be found or deleted by a NaN key. Ordinary union `==` also incorrectly treats the same box as equal before comparing its NaN payload. These pre-existing exceptions are recorded in the ownership/Set section of `design/todo.md`; complete-item SameValueZero is the specified behavior.
 
 ### JavaScript
 
 - A set of primitives (`Integer`, `Float`, `String`, `Boolean`, a union of literals) is a JavaScript `Set`: the engine's `includes` (`has`) is as fast as anything written by hand.
-- A set of objects or tuples can't use a JavaScript `Set` directly, which compares objects by identity. It is a JavaScript `Map` from the structural hash of the value (a 32-bit number, computed by a function generated per element type) to the value, or to an array of values when several values share a hash. `includes` hashes the value, then compares it with the generated `==`. `size` is a counter kept next to the `Map`.
-- A reference to an object value is the object itself. Hashing and equality always use the item type; the table header contains no custom key callback. Removing that legacy callback from both backends belongs to the Set implementation slices.
+- Other item types use the runtime `FaSet`, backed by `FaHashMap`. The current runtime hashes the complete value structurally into 32 bits, then probes an open-addressing table and compares candidates with structural SameValueZero equality. Tuples, objects, optionals, unions and collection-valued items compare by content; a hash collision never merges unequal items. Nested sets and maps hash independently of insertion order. `size` is the number of live entries.
+- A reference to an object value is the object itself. The table stores complete items and has no custom key callback. Filtering, set operations and copying preserve the representation and its standard hash/equality operations.
 :::

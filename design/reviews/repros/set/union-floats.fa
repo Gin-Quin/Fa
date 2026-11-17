@@ -1,0 +1,11 @@
+-- A float inside an anonymous union: SameValueZero must hold as for a plain Float.
+let nan = 0.0 / 0.0
+let negativeNan = -(0.0 / 0.0)
+let zeros: Set<Float | String> = [-0.0, 0.0]
+let nans: Set<Float | String> = [nan, nan]
+let signedNans: Set<Float | String> = [nan, negativeNan]
+mutable found: Set<Float | String> = [nan]
+let plain: Set<Float> = [nan, negativeNan, -0.0, 0.0]
+let numbers: Set<Float | Boolean> = [nan, negativeNan, -0.0, 0.0]
+console.log(zeros.size, nans.size, signedNans.size, found.includes(nan), found.delete(negativeNan), plain.size, numbers.size)
+-- prints: 1 1 1 true true 2 2

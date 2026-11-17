@@ -20,7 +20,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use fa_analyzer::analysis::{Argument, AsyncSummary, AwaitKind, Callee, TargetSet};
+use fa_analyzer::analysis::{Argument, AsyncSummary, AwaitKind, Callee, NodeFlags, TargetSet};
 use fa_analyzer::ids::{NodeId, TypeId};
 use fa_analyzer::symbols::Resolution;
 use fa_analyzer::syntax::View;
@@ -172,14 +172,21 @@ impl Generator<'_> {
 		// the functions used as values: both instances (`faAsyncValue`)
 		for index in 0..self.tree.nodes.len() {
 			let node = NodeId::new(index);
-			if !matches!(self.view(node), View::Name(_)) {
+			if self.is_callee(node) {
 				continue;
 			}
-			let Resolution::Local(symbol) = self.analysis.resolution(node) else {
+			let named = match self.view(node) {
+				View::Name(_) => node,
+				View::Call { callee, .. } if self.has(node, NodeFlags::GENERIC_APPLICATION) => {
+					self.strip_groups(callee)
+				}
+				_ => continue,
+			};
+			let Resolution::Local(symbol) = self.analysis.resolution(named) else {
 				continue;
 			};
 			let declaration = self.analysis.symbols.symbol(symbol).decl_node;
-			if !self.suspends(declaration) || self.is_callee(node) {
+			if !self.suspends(declaration) {
 				continue;
 			}
 			pending.push((declaration, Mode::Blocking));

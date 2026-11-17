@@ -1,0 +1,32 @@
+-- Sets use SameValueZero even for NaN nested in a tuple/object/collection.
+function check = (): Boolean => {
+	let nan = 0.0 / 0.0
+	mutable floats: Set<Float> = [nan, nan, -0.0, 0.0]
+	assert floats.size == 2
+	assert floats.includes(nan)
+	assert not floats.add(nan)
+	assert floats.delete(nan)
+	assert not floats.delete(nan)
+	mutable tuples: Set<Tuple<Float, Integer>> = [(nan, 1), (nan, 1)]
+	assert tuples.size == 1
+	assert tuples.includes((nan, 1))
+	assert tuples.delete((nan, 1))
+	mutable objects: Set<{ x: Float }> = [{ x = nan }, { x = nan }]
+	assert objects.size == 1
+	assert objects.delete({ x = nan })
+	mutable arrays: Set<Array<Float>> = [[nan], [nan]]
+	assert arrays.size == 1
+	assert arrays.delete([nan])
+	let a: Set<Float> = [nan, -0.0]
+	let b: Set<Float> = [0.0, nan]
+	assert (a == b) == true
+	assert (a.intersection(b) == a) == true
+	assert a.difference(b).isEmpty()
+	assert a.union(b).size == 2
+	assert a.isSubsetOf(b)
+	-- Array membership retains IEEE comparison.
+	let ordinary: Array<Float> = [nan]
+	assert not ordinary.includes(nan)
+	true
+}
+console.log(@check(), check()) -- prints: true true

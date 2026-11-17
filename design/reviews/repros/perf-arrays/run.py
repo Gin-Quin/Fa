@@ -2,7 +2,7 @@
 """Compare review programs with Bun at O0/O3 on all LLVM targets.
 
 Run under taskset -c 0-4. Retain stdout/stderr, commands, and RSS in /tmp.
-The repository audit runner enforces the 512 MiB RSS limit and timeout.
+The runner enforces a 512 MiB process-group RSS limit and 60-second timeout.
 """
 import json
 import os
@@ -65,4 +65,8 @@ for argument in sys.argv[1:]:
             label = f"{name}-{target}-O{opt}"
             run(label, [ROOT / "target/debug/examples/build", source,
                 f"--target={target}", f"-O{opt}", "--leak-check", "--emit-ir",
-                "--asynchronous=false", f"--output={OUT / label}", "--run"], expected)
+                f'--asynchronous={os.environ.get("REVIEW_ASYNC", "false")}',
+                f'--overflow-checks={os.environ.get("REVIEW_OVERFLOW", "true")}',
+                f"--output={OUT / label}", "--run"], expected)
+
+sys.exit(1 if any(not record["pass"] for record in records) else 0)

@@ -1,0 +1,24 @@
+function run = (count: Integer, value: Boolean) => {
+	mutable flags: Array<Boolean> = [false]
+	for -1..count { flags.push(true) }
+	for count..-1 { flags.push(false) }
+	for count..=count { flags.push(false) }
+	for 0..count { flags.push(value) }
+	mutable optional: Array<Boolean?> = [none]
+	mutable bytes: Array<UInt8> = [255]
+	for i in 0..count {
+		optional.push(i %% 2 == 0)
+		bytes.push(UInt8(i %% 256))
+		flags.push(i %% 2 == 0)
+		assert flags.length == count + 3 + count + i + 1
+	}
+	console.log(flags, optional, bytes)
+}
+for count in [0, 1, 3, 257] { run(count, count %% 2 == 0) }
+function compileTime = (): Integer => {
+	mutable flags: Array<Boolean> = []
+	for 0..9 { flags.push(true) }
+	flags.length
+}
+static count = @compileTime()
+assert count == 9

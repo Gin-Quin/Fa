@@ -7,12 +7,16 @@ function checkInt8 = (value: Int8) throws DivisionByZero => {
 	let two: Int8 = 2
 	let power: Int8 = 16
 	let seven: Int8 = 7
+	let negative: Int8 = -7
+	let minusOne: Int8 = -1
 	for 0..3 {
 		assert value %% one == (try slowInt8(value, one))
 		assert value %% two == (try slowInt8(value, two))
 		assert value %% power == (try slowInt8(value, power))
 		assert value %% seven == (try slowInt8(value, seven))
 		assert value %% 7 == (try slowInt8(value, 7))
+		assert value %% negative == (try slowInt8(value, negative))
+		assert value %% minusOne == 0
 	}
 }
 for x in [-120, -8, -1, 0, 1, 8, 120] { try checkInt8(Int8(x)) }
@@ -22,12 +26,16 @@ function checkInt16 = (value: Int16) throws DivisionByZero => {
 	let two: Int16 = 2
 	let power: Int16 = 16
 	let seven: Int16 = 7
+	let negative: Int16 = -7
+	let minusOne: Int16 = -1
 	for 0..3 {
 		assert value %% one == (try slowInt16(value, one))
 		assert value %% two == (try slowInt16(value, two))
 		assert value %% power == (try slowInt16(value, power))
 		assert value %% seven == (try slowInt16(value, seven))
 		assert value %% 7 == (try slowInt16(value, 7))
+		assert value %% negative == (try slowInt16(value, negative))
+		assert value %% minusOne == 0
 	}
 }
 for x in [-120, -8, -1, 0, 1, 8, 120] { try checkInt16(Int16(x)) }
@@ -37,12 +45,16 @@ function checkInt32 = (value: Int32) throws DivisionByZero => {
 	let two: Int32 = 2
 	let power: Int32 = 16
 	let seven: Int32 = 7
+	let negative: Int32 = -7
+	let minusOne: Int32 = -1
 	for 0..3 {
 		assert value %% one == (try slowInt32(value, one))
 		assert value %% two == (try slowInt32(value, two))
 		assert value %% power == (try slowInt32(value, power))
 		assert value %% seven == (try slowInt32(value, seven))
 		assert value %% 7 == (try slowInt32(value, 7))
+		assert value %% negative == (try slowInt32(value, negative))
+		assert value %% minusOne == 0
 	}
 }
 for x in [-120, -8, -1, 0, 1, 8, 120] { try checkInt32(Int32(x)) }
@@ -52,12 +64,16 @@ function checkInt64 = (value: Int64) throws DivisionByZero => {
 	let two: Int64 = 2
 	let power: Int64 = 16
 	let seven: Int64 = 7
+	let negative: Int64 = -7
+	let minusOne: Int64 = -1
 	for 0..3 {
 		assert value %% one == (try slowInt64(value, one))
 		assert value %% two == (try slowInt64(value, two))
 		assert value %% power == (try slowInt64(value, power))
 		assert value %% seven == (try slowInt64(value, seven))
 		assert value %% 7 == (try slowInt64(value, 7))
+		assert value %% negative == (try slowInt64(value, negative))
+		assert value %% minusOne == 0
 	}
 }
 for x in [-120, -8, -1, 0, 1, 8, 120] { try checkInt64(Int64(x)) }
@@ -67,12 +83,16 @@ function checkInt128 = (value: Int128) throws DivisionByZero => {
 	let two: Int128 = 2
 	let power: Int128 = 16
 	let seven: Int128 = 7
+	let negative: Int128 = -7
+	let minusOne: Int128 = -1
 	for 0..3 {
 		assert value %% one == (try slowInt128(value, one))
 		assert value %% two == (try slowInt128(value, two))
 		assert value %% power == (try slowInt128(value, power))
 		assert value %% seven == (try slowInt128(value, seven))
 		assert value %% 7 == (try slowInt128(value, 7))
+		assert value %% negative == (try slowInt128(value, negative))
+		assert value %% minusOne == 0
 	}
 }
 for x in [-120, -8, -1, 0, 1, 8, 120] { try checkInt128(Int128(x)) }
@@ -165,6 +185,26 @@ for x in [-1000, -1, 0, 1, 1000] {
 	}
 	assert generic(true, x) == (try slow(x, 7))
 }
+try checkInt8(Int8.minValue)
+try checkInt8(Int8.maxValue)
+try checkInt16(Int16.minValue)
+try checkInt16(Int16.maxValue)
+try checkInt32(Int32.minValue)
+try checkInt32(Int32.maxValue)
+try checkInt64(Int64.minValue)
+try checkInt64(Int64.maxValue)
+try checkInt128(Int128.minValue)
+try checkInt128(Int128.maxValue)
+try checkUInt8(UInt8.minValue)
+try checkUInt8(UInt8.maxValue)
+try checkUInt16(UInt16.minValue)
+try checkUInt16(UInt16.maxValue)
+try checkUInt32(UInt32.minValue)
+try checkUInt32(UInt32.maxValue)
+try checkUInt64(UInt64.minValue)
+try checkUInt64(UInt64.maxValue)
+try checkUInt128(UInt128.minValue)
+try checkUInt128(UInt128.maxValue)
 static computed = @generic(true, -8)
 assert computed == 6
 console.log("remainder widths ok")

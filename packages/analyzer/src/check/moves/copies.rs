@@ -413,8 +413,11 @@ impl Walker<'_> {
 			View::Index { index, .. } => {
 				!matches!(self.s.types.kind(self.a.type_of(index)), TypeKind::Range)
 			}
-			View::Call { .. } => self.reference_results.contains_key(&node) || crate::lower::copies::element_view(&self.tree, &self.a, node)
-				.is_some_and(|(_, collection)| !collection),
+			View::Call { .. } => {
+				self.reference_results.contains_key(&node)
+					|| crate::lower::copies::element_view(&self.tree, &self.a, node)
+						.is_some_and(|(_, collection)| !collection)
+			}
 			_ => false,
 		}
 	}
@@ -584,10 +587,19 @@ mod tests {
 		let source = "function first = (rows: Array<Array<Integer>>): Array<Integer> in rows throws IndexError => try rows[0]\nlet rows = [[1]]\nlet result = try first(rows)\nconsole.log(result, rows)\n";
 		let (session, file) = crate::analyze_source(source);
 		let diagnostics = session.diagnostics(file);
-		assert_eq!(diagnostics.iter().map(|diagnostic| diagnostic.code.id).collect::<Vec<_>>(), ["MEM004"]);
+		assert_eq!(
+			diagnostics
+				.iter()
+				.map(|diagnostic| diagnostic.code.id)
+				.collect::<Vec<_>>(),
+			["MEM004"]
+		);
 		let edit = &diagnostics[0].fixes[0].edits[0];
 		let mut fixed = source.to_string();
-		fixed.replace_range(edit.location.span.start as usize..edit.location.span.end as usize, &edit.replacement);
+		fixed.replace_range(
+			edit.location.span.start as usize..edit.location.span.end as usize,
+			&edit.replacement,
+		);
 		analyzed(&fixed);
 	}
 

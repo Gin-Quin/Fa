@@ -14,106 +14,125 @@ enum Primitive {
 	BigInt,
 }
 
+type ItemParts = Vec<Vec<(TypeId, TypeId)>>;
+
+enum ItemCheck {
+	Compare(TypeId, TypeId),
+	Finish(TypeId, TypeId, ItemParts),
+}
+
 impl TypeStore {
 	/// Whether item types differ beyond the one language-level storage
 	/// exception. This is independent of a backend's selected layout.
 	pub fn same_structure_item(&self, actual: TypeId, target: TypeId) -> bool {
-		self.same_structure_item_cached(actual, target, &mut FxHashMap::default())
-	}
-
-	fn same_structure_item_cached(
-		&self,
-		actual: TypeId,
-		target: TypeId,
-		cache: &mut FxHashMap<(TypeId, TypeId), bool>,
-	) -> bool {
-		if let Some(&result) = cache.get(&(actual, target)) {
-			return result;
-		}
-		let result = self.compare_structure_items(actual, target, cache);
-		cache.insert((actual, target), result);
-		result
-	}
-
-	fn compare_structure_items(
-		&self,
-		actual: TypeId,
-		target: TypeId,
-		cache: &mut FxHashMap<(TypeId, TypeId), bool>,
-	) -> bool {
-		let mut pending = vec![(actual, target)];
-		let mut seen = FxHashSet::default();
-		while let Some((actual, target)) = pending.pop() {
-			if actual == target || !seen.insert((actual, target)) {
-				continue;
+		let mut results = FxHashMap::default();
+		let mut pending = vec![ItemCheck::Compare(actual, target)];
+		while let Some(check) = pending.pop() {
+			match check {
+				ItemCheck::Compare(actual, target) => {
+					if results.contains_key(&(actual, target)) {
+						continue;
+					}
+					match self.structure_item_parts(actual, target) {
+						Err(result) => {
+							results.insert((actual, target), result);
+						}
+						Ok(parts) => {
+							pending.push(ItemCheck::Finish(actual, target, parts.clone()));
+							pending.extend(
+								parts
+									.into_iter()
+									.flatten()
+									.map(|(a, b)| ItemCheck::Compare(a, b)),
+							);
+						}
+					}
+				}
+				ItemCheck::Finish(actual, target, parts) => {
+					let same = parts
+						.iter()
+						.all(|choices| choices.iter().any(|pair| results.get(pair) == Some(&true)));
+					results.insert((actual, target), same);
+				}
 			}
-			if self
+		}
+		results[&(actual, target)]
+	}
+
+	/// Every group must match; a union member can match any alternative.
+	/// Recursive identities are opaque here, so the dependency graph is a
+	/// DAG and an explicit postorder stack suffices even for deeply nested
+	/// optional tuples. No product types are constructed while comparing alternatives.
+	fn structure_item_parts(&self, actual: TypeId, target: TypeId) -> Result<ItemParts, bool> {
+		if actual == target
+			|| self
 				.primitive_item(actual)
 				.is_some_and(|kind| Some(kind) == self.primitive_item(target))
-			{
-				continue;
-			}
-			match (self.kind(actual), self.kind(target)) {
-				(TypeKind::Union(left), TypeKind::Union(right)) => {
-					let (left, right) = (self.list_items(left), self.list_items(right));
-					if !left.iter().all(|&a| {
+		{
+			return Err(true);
+		}
+		let pairs = match (self.kind(actual), self.kind(target)) {
+			(TypeKind::Union(left), TypeKind::Union(right)) => {
+				let (left, right) = (self.list_items(left), self.list_items(right));
+				return Ok(left
+					.iter()
+					.map(|&a| right.iter().map(|&b| (a, b)).collect())
+					.chain(
 						right
 							.iter()
-							.any(|&b| self.same_structure_item_cached(a, b, cache))
-					}) || !right.iter().all(|&b| {
-						left.iter()
-							.any(|&a| self.same_structure_item_cached(a, b, cache))
-					}) {
-						return false;
-					}
-				}
-				(TypeKind::Union(items), _) => {
-					pending.extend(self.list_items(items).iter().map(|&item| (item, target)))
-				}
-				(_, TypeKind::Union(items)) => {
-					pending.extend(self.list_items(items).iter().map(|&item| (actual, item)))
-				}
-				(TypeKind::Tuple(left), TypeKind::Tuple(right)) => {
-					let (left, right) = (self.list_items(left), self.list_items(right));
-					if left.len() != right.len() {
-						return false;
-					}
-					pending.extend(left.iter().copied().zip(right.iter().copied()));
-				}
-				(TypeKind::Object(left), TypeKind::Object(right)) => {
-					if self.shape(left).nominal != self.shape(right).nominal {
-						return false;
-					}
-					let (left, right) = (self.shape_fields(left), self.shape_fields(right));
-					if left.len() != right.len() {
-						return false;
-					}
-					for field in left {
-						let Some(other) = right.iter().find(|other| other.name == field.name)
-						else {
-							return false;
-						};
-						if field.flags != other.flags {
-							return false;
-						}
-						pending.push((field.ty, other.ty));
-					}
-				}
-				(
-					TypeKind::Collection(kind, item, key),
-					TypeKind::Collection(other, other_item, other_key),
-				) if kind == other => {
-					pending.extend([(item, other_item), (key, other_key)]);
-				}
-				(TypeKind::CArray(item, size), TypeKind::CArray(other, other_size))
-					if size == other_size =>
-				{
-					pending.push((item, other))
-				}
-				_ => return false,
+							.map(|&b| left.iter().map(|&a| (a, b)).collect()),
+					)
+					.collect());
 			}
-		}
-		true
+			(TypeKind::Union(items), _) => self
+				.list_items(items)
+				.iter()
+				.map(|&item| (item, target))
+				.collect(),
+			(_, TypeKind::Union(items)) => self
+				.list_items(items)
+				.iter()
+				.map(|&item| (actual, item))
+				.collect(),
+			(TypeKind::Tuple(left), TypeKind::Tuple(right)) => {
+				let (left, right) = (self.list_items(left), self.list_items(right));
+				if left.len() != right.len() {
+					return Err(false);
+				}
+				left.iter().copied().zip(right.iter().copied()).collect()
+			}
+			(TypeKind::Object(left), TypeKind::Object(right)) => {
+				if self.shape(left).nominal != self.shape(right).nominal {
+					return Err(false);
+				}
+				let (left, right) = (self.shape_fields(left), self.shape_fields(right));
+				if left.len() != right.len() {
+					return Err(false);
+				}
+				let mut pairs = Vec::with_capacity(left.len());
+				for field in left {
+					let Some(other) = right.iter().find(|other| other.name == field.name) else {
+						return Err(false);
+					};
+					if field.flags != other.flags {
+						return Err(false);
+					}
+					pairs.push((field.ty, other.ty));
+				}
+				pairs
+			}
+			(
+				TypeKind::Collection(kind, item, key),
+				TypeKind::Collection(other, other_item, other_key),
+			) if kind == other => vec![(item, other_item), (key, other_key)],
+			(TypeKind::CArray(item, size), TypeKind::CArray(other, other_size))
+				if size == other_size =>
+			{
+				vec![(item, other)]
+			}
+			_ => return Err(false),
+		};
+		Ok(pairs.into_iter().map(|pair| vec![pair]).collect())
 	}
 
 	fn primitive_item(&self, ty: TypeId) -> Option<Primitive> {

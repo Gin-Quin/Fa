@@ -18,7 +18,7 @@ async function reportBoxes = (label: String, items: Array<Box>) => console.log("
 async function reportOne = (item: Box) => console.log("index {item.value}")
 async function reportSpread = (...items: Box) => console.log("spread {items}")
 mutable holder = Holder { items = [{ value = 1 }] }
-start reportBoxes("field", holder.items)
+start reportBoxes("field", copy holder.items)
 try holder.items[0].value = 2
 console.log("field caller", holder.items) -- prints: field caller [{ value = 2 }]
 await Task.yield()

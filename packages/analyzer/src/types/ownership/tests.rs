@@ -629,3 +629,24 @@ fn optional_recursive_references_and_their_unfolded_values_need_no_conversion_co
 	assert_eq!(types.structure_conversion(source, target), None);
 	assert_eq!(types.structure_conversion(target, source), None);
 }
+
+#[test]
+fn primitive_widening_through_deep_optional_products_uses_no_rust_recursion() {
+	std::thread::Builder::new()
+		.stack_size(256 << 10)
+		.spawn(|| {
+			let mut types = TypeStore::new();
+			let mut actual = types.int_literal(I256::ONE);
+			let mut target = TypeId::INTEGER;
+			for _ in 0..2_000 {
+				actual = types.tuple(&[actual]);
+				target = types.tuple(&[target]);
+				actual = types.union(&[actual, TypeId::NONE]);
+				target = types.union(&[target, TypeId::NONE]);
+			}
+			assert!(types.same_structure_item(actual, target));
+		})
+		.unwrap()
+		.join()
+		.unwrap();
+}

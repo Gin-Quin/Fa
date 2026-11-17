@@ -407,13 +407,15 @@ mod with_llvm {
 				OptLevel::O0,
 				target,
 			);
-			let body = function(&ir, "fa.exercise");
-			assert!(
-				!body
-					.lines()
-					.any(|line| line.contains("call") && line.contains("ptr @fa.copy")),
-				"{target:?}: {body}"
-			);
+			for name in ["fa.exercise", "fa.sameRecursive"] {
+				let body = function(&ir, name);
+				assert!(
+					!body
+						.lines()
+						.any(|line| line.contains("call") && line.contains("ptr @fa.copy")),
+					"{target:?}: {body}"
+				);
+			}
 			assert!(!ir.contains("@fa.convert_copy"), "{target:?}: {ir}");
 		}
 	}

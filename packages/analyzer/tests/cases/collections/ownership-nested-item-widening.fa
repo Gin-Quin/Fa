@@ -1,4 +1,12 @@
 -- Primitive literal/range widening preserves storage at every item depth.
+type Narrow = { label: "a" | "b", next: Narrow? }
+type Broad = { label: String, next: Broad? }
+function sameRecursive = (narrow: Narrow, broad: Broad) => narrow == broad
+function recursiveComparison = (): Boolean => {
+	let narrow = Narrow { label = "a", next = Narrow { label = "b" } }
+	let broad = Broad { label = "a", next = Broad { label = "b" } }
+	sameRecursive(narrow, broad)
+}
 function exercise = (): Integer => {
 	let exact = [("é", 0), ("日", 1)]
 	function size = (items: Array<(String, Integer)>) => items.length
@@ -13,11 +21,7 @@ function exercise = (): Integer => {
 	let complete: Array<{ name: String, age: Integer }> = [{ name = "Ana", age = 2 }]
 	let names: Array<{ name: String }> = [{ name = "Ana" }]
 	assert complete != names
-	type Narrow = { label: "a" | "b", next: Narrow? }
-	type Broad = { label: String, next: Broad? }
-	let narrow = Narrow { label = "a", next = Narrow { label = "b" } }
-	let broad = Broad { label = "a", next = Broad { label = "b" } }
-	assert narrow == broad
+	assert recursiveComparison()
 	before + wide.length + count
 }
 static compiled = @exercise()

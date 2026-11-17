@@ -2818,3 +2818,9 @@ slots by value, matching their nonescaping parser lifetime.
 ### Ownership enforcement: inspecting comparisons and nested literal widening (lead, 2026-11-17)
 
 Ownership and conversion restrictions apply to stores. Read-only equality, ordering, `is`, membership, printing and hashing for lookup retain their prior compatibility rules and inspect the items without copying or converting either collection. Primitive literal/range widening is storage-preserving at every depth of an item type: the same tuple/object shape with only such component widenings (for example `("é", 0)` as `(String, Integer)`) does not require `copy`, including when stored in an array. Different primitive types, extra union alternatives/optionality, projected fields and different recursive types still require explicit conversion with `copy`.
+
+### Ownership enforcement integration details (2026-11-17)
+
+- Incoming user-function references use the ownership VM’s stable loans; declared reference returns forward loans, while ordinary returns materialize owned results. A reference into an immutable cached module value retains only its selected self-contained value when a helper frame leaves. Source-local reference escapes remain invariant errors.
+- Literal/range equivalence through nested item products uses an explicit, memoized postorder work stack. Recursive identities remain opaque to this exception. Native array and recursive equality use cached pair comparators and each operand’s original representation, without a converting copy.
+- Detached argument stores include fields and reference results. Resolving a declared method selector before its receiver’s task store is not a later payload use. A machine fix requiring a copied started receiver introduces a fresh scoped snapshot; it cannot prefix `copy` or a grouped receiver directly after contextual `start`. The fix keeps the original detached/kept behavior and does not move argument evaluation outside its expression.

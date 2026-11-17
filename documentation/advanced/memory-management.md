@@ -460,7 +460,7 @@ Across workers, use an independent copy, a common `Mutex`, or a proven exclusive
 | `MEM004` | Copying `T` duplicates a structure; write `copy value` explicitly or stop using the source so it can move. | Write `copy` at the storage site; for a capture, first create a local snapshot and capture its last use. |
 | `MEM005` | An error payload owns a unique value; error payloads must be copyable data. | Keep an identifier or a description of the resource instead; keep the unique owner outside the error. Shared synchronization handles are allowed. |
 
-The following deliberately invalid example documents `MEM004`. Enforcement is a later implementation slice:
+The following deliberately invalid example documents `MEM004`:
 
 ```fa
 let source = [1, 2]
@@ -508,7 +508,7 @@ Local references name their owner and are checked statically. Stored references 
 
 A move transfers headers/pointers or inline fields and clears the source's ownership/drop state; it never walks or duplicates a collection's payload. Returned fresh aggregates build into their final destination under the existing return ABI. A mutable or escaping collection starts in suitable storage: never construct in a frame and add a hidden deep copy to rescue its escape. Scope, replacement, error and cancellation cleanup agree on which path owns each value.
 
-Union stores select the semantic alternative before erasing its type to a tag and payload. A collection can retain its storage through primitive literal/range widening only when its native item layout remains readable through the widened type. Matching physical layouts alone never authorizes an item conversion or selects a different written alternative.
+Union stores select the semantic alternative before erasing its type to a tag and payload. A collection can retain its storage through primitive literal/range widening only when its native item layout remains readable through the widened type. Matching physical layouts alone never authorizes an item conversion or selects a different written alternative. Primitive widening through tuple/object components keeps those same item bytes. The shared type query compares type-pair dependencies with a memoized work stack, including optional alternatives, rather than recursively expanding combinations. Array equality reads each operand with its own item stride and uses a cached pair comparator; recursive comparisons likewise cache a helper before descending into child types. Neither operation converts or copies a collection to compare it.
 
 An owned immutable function environment has a common header containing its release operation, retain operation and reference count. A function-handle copy retains this environment; the last release destroys its payload once. Closures, error adapters, compositions and generic lambda environments use this contract. Native counts are atomic; current single-threaded WebAssembly uses ordinary counts. Borrowed frame environments keep their no-op lifetime operations and cannot escape. This private counting does not make resources or other unique values copyable.
 
@@ -540,7 +540,7 @@ Demand-time checking and finished-file evaluation share revisioned function code
 
 ### Integration status
 
-The `copy` syntax and existing copy operations are available in this slice. The category predicates and concrete `MEM005` payload checks are available. Generic-dependent error payload constraints are checked by the subsequent instantiation-conditions slice. `MEM004`, complete `MEM003`, alias/branch/loop moves, unique-resource borrows, portable generic/capture conditions, recursive moves and binary transport are the subsequent ownership slices. The rules above are the specification those slices must satisfy; current acceptance of a prohibited copy is not permission to rely on it.
+The `copy` syntax, category queries, concrete unique-copy and `MEM005` payload checks, and whole-value `MEM004` store checks are available. Detached argument stores include fields and declared reference results; their fixes preserve argument evaluation and detached-call behavior. Existing supported unique-field moves remain available. Ownership enforcement is still being integrated: checked capture transfers and early calls, generic instantiation conditions, additional structure-field/recursive moves, construction stores and binary transport remain subsequent work. The rules above specify the complete language; current acceptance of a prohibited copy is not permission to rely on it.
 ### Complete-owner link operations
 
 Native copies of flat linked payloads copy runs once per page/segment, rebuild headers/directories and preserve ordinal bytes without edge fixups; owning payloads and ordinary relations still use specialized operations. Moves transfer headers. Stable fixed-stride union slots copy/drop only their active payload. Never use recursive owning-child copy/drop for links or assume TLS root builders/near-far addressing.

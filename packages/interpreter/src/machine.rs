@@ -158,10 +158,6 @@ enum Iteration {
 		text: Text,
 		offset: usize,
 	},
-	Bytes {
-		bytes: Arc<Vec<u8>>,
-		offset: usize,
-	},
 	Range {
 		current: I256,
 		end: Option<I256>,
@@ -348,11 +344,14 @@ impl<'i, 'h> Machine<'i, 'h> {
 	}
 
 	fn view_value(&self, view: PlaceView<'_>) -> Result<Value, Flow> {
-		if matches!(view, PlaceView::Entry(_)) {
-			self.interpreter.reserve(
-				memory::values_size(2) + size_of::<Vec<Value>>() + 2 * size_of::<usize>(),
-			)?;
-		}
+		let bytes = match view {
+			PlaceView::Entry(_) => memory::values_size(2),
+			PlaceView::Array(items) => memory::values_size(items.len()),
+			PlaceView::Bytes(bytes) => bytes.len(),
+			_ => return Ok(view.materialize()),
+		};
+		self.interpreter
+			.reserve(bytes + size_of::<Vec<Value>>() + 2 * size_of::<usize>())?;
 		Ok(view.materialize())
 	}
 
@@ -747,79 +746,93 @@ impl<'i, 'h> Machine<'i, 'h> {
 		}
 	}
 
-	fn place_step(&self, state: &mut PlaceEvaluation, mut step: PlaceStep) -> Result<(), Flow> {
-		let parent = self.read_loan(&state.loan)?;
+	fn place_step(&self, state: &mut PlaceEvaluation, step: PlaceStep) -> Result<(), Flow> {
 		let insert = state.remaining.len() == 0 && matches!(state.action, PlaceAction::Assign(_));
-		match &mut step {
-			PlaceStep::Index(key) => {
-				if !insert || !matches!(parent, PlaceView::Value(Value::Map(_))) {
-					parent.project(&PlaceStep::Index(key.clone()))?;
+		self.extend_loan(&mut state.loan, step, insert)
+	}
+
+	/// Resolve a designation once. A range followed by an item/range stays
+	/// rooted in its owner, so mutation never creates a detached slice.
+	fn extend_loan(&self, loan: &mut Loan, mut step: PlaceStep, insert: bool) -> Result<(), Flow> {
+		let parent = self.read_loan(loan)?;
+		if !insert
+			|| !(matches!(step, PlaceStep::Field(_))
+				|| matches!(parent, PlaceView::Value(Value::Map(_))))
+		{
+			parent.project(&step)?;
+		}
+		let length = match parent {
+			PlaceView::Value(Value::Array(items) | Value::Tuple(items)) => Some(items.len()),
+			PlaceView::Value(Value::Bytes(bytes)) => Some(bytes.len()),
+			PlaceView::Bytes(bytes) => Some(bytes.len()),
+			PlaceView::Array(items) => Some(items.len()),
+			_ => None,
+		};
+		if let Some(length) = length {
+			match &mut step {
+				PlaceStep::Index(key) => match key {
+					Value::Range {
+						start,
+						end,
+						inclusive,
+					} => {
+						let (from, to) = builtins::slice_bounds(*start, *end, *inclusive, length)?;
+						*start = Some((from as u64).into());
+						*end = Some((to as u64).into());
+						*inclusive = false;
+					}
+					Value::Integer(index) if *index < I256::ZERO => {
+						*index += I256::from(length as u64)
+					}
+					_ => {}
+				},
+				PlaceStep::Item(index) => {
+					step = PlaceStep::Index(Value::Integer((*index as u64).into()))
 				}
-				// A reference designates the position selected now, including
-				// when its index was written relative to the end.
-				if let (
-					PlaceView::Value(Value::Array(items) | Value::Tuple(items)),
-					Value::Integer(index),
-				) = (parent, key)
-					&& *index < I256::ZERO
-				{
-					*index += I256::from(items.len() as u64);
-				}
-			}
-			PlaceStep::Field(name) if !insert => {
-				parent.project(&PlaceStep::Field(Arc::clone(name)))?;
-			}
-			PlaceStep::Field(_) => {}
-			PlaceStep::Capture(_)
-			| PlaceStep::Bound(_)
-			| PlaceStep::Item(_)
-			| PlaceStep::Entry(_) => {
-				unreachable!("source projections are fields and indices")
+				_ => {}
 			}
 		}
-		// Freeze a byte view's next index against its original owner. A
-		// write through the view must not materialize a detached slice.
-		if let PlaceStep::Index(key) = &mut step {
-			let previous = state.loan.parent().and_then(|(base, step)| match step {
+		if let PlaceStep::Index(key) = &mut step
+			&& let Some((
+				base,
 				PlaceStep::Index(Value::Range {
 					start,
 					end,
 					inclusive,
-				}) => Some((base, *start, *end, *inclusive)),
+				}),
+			)) = loan.parent()
+		{
+			let length = match self.read_loan(&base)? {
+				PlaceView::Value(Value::Array(items)) => Some(items.len()),
+				PlaceView::Value(Value::Bytes(bytes)) => Some(bytes.len()),
 				_ => None,
-			});
-			if let Some((base, start, end, inclusive)) = previous {
-				let length = match self.read_loan(&base)? {
-					PlaceView::Value(Value::Bytes(bytes)) => Some(bytes.len()),
-					PlaceView::Bytes(bytes) => Some(bytes.len()),
-					_ => None,
-				};
-				if let Some(length) = length {
-					let (from, to) = builtins::slice_bounds(start, end, inclusive, length)?;
-					*key = match key {
+			};
+			if let Some(length) = length {
+				let (from, to) = builtins::slice_bounds(*start, *end, *inclusive, length)?;
+				*key = match key {
+					Value::Range {
+						start,
+						end,
+						inclusive,
+					} => {
+						let (left, right) =
+							builtins::slice_bounds(*start, *end, *inclusive, to - from)?;
 						Value::Range {
-							start,
-							end,
-							inclusive,
-						} => {
-							let (left, right) =
-								builtins::slice_bounds(*start, *end, *inclusive, to - from)?;
-							Value::Range {
-								start: Some(I256::from((from + left) as u64)),
-								end: Some(I256::from((from + right) as u64)),
-								inclusive: false,
-							}
+							start: Some(((from + left) as u64).into()),
+							end: Some(((from + right) as u64).into()),
+							inclusive: false,
 						}
-						_ => Value::Integer(I256::from(
-							(from + builtins::position(builtins::integer(key)?, to - from)?) as u64,
-						)),
-					};
-					state.loan = base;
-				}
+					}
+					_ => Value::Integer(
+						((from + builtins::position(builtins::integer(key)?, to - from)?) as u64)
+							.into(),
+					),
+				};
+				*loan = base;
 			}
 		}
 		self.interpreter.reserve(Loan::projection_bytes(1))?;
-		state.loan.push(step);
+		loan.push(step);
 		Ok(())
 	}
 
@@ -911,6 +924,11 @@ impl<'i, 'h> Machine<'i, 'h> {
 					arguments.extend(values.into_iter().map(Out::Value));
 					self.start_callback(path, arguments, true)
 				} else {
+					self.reserve_write(&loan, true)?;
+					if path == "Array#reverseInPlace" {
+						Self::array_mut(&mut self.frames, &loan)?.reverse();
+						return Self::done(Value::None);
+					}
 					Self::done(builtins::mutate_internal(
 						self.interpreter,
 						path,
@@ -989,12 +1007,36 @@ impl<'i, 'h> Machine<'i, 'h> {
 		Ok(current)
 	}
 
-	fn reserve_write(&self, loan: &Loan) -> Result<(), Flow> {
+	fn array_mut<'f>(frames: &'f mut [Frame], loan: &Loan) -> Result<&'f mut [Value], Flow> {
+		let (parent, bounds) = match loan.parent() {
+			Some((
+				parent,
+				PlaceStep::Index(Value::Range {
+					start,
+					end,
+					inclusive,
+				}),
+			)) => (parent, Some((*start, *end, *inclusive))),
+			_ => (loan.clone(), None),
+		};
+		let Value::Array(items) = Self::locate(frames, &parent)? else {
+			return Err(Error::Stop("a mutating array operation requires an array".into()).into());
+		};
+		let (from, to) = match bounds {
+			Some((start, end, inclusive)) => {
+				builtins::slice_bounds(start, end, inclusive, items.len())?
+			}
+			None => (0, items.len()),
+		};
+		Ok(&mut Arc::make_mut(items)[from..to])
+	}
+
+	fn reserve_write(&self, loan: &Loan, container: bool) -> Result<(), Flow> {
 		let mut view = self.read_loan(&Loan::new(loan.owner))?;
 		let mut shared = false;
 		let mut bytes = 0usize;
 		let steps = loan.steps();
-		for (index, step) in steps.iter().enumerate() {
+		for index in 0..steps.len() + usize::from(container) {
 			while let PlaceView::Value(Value::Member(member)) = view {
 				if shared || Arc::strong_count(member) > 1 {
 					bytes = bytes.saturating_add(size_of_val(member.as_ref()));
@@ -1027,15 +1069,15 @@ impl<'i, 'h> Machine<'i, 'h> {
 			};
 			shared |= allocation != 0;
 			bytes = bytes.saturating_add(allocation);
-			if index + 1 < steps.len() {
-				view = view.project(step)?;
+			if index + 1 < steps.len() + usize::from(container) {
+				view = view.project(steps[index])?;
 			}
 		}
 		Ok(self.interpreter.reserve(bytes)?)
 	}
 
 	fn assign_loan(&mut self, loan: &Loan, value: Value) -> Result<(), Flow> {
-		self.reserve_write(loan)?;
+		self.reserve_write(loan, false)?;
 		if let Some((parent, PlaceStep::Index(key))) = loan.parent()
 			&& let PlaceView::Value(Value::Bytes(_bytes)) = self.read_loan(&parent)?
 		{
@@ -1177,6 +1219,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 			PlaceView::Value(Value::Array(items) | Value::Tuple(items)) => {
 				(Container::Array, items.len())
 			}
+			PlaceView::Array(items) => (Container::Array, items.len()),
 			PlaceView::Value(Value::Set(items)) => (Container::Set, items.len()),
 			PlaceView::Value(Value::Map(entries)) => (Container::Map, entries.len()),
 			_ => return Err(Error::Stop("a callback receiver must be a collection".into()).into()),
@@ -1232,13 +1275,16 @@ impl<'i, 'h> Machine<'i, 'h> {
 	}
 
 	fn callback_item(&self, state: &CallbackState, position: usize) -> Result<Loan, Flow> {
-		self.interpreter.reserve(Loan::projection_bytes(1))?;
 		let mut loan = state.source.clone();
-		loan.push(if matches!(state.container, Container::Map) {
-			PlaceStep::Entry(position)
-		} else {
-			PlaceStep::Item(position)
-		});
+		self.extend_loan(
+			&mut loan,
+			if matches!(state.container, Container::Map) {
+				PlaceStep::Entry(position)
+			} else {
+				PlaceStep::Item(position)
+			},
+			false,
+		)?;
 		self.read_loan(&loan)?;
 		Ok(loan)
 	}
@@ -1260,12 +1306,8 @@ impl<'i, 'h> Machine<'i, 'h> {
 			};
 			match progress {
 				Progress::Swap { left, right, next } => {
-					let Value::Array(items) = Self::locate(&mut self.frames, &state.source)? else {
-						return Err(
-							Error::Stop("a sorting callback requires an array".into()).into()
-						);
-					};
-					Arc::make_mut(items).swap(left, right);
+					self.reserve_write(&state.source, true)?;
+					Self::array_mut(&mut self.frames, &state.source)?.swap(left, right);
 					callback = next;
 					value = None;
 				}
@@ -1275,6 +1317,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 					delete,
 					next,
 				} => {
+					self.reserve_write(&state.source, true)?;
 					match Self::locate(&mut self.frames, &state.source)? {
 						Value::Array(items) | Value::Set(items) => compact_item(
 							Arc::make_mut(items).as_mut_slice(),
@@ -1421,6 +1464,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 				.into())
 			}
 			CallbackOutput::Deleted { kept, unvisited } => {
+				self.reserve_write(&state.source, true)?;
 				match Self::locate(&mut self.frames, &state.source)? {
 					Value::Array(items) | Value::Set(items) => {
 						finish_deletions(Arc::make_mut(items), kept, unvisited, || Value::None)
@@ -1455,10 +1499,8 @@ impl<'i, 'h> Machine<'i, 'h> {
 				for (destination, &source) in permutation.iter().enumerate() {
 					destinations[source] = destination;
 				}
-				let Value::Array(items) = Self::locate(&mut self.frames, &state.source)? else {
-					return Err(Error::Stop("a mutating callback requires an array".into()).into());
-				};
-				let items = Arc::make_mut(items);
+				self.reserve_write(&state.source, true)?;
+				let items = Self::array_mut(&mut self.frames, &state.source)?;
 				for position in 0..destinations.len() {
 					while destinations[position] != position {
 						let destination = destinations[position];
@@ -1837,10 +1879,6 @@ impl<'i, 'h> Machine<'i, 'h> {
 				text: text.clone(),
 				offset: 0,
 			}),
-			PlaceView::Value(Value::Bytes(bytes)) => Some(Iteration::Bytes {
-				bytes: Arc::clone(bytes),
-				offset: 0,
-			}),
 			_ => None,
 		};
 		if let Some(values) = text_values {
@@ -1882,6 +1920,9 @@ impl<'i, 'h> Machine<'i, 'h> {
 			}
 			PlaceView::Value(Value::Map(entries)) => (entries.len(), true),
 			PlaceView::Entry(_) => (2, false),
+			PlaceView::Array(items) => (items.len(), false),
+			PlaceView::Value(Value::Bytes(bytes)) => (bytes.len(), false),
+			PlaceView::Bytes(bytes) => (bytes.len(), false),
 			_ => {
 				let value = self.value(value)?;
 				self.interpreter
@@ -1961,13 +2002,6 @@ impl<'i, 'h> Machine<'i, 'h> {
 					}
 					None => None,
 				},
-				Iteration::Bytes { bytes, offset } => match bytes.get(*offset) {
-					Some(byte) => {
-						*offset += 1;
-						Some(Value::int(i64::from(*byte)).into())
-					}
-					None => None,
-				},
 				Iteration::Values {
 					source,
 					length,
@@ -1977,13 +2011,16 @@ impl<'i, 'h> Machine<'i, 'h> {
 					if *position >= *length {
 						None
 					} else {
-						self.interpreter.reserve(Loan::projection_bytes(1))?;
 						let mut loan = source.clone();
-						loan.push(if *entries {
-							PlaceStep::Entry(*position)
-						} else {
-							PlaceStep::Item(*position)
-						});
+						self.extend_loan(
+							&mut loan,
+							if *entries {
+								PlaceStep::Entry(*position)
+							} else {
+								PlaceStep::Item(*position)
+							},
+							false,
+						)?;
 						self.read_loan(&loan)?;
 						*position += 1;
 						Some(Out::Loan(loan))
@@ -2139,6 +2176,84 @@ mod ownership_tests {
 			assert!(matches!(machine.run(action), Ok(Value::Boolean(true))));
 			assert_eq!(machine.frames.len(), 1);
 			assert_eq!(machine.frame().locals.len(), 1);
+		}
+	}
+
+	#[test]
+	fn live_slice_paths_collapse_to_owner_items_without_sharing_the_payload() {
+		for bytes in [false, true] {
+			let code = Arc::new(Code::expression(&Expr::none(), 1, || Ok(())).unwrap());
+			let mut host = EmptyHost;
+			let mut interpreter = Interpreter::new(&mut host, crate::Limits::default());
+			let mut machine = Machine::new(&mut interpreter, code).unwrap();
+			machine.locals()[0] = if bytes {
+				Value::Bytes(Arc::new(vec![1, 2, 3, 4]))
+			} else {
+				Value::array(vec![
+					Value::int(1),
+					Value::int(2),
+					Value::int(3),
+					Value::int(4),
+				])
+			}
+			.into();
+			let mut loan = machine
+				.loan(&ResolvedPlace {
+					slot: 0,
+					steps: Vec::new(),
+				})
+				.unwrap();
+			machine
+				.extend_loan(
+					&mut loan,
+					PlaceStep::Index(Value::Range {
+						start: Some(I256::ONE),
+						end: Some(I256::from(-1)),
+						inclusive: false,
+					}),
+					false,
+				)
+				.unwrap();
+			let mut element = loan.clone();
+			machine
+				.extend_loan(&mut element, PlaceStep::Index(Value::int(-1)), false)
+				.unwrap();
+			assert_eq!(element.steps().len(), 1);
+			machine.assign_loan(&element, Value::int(9)).unwrap();
+			assert_eq!(machine.value(Out::Loan(element)).unwrap(), Value::int(9));
+			let root = machine.read_loan(&Loan::new(loan.owner)).unwrap();
+			match root {
+				PlaceView::Value(Value::Array(items)) => {
+					assert_eq!(Arc::strong_count(items), 1);
+					assert_eq!(items[2], Value::int(9));
+				}
+				PlaceView::Value(Value::Bytes(items)) => {
+					assert_eq!(Arc::strong_count(items), 1);
+					assert_eq!(items[2], 9);
+				}
+				_ => panic!("the original collection"),
+			}
+		}
+	}
+
+	#[test]
+	fn materializing_slice_views_respects_the_memory_limit() {
+		let code = Arc::new(Code::expression(&Expr::none(), 0, || Ok(())).unwrap());
+		let mut host = EmptyHost;
+		let mut interpreter = Interpreter::new(
+			&mut host,
+			crate::Limits {
+				memory: 1,
+				..crate::Limits::default()
+			},
+		);
+		let machine = Machine::new(&mut interpreter, code).unwrap();
+		let items = [Value::int(1)];
+		for view in [PlaceView::Array(&items), PlaceView::Bytes(&[1])] {
+			assert!(matches!(
+				machine.view_value(view),
+				Err(Flow::Error(Error::Memory(1)))
+			));
 		}
 	}
 

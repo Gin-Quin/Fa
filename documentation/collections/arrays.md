@@ -428,4 +428,8 @@ The shared slice proof checks normalized endpoints, with an inclusive end strict
 - Since a reference to an object item is the object, writing a whole object into a place that a live reference may designate (`users[0] = other`, `mutates self[index]`) assigns it field by field into the existing object (a generated `assign` function), so that the reference sees the new value. Elsewhere, the value is simply replaced.
 - Owning slices use `slice()`, followed by a copy of each item when the items own memory (objects are values in Fa, not shared pointers). A `use` range is a live Array proxy over its owner and normalized bounds: indexed reads/writes, iteration and ordinary array methods use the selected items without copying them. `reuse` replaces that view; structural operations and whole-view assignment are rejected before lowering.
 - `reverseInPlace` is `reverse`. A non-throwing `sortInPlace` comparator calls the JavaScript array's stable `sort` directly; a potentially throwing comparator uses staged item handles and commits the order only after all comparisons succeed, so its object-field writes remain visible on failure. `sort()` and `reverse()` construct a new array.
+### Compile-time interpreter
+
+A borrowed range keeps the stable owner slot and normalized bounds. Nested indices, iteration and callback items resolve back to that owner; they do not copy the collection or its items. `reuse` changes the saved designation at runtime. Array sorting and reversal operate on the designated items. An owning read or explicit copy materializes an independent value under the interpreter's memory budget.
+
 :::

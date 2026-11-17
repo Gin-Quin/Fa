@@ -28,6 +28,7 @@ pub(crate) enum Step {
 pub(crate) enum View<'v> {
 	Integer(ethnum::I256),
 	Bytes(&'v [u8]),
+	Array(&'v [Value]),
 	Value(&'v Value),
 	Entry(&'v (Value, Value)),
 }
@@ -37,6 +38,7 @@ impl<'v> View<'v> {
 		match self {
 			Self::Integer(value) => Value::Integer(value),
 			Self::Bytes(bytes) => Value::Bytes(Arc::new(bytes.to_vec())),
+			Self::Array(items) => Value::array(items.to_vec()),
 			Self::Value(value) => value.clone(),
 			Self::Entry((key, value)) => Value::Tuple(Arc::new(vec![key.clone(), value.clone()])),
 		}
@@ -71,6 +73,12 @@ impl<'v> View<'v> {
 					let (from, to) = builtins::slice_bounds(*start, *end, *inclusive, bytes.len())?;
 					Ok(Self::Bytes(&bytes[from..to]))
 				}
+				Step::Item(index) => bytes
+					.get(*index)
+					.map(|byte| Self::Integer((*byte).into()))
+					.ok_or_else(|| {
+						Error::Stop("internal: an iterated byte was invalidated".into())
+					}),
 				Step::Index(key) => Ok(Self::Integer(ethnum::I256::from(
 					bytes[builtins::position(builtins::integer(key)?, bytes.len())?],
 				))),
@@ -78,6 +86,33 @@ impl<'v> View<'v> {
 					Ok(Self::Integer(ethnum::I256::from(bytes.len() as u64)))
 				}
 				_ => Err(Error::Stop("unsupported byte projection".into())),
+			};
+		}
+		let items = match self {
+			Self::Value(Value::Array(items)) => Some(items.as_slice()),
+			Self::Array(items) => Some(items),
+			_ => None,
+		};
+		if let Some(items) = items {
+			return match step {
+				Step::Index(Value::Range {
+					start,
+					end,
+					inclusive,
+				}) => {
+					let (from, to) = builtins::slice_bounds(*start, *end, *inclusive, items.len())?;
+					Ok(Self::Array(&items[from..to]))
+				}
+				Step::Index(key) => Ok(Self::Value(
+					&items[builtins::position(builtins::integer(key)?, items.len())?],
+				)),
+				Step::Item(index) => items.get(*index).map(Self::Value).ok_or_else(|| {
+					Error::Stop("internal: an iterated item was invalidated".into())
+				}),
+				Step::Field(name) if name.as_ref() == "length" => {
+					Ok(Self::Integer((items.len() as u64).into()))
+				}
+				_ => Err(Error::Stop("unsupported array projection".into())),
 			};
 		}
 		let Self::Value(value) = self else {

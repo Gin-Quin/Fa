@@ -130,4 +130,8 @@ The shared slice proof requires an inclusive end to name an existing byte and ch
 - `==` is a helper that compares the lengths, then the bytes.
 - `toString()` is the helper that prints arrays, not `Uint8Array.prototype.toString` (which gives `104,105`).
 - `toUtf8()`, `String.fromUtf8` and `String.fromUtf8Lossy` use a shared `TextEncoder` and two shared `TextDecoder`s (see [strings](/values/strings)).
+### Compile-time interpreter
+
+A borrowed range keeps the stable owner slot and normalized bounds. Nested indices, iteration and callback items resolve back to that owner; they do not copy the collection or its items. `reuse` changes the saved designation at runtime. Array sorting and reversal operate on the designated items. An owning read or explicit copy materializes an independent value under the interpreter's memory budget.
+
 :::

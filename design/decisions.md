@@ -2591,3 +2591,16 @@ arguments as immutable does not cover it. The required differential corpus
 caught writeback through an ordinary object index; the mixed capacity/key-set
 fixture checks nested paths, UTF-16 lengths and hidden argument order on every
 target without weakening that corpus.
+
+
+### Ownership enforcement: live range loans (implementation, 2026-11-17)
+
+The ownership VM integration supersedes the copy-back argument mechanism described
+in the String landing record above. Arguments, aliases and captures retain stable
+owner loans. An Array or Bytes range records normalized endpoints once; projecting
+another range or item rebases that designation into the original owner. Iteration
+and callback items use the same projection operation, including packed bytes,
+without retaining a collection snapshot. Array reversal and both sort paths mutate
+the selected items directly. Owning materialization and copy-on-write writes are
+budgeted before allocation. This changes execution machinery, not the language's
+slice, error or ownership rules; user-function reference results remain separate.

@@ -46,8 +46,8 @@ impl Lowerer<'_> {
 		self.expr(node)
 	}
 
-	/// Stored fields/items only. Computed members, string characters and
-	/// slices are values rather than addressable payloads in the VM.
+	/// Stored fields/items and live array/byte ranges. Computed members
+	/// and immutable string slices are values rather than mutable places.
 	pub(super) fn borrowable_place(&mut self, node: NodeId) -> Option<Place> {
 		match syntax::view(self.tree, node) {
 			View::Group(inner) => self.borrowable_place(inner),
@@ -76,12 +76,18 @@ impl Lowerer<'_> {
 					self.types().kind(ty),
 					TypeKind::Collection(
 						CollKind::Array
+							| CollKind::InlineArray
 							| CollKind::GrowingArray
 							| CollKind::Map | CollKind::GrowingMap,
 						..
 					) | TypeKind::Tuple(_)
-				) || matches!(self.types().kind(self.a.type_of(index)), TypeKind::Range)
-				{
+						| TypeKind::Bytes
+				) || (matches!(self.types().kind(self.a.type_of(index)), TypeKind::Range)
+					&& matches!(
+						self.types().kind(ty),
+						TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, ..)
+							| TypeKind::Tuple(_)
+					)) {
 					return None;
 				}
 				let mut place = self.borrowable_place(target)?;

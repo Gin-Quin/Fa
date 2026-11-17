@@ -218,7 +218,7 @@ The call above compiles to three `console.log` lines with no runtime lookup at a
 
 - **Immutable literals (current LLVM backend).** Constant `let` literals with supported scalar keys use read-only entries and index. Runtime local literals use a fixed frame buffer when the header, entries, index and any stable chunk directory fit the 2 KiB collection and 4 KiB non-recursive frame budgets. Captured or asynchronous values and larger constructions keep heap storage. Static drops do nothing; frame drops destroy owned elements without freeing their storage. An explicit copy of static values constructs independent mutable storage. Proven moves choose suitable destination storage before construction. Runtime owning or uncertain uses choose the heap before construction, without frame-to-heap copy-out. Duplicate constant elements retain set semantics.
 
-The set is a **Swiss table** (Abseil's `flat_hash_set`, Rust's `hashbrown`, Go's maps since 1.24), with the values stored inline:
+The planned inline layout is a **Swiss table** (Abseil's `flat_hash_set`, Rust's `hashbrown`, Go's maps since 1.24), with the values stored inline:
 
 - **Layout.** One allocation holding an array of control bytes followed by an array of values. A control byte is empty, deleted, or 7 bits of the value's hash. The control array is padded with a copy of its first group, so that probing never wraps in the middle of a group.
 - **Probing.** The hash gives a starting group; a group is 16 control bytes compared at once with SIMD (SSE2, NEON; a portable 8-byte word otherwise). Each control byte equal to the hash's 7 bits is a candidate, compared with the value's `==`. A group with an empty byte ends the search. Groups are probed in triangular order.
@@ -227,7 +227,7 @@ The set is a **Swiss table** (Abseil's `flat_hash_set`, Rust's `hashbrown`, Go's
 - **Hashing.** Fast and non-cryptographic, with a random seed per set to resist hash flooding. Tests can fix the seed.
 - **References.** A reference into a set is a pointer to the value in the table, invalidated by any `add`, `delete` or `clear`, as declared.
 
-The current LLVM backend stores a set like a [map](/collections/maps) without values: its values in stable chunks, and an index of 32-bit hash tags and value numbers.
+The current LLVM backend stores a set like a [map](/collections/maps) without values: its values in stable chunks, and an index of 32-bit hash tags and value numbers. It uses the same standard hash and structural SameValueZero comparison functions as map keys. Scalars, strings, arrays, inline arrays, objects, tuples, optionals and Bytes hash their content. Named unions currently hash their member tag; other collection representations use a conservative collision hash. In either case the complete item is compared before a candidate matches: collisions never select a subset of its fields as its identity. The constructor has no callback or unsupported-key path.
 
 ### JavaScript
 

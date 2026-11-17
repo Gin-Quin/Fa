@@ -604,6 +604,9 @@ impl Generator<'_> {
 				.map(|info| (symbol, info.clone())),
 			_ => None,
 		};
+		let declaration = local
+			.as_ref()
+			.map(|(_, info)| info.declaration.unwrap_or(info.lambda));
 		let (function, hidden) = match local {
 			Some((symbol, info)) => {
 				if info.generics.is_empty() {
@@ -622,7 +625,11 @@ impl Generator<'_> {
 				(self.expr(callee).primary_text(), hidden)
 			}
 		};
-		let value = self.select_reference_body_value(n, callee, Expr::name(function, true));
+		let value = declaration
+			.and_then(|declaration| self.async_function_value(n, declaration))
+			.unwrap_or_else(|| {
+				self.select_reference_body_value(n, callee, Expr::name(function, true))
+			});
 		Some(self.bind_function_hidden(value, hidden))
 	}
 

@@ -1,6 +1,5 @@
 # The programs the native-freestanding target doesn't pass yet, with the reason
 # (`tests/programs.rs`): any other compile error fails.
-analyzer/tests/cases/comptime/directories.fa: main.fa:4:19: this member is not supported by the native backend yet
 analyzer/tests/cases/comptime/for-per-item.fa: main.fa:19:14: a value of type `Void` is not supported by the native backend yet
 analyzer/tests/cases/modules/field-defaults-across-files.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
 analyzer/tests/cases/std/json-defaults-across-files.fa: target limit: std.json requires libc (AN004); build for native

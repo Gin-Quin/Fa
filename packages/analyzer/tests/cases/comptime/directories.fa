@@ -1,5 +1,4 @@
 -- file: main.fa
--- skip-target: native (the native backend does not lower a compile-time directory listing yet)
 static pages = @readDirectory("pages")
 @for page in pages {
 	console.log(page.name)

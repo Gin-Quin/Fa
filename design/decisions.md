@@ -2821,3 +2821,11 @@ reference cell or copied referent is needed.
 JavaScript scalar reference metadata also derives optionality from the declared
 type, so a present first designation cannot disable nullable container access
 after reseating. Immutable aliases inherit the same locator convention.
+
+## Native completeness: directory-entry exclusions (2026-11-17)
+
+The common anonymous-union field lowering also handles directory entries with
+different literal names and paths. The existing multi-file @readDirectory case
+passes native, wasm and freestanding with its unchanged output oracle. Remove
+its native annotation and wasm/freestanding ratchets; no separate directory
+lowering or target-specific implementation is needed.

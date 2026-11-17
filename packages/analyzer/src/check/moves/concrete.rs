@@ -171,6 +171,17 @@ impl Walker<'_> {
 		// each source live; storage-origin filtering belongs to the later
 		// borrowed/owned invocation graph, not this conservative seed.
 		for (node, sources) in self.ownership_read_origins.clone() {
+			let function = self.ownership_body(node);
+			// The current move graph observes borrowed source scopes. Owned
+			// invocation summaries will select the environment boundary when
+			// declaration bindings and capture transfer plans activate together.
+			let sources = crate::flow::ownership::boundary_sources(
+				&mut self.places,
+				sources,
+				function,
+				false,
+				&self.ownership_capture_origins,
+			);
 			self.observe_places(
 				node,
 				sources.into_iter().map(|source| source.place),

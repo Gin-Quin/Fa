@@ -231,6 +231,18 @@ impl Places {
 		false
 	}
 
+	/// Checked projection steps, from the root to this place.
+	pub fn steps(&self, place: PlaceId) -> Vec<Step> {
+		let mut steps = Vec::new();
+		let mut current = place;
+		while let (Some(parent), Some(step)) = (self.get(current).parent, self.get(current).step) {
+			steps.push(step);
+			current = parent;
+		}
+		steps.reverse();
+		steps
+	}
+
 	/// The number of steps from the root.
 	pub fn depth(&self, place: PlaceId) -> usize {
 		let mut depth = 0;

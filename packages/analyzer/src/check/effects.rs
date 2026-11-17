@@ -242,20 +242,7 @@ impl Walker<'_> {
 
 	/// The steps of a place, from its root.
 	pub(crate) fn place_steps(&self, place: PlaceId) -> Vec<Step> {
-		let mut steps = Vec::new();
-		let mut current = place;
-		loop {
-			let entry = self.places.get(current);
-			match (entry.parent, entry.step) {
-				(Some(parent), Some(step)) => {
-					steps.push(step);
-					current = parent;
-				}
-				_ => break,
-			}
-		}
-		steps.reverse();
-		steps
+		self.places.steps(place)
 	}
 
 	/// Prints a place for messages: `bodies[j].vx`, `scores[..]`.

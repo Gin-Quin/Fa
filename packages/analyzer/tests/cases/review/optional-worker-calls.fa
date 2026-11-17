@@ -13,5 +13,5 @@ async function call = (present: Boolean) => {
 }
 export async function = () => {
 	await call(false) -- prints: none
-	await call(true) -- prints: 6
+	await call(true)  -- prints: 6
 }

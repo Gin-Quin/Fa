@@ -62,7 +62,9 @@ impl Generator<'_> {
 			View::None => Expr::constant("undefined", Prec::Primary),
 			View::Name(_) => self.name(n),
 			View::Access { target, members } => self.member_access(n, target, members),
-			View::OptionalAccess { target, members } => self.optional_access(n, target, members),
+			View::OptionalAccess { .. } => {
+				self.internal_error(n, "an optional read bypassed its guarded continuation")
+			}
 			View::Object { .. } | View::TypedObject { .. } => self.object_literal(n),
 			// a tuple is a JavaScript array (printed by its type's formatter)
 			View::Array { items } => match self.collection_literal(n, items) {

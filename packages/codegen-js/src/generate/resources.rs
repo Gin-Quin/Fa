@@ -479,7 +479,7 @@ impl Generator<'_> {
 		let result = self.inline_temp();
 		let mut read = Expr::name(temp.clone(), false);
 		for &member in members {
-			read = self.apply_member(read, member, false);
+			read = self.apply_member(read, member);
 		}
 		let moved = if self.may_hold_resource(self.type_of(n)) {
 			format!("{} = undefined, ", read.text)

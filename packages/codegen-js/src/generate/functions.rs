@@ -706,12 +706,7 @@ impl Generator<'_> {
 					.filter(|argument| !matches!(argument, Argument::Receiver(_)))
 					.cloned()
 					.collect();
-				let optional = matches!(self.view(callee), View::OptionalAccess { .. });
-				let (receiver, drop) = if optional {
-					(self.keep_value(receiver), None)
-				} else {
-					self.temporary_receiver(callee, receiver)
-				};
+				let (receiver, drop) = self.temporary_receiver(callee, receiver);
 				let function = self
 					.select_reference_call(n, callee, Expr::name(function, true))
 					.text;
@@ -726,13 +721,7 @@ impl Generator<'_> {
 				let hidden = self.hidden_arguments(declaration, n);
 				values.splice(0..0, hidden);
 				let result = self.finish_call(n, Some(declaration), function, values);
-				if !optional {
-					return self.after_call_drop(n, result, drop);
-				}
-				// `receiver?.method()`: `none` when the receiver is `none`
-				let none = Expr::constant("undefined", Prec::Primary);
-				let test = js::binary(&receiver, "===", &none, Prec::Equality);
-				js::conditional(&test, &none, &result)
+				self.after_call_drop(n, result, drop)
 			}
 			Callee::Value
 				if info

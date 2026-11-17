@@ -1,4 +1,4 @@
--- Accepted by the analyzer; the JavaScript backend currently refuses this.
+-- Fixed by the guarded optional-chain lowering; kept as the original census probe.
 type Color = Enum { red, blue }
 function describe = (value: Color?): String? => value?.toString()
 console.log(describe(Color.red), describe(none))

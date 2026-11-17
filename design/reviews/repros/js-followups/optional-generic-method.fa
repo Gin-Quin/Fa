@@ -1,0 +1,7 @@
+-- Frontend GN007 before the generator: explicit generic method arguments
+-- through an optional receiver. The inferred form works on JS.
+type Box = {
+	function echo = <Item>(self, value: Item): Item => value
+}
+function direct = (box: Box?): Integer? => box?.echo<Integer>(7)
+console.log(direct(none), direct(Box {}))

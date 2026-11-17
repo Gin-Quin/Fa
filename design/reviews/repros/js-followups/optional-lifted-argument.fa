@@ -1,3 +1,4 @@
+-- Fixed by guarding the complete continuation; kept as the original runtime probe.
 -- Expected output is only none: absent receivers must skip argument evaluation.
 type Person = {
 	name: String

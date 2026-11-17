@@ -54,7 +54,7 @@ impl<'s> Generator<'s> {
 			.find(|call| call.callee == node)?
 			.clone();
 		Some(match call.member {
-			Some(member) => self.apply_member(call.receiver, member, false),
+			Some(member) => self.apply_member(call.receiver, member),
 			None => call.receiver,
 		})
 	}
@@ -122,7 +122,7 @@ impl<'s> Generator<'s> {
 			return next(self, value, ty);
 		};
 		let mut apply = |g: &mut Self, value, _| {
-			let value = g.apply_member(value, member, false);
+			let value = g.apply_member(value, member);
 			g.chain_members(value, g.type_of(member), rest, optional, next)
 		};
 		if optional {

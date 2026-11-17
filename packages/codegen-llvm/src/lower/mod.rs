@@ -108,6 +108,7 @@ use values::{IntRepr, Repr, Val};
 
 /// LLVM's number for the `fastcc` calling convention.
 pub(crate) const FAST_CALLING_CONVENTION: u32 = 8;
+pub(super) const CANONICAL_SPLIT: &str = "fa.string.canonical-split";
 
 type CallbackInstanceKey<'ctx> = (FunctionValue<'ctx>, Vec<(usize, TypeId)>);
 type InstanceKey = (
@@ -805,21 +806,47 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		// accept virtual views from other code; closed programs can erase it.
 		let virtual_views = !self.whole_program
 			|| self.c_library.is_some()
-			|| [
-				"fa_string_slice_view",
-				"fa_string_slice_region",
-				"fa_string_split_views",
-				"fa_string_split_nonempty_views",
-				"fa_string_split_views_into",
-			]
-			.into_iter()
-			.filter_map(|name| self.module.get_function(name))
-			.any(|function| {
-				inkwell::values::BasicValue::get_first_use(
-					&function.as_global_value().as_pointer_value(),
-				)
-				.is_some()
-			});
+			|| ["fa_string_slice_view", "fa_string_slice_region"]
+				.into_iter()
+				.filter_map(|name| self.module.get_function(name))
+				.any(|function| {
+					inkwell::values::BasicValue::get_first_use(
+						&function.as_global_value().as_pointer_value(),
+					)
+					.is_some()
+				}) || [
+			"fa_string_split_views",
+			"fa_string_split_nonempty_views",
+			"fa_string_split_views_into",
+		]
+		.into_iter()
+		.filter_map(|name| self.module.get_function(name))
+		.any(|function| {
+			use inkwell::values::{AnyValueEnum, BasicValue, BasicValueEnum, CallSiteValue};
+
+			let mut next = function
+				.as_global_value()
+				.as_pointer_value()
+				.get_first_use();
+			while let Some(usage) = next {
+				let instruction = match usage.get_user() {
+					AnyValueEnum::InstructionValue(instruction) => Some(instruction),
+					other => BasicValueEnum::try_from(other)
+						.ok()
+						.and_then(|value| value.as_instruction_value()),
+				};
+				if !instruction
+					.and_then(|instruction| CallSiteValue::try_from(instruction).ok())
+					.is_some_and(|call| {
+						call.get_string_attribute(AttributeLoc::Function, CANONICAL_SPLIT)
+							.is_some()
+					}) {
+					return true;
+				}
+				next = usage.get_next_use();
+			}
+			false
+		});
 		if let Some(flag) = self.module.get_global("fa_virtual_string_slices") {
 			flag.set_initializer(
 				&self

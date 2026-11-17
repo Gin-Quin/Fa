@@ -34,6 +34,57 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn ascii_split_proofs_keep_other_cut_constructors_authoritative() {
+		for target in [Target::Native, Target::Wasm] {
+			for (name, separator, filter, extra, enabled) in [
+				("ascii", "\" \"", "", "", false),
+				(
+					"filtered-ascii",
+					"\" \"",
+					".filter((part) => not part.isEmpty())",
+					"",
+					false,
+				),
+				("unknown", "separator", "", "", true),
+				("empty", "\"\"", "", "", true),
+				("cut", "\"😀\"[1]", "", "", true),
+				(
+					"ascii-with-cut",
+					"\" \"",
+					"",
+					"if source.length >= 3 { use cut = source[2..3]\nconsole.log(cut) }\n",
+					true,
+				),
+			] {
+				let (parameter, argument) = if name == "unknown" {
+					(", separator: String", ", \" \"")
+				} else {
+					("", "")
+				};
+				let source = format!(
+					"function run = (text: String{parameter}): Integer => {{\nmutable source = text\nlet parts = source.split({separator}){filter}\n{extra}parts.length\n}}\nconsole.log(run(\"é😀 x\"{argument}))\n"
+				);
+				let ir = complete_ir_at_target(
+					&format!("split-capability-{name}"),
+					&source,
+					false,
+					OptLevel::O0,
+					target,
+				);
+				let flag = ir
+					.lines()
+					.find(|line| line.starts_with("@fa_virtual_string_slices ="))
+					.expect("virtual span capability");
+				assert!(
+					flag.contains(&format!("constant i32 {}", u8::from(enabled))),
+					"{name}/{target:?}: {flag}"
+				);
+				assert!(ir.contains("@fa_string_split_"), "{name}: {ir}");
+			}
+		}
+	}
+
+	#[test]
 	fn view_constructors_enable_virtual_surrogate_edges() {
 		let cases = [
 			(

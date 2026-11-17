@@ -731,7 +731,6 @@ static FaString owned_copy(const uint8_t *bytes, size_t length) {
 /// `owned_copy` of bytes known to be simple (`SIMPLE`), or to be scanned (0).
 static FaString owned_copy_with(const uint8_t *bytes, size_t length, size_t simple) {
 	size_t encoded = fa_string_encoded_length(bytes, length, simple);
-	if (encoded >= KIND_MASK) { out_of_memory(); }
 	FaString string;
 	if (length == 0) {
 		string.bytes = (const uint8_t *)"";
@@ -748,6 +747,9 @@ static FaString owned_copy_with(const uint8_t *bytes, size_t length, size_t simp
 		inline_string_tag(&small, encoded, (simple & SIMPLE) ? SIMPLE : text_flags((uint8_t *)&small, encoded));
 		return small;
 	}
+	// Inline copies already proved their size; only a heap copy needs the
+	// representation-limit check before allocating.
+	if (encoded >= KIND_MASK) { out_of_memory(); }
 	size_t block = string_block(encoded);
 	uint8_t *copy = string_alloc(&block, simple);
 	fa_string_copy_bytes(copy, bytes, length, simple);

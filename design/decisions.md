@@ -2095,3 +2095,17 @@ virtual-head byte probes in parser loops without duplicating recursive methods o
 changing the existing proof. ASCII append guards likewise bypass virtual-edge
 materialization. A shared ASCII/Unicode/cut-surrogate fixture and native/wasm O0
 IR check require one encoded-length computation and two indexed byte readers.
+
+
+Closed-program capability selection distinguishes split calls proved to use a
+nonempty ASCII literal. Mark those lowered calls and retain virtual-span support
+for every unmarked use, unknown/empty/surrogate separator, explicit slice, region
+slice, separate unit and C library. Splitting at an ASCII separator cannot create
+a surrogate edge; if the source already has one, its other constructor keeps the
+capability enabled. Late instances participate in the same final use scan.
+This refines the capability proof without disabling a supported constructor.
+
+The final short-copy path proves the inline byte limit before checking the heap
+representation limit. Keep that latter check on the heap branch before allocation;
+empty/single-byte/inline copies need no second bound check. This removes a
+redundant instruction path without changing any allocation limit.

@@ -1743,6 +1743,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				};
 				let function = self.runtime.function(name)?;
 				let invocation = self.builder.build_call(function, &call, "")?;
+				if name.contains("_views")
+					&& info
+						.arguments
+						.iter()
+						.find_map(|argument| match argument {
+							Argument::Given(node) => self.literal_shape(*node),
+							_ => None,
+						})
+						.is_some_and(|(length, ascii)| length != 0 && ascii)
+				{
+					// A nonempty ASCII separator cannot cut a surrogate pair.
+					// Any input edge still needs another constructor, which keeps
+					// the program-wide capability enabled independently.
+					invocation.add_attribute(
+						inkwell::attributes::AttributeLoc::Function,
+						self.context
+							.create_string_attribute(super::CANONICAL_SPLIT, ""),
+					);
+				}
 				if name.ends_with("_into") && self.recursive_collection_frame() {
 					// The split helper has bounded scanning/construction scratch.
 					// Keep that scratch in one transient helper frame, rather than

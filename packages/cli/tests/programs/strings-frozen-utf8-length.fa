@@ -1,0 +1,20 @@
+-- Frozen fields compute their encoded byte length once per method call.
+-- asynchronous: false
+-- require-split: true
+
+type Reader = {
+	text: String
+
+	function checksum = (self): Integer => {
+		mutable total = 0
+		for index in 0..self.text.utf8Length() {
+			total += self.text.toUtf8().get(index) ?? 0
+			total += self.text.toUtf8().get(index) ?? 0
+		}
+		total
+	}
+}
+
+console.log(Reader { text = "ab" }.checksum()) -- prints: 390
+console.log(Reader { text = "é" }.checksum()) -- prints: 728
+console.log(Reader { text = "😀"[1] }.checksum()) -- prints: 1238

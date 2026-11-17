@@ -1635,24 +1635,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			"String#toString" => Ok(receiver),
 			"String#codeUnitAt" => self.string_unit_at(node, receiver, arguments[0]),
-			"String#utf8Length" => {
-				let length = self
-					.call_value(
-						self.runtime.function("fa_string_encoded_length")?,
-						&[
-							bytes.into(),
-							length.into(),
-							self.string_capacity(receiver)?.into(),
-						],
-					)?
-					.into_int_value();
-				let count = self.builder.build_int_z_extend_or_bit_cast(
-					length,
-					self.context.i64_type(),
-					"",
-				)?;
-				Ok(Val::new(Repr::Int(IntRepr::I64), count))
-			}
+			"String#utf8Length" => Ok(Val::new(
+				Repr::Int(IntRepr::I64),
+				self.byte_length(receiver)?,
+			)),
 			"String#isWellFormed" => {
 				call.push(self.string_capacity(receiver)?.into());
 				boolean(self, "fa_string_is_well_formed", &call)

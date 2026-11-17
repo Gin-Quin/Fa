@@ -1850,6 +1850,61 @@ static void test_string_equal(void) {
 	}
 }
 
+static void test_string_keys(void) {
+	uint8_t ascii[65];
+	__builtin_memset(ascii, 'x', sizeof ascii);
+	for (size_t length = 0; length <= sizeof ascii; length += 1) {
+		FaString owner;
+		fa_string_own(ascii, length, SIMPLE, &owner);
+		FaString view = {ascii, length, SIMPLE | KIND_MASK};
+		FaString unmarked = {ascii, length, KIND_MASK};
+		CHECK(string_keys_equal((const uint8_t *)&owner, &view));
+		CHECK(string_keys_equal((const uint8_t *)&view, &owner));
+		CHECK(string_keys_equal((const uint8_t *)&owner, &unmarked));
+		if (length) {
+			ascii[length - 1] = 'y';
+			CHECK(!string_keys_equal((const uint8_t *)&owner, &view));
+			ascii[length - 1] = 'x';
+		}
+		if (string_owned(owner.capacity)) { fa_string_free(owner.bytes, owner.capacity); }
+	}
+	const uint8_t physical[] = {0x98, 0x80, 'x', 0xF0, 0x9F, 0x98};
+	const uint8_t canonical[] = {0xED, 0xB8, 0x80, 'x', 0xED, 0xA0, 0xBD};
+	FaString edge = {physical, sizeof physical, STRING_COUNTED_VIEW | 3};
+	FaString owner;
+	fa_string_own(canonical, sizeof canonical, STRING_SURROGATES, &owner);
+	CHECK(string_keys_equal((const uint8_t *)&owner, &edge));
+	CHECK(string_keys_equal((const uint8_t *)&edge, &owner));
+	FaString view = {ascii, sizeof physical, SIMPLE | KIND_MASK};
+	CHECK(!string_keys_equal((const uint8_t *)&view, &edge));
+	CHECK(!string_keys_equal((const uint8_t *)&edge, &view));
+	if (string_owned(owner.capacity)) { fa_string_free(owner.bytes, owner.capacity); }
+}
+
+static void test_reserving_cut_string_views(void) {
+	for (size_t middle = 0; middle <= 80; middle += 40) {
+		uint8_t physical[85] = {0x98, 0x80};
+		__builtin_memset(physical + 2, 'x', middle);
+		copy_bytes(physical + middle + 2, (const uint8_t *)"\xF0\x9F\x98", 3);
+		size_t length = middle + 5;
+		size_t flags = STRING_COUNTED_VIEW | (middle + 2);
+		uint8_t canonical[86];
+		fa_string_copy_bytes(canonical, physical, length, flags);
+		for (int mode = 0; mode < 3; mode += 1) {
+			for (size_t extra = 0; extra <= 128; extra += 64) {
+				FaString string = {physical, length, flags};
+				if (mode == 0) { fa_string_reserve(&string, extra); }
+				else if (mode == 1) { fa_string_reserve_owned(&string, extra); }
+				else { fa_string_reserve_inline(&string, extra); }
+				CHECK(fa_string_equal(string_bytes(&string), string_length(&string), canonical, length + 1));
+				CHECK(fa_string_length(string_bytes(&string), string_length(&string), string.capacity) == middle + 2);
+				CHECK(fa_string_room(string_length(&string), string.capacity) >= length + 1 + extra);
+				if (string_owned(string.capacity)) { fa_string_free(string.bytes, string.capacity); }
+			}
+		}
+	}
+}
+
 typedef struct {
 	int64_t key;
 	int64_t value;
@@ -2983,6 +3038,8 @@ int main(void) {
 	test_allocator_fast_paths();
 	test_short_copies();
 	test_string_equal();
+	test_string_keys();
+	test_reserving_cut_string_views();
 	printf("test_yields\n");
 	test_yields();
 	printf("test_timers\n");

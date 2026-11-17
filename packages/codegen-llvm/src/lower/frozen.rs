@@ -48,6 +48,7 @@ pub(crate) struct FrozenParts<'ctx> {
 	value: BasicValueEnum<'ctx>,
 	bytes: PointerValue<'ctx>,
 	length: IntValue<'ctx>,
+	encoded_length: IntValue<'ctx>,
 }
 
 /// How to expand a call of a small method of `self` (see the module).
@@ -166,6 +167,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.iter()
 			.find(|parts| parts.value == raw)
 			.map(|parts| (parts.bytes, parts.length))
+	}
+
+	pub(crate) fn frozen_byte_length(&self, value: Val<'ctx>) -> Option<IntValue<'ctx>> {
+		let raw = value.value?;
+		self.frozen_string_parts
+			.iter()
+			.find(|parts| parts.value == raw)
+			.map(|parts| parts.encoded_length)
 	}
 
 	/// Whether a representation is a scalar: nothing to drop or to own.
@@ -460,10 +469,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				// The whole-program field proof also fixes inline payload
 				// storage for this call. Borrow it instead of snapshotting it.
 				let (bytes, length) = self.string_place_parts(value, pointer)?;
+				let encoded_length = self
+					.call_value(
+						self.runtime.function("fa_string_encoded_length")?,
+						&[
+							bytes.into(),
+							length.into(),
+							self.string_capacity(value)?.into(),
+						],
+					)?
+					.into_int_value();
 				self.frozen_string_parts.push(FrozenParts {
 					value: value.value.expect("a string"),
 					bytes,
 					length,
+					encoded_length,
 				});
 			}
 			self.frozen_reads.push(FrozenRead {

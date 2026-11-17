@@ -1358,9 +1358,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The encoded UTF-8 byte length of a text, as an `i64`.
 	pub(crate) fn byte_length(&self, text: Val<'ctx>) -> Result<IntValue<'ctx>, Error> {
-		let (bytes, physical) = self.string_parts(text)?;
-		let length = self
-			.call_value(
+		let length = if let Some(length) = self.frozen_byte_length(text) {
+			length
+		} else {
+			let (bytes, physical) = self.string_parts(text)?;
+			self.call_value(
 				self.runtime.function("fa_string_encoded_length")?,
 				&[
 					bytes.into(),
@@ -1368,7 +1370,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.string_capacity(text)?.into(),
 				],
 			)?
-			.into_int_value();
+			.into_int_value()
+		};
 		self.int_to(
 			length,
 			IntRepr {

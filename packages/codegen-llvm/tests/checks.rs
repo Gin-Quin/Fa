@@ -2637,6 +2637,23 @@ console.log(try read(T.One { child = T.Leaf { value = 7 } }, false))
 	}
 
 	#[test]
+	fn frozen_utf8_reads_share_the_encoded_length() {
+		let source = include_str!("../../cli/tests/programs/strings-frozen-utf8-length.fa");
+		for (name, target) in [("native", Target::Native), ("wasm", Target::Wasm)] {
+			let ir = ir_at_target(
+				&format!("frozen-utf8-length-{name}"),
+				source,
+				false,
+				OptLevel::O0,
+				target,
+			);
+			let body = function(&ir, "fa.checksum");
+			assert_eq!(count(body, "@fa_string_encoded_length("), 1, "{body}");
+			assert_eq!(count(body, "@fa_string_utf8_byte("), 2, "{body}");
+		}
+	}
+
+	#[test]
 	fn bytes_mutation_preserves_a_private_map_probe() {
 		let source = include_str!("../../cli/tests/programs/map-probe-bytes.fa");
 		for (name, target) in [("native", Target::Native), ("wasm", Target::Wasm)] {

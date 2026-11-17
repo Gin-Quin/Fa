@@ -2074,3 +2074,24 @@ a map. This replaces the removed `Character` arm from the trunk's classifier.
 Mutating a separate Bytes owner therefore preserves a private scalar map's cached
 probe, under the existing table/key identity and effect proofs. The shared program
 checks execution; native and wasm IR checks require the probe to survive the call.
+
+
+### Preserve ASCII costs with virtual-span support
+
+The landing profiles include the reviewed constructor-capability fix. Enabling
+virtual spans for split/region constructors exposed a table comparator that
+ignored existing String flags, and a reservation helper whose whole materializer
+was called on the common path. Route table keys through `fa_string_equal_flags`;
+keep the ASCII/view predicate inline and outline only actual virtual-span
+materialization. The capability and cut-span semantics remain enabled. C tests
+cross key representations and all three reserve entry points on short/long cuts.
+Bump the native object-cache String generation to 5. Gate the result on fresh
+map/String instruction profiles against main; retain the first failing profile.
+
+The frozen field proof also permits its encoded UTF-8 length to be computed once
+at method entry. Cache that value beside the already frozen pointer/physical
+length and reuse it for direct UTF-8 reads and `utf8Length()`. This avoids repeated
+virtual-head byte probes in parser loops without duplicating recursive methods or
+changing the existing proof. ASCII append guards likewise bypass virtual-edge
+materialization. A shared ASCII/Unicode/cut-surrogate fixture and native/wasm O0
+IR check require one encoded-length computation and two indexed byte readers.

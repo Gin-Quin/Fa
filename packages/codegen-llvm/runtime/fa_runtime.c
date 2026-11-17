@@ -2080,7 +2080,7 @@ static __attribute__((noinline)) void string_append_slow(FaString *string, const
 		return;
 	}
 	size_t capacity = string->capacity;
-	if (string_view(capacity) && span_has_edges(string->bytes, string->length)) {
+	if (!(capacity & SIMPLE) && string_view(capacity) && span_has_edges(string->bytes, string->length)) {
 		FaString result;
 		fa_concat(string->bytes, string->length, capacity, bytes, length, suffix_capacity, &result);
 		*string = result;
@@ -2137,7 +2137,7 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_append_after_guard(FaStr
                                 size_t suffix_capacity) {
 	size_t capacity = string->capacity;
 	if (length == 0) { return; }
-	if (string_view(capacity) && span_has_edges(string->bytes, string->length)) {
+	if (!(capacity & SIMPLE) && string_view(capacity) && span_has_edges(string->bytes, string->length)) {
 		string_append_slow(string, bytes, length, suffix_capacity);
 		return;
 	}
@@ -2233,13 +2233,17 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_plus(FaString *string,
 
 /// `fa_string_reserve` when the string has no room: a heap block twice as
 /// large, or as large as needed.
-static int string_reserve_virtual(FaString *string, size_t extra) {
-	if (!fa_virtual_string_slices || !string_view(string->capacity) ||
-	    !span_has_edges(string->bytes, string->length)) { return 0; }
+static __attribute__((noinline, cold)) void string_reserve_virtual_slow(FaString *string, size_t extra) {
 	size_t length = fa_string_encoded_length(string->bytes, string->length, string->capacity);
 	FaString result;
 	fa_string_from(string->bytes, string->length, string->capacity, fa_string_size(length, extra), &result);
 	*string = result;
+}
+
+static __attribute__((always_inline)) inline int string_reserve_virtual(FaString *string, size_t extra) {
+	if ((string->capacity & SIMPLE) || !fa_virtual_string_slices ||
+	    !string_view(string->capacity) || !span_has_edges(string->bytes, string->length)) { return 0; }
+	string_reserve_virtual_slow(string, extra);
 	return 1;
 }
 
@@ -8547,8 +8551,8 @@ static __attribute__((always_inline)) inline int string_keys_equal(const uint8_t
 	}
 	const FaString *left = (const FaString *)stored;
 	const FaString *right = (const FaString *)key;
-	return fa_string_equal(string_bytes(left), string_length(left), string_bytes(right),
-	                       string_length(right));
+	return fa_string_equal_flags(string_bytes(left), string_length(left), left->capacity,
+	                             string_bytes(right), string_length(right), right->capacity);
 }
 
 /// Whether a stored key equals a key.

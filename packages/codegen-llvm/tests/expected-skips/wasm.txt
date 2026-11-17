@@ -21,9 +21,11 @@ cli/tests/programs/builtin-methods.fa: line 34: `Integer#checkedPow` is not supp
 cli/tests/programs/js-deep-values.fa: runtime: recursive deep copy exhausts the wasm stack at 20000 nodes; use iterative native helpers
 cli/tests/programs/js-million-copy.fa: runtime: recursive deep copy/equality exhausts the stack at one million nodes; use iterative native helpers
 cli/tests/programs/number-api.fa: line 47: this name is not supported by the native backend yet
-cli/tests/programs/references.fa: line 42: a `use` of this value is not supported by the native backend yet
 cli/tests/programs/tuples-ranges-patterns.fa: line 27: this place is not supported by the native backend yet
 
 # js/followups LLVM audit: remaining optional continuation lowering.
 analyzer/tests/cases/review/optional-worker-calls.fa: threaded worker calls are unavailable on wasm (CONC010); native and freestanding pass
 cli/tests/programs/optional-calls.fa: native continuation after an optional call lacks present-result lowering (Optional<Object> to Object); requires the full chain normalizer
+
+# Builtin-produced pool references do not yet reach the native removal slot path.
+cli/tests/programs/pool-direct-reference-removal.fa: line 3: delete/take accepts stored places; direct Pool/Columnar add results need producer-slot forwarding with control-flow and failure handling

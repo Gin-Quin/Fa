@@ -36,12 +36,12 @@ for word in unique { console.log(word) }
 -- prints: abcdefgh
 -- prints: abcdefghijklmnop
 -- prints: é
-mutable duplicate = lookup
+mutable duplicate = copy lookup
 duplicate["new"] = 1
 duplicate.delete("short")
 console.log(duplicate.size, duplicate.get("new"), lookup.size, lookup.get("short"))
 -- prints: 2 1 2 5
-mutable grown = unique
+mutable grown = copy unique
 for index in 0..100 { grown.add("item {index}") }
 console.log(grown.size, unique.size, grown.includes("item 99"), grown.includes("é"))
 -- prints: 104 4 true true
@@ -50,7 +50,7 @@ mutable total = 0
 for value in many { total += value }
 console.log(many.size, total, many.includes(33), many.includes(41))
 -- prints: 40 820 true false
-mutable more = many
+mutable more = copy many
 more.add(41)
 more.delete(1)
 console.log(more.size, more.includes(41), more.includes(1), many.includes(1))
@@ -89,12 +89,12 @@ let wide: Map<UInt32, UInt8> = [(0, 1), (7, 2), (4000000000, 3)]
 let noZero: Map<UInt32, UInt8> = [(5, 1), (13, 2)]
 console.log(wide.get(0), wide.get(7), wide.get(4000000000), wide.get(8), wide.size, noZero.get(0), noZero.get(13), noZero.size)
 -- prints: 1 2 3 none 3 none 2 2
-mutable widened = wide
+mutable widened = copy wide
 widened[9] = 9
 widened.delete(0)
 console.log(widened.size, widened.get(9), widened.get(0), wide.get(0), wide.size)
 -- prints: 3 9 none 1 3
-mutable smaller = small
+mutable smaller = copy small
 smaller[500] = 50
 console.log(smaller.size, smaller.get(500), small.get(500), small.size)
 -- prints: 4 50 none 3

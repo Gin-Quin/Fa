@@ -87,6 +87,7 @@ impl Walker<'_> {
 		};
 		// declaring the name again: only over an invalidated `use`
 		self.check_declared_again(n, name, symbol);
+		self.record_alias_origins(symbol, value, place);
 		if let Some(place) = place {
 			self.aliases.insert(symbol, place);
 			if self.body.flow.reachable {
@@ -368,6 +369,7 @@ impl Walker<'_> {
 		else {
 			return TypeId::VOID;
 		};
+		self.record_alias_origins(symbol, value, place);
 		if let Some(place) = place {
 			// the owner must be the same collection (`REF006`)
 			if let Some(&current) = self.aliases.get(&symbol)

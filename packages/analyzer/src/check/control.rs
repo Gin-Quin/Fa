@@ -963,6 +963,7 @@ impl Walker<'_> {
 					self.a.symbols.symbol(variable).kind,
 					SymbolKind::LoopVariable { copy: false }
 				) {
+				self.record_alias_origins(variable, iterable, Some(item_place));
 				self.aliases.insert(variable, item_place);
 			}
 			// `for (key, value) in map`: the value designates the map's value
@@ -972,6 +973,7 @@ impl Walker<'_> {
 				&& let Some(value) = items.get(1)
 				&& let Some(variable) = self.a.symbols.symbol_of_decl(value)
 			{
+				self.record_alias_origins(variable, iterable, Some(item_place));
 				self.aliases.insert(variable, item_place);
 			}
 			self.body.flow.iterating.push(collection);

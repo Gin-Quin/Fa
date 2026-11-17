@@ -1990,3 +1990,7 @@ Publish named callable bindings separately from data captures; a caller retains 
 ### Ownership enforcement: async self environment identity (2026-11-17)
 
 A lowering frame records the original concrete entry and its incoming environment. Its synchronous and coroutine forms reuse that environment for self calls; self handles retain it. Coroutine leases and existing return/error/cancellation cleanup remain responsible for lifetime. The canonical concrete entry still distinguishes generic instances. The runtime guard covers ramp/resume/destroy/cleanup, and a borrowed recursive callback must preserve writes to its enclosing mutable local.
+
+### Ownership enforcement: alias storage origins (2026-11-17)
+
+Track ownership provenance separately from reference validity: a sparse flow binding associates each alias with correlated canonical places and direct-source or logical capture-input origins. Reseating replaces that set; reachable joins union complete alternatives. Missing metadata falls back to known reference places, while an explicit empty designation does not revive a remembered owner. Checked projections rebase both canonical and logical paths. Freeze each read's current-pass sources by replacement, and clear them between key specializations. This is preparation for conditional source-read summaries; it does not activate capture moves or alter reference checking or its ABI.

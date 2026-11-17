@@ -10,6 +10,7 @@
 
 pub mod facts;
 pub mod map;
+pub(crate) mod ownership;
 pub mod refs;
 
 use smallvec::SmallVec;
@@ -265,6 +266,9 @@ pub struct FlowState {
 	pub moved_fields: SmallVec<[(PlaceId, NodeId); 1]>,
 	/// Evaluation-time function-slot sources, joined with the other flow facts.
 	pub callable_values: CallableBindings,
+	/// Correlated ownership sources of references. This does not change
+	/// their independent validity/invalidation facts in `refs`.
+	pub(crate) ownership_aliases: ownership::AliasOrigins,
 	/// The kept tasks that may still run (their `start` nodes): they
 	/// borrow what they use until they end (`check/tasks.rs`).
 	pub tasks: SmallVec<[NodeId; 1]>,
@@ -295,6 +299,7 @@ impl FlowState {
 			consumed: SmallVec::new(),
 			moved_fields: SmallVec::new(),
 			callable_values: SmallVec::new(),
+			ownership_aliases: ownership::AliasOrigins::default(),
 			tasks: SmallVec::new(),
 			cancelled: SmallVec::new(),
 		}
@@ -453,6 +458,7 @@ impl FlowState {
 			}
 		}
 		joined.refs = refs::join_refs(&mut facts.refs, &self.refs, &other.refs);
+		joined.ownership_aliases = ownership::AliasOrigins::join(self, other, &facts.refs);
 		joined.iterating = self
 			.iterating
 			.iter()

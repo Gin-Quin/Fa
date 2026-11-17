@@ -490,6 +490,8 @@ pub struct Walker<'s> {
 	pub(crate) move_reads: FxHashMap<NodeId, Vec<SymbolId>>,
 	/// Places observed at each read, before later `reuse` changes an alias.
 	pub(crate) move_places: FxHashMap<NodeId, Vec<PlaceId>>,
+	/// Storage origins frozen at each ownership read in its current pass.
+	pub(crate) ownership_read_origins: FxHashMap<NodeId, crate::flow::ownership::Sources>,
 	/// Replacements restore ownership at their successful assignment.
 	pub(crate) move_writes: FxHashMap<NodeId, PlaceId>,
 	/// Explicit operations ending a unique handle's lifetime in place.
@@ -678,6 +680,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		copy_sites: rustc_hash::FxHashSet::default(),
 		move_reads: FxHashMap::default(),
 		move_places: FxHashMap::default(),
+		ownership_read_origins: FxHashMap::default(),
 		move_writes: FxHashMap::default(),
 		lifetime_ends: FxHashMap::default(),
 		effect_types: FxHashMap::default(),

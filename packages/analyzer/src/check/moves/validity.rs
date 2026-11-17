@@ -17,6 +17,7 @@ impl Walker<'_> {
 		if self.body.flow.reachable
 			&& let Some(place) = self.place_of(node)
 		{
+			self.record_ownership_read(node, &[place]);
 			self.move_places.insert(node, vec![place]);
 			if let Some(symbol) = self.place_symbol(place) {
 				self.record_move_read(node, symbol);

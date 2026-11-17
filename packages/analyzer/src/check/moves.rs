@@ -22,6 +22,7 @@ mod captures;
 mod concrete;
 mod copies;
 mod graph;
+mod origins;
 mod validity;
 
 /// The last use of a local seen so far.
@@ -109,6 +110,7 @@ impl Walker<'_> {
 		} else {
 			vec![self.places.symbol(symbol)]
 		};
+		self.record_ownership_read(n, &places);
 		self.move_places.insert(n, places);
 		match kind {
 			SymbolKind::Let | SymbolKind::Mutable => self.note_use(n, symbol),

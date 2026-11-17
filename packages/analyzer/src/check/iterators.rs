@@ -172,6 +172,7 @@ impl Walker<'_> {
 				.facts
 				.refs
 				.state(crate::flow::refs::RefState::valid(elements));
+			self.record_alias_origins(symbol, value, Some(elements));
 			self.body.flow.set_ref_state(symbol, state);
 		}
 	}

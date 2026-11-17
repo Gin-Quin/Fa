@@ -227,6 +227,8 @@ The current LLVM backend stores a set like a [map](/collections/maps) without va
 
 ### JavaScript
 
+- Compile-time table values choose the same primitive or structural table class as runtime literals, including nested constants.
+
 - A set of primitives (`Integer`, `Float`, `String`, `Boolean`, a union of literals) is a JavaScript `Set`: the engine's `includes` (`has`) is as fast as anything written by hand.
 - A set of objects or tuples can't use a JavaScript `Set` directly, which compares objects by identity. It is a JavaScript `Map` from the structural hash of the value (a 32-bit number, computed by a function generated per element type) to the value, or to an array of values when several values share a hash. `includes` hashes the value, then compares it with the generated `==`. `size` is a counter kept next to the `Map`.
 - A reference to an object value is the object itself. Hashing and equality always use the item type; the table header contains no custom key callback. Removing that legacy callback from both backends belongs to the Set implementation slices.

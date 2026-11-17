@@ -1,0 +1,43 @@
+-- Compile-time tables retain structural equality on every JavaScript target.
+type Key = { code: Integer }
+static keys: Set<Key> = [{ code = 1 }, { code = 2 }, { code = 1 }]
+static values: Map<Key, String> = [
+	({ code = 1 }, "one")
+	({ code = 2 }, "two")
+	({ code = 1 }, "updated")
+]
+function show = (keys: Set<Key>, values: Map<Key, String>) => {
+	console.log(keys.size, keys.includes({ code = 1 }), keys.includes({ code = 3 })) -- prints: 2 true false
+	console.log(
+		values.size
+		values.get({ code = 1 })
+		values.get({ code = 2 })
+		values.get({ code = 3 })
+	) -- prints: 2 updated two none
+}
+show(keys, values)
+
+static pairs: Set<(Integer, String)> = [(1, "one"), (2, "two"), (1, "one")]
+static byPair: Map<(Integer, String), Integer> = [((1, "one"), 11), ((2, "two"), 22)]
+console.log(pairs.size, pairs.includes((1, "one")), pairs.includes((1, "other"))) -- prints: 2 true false
+console.log(byPair.get((1, "one")), byPair.get((2, "two")))                       -- prints: 11 22
+
+static optional: Set<Integer?> = [1, none, 2, none]
+static wide: Map<Int64, String> = [(1, "wide")]
+console.log(optional.size, optional.includes(none), wide.get(1)) -- prints: 3 true wide
+
+static nested: { values: Map<Key, Set<(Integer, String)>> } = {
+	values = [({ code = 1 }, [(1, "one"), (1, "one")])]
+}
+let present = nested.values.get({ code = 1 })
+if present is not none {
+	console.log(present.size, present.includes((1, "one"))) -- prints: 1 true
+}
+
+type Color = Enum { red, green, blue }
+static colors: Set<Color> = [Color.red, Color.blue, Color.red]
+static byColor: Map<Color, String> = [(Color.red, "red")]
+static fractions: Set<Percentage> = [25%, 50%, 25%]
+static bytes: Set<Bytes> = ["one".toUtf8(), "one".toUtf8()]
+console.log(colors.size, colors.includes(Color.red), byColor.get(Color.red))                     -- prints: 2 true red
+console.log(fractions.size, fractions.includes(25%), bytes.size, bytes.includes("one".toUtf8())) -- prints: 2 true 1 true

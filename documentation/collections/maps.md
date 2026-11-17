@@ -285,6 +285,8 @@ each slot rather than using `tzcnt`; the randomized hash seed remains planned.
 
 ### JavaScript
 
+- Compile-time table values choose the same primitive or structural table class as runtime literals, including nested constants.
+
 - A map whose keys are primitives (`Integer`, `Float`, `String`, `Boolean`, a union of literals) is a JavaScript `Map`. Its iteration order is the insertion order, which the documentation allows since it promises no order.
 - A map whose keys are objects or tuples can't use a JavaScript `Map` directly, which compares objects by identity. It is a JavaScript `Map` from the structural hash of the key (a 32-bit number, computed by a function generated per key type) to the entry, or to an array of entries when several keys share a hash. Each entry is `{ key, value }`, and the key is compared with the generated `==`.
 - A reference to an object value is the object itself, including function parameters and results. A borrowed primitive or mixed-union slot retains the evaluated map and key: local reads and writes call the map's `get` and `set` directly. Calls use the allocation-free container/key convention described in the [reference ABI](/advanced/owned-references); aliases and defaults retain these evaluated parts.

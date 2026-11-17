@@ -2538,3 +2538,8 @@ Preserve conditional blocking requirements as (generic owner declaration, parame
 On a target with no synchronous method entry, its dictionary holds a per-value unreachable blocking stub plus the real async entry. The checker reports CONC010 at a forbidden blocking application, so the stub is never the language's target-refusal mechanism. This prevents both task/receiver argument shifts and imports of absent $sync exports; stubs must not share mutable $async properties.
 
 Recursive generic calls inside a definition retain the existing current-instance type: explicit self type arguments remain GN007. Their lowered calls record an identity application of the rigid binders for erased dictionaries; publishing a generic recursive signature would incorrectly change this language rule.
+
+### Compile-time composite tables (2026-11-17)
+
+JavaScript constants share the runtime literal class selection: primitive Set/Map keys use engine tables, composite keys use FaSet/FaHashMap. Choose by the checked key type, including empty tables and nested constants, rather than refusing nonprimitive interpreter values. Preserve duplicate replacement and structural equality through the existing constructors.
+

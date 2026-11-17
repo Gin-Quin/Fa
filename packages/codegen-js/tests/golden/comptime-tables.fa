@@ -1,0 +1,3 @@
+static objects: Set<{ code: Integer }> = [{ code = 1 }]
+static tuples: Map<(Integer, String), String> = [((1, "one"), "value")]
+console.log(objects.includes({ code = 1 }), tuples.get((1, "one")))

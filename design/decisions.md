@@ -2768,3 +2768,9 @@ Validation without LLVM exposed missing compile_file/run unavailable-result APIs
 Their non-LLVM stubs now match the other compile APIs and have direct tests, so
 runtime-guarded native fixtures still compile. The checker implementation and the
 measured release binary are unchanged.
+
+The lead's overload rule is explicit: finish matched-input correctness,
+instruction profiling and memory first; timing requires one-minute load <6.
+Each completed timing round is retained if a load spike stops the run. An explicit
+--allow-busy produces one provisional series with observed load beside the
+figures, without a 20% acceptance claim. The lead reruns it in a quiet window.

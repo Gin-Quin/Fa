@@ -5,8 +5,8 @@ From the repository root, with Bun and Valgrind installed as in AGENTS.md:
 ```sh
 export PATH="$HOME/.bun/bin:$HOME/.local/bin:$PATH"
 bun install --frozen-lockfile --cwd packages/benchmark-typescript
-# One command builds release Fa, regenerates both inputs, independently checks
-# the TS with pinned TypeScript 7, measures, profiles and checks the own corpus:
+# One command builds release Fa, regenerates/checks both inputs, independently
+# validates pinned TS7, profiles/checks memory and corpus, then measures:
 taskset -c 0-4 env -u LLVM_SYS_181_PREFIX python3 benchmarks/compiler/check_speed.py --report benchmarks/results/check-speed.json
 ```
 
@@ -16,7 +16,18 @@ lines each. Packages also have three cyclic namespace files, an entry and a Fa
 configuration; JSON records exact file/line/byte counts and SHA-256s of the inputs.
 `--files 1,100 --lines 100 --runs 3` is a smoke run, never an acceptance result.
 `--mode prepare|measure|profile|annotate|legacy|corpus|rss|render` resumes one stage using the report.
+For a lead-run quiet rerun after full preparation, use:
+
+```sh
+taskset -c 0-4 python3 benchmarks/compiler/check_speed.py --mode measure --report benchmarks/results/check-speed.json
+```
 Keep the first primary report: use a different `--report` for a supplemental run.
+Timing starts only while the one-minute load is below 6. If it reaches 6 before
+a new round, the driver stops at its checkpoint; use `--mode measure` to resume
+in a quiet window. `--allow-busy` explicitly records one provisional busy-host
+series. Every new timed sample records load before/after; generated timing tables
+show observed load and label busy-host figures provisional. Non-timing stages run
+before the timing gate, so completed profiles/inputs survive a busy-host refusal.
 There is no outlier removal. Resumed runs reject changed executables and inputs,
 including project configuration. Each completed round is checkpointed; measurement
 resume retains those samples and skips already completed size/mode series.

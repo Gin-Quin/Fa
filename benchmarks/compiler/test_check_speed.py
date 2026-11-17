@@ -62,7 +62,7 @@ class StatisticsTests(unittest.TestCase):
         value = {"wall": .02, "user": .01, "system": .001, "cpu": .011, "peak_rss_kib": 10000}
         with tempfile.TemporaryDirectory() as directory:
             args = SimpleNamespace(fa=Path("fa"), bun=Path("bun"), modes=["single"],
-                                   runs=2, report=Path(directory)/"result.json")
+                                   runs=2, report=Path(directory)/"result.json", allow_busy=True, max_load=6)
             data = {"fixtures": [{"files": 1, "faInput": "input.fa", "tsInput": "ts",
                                   "fa": {"files": 1, "lines": 500, "bytes": 10000},
                                   "ts": {"files": 1, "lines": 500, "bytes": 10000}}]}
@@ -86,6 +86,23 @@ class StatisticsTests(unittest.TestCase):
                 completed.assert_not_called()
             self.assertEqual(len(saved["series"]), 1)
             self.assertEqual(len(saved["series"][0]["samples"]["fa"]), 2)
+
+    def test_load_guard_refuses_measurement_before_warming_tools(self):
+        args = SimpleNamespace(modes=["single"], allow_busy=False, max_load=6)
+        data = {"fixtures": [{"files": 1}]}
+        with patch.object(check_speed.os, "getloadavg", return_value=(7., 7., 7.)):
+            with patch.object(check_speed, "sample") as sampled:
+                with self.assertRaisesRegex(RuntimeError, "quiet window"):
+                    check_speed.measure(args, data)
+                sampled.assert_not_called()
+
+    def test_load_display_handles_timing_series_and_corpus(self):
+        snapshots = {"start": {"load_average": [7, 7, 7]}, "end": {"load_average": [8, 8, 8]}}
+        self.assertEqual(check_speed.load_cell(snapshots), "7.00–8.00")
+        self.assertTrue(check_speed.row_is_provisional(snapshots))
+        corpus = {"samples": [{"load_1m_start": 3, "load_1m_end": 4}]}
+        self.assertEqual(check_speed.load_cell(corpus), "3.00–4.00")
+        self.assertFalse(check_speed.row_is_provisional(corpus))
 
     def test_callgrind_parser_keeps_totals_outside_function_sums(self):
         total, functions = check_speed.parse_annotation("100 (100.0%) PROGRAM TOTALS\n80 (80.0%) ???:fa_analyzer::types::kind\n20 (20.0%) ???:malloc\n")

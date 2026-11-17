@@ -82,6 +82,11 @@ def prepare(args, data):
         # Explicit independent validation against the pinned TS7 binary as well as Bun.
         run(["taskset", "-c", "0-4", args.bun, ROOT / "packages/benchmark-typescript/node_modules/@typescript/native/bin/tsc",
              "--noEmit", "-p", fixture["tsInput"]], timeout=180)
+        fixture["validation"] = {
+            "fa": sample(["taskset", "-c", "0-4", "env", "-u", "RAYON_NUM_THREADS", str(args.fa), "check", fixture["faInput"]], b"", timeout=600, max_rss_kib=512 * 1024),
+            "bun": sample(["taskset", "-c", "0-4", str(args.bun), "check", "--no-script", "-p", fixture["tsInput"]], b"", timeout=600),
+        }
+        fixture["validation_purpose"] = "clean-input correctness and memory; not an acceptance timing series"
         fixtures.append(fixture)
         print(f"prepared {count}: Fa {fixture['fa']['lines']} / TS {fixture['ts']['lines']} lines", flush=True)
     data["fixtures"] = fixtures
@@ -94,6 +99,8 @@ def measure(args, data):
         for mode in args.modes:
             if (fixture["files"], mode) in complete:
                 continue
+            if not args.allow_busy and os.getloadavg()[0] >= args.max_load:
+                raise RuntimeError("timing requires one-minute load <6; resume in a quiet window, or use --allow-busy once for a provisional series")
             row = {"files": fixture["files"], "mode": mode, "start": snapshot(), "samples": {}, "orders": [], "runner_sha256": RUNNER_SHA256}
             cmds = commands(args, fixture, mode)
             active = data.get("active_series")
@@ -101,6 +108,7 @@ def measure(args, data):
                 if active["commands"] != cmds or active["planned_runs"] != args.runs:
                     raise RuntimeError("unfinished series command/run count changed")
                 row = active
+                row.setdefault("resumptions", []).append({"snapshot": snapshot(), "runner_sha256": RUNNER_SHA256})
             row["commands"] = cmds
             row["planned_runs"] = args.runs
             row["resource_method"] = "GNU time child RSS; wait4 CPU includes the identical launcher"
@@ -108,6 +116,8 @@ def measure(args, data):
             for label in ("fa", "bun"):
                 sample(cmds[label], b"", timeout=300, max_rss_kib=512 * 1024 if label == "fa" else None)
             for index in range(len(row["orders"]), args.runs):
+                if not args.allow_busy and os.getloadavg()[0] >= args.max_load:
+                    raise RuntimeError("host load reached 6; completed rounds are checkpointed for quiet-window resume")
                 order = order_for_round(list(cmds), index)
                 row["orders"].append(order)
                 for label in order:
@@ -130,6 +140,7 @@ def measure(args, data):
                 if args.runs < 11:
                     row["comparisons"][metric]["verdict"] = "smoke only"
             row["end"] = snapshot()
+            row["provisional"] = row_is_provisional(row)
             data["series"].append(row)
             data.pop("active_series", None)
             save(args, data)
@@ -179,13 +190,13 @@ def category(name, methods=None):
     rules = [
         ("runtime_other", ("fa_interpreter::memory",)),
         ("compile_time", ("fa_interpreter", "fa_analyzer::comptime", "::check::comptime")),
-        ("references_moves_relations", ("::check::references", "::check::reference_sensitivity", "::check::moves", "::check::relations", "::flow::values")),
+        ("references_moves_relations", ("::check::references", "::check::reference_sensitivity", "::check::provenance", "::check::moves", "::check::relations", "::flow::values")),
         ("flow_effects", ("::flow::", "::check::flow", "::check::effects", "::check::control", "::check::conditions", "::check::tasks")),
-        ("reading_parsing", ("fa_parser::", "::parse_module", "std::fs::", "std::io::")),
         ("scanning_resolving", ("fa_codebase_parser::", "fa_analyzer::scan", "fa_analyzer::graph", "::check::modules", "::check::interface", "::symbols::", "::resolve")),
         ("rendering", ("fa::report", "::diagnostics::", "fa::color")),
-        ("syntax_decode", ("fa_analyzer::syntax",)),
+        ("syntax_decode", ("fa_analyzer::syntax", "fa_parser::nodes::Node", "fa_parser::typed_syntax_tree::TypedSyntaxTree>::name")),
         ("types_checking", ("fa_analyzer::types", "fa_analyzer::check::")),
+        ("reading_parsing", ("fa_parser::", "::parse_module", "std::fs::", "std::io::")),
         ("pipeline_session", ("fa_analyzer::", "fa::")),
     ]
     return next((group for group, patterns in rules if any(p in name for p in patterns)), "runtime_other")
@@ -207,6 +218,11 @@ def parse_annotation(annotation, methods=None):
 def annotate_profile(args, data):
     result = data["profile"]
     output = Path(result["callgrind"]["path"])
+    if not output.exists() and result["callgrind"].get("archive"):
+        import gzip
+        output = args.directory / "profile/restored.callgrind.out"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(gzip.decompress((ROOT / result["callgrind"]["archive"]).read_bytes()))
     if digest(output) != result["callgrind"]["sha256"]:
         raise RuntimeError("Callgrind artifact changed")
     annotate = shutil.which("callgrind_annotate") or str(Path.home() / ".local/valgrind/usr/bin/callgrind_annotate")
@@ -239,7 +255,9 @@ def profile(args, data):
     for mode in ("single", "default"):
         command = commands(args, fixture, mode)["fa"] + ["--timings"]
         path = directory / f"timings-{mode}.txt"
+        before = snapshot()
         measured = corpus_sample(command, output_path=path, timeout=300)
+        result.setdefault("timing_load", {})[mode] = {"start": before, "end": snapshot()}
         if measured["failure"] or measured["exit"]:
             raise RuntimeError(f"phase profile failed: {measured}")
         result["timings"][mode] = path.read_text()
@@ -321,9 +339,29 @@ def rss_supplement(args, data):
         save(args, data)
 
 
+def row_loads(row):
+    values = [row[key]["load_average"][0] for key in ("start", "end") if key in row]
+    stored = row.get("samples", {})
+    groups = stored.values() if isinstance(stored, dict) else [stored]
+    for samples in groups:
+        for value in samples:
+            values.extend(value[key] for key in ("load_1m_start", "load_1m_end") if key in value)
+    return values
+
+
+def row_is_provisional(row):
+    values = row_loads(row)
+    return not values or max(values) >= 6
+
+
+def load_cell(row):
+    values = row_loads(row)
+    return f"{min(values):.2f}–{max(values):.2f}" if values else "not captured"
+
+
 def markdown(data):
     lines = ["# Checker comparison", "", "Generated from the accompanying JSON; seconds and MiB. Default parallelism on CPUs 0–4 is the wall-time goal; single worker on CPU 5 measures CPU cost. Shared machine, warm filesystem cache, fresh checker processes.", "",
-             "| Files | Mode | Fa wall Q1 / med / Q3 | Bun wall Q1 / med / Q3 | Fa/Bun wall medians / paired [Q1,Q3] | Wall goal | CPU ratio medians / paired | Control wall / CPU | Fa / Bun peak MiB (max) |", "|---:|---|---:|---:|---:|---|---:|---|---:|"]
+             "| Files | Mode | Observed load L1 | Fa wall Q1 / med / Q3 | Bun wall Q1 / med / Q3 | Fa/Bun wall medians / paired [Q1,Q3] | Wall goal | CPU ratio medians / paired | Control wall / CPU | Fa / Bun peak MiB (max) |", "|---:|---|---:|---:|---:|---:|---|---:|---|---:|"]
     def dist(d):
         return " / ".join(f"{d[k]:.4f}" for k in ("q1", "median", "q3"))
     for row in data.get("series", []):
@@ -332,13 +370,16 @@ def markdown(data):
         ctrl = " / ".join(f"{row['controls'][m]['ratio_of_medians']:.3f},{row['controls'][m]['median']:.3f} {'pass' if row['controls'][m]['passes'] else 'fail'}" for m in ("wall", "cpu"))
         rss = [max(s["peak_rss_kib"] for s in row.get("rss_samples", row["samples"])[label]) / 1024 for label in ("fa", "bun")]
         goal = w['verdict'] if row['mode'] == 'default' else 'reference only'
-        lines.append(f"| {row['files']} | {row['mode']} | {dist(a['wall'])} | {dist(b['wall'])} | {w['ratio_of_medians']:.3f} / {w['median']:.3f} [{w['q1']:.3f},{w['q3']:.3f}] | {goal} | {c['ratio_of_medians']:.3f} / {c['median']:.3f} | {ctrl} | {rss[0]:.1f} / {rss[1]:.1f} |")
-    lines += ["", "| Files | Mode | Tool | User Q1 / med / Q3 | System Q1 / med / Q3 | CPU Q1 / med / Q3 | CPU/wall (median ratio) | RSS MiB Q1 / med / Q3 |", "|---:|---|---|---:|---:|---:|---:|---:|"]
+        if row_is_provisional(row):
+            goal = "provisional: " + goal
+        lines.append(f"| {row['files']} | {row['mode']} | {load_cell(row)} | {dist(a['wall'])} | {dist(b['wall'])} | {w['ratio_of_medians']:.3f} / {w['median']:.3f} [{w['q1']:.3f},{w['q3']:.3f}] | {goal} | {c['ratio_of_medians']:.3f} / {c['median']:.3f} | {ctrl} | {rss[0]:.1f} / {rss[1]:.1f} |")
+    lines += ["", "| Files | Mode | Tool | Observed load L1 | User Q1 / med / Q3 | System Q1 / med / Q3 | CPU Q1 / med / Q3 | CPU/wall (median ratio) | RSS MiB Q1 / med / Q3 |", "|---:|---|---|---:|---:|---:|---:|---:|---:|"]
     for row in data.get("series", []):
         for label in ("fa", "bun"):
             s = row["summary"][label]
             rss = {k: v / 1024 for k, v in row.get("rss_summary", {}).get(label, s["peak_rss_kib"]).items()}
-            lines.append(f"| {row['files']} | {row['mode']} | {label} | {dist(s['user'])} | {dist(s['system'])} | {dist(s['cpu'])} | {s['cpu']['median'] / s['wall']['median']:.2f} | {dist(rss)} |")
+            lines.append(f"| {row['files']} | {row['mode']} | {label} | {load_cell(row)} | {dist(s['user'])} | {dist(s['system'])} | {dist(s['cpu'])} | {s['cpu']['median'] / s['wall']['median']:.2f} | {dist(rss)} |")
+    lines += ["", "All timing figures with observed one-minute load >=6 are provisional. Load columns show min/max of captured observations; old rows have endpoint readings, newer samples also retain start/end load. No historical per-sample load is invented."]
     if any("rss_samples" in row for row in data.get("series", [])):
         lines += ["", "Small initial CPU-5 rows use separately labeled eleven-run GNU-time RSS supplements; their primary CPU/wall samples remain unchanged."]
     if data.get("fixtures"):
@@ -356,15 +397,15 @@ def markdown(data):
         for function in profile["functions"][:20]:
             lines.append(f"| `{function['function']}` | {function['instructions']:,} | {function['instructions']/total*100:.2f} |")
         for mode, text in profile["timings"].items():
-            lines += ["", f"### Wall phases: {mode}", "", "```text", text.rstrip(), "```"]
+            lines += ["", f"### Diagnostic wall phases: {mode} (load {load_cell(profile.get('timing_load', {}).get(mode, {}))}; provisional when busy or not captured)", "", "```text", text.rstrip(), "```"]
     if "legacy_target_probe" in data:
         probe = data["legacy_target_probe"]
         r = probe["resources"]
-        lines += ["", "## Original target-dependent generator", "", f"One correctness/memory probe, {probe['target_readers']} target readers, {probe['files']} files, {probe['lines']} lines: {r['wall']:.3f} s wall, {r['cpu']:.3f} s CPU, {r['peak_rss_kib']/1024:.2f} MiB peak. This is not an acceptance timing series.", "", "```text", probe["timings"].rstrip(), "```"]
+        lines += ["", "## Original target-dependent generator", "", f"One correctness/memory probe, {probe['target_readers']} target readers, {probe['files']} files, {probe['lines']} lines: {r['peak_rss_kib']/1024:.2f} MiB peak. Per-probe load was not captured; archived phase times are provisional. This is not an acceptance timing series.", "", "```text", probe["timings"].rstrip(), "```"]
     if data.get("corpus", {}).get("totals"):
         corpus = data["corpus"]
         t = corpus["totals"]
-        lines += ["", "## Repository corpus", "", f"{corpus['files']} tracked .fa files, fresh process per file in its repository context: {t['wall']:.3f} s aggregate wall, {t['user']:.3f} s user + {t['system']:.3f} s system = {t['cpu']:.3f} s CPU; peak {corpus['max_peak_rss_kib']/1024:.2f} MiB. Exit counts: {corpus['exit_counts']}; abnormal/timeout/memory failures: {len(corpus['failures'])}. Expected diagnostic fixtures keep exit 1."]
+        lines += ["", "## Repository corpus", "", f"Observed load L1 {load_cell(corpus)}; timings provisional when >=6. {corpus['files']} tracked .fa files, fresh process per file in its repository context: {t['wall']:.3f} s aggregate wall, {t['user']:.3f} s user + {t['system']:.3f} s system = {t['cpu']:.3f} s CPU; peak {corpus['max_peak_rss_kib']/1024:.2f} MiB. Exit counts: {corpus['exit_counts']}; abnormal/timeout/memory failures: {len(corpus['failures'])}. Expected diagnostic fixtures keep exit 1."]
     return "\n".join(lines) + "\n"
 
 
@@ -380,6 +421,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=("all", "prepare", "measure", "profile", "corpus", "legacy", "rss", "annotate", "render"), default="all")
     parser.add_argument("--files", type=lambda s: list(map(int, s.split(','))), default=[1, 100, 1000, 2000])
+    parser.add_argument("--allow-busy", action="store_true", help="record one provisional timing series on an overloaded host")
+    parser.add_argument("--max-load", type=float, default=6, help="timing requires one-minute load below this (default 6)")
     parser.add_argument("--no-build", action="store_true", help="use an already-built release checker")
     parser.add_argument("--lines", type=int, default=500)
     parser.add_argument("--runs", type=int, default=11)
@@ -437,8 +480,6 @@ def main():
                 for relative, expected in fixture[language]["sources"].items():
                     if digest(args.directory / str(fixture["files"]) / relative) != expected:
                         raise RuntimeError(f"fixture changed: {relative}")
-    if args.mode in ("all", "measure"):
-        measure(args, data)
     if args.mode in ("all", "profile"):
         profile(args, data)
     if args.mode == "annotate":
@@ -449,6 +490,8 @@ def main():
         corpus(args, data)
     if args.mode == "rss":
         rss_supplement(args, data)
+    if args.mode in ("all", "measure"):
+        measure(args, data)
     save(args, data)
 
 

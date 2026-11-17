@@ -18,6 +18,7 @@ def sample(command, expected, timeout=300, max_rss_kib=None, *, allowed_exits=(0
         directory = Path(temporary)
         rss_file = directory / "rss"
         with (directory / "stdout").open("wb") as stdout, (directory / "stderr").open("wb") as stderr:
+            load_start = os.getloadavg()[0]
             started = time.perf_counter()
             child = subprocess.Popen(["/usr/bin/time", "-q", "-f", "%M", "-o", str(rss_file), *command],
                                      stdout=stdout, stderr=stderr, start_new_session=True)
@@ -61,7 +62,8 @@ def sample(command, expected, timeout=300, max_rss_kib=None, *, allowed_exits=(0
             raise RuntimeError(f"{command}: {failure}: " + diagnostics.decode(errors="replace")[-2000:])
         if expected is not None and stdout_bytes != expected:
             raise RuntimeError(f"{command}: unexpected stdout")
-        return {"wall": wall, "user": usage.ru_utime, "system": usage.ru_stime,
+        return {"load_1m_start": load_start, "load_1m_end": os.getloadavg()[0],
+                "wall": wall, "user": usage.ru_utime, "system": usage.ru_stime,
                 "cpu": usage.ru_utime + usage.ru_stime, "peak_rss_kib": peak,
                 "launcher_peak_rss_kib": usage.ru_maxrss, "exit": child.returncode,
                 "failure": failure, "diagnostic_bytes": len(diagnostics),

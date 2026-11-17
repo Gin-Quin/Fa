@@ -290,11 +290,13 @@ impl ProgramFacts {
 		}
 	}
 
+	#[cfg(any(fa_llvm, test))]
 	pub(crate) fn extend(&mut self, kind: &'static str, keys: BTreeSet<String>) {
 		self.facts.entry(kind).or_default().extend(keys);
 	}
 
 	/// Replace provisional unit map patterns with the complete application facts.
+	#[cfg(any(fa_llvm, test))]
 	pub(crate) fn resolve_maps(&mut self, resolved: ProgramFacts) {
 		for kind in [REFERENCED_MAPS, DELETED_WHILE_ITERATED_MAPS] {
 			self.facts
@@ -366,6 +368,7 @@ pub(crate) fn map_component(types: &TypeStore, ty: TypeId) -> Option<String> {
 }
 
 /// The map layouts used by all concrete applications in these files.
+#[cfg(any(fa_llvm, test))]
 pub(crate) fn map_facts(session: &Session, files: &[FileId]) -> ProgramFacts {
 	let mut inputs = crate::map_facts::MapFacts::default();
 	inputs.collect(session, files);
@@ -410,6 +413,7 @@ pub(crate) fn map_key(types: &TypeStore, ty: TypeId) -> Option<String> {
 /// Query every exclusion that can match a concrete map, including generic
 /// bodies in other units. The caller supplies a logged lookup for cached
 /// units: absence of a wildcard is a dependency too.
+#[cfg(any(fa_llvm, test))]
 pub(crate) fn map_excluded(
 	types: &TypeStore,
 	ty: TypeId,

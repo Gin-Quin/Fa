@@ -46382,8 +46382,8 @@ define internal fastcc noundef ptr @ascii_units(ptr nocapture noundef readonly %
   ret ptr %24
 }
 
-; Function Attrs: nounwind optsize
-define internal fastcc ptr @split_unicode(ptr noundef %0, i64 noundef %1, i64 noundef %2, ptr noundef %3, i64 noundef %4, i32 noundef %5, i32 noundef %6, ptr noundef %7) unnamed_addr #14 {
+; Function Attrs: noinline nounwind optsize
+define internal fastcc ptr @split_unicode(ptr noundef %0, i64 noundef %1, i64 noundef %2, ptr noundef %3, i64 noundef %4, i32 noundef %5, i32 noundef %6, ptr noundef %7) unnamed_addr #26 {
   %9 = alloca %struct.UnitReader, align 8
   %10 = alloca %struct.UnitReader, align 8
   %11 = alloca %struct.UnitReader, align 8

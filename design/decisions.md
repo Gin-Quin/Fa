@@ -2085,7 +2085,7 @@ was called on the common path. Route table keys through `fa_string_equal_flags`;
 keep the ASCII/view predicate inline and outline only actual virtual-span
 materialization. The capability and cut-span semantics remain enabled. C tests
 cross key representations and all three reserve entry points on short/long cuts.
-Bump the native object-cache String generation to 5. Gate the result on fresh
+Bump the native object-cache String generation to 6. Gate the result on fresh
 map/String instruction profiles against main; retain the first failing profile.
 
 The frozen field proof also permits its encoded UTF-8 length to be computed once
@@ -2118,3 +2118,12 @@ view. Canonical Unicode views remain valid when no edge constructor is present.
 A C test disables the capability and exercises all three split-view constructors
 with Unicode text and a nonempty ASCII separator, including caller storage.
 The existing frame-string and split-view execution fixtures pin the regression.
+
+Keep the Unicode split implementation in one non-inlined helper. It runs once per
+Unicode split and retains every view/copy/empty-separator behavior. Inlining its
+complete cursor and constructor loops into ASCII callers increased register
+pressure in surrounding append/count loops. The ASCII split path remains inline;
+no benchmark algorithm or input is changed.
+
+The final cache generation is 6, invalidating objects from the intermediate
+virtual-span capability and inlining implementations.

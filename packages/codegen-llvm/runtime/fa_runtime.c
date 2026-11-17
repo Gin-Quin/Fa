@@ -3136,7 +3136,7 @@ void fa_array_materialize(FaArrayHeader *array);
 void *fa_array_push_slot(void *array, int64_t item_size);
 void fa_array_reserve(FaArrayHeader *array, int64_t capacity, int64_t item_size);
 
-static void *split_unicode(const uint8_t *text, size_t length, size_t capacity,
+static __attribute__((noinline)) void *split_unicode(const uint8_t *text, size_t length, size_t capacity,
     const uint8_t *separator, size_t separator_length, int views, int nonempty, void *parts);
 static size_t count_unicode_parts(const uint8_t *text, size_t length,
     const uint8_t *separator, size_t separator_length, size_t limit);
@@ -3706,7 +3706,7 @@ static void split_unit_part(void *parts, const uint8_t *text, size_t length, siz
 	unit_slice_positions(text, length, capacity, first, last, units, part, views ? 2 : 0);
 }
 
-static void *split_unicode(const uint8_t *text, size_t length, size_t capacity,
+static __attribute__((noinline)) void *split_unicode(const uint8_t *text, size_t length, size_t capacity,
     const uint8_t *separator, size_t separator_length, int views, int nonempty, void *parts) {
 	size_t room = 4;
 	uint64_t raw_capacity = nonempty ? room : 0, raw_parts = 1;

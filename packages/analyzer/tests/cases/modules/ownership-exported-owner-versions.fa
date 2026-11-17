@@ -3,9 +3,12 @@
 mutable original: Array<Integer> = [1]
 function read = (): Integer => original.sum()
 let preserved = copy original
-mutable saved = original
-original = [2, 5]
-saved.push(3)
+let saved = do {
+	mutable previous = original
+	original = [2, 5]
+	previous.push(3)
+	previous
+}
 export = { read = read, saved = saved, preserved = preserved }
 -- file: application/main.fa
 export function = () => console.log(library.owners.read(), library.owners.saved, library.owners.preserved)

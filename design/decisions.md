@@ -1980,3 +1980,8 @@ Keep the declared result union available through native return injection. A type
 ### Ownership enforcement: revisioned compile-time code (2026-11-17)
 
 The Walker and SessionHost share one function cache. Stamp each lowering with a session-wide fact revision; retention/capture settlement, final move facts and source invalidation advance it, so a caller cannot retain stale code merely because its own source is unchanged. Invalidate memoized purity with those facts, keeping active recursion guards separate. This prepares coordinated environment activation; reachable invocation/capture plans must still settle before evaluation, including per-key specialization identity, rather than relying on invalidation to repair already-computed values.
+
+
+### Ownership enforcement: named callable dependency facts (2026-11-17)
+
+Publish named callable bindings separately from data captures; a caller retains a callee handle rather than taking another snapshot of its data. Discover body and default uses, transport nonlocal bindings through intervening environments, and compute capture state with reverse worklists. Preserve raw dependency edges independently of `Empty`, `Capturing` or `Pending` state: per-key analysis can snapshot an enclosing body before its captures are complete. Pending facts must settle against that context before target environment selection. Captureless chains and empty cycles stay empty. This publication changes no target layout or capture ownership.

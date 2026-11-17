@@ -21,6 +21,7 @@ mod c_library;
 mod callable_values;
 mod callbacks;
 mod calls;
+mod capture_handles;
 mod collections;
 mod compose;
 mod comptime;

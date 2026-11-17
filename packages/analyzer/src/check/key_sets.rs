@@ -570,6 +570,7 @@ impl Walker<'_> {
 				self.key_sets.current.remove(&pattern);
 			}
 			// the analysis with the body checked for this key
+			self.publish_callable_capture_facts();
 			let nested = std::mem::take(&mut self.a.key_loop_bodies);
 			analyses.push(Arc::new(self.a.clone()));
 			self.a.key_loop_bodies = nested;

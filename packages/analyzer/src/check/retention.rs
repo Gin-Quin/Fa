@@ -127,6 +127,7 @@ impl Walker<'_> {
 		if self.retention_checked_version == Some(version) {
 			return;
 		}
+		self.publish_callable_capture_facts();
 		let mut origins = FxHashMap::default();
 		let mut kept = FxHashSet::default();
 		let mut unknown = FxHashSet::default();

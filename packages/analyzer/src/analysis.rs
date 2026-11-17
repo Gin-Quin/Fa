@@ -666,6 +666,14 @@ pub struct Analysis {
 	/// capture materialization must distinguish that logical type from the
 	/// source's physical representation. This table makes no transfer claim.
 	pub capture_types: FxHashMap<(NodeId, SymbolId), TypeId>,
+	/// Nonlocal named callable bindings, including lexical transport. Retain
+	/// these edges even when a callee's capture facts are still pending in a
+	/// per-key snapshot. Capture state decides which need environment slots.
+	pub named_function_dependencies: FxHashMap<NodeId, Vec<SymbolId>>,
+	/// Definite or unfinished environment requirements. A consumer must
+	/// settle Pending against the enclosing declaration before lowering.
+	/// Neither this state nor the dependency edges authorize a transfer.
+	pub function_capture_states: FxHashMap<NodeId, FunctionCaptureState>,
 	/// Parameters whose callable data can be retained by their function.
 	pub kept_parameters: rustc_hash::FxHashSet<SymbolId>,
 	/// Retention inferred conservatively from an unknown function value.
@@ -1339,6 +1347,15 @@ pub struct ArithInfo {
 	pub root: bool,
 }
 
+/// Whether a callable's environment requirements are settled.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FunctionCaptureState {
+	Empty,
+	Capturing,
+	/// Its body or an enclosing dependency is still being checked.
+	Pending,
+}
+
 /// What the backends need of a function or a lambda node.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FnInfo {
@@ -1602,6 +1619,8 @@ impl Analysis {
 			callback_types: FxHashMap::default(),
 			escapes: rustc_hash::FxHashSet::default(),
 			capture_types: FxHashMap::default(),
+			named_function_dependencies: FxHashMap::default(),
+			function_capture_states: FxHashMap::default(),
 			kept_parameters: rustc_hash::FxHashSet::default(),
 			unknown_kept_parameters: rustc_hash::FxHashSet::default(),
 			non_escaping: rustc_hash::FxHashSet::default(),

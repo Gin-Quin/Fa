@@ -175,7 +175,9 @@ mod with_llvm {
 		target: Target,
 	) -> String {
 		let mut session = Session::new();
-		let file = session.set_source("main", Arc::from(source));
+		let foreign = name.ends_with(".foreign");
+		let module = if foreign { "main.foreign" } else { "main" };
+		let file = session.set_source(module, Arc::from(source));
 		session.analyze_file(file);
 		let options = Options {
 			opt_level,
@@ -186,7 +188,12 @@ mod with_llvm {
 		let output = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
 			.join("fa-checks")
 			.join(name);
-		let artifact = compile(&session, file, "test.fa", target, &options, &output)
+		let label = if foreign {
+			"test.foreign.fa"
+		} else {
+			"test.fa"
+		};
+		let artifact = compile(&session, file, label, target, &options, &output)
 			.unwrap_or_else(|error| panic!("{name}: {error}"));
 		std::fs::read_to_string(artifact.ir.expect("the IR")).expect("the IR file")
 	}
@@ -428,6 +435,30 @@ mod with_llvm {
 			let body = function(&ir, "fa.grow");
 			assert!(!body.contains("@fa.copy"), "{target:?}: {body}");
 			assert!(!body.contains("@fa.convert_copy"), "{target:?}: {body}");
+		}
+	}
+
+	#[test]
+	fn map_entries_transfer_unique_pairs_without_an_aggregate_copier() {
+		let source =
+			include_str!("../../analyzer/tests/cases/ownership-map-pair-transfer.foreign.fa");
+		for target in [Target::Native, Target::Wasm] {
+			let ir = ir_at_target(
+				"map-pair-transfer.foreign",
+				source,
+				true,
+				OptLevel::O0,
+				target,
+			);
+			let body = function(&ir, "fa.run");
+			// This fixture's only ordinary copies are strings (`fa.copy`).
+			// A suffixed copier would duplicate a resource, pair or collection.
+			assert!(
+				!body
+					.lines()
+					.any(|line| line.contains("call") && line.contains("@fa.copy.")),
+				"{target:?}: {body}"
+			);
 		}
 	}
 

@@ -1629,7 +1629,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(result)
 	}
 
-	/// Owned copies of the key and value of a tuple `(key, value)`.
+	/// Transfer both parts of a dying tuple; borrowed construction inputs
+	/// retain their existing item-copy checks.
 	fn pair_parts(
 		&mut self,
 		pair: Val<'ctx>,
@@ -1640,6 +1641,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Err(self.unsupported(node.index(), "this map entry"));
 		};
 		let reprs = self.tuple_reprs(ty);
+		let transfer = self.is_temporary(pair) || self.movable_local(node, pair.repr).is_some();
+		let pair = if transfer {
+			self.take(pair, Some(node))?
+		} else {
+			pair
+		};
 		let structure = pair.value.expect("a tuple").into_struct_value();
 		let key = self.builder.build_extract_value(structure, 0, "")?;
 		let value = self.builder.build_extract_value(structure, 1, "")?;
@@ -1649,7 +1656,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			table.value.expect("a map"),
 			node.index(),
 		)?;
-		Ok((self.emit_copy(key)?, self.emit_copy(value)?))
+		if transfer {
+			Ok((key, value))
+		} else {
+			Ok((self.emit_copy(key)?, self.emit_copy(value)?))
+		}
 	}
 
 	/// `map[key]`: the value (a view), `KeyNotFound` when absent and not proven.

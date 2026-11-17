@@ -2828,3 +2828,7 @@ Ownership and conversion restrictions apply to stores. Read-only equality, order
 #### Ownership enforcement: default argument binding (2026-11-17)
 
 Omitted borrowed parameters preserve the selected existing place, including its address for mutations, or own a fresh selected result until the call ends. Binding plans cover result paths only; they do not authorize the stores computing those results. A guarded temporary is registered before evaluating a default so a later failure cleans earlier fresh defaults. A local created inside a block-valued argument must transfer out before its inner scope ends; enclosing places remain borrowed. Native and JavaScript cleanup follow the selected branch, not merely the fact that an argument was omitted.
+
+#### Ownership enforcement: map entry transfers (2026-11-17)
+
+Map entry grouping preserves normal expression evaluation and coercions. An entry supplied as a temporary or an analyzer-proven moved whole tuple transfers both parts into the table; its old tuple cleanup is removed or its source slot cleared. Splitting a moved whole owner internally is not a new source-level partial move. Borrowed collection-construction inputs remain subject to the later construction-store slice. This removes an implicit Resource copy and early duplicate finalization in the map-entry fallback.

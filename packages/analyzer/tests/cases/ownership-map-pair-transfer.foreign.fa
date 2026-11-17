@@ -1,0 +1,22 @@
+type Resource = {
+	name: String
+	items: Array<Integer>
+	function destroy = (self) => {
+		assert self.items.length == 2
+		assert (self.items[0] catch _error => -1) == self.name.length
+		console.log("drop {self.name} {self.items.length}")
+	}
+}
+function make = (name: String): Resource => Resource { name, items = [name.length, name.length + 1] }
+function run = () => {
+	let direct: Map<String, Resource> = [("a", make("direct"))]
+	let entry = ("b", make("stored"))
+	let stored: Map<String, Resource> = [entry]
+	let grouped: Map<String, Resource> = [((("c", make("grouped"))))]
+	console.log(direct.size, stored.size, grouped.size)
+}
+run()
+-- prints: 1 1 1
+-- prints: drop grouped 2
+-- prints: drop stored 2
+-- prints: drop direct 2

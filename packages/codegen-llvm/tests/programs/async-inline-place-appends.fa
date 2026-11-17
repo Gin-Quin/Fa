@@ -1,6 +1,8 @@
 -- Field/item appends preserve every inline payload byte and encoding flag,
 -- then fall back when the payload grows or the suffix is not one ASCII byte.
 -- The package runs as one module and per unit, including coroutine lowering.
+-- file: package.fa
+export = { name = "inlinePlaceAppends" }
 -- file: library/output.fa
 export type = { text: String }
 -- file: library/append.fa

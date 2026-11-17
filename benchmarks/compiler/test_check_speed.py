@@ -1,5 +1,11 @@
 import unittest
 import sys
+import json
+import tempfile
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+import check_speed
 from resources import sample
 from check_speed import category, comparison, distribution, markdown
 
@@ -42,6 +48,41 @@ class StatisticsTests(unittest.TestCase):
         self.assertEqual(value["exit"], 1)
         self.assertIsNone(value["failure"])
         self.assertEqual(value["diagnostic_bytes"], 3)
+
+    def test_resume_keeps_completed_round_and_does_not_repeat_completed_series(self):
+        value = {"wall": .02, "user": .01, "system": .001, "cpu": .011, "peak_rss_kib": 10000}
+        with tempfile.TemporaryDirectory() as directory:
+            args = SimpleNamespace(fa=Path("fa"), bun=Path("bun"), modes=["single"],
+                                   runs=2, report=Path(directory)/"result.json")
+            data = {"fixtures": [{"files": 1, "faInput": "input.fa", "tsInput": "ts",
+                                  "fa": {"files": 1, "lines": 500, "bytes": 10000},
+                                  "ts": {"files": 1, "lines": 500, "bytes": 10000}}]}
+            calls = 0
+            def interrupted(*_args, **_kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 6:
+                    raise RuntimeError("interrupted after first checkpoint")
+                return value.copy()
+            with patch.object(check_speed, "sample", side_effect=interrupted):
+                with self.assertRaisesRegex(RuntimeError, "interrupted"):
+                    check_speed.measure(args, data)
+            saved = json.loads(args.report.read_text())
+            self.assertEqual(len(saved["active_series"]["orders"]), 1)
+            with patch.object(check_speed, "sample", return_value=value.copy()) as resumed:
+                check_speed.measure(args, saved)
+                self.assertEqual(resumed.call_count, 5)  # Two warmups and one round.
+            with patch.object(check_speed, "sample") as completed:
+                check_speed.measure(args, saved)
+                completed.assert_not_called()
+            self.assertEqual(len(saved["series"]), 1)
+            self.assertEqual(len(saved["series"][0]["samples"]["fa"]), 2)
+
+    def test_callgrind_parser_keeps_totals_outside_function_sums(self):
+        total, functions = check_speed.parse_annotation("100 (100.0%) PROGRAM TOTALS\n80 (80.0%) ???:fa_analyzer::types::kind\n20 (20.0%) ???:malloc\n")
+        self.assertEqual(total, 100)
+        self.assertEqual(sum(row["instructions"] for row in functions), total)
+        self.assertEqual(functions[0]["category"], "types_checking")
 
     def test_render_is_derived_from_json(self):
         self.assertIn("wall-time goal", markdown({"series": []}))

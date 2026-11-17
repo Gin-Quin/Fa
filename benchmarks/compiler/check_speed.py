@@ -77,6 +77,8 @@ def prepare(args, data):
             fixture[language] = {"files": len(paths), "lines": sum(p.read_bytes().count(b"\n") for p in paths),
                                  "bytes": sum(p.stat().st_size for p in paths),
                                  "sources": {str(p.relative_to(directory)): digest(p) for p in paths}}
+        fixture["configuration"] = {name: digest(directory / name) for name in (
+            "fa/package.fa", "ts/tsconfig.json", "ts/package.json")}
         # Explicit independent validation against the pinned TS7 binary as well as Bun.
         run(["taskset", "-c", "0-4", args.bun, ROOT / "packages/benchmark-typescript/node_modules/@typescript/native/bin/tsc",
              "--noEmit", "-p", fixture["tsInput"]], timeout=180)
@@ -87,15 +89,25 @@ def prepare(args, data):
 
 def measure(args, data):
     data.setdefault("series", [])
+    complete = {(row["files"], row["mode"]) for row in data["series"]}
     for fixture in data["fixtures"]:
         for mode in args.modes:
+            if (fixture["files"], mode) in complete:
+                continue
             row = {"files": fixture["files"], "mode": mode, "start": snapshot(), "samples": {}, "orders": [], "runner_sha256": RUNNER_SHA256}
             cmds = commands(args, fixture, mode)
+            active = data.get("active_series")
+            if active and (active["files"], active["mode"]) == (fixture["files"], mode):
+                if active["commands"] != cmds or active["planned_runs"] != args.runs:
+                    raise RuntimeError("unfinished series command/run count changed")
+                row = active
             row["commands"] = cmds
+            row["planned_runs"] = args.runs
+            row["resource_method"] = "GNU time child RSS; wait4 CPU includes the identical launcher"
             # A whole successful run warms filesystem pages; no checker cache is persisted.
             for label in ("fa", "bun"):
                 sample(cmds[label], b"", timeout=300, max_rss_kib=512 * 1024 if label == "fa" else None)
-            for index in range(args.runs):
+            for index in range(len(row["orders"]), args.runs):
                 order = order_for_round(list(cmds), index)
                 row["orders"].append(order)
                 for label in order:
@@ -103,6 +115,8 @@ def measure(args, data):
                                    max_rss_kib=512 * 1024 if label.startswith("fa") else None)
                     row["samples"].setdefault(label, []).append(value)
                 print(f"{fixture['files']} {mode}: round {index + 1}/{args.runs}", flush=True)
+                data["active_series"] = row
+                save(args, data)
             row["summary"] = {label: {metric: distribution([s[metric] for s in samples])
                                               for metric in ("wall", "cpu", "user", "system", "peak_rss_kib")}
                               for label, samples in row["samples"].items()}
@@ -117,6 +131,7 @@ def measure(args, data):
                     row["comparisons"][metric]["verdict"] = "smoke only"
             row["end"] = snapshot()
             data["series"].append(row)
+            data.pop("active_series", None)
             save(args, data)
 
 
@@ -134,6 +149,43 @@ def category(name):
         ("pipeline_session", ("fa_analyzer::", "fa::")),
     ]
     return next((group for group, patterns in rules if any(p in name for p in patterns)), "runtime_other")
+
+
+def parse_annotation(annotation):
+    functions = []
+    for line in annotation.splitlines():
+        match = re.match(r"\s*([\d,]+)\s+\([^)]*\)\s+(.*)", line)
+        if match and "PROGRAM TOTALS" not in match[2]:
+            functions.append({"instructions": int(match[1].replace(",", "")),
+                              "function": match[2], "category": category(match[2])})
+    total = re.search(r"([\d,]+)\s+\([^)]*\)\s+PROGRAM TOTALS", annotation)
+    if not total or not functions:
+        raise ValueError("Callgrind annotation has no totals/functions")
+    return int(total[1].replace(",", "")), functions
+
+
+def annotate_profile(args, data):
+    result = data["profile"]
+    output = Path(result["callgrind"]["path"])
+    if digest(output) != result["callgrind"]["sha256"]:
+        raise RuntimeError("Callgrind artifact changed")
+    annotate = shutil.which("callgrind_annotate") or str(Path.home() / ".local/valgrind/usr/bin/callgrind_annotate")
+    for inclusive in (False, True):
+        annotation = run([annotate, f"--inclusive={'yes' if inclusive else 'no'}",
+                          "--auto=no", "--threshold=100", output]).stdout.decode()
+        (output.parent / ("functions-inclusive.txt" if inclusive else "functions.txt")).write_text(annotation)
+        total, functions = parse_annotation(annotation)
+        result["instructions"] = total
+        result["inclusive_functions" if inclusive else "functions"] = functions
+    groups = {}
+    for function in result["functions"]:
+        group = function["category"]
+        groups[group] = groups.get(group, 0) + function["instructions"]
+    result["exclusive_categories"] = groups
+    result["exclusive_coverage"] = sum(groups.values()) / result["instructions"]
+    if not .99 <= result["exclusive_coverage"] <= 1.000001:
+        raise RuntimeError("exclusive function totals do not cover whole-process instructions")
+    save(args, data)
 
 
 def profile(args, data):
@@ -160,25 +212,25 @@ def profile(args, data):
     # Profilers do not run on reserved measurement CPU 5. Their RSS is host overhead.
     with (directory / "callgrind.log").open("wb") as log:
         subprocess.run(command, check=True, stdout=log, stderr=log, timeout=7200)
-    annotate = shutil.which("callgrind_annotate") or str(Path.home() / ".local/valgrind/usr/bin/callgrind_annotate")
-    annotation = run([annotate, "--inclusive=no", "--threshold=100", output]).stdout.decode()
-    (directory / "functions.txt").write_text(annotation)
-    functions = []
-    for line in annotation.splitlines():
-        match = re.match(r"\s*([\d,]+)\s+\([^)]*\)\s+(.*)", line)
-        if match and "PROGRAM TOTALS" not in match[2]:
-            name = match[2]
-            functions.append({"instructions": int(match[1].replace(",", "")), "function": name, "category": category(name)})
-    total = re.search(r"([\d,]+)\s+\([^)]*\)\s+PROGRAM TOTALS", annotation)
-    result["instructions"] = int(total[1].replace(",", "")) if total else None
-    result["functions"] = functions
-    groups = {}
-    for function in functions:
-        group = function["category"]
-        groups[group] = groups.get(group, 0) + function["instructions"]
-    result["exclusive_categories"] = groups
     result["callgrind"] = {"path": str(output), "sha256": digest(output)}
     data["profile"] = result
+    annotate_profile(args, data)
+
+
+def legacy_probe(args, data):
+    directory = args.directory / "legacy-targets"
+    run(["taskset", "-c", "0-4", args.bun, ROOT / "benchmarks/compiler/generate.ts",
+         "--files", data["fixtures"][-1]["files"], "--lines", data["lines"], "--output", directory])
+    paths = sorted(directory.rglob("*.fa"))
+    result = {"description": "Original generator defaults, including 5% target readers and both bun/native targets; one correctness/memory probe, not an acceptance series.",
+              "files": len(paths), "lines": sum(path.read_bytes().count(b"\n") for path in paths),
+              "target_readers": sum("@if target" in path.read_text() for path in paths),
+              "sources": {str(path.relative_to(directory)): digest(path) for path in paths}}
+    output = directory / "timings.txt"
+    command = ["taskset", "-c", "0-4", "env", "-u", "RAYON_NUM_THREADS", str(args.fa), "check", str(directory), "--timings"]
+    result["resources"] = sample(command, b"", timeout=600, max_rss_kib=512 * 1024, output_path=output)
+    result["timings"] = output.read_text()
+    data["legacy_target_probe"] = result
     save(args, data)
 
 
@@ -243,6 +295,32 @@ def markdown(data):
             s = row["summary"][label]
             rss = {k: v / 1024 for k, v in row.get("rss_summary", {}).get(label, s["peak_rss_kib"]).items()}
             lines.append(f"| {row['files']} | {row['mode']} | {label} | {dist(s['user'])} | {dist(s['system'])} | {dist(s['cpu'])} | {s['cpu']['median'] / s['wall']['median']:.2f} | {dist(rss)} |")
+    if any("rss_samples" in row for row in data.get("series", [])):
+        lines += ["", "Small initial CPU-5 rows use separately labeled eleven-run GNU-time RSS supplements; their primary CPU/wall samples remain unchanged."]
+    if data.get("fixtures"):
+        lines += ["", "| Library files | Fa source files / lines / bytes | TS source files / lines / bytes |", "|---:|---:|---:|"]
+        for fixture in data["fixtures"]:
+            cells = [" / ".join(str(fixture[language][key]) for key in ("files", "lines", "bytes")) for language in ("fa", "ts")]
+            lines.append(f"| {fixture['files']} | {cells[0]} | {cells[1]} |")
+    profile = data.get("profile", {})
+    if profile.get("instructions"):
+        total = profile["instructions"]
+        lines += ["", "## Largest-size profile", "", "Exclusive user-space instruction attribution; inlining charges helpers to their surviving caller. These are not CPU/wall milliseconds; kernel time is outside Callgrind.", "", "| Phase/helper category | Instructions | % of whole process |", "|---|---:|---:|"]
+        for name, count in sorted(profile["exclusive_categories"].items(), key=lambda item: -item[1]):
+            lines.append(f"| {name} | {count:,} | {count / total * 100:.2f} |")
+        lines += ["", "| Function (exclusive) | Instructions | % of process |", "|---|---:|---:|"]
+        for function in profile["functions"][:20]:
+            lines.append(f"| `{function['function']}` | {function['instructions']:,} | {function['instructions']/total*100:.2f} |")
+        for mode, text in profile["timings"].items():
+            lines += ["", f"### Wall phases: {mode}", "", "```text", text.rstrip(), "```"]
+    if "legacy_target_probe" in data:
+        probe = data["legacy_target_probe"]
+        r = probe["resources"]
+        lines += ["", "## Original target-dependent generator", "", f"One correctness/memory probe, {probe['target_readers']} target readers, {probe['files']} files, {probe['lines']} lines: {r['wall']:.3f} s wall, {r['cpu']:.3f} s CPU, {r['peak_rss_kib']/1024:.2f} MiB peak. This is not an acceptance timing series.", "", "```text", probe["timings"].rstrip(), "```"]
+    if data.get("corpus", {}).get("totals"):
+        corpus = data["corpus"]
+        t = corpus["totals"]
+        lines += ["", "## Repository corpus", "", f"{corpus['files']} tracked .fa files, fresh process per file in its repository context: {t['wall']:.3f} s aggregate wall, {t['user']:.3f} s user + {t['system']:.3f} s system = {t['cpu']:.3f} s CPU; peak {corpus['max_peak_rss_kib']/1024:.2f} MiB. Exit counts: {corpus['exit_counts']}; abnormal/timeout/memory failures: {len(corpus['failures'])}. Expected diagnostic fixtures keep exit 1."]
     return "\n".join(lines) + "\n"
 
 
@@ -256,7 +334,7 @@ def save(args, data):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("all", "prepare", "measure", "profile", "corpus", "rss", "render"), default="all")
+    parser.add_argument("--mode", choices=("all", "prepare", "measure", "profile", "corpus", "legacy", "rss", "annotate", "render"), default="all")
     parser.add_argument("--files", type=lambda s: list(map(int, s.split(','))), default=[1, 100, 1000, 2000])
     parser.add_argument("--no-build", action="store_true", help="use an already-built release checker")
     parser.add_argument("--lines", type=int, default=500)
@@ -277,6 +355,8 @@ def main():
     if args.mode in ("all", "prepare"):
         if not args.no_build:
             run(["taskset", "-c", "0-4", "env", "CARGO_BUILD_JOBS=2", "cargo", "build", "--release", "-p", "fa", "--bin", "fa"])
+        native_path = run(["taskset", "-c", "0-4", args.bun, "-e",
+                           'import getExePath from "./packages/benchmark-typescript/node_modules/@typescript/native/lib/getExePath.js"; console.log(getExePath());']).stdout.decode().strip()
         versions = json.loads(run(["taskset", "-c", "0-4", args.bun, "-p", "JSON.stringify(process.versions)"]).stdout)
         pinned = json.loads((ROOT / "packages/benchmark-typescript/node_modules/@typescript/native/package.json").read_text())["version"]
         if versions["typescript"] != pinned:
@@ -285,6 +365,7 @@ def main():
                 "start": snapshot(), "machine": platform.uname()._asdict(), "runs": args.runs,
                 "fa_binary": identity(args.fa), "bun_binary": identity(args.bun),
                 "versions": versions, "pinned_typescript": pinned,
+                "native_typescript_binary": identity(native_path),
                 "runner_sha256": RUNNER_SHA256, "generator_sha256": digest(ROOT / "benchmarks/compiler/paired.ts"),
                 "sources": {str(p): digest(ROOT / p) for p in (
                     "benchmarks/compiler/check_speed.py", "benchmarks/compiler/paired.ts",
@@ -305,6 +386,9 @@ def main():
             raise RuntimeError("checker binary changed since prepare")
     if args.mode != "render":
         for fixture in data["fixtures"]:
+            for relative, expected in fixture.get("configuration", {}).items():
+                if digest(args.directory / str(fixture["files"]) / relative) != expected:
+                    raise RuntimeError(f"configuration changed: {relative}")
             for language in ("fa", "ts"):
                 for relative, expected in fixture[language]["sources"].items():
                     if digest(args.directory / str(fixture["files"]) / relative) != expected:
@@ -313,6 +397,10 @@ def main():
         measure(args, data)
     if args.mode in ("all", "profile"):
         profile(args, data)
+    if args.mode == "annotate":
+        annotate_profile(args, data)
+    if args.mode in ("all", "legacy"):
+        legacy_probe(args, data)
     if args.mode in ("all", "corpus"):
         corpus(args, data)
     if args.mode == "rss":

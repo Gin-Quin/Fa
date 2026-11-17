@@ -15,9 +15,11 @@ are one standalone file, 100, 1,000 and 2,000 library files, approximately 500 F
 lines each. Packages also have three cyclic namespace files, an entry and a Fa
 configuration; JSON records exact file/line/byte counts and SHA-256s of the inputs.
 `--files 1,100 --lines 100 --runs 3` is a smoke run, never an acceptance result.
-`--mode prepare|measure|profile|corpus|rss|render` resumes one stage using the report.
+`--mode prepare|measure|profile|annotate|legacy|corpus|rss|render` resumes one stage using the report.
 Keep the first primary report: use a different `--report` for a supplemental run.
-There is no outlier removal. Resumed runs reject changed executables and inputs.
+There is no outlier removal. Resumed runs reject changed executables and inputs,
+including project configuration. Each completed round is checkpointed; measurement
+resume retains those samples and skips already completed size/mode series.
 
 `paired.ts` renders the existing Fa generator's restricted fixture templates as
 TypeScript. It preserves seeded constants, functions, loops, union/enum cases,
@@ -75,7 +77,12 @@ inferred wall milliseconds; optimized inlining charges code to its surviving
 caller. `--timings` phases overlap (pipeline contains parse and analysis), so they
 must not be added together. Raw Callgrind and annotation files stay in
 `benchmarks/build/check-speed/profile/`; hashes, function counts and phase text
-are retained in JSON. Profiling memory includes Valgrind and is not checker RSS.
+are retained in JSON, along with inclusive caller costs (which must not be
+summed). `--mode annotate` regenerates function/category tables from the unchanged
+Callgrind artifact. Profiling memory includes Valgrind and is not checker RSS.
+The original generator defaults also get a separately labeled correctness/memory
+probe, including 5% target readers and both configured targets. It does not enter
+the matched-program acceptance ratios.
 
 The corpus sanity pass checks every tracked `.fa` file individually in its normal
 repository context, sequential fresh processes, CPU 5/one worker. Intentional

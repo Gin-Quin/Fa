@@ -2829,3 +2829,14 @@ different literal names and paths. The existing multi-file @readDirectory case
 passes native, wasm and freestanding with its unchanged output oracle. Remove
 its native annotation and wasm/freestanding ratchets; no separate directory
 lowering or target-specific implementation is needed.
+
+## Native completeness review: enumeration to a narrower integer (2026-11-17)
+
+`UInt8(status)` with a member pinned to `70000` was accepted and truncated natively (112) while
+Bun printed 70000. The conversion of an enumeration to an integer type now exists only when the type
+holds the value of every member the source type may hold (its pinned values, else its declaration
+indices), exactly like the conversion of a `Fields` value (`E-NUM-16`, "convert to a wider integer
+type"). Refusing rather than checking with `ArithmeticError`: the page groups enumerations with
+fields, whose conversion is refused, and an enumeration's value set is known statically, so a
+check could only fail on a type the programmer chose too small. A narrowed member type (`Status.active`)
+needs room for its own values only. Every engine agrees because the program is refused.

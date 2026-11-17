@@ -1865,11 +1865,8 @@ impl Walker<'_> {
 					K::Int(_) | K::Float(_) | K::Percentage | K::BigInt
 				) | (K::BigInt, K::Int(_) | K::BigInt)
 				| (K::Percentage, K::Int(_) | K::Float(_))
-		) || (matches!(to, K::Int(_))
-			&& matches!(
-				self.s.types.kind(source),
-				TypeKind::Enum(..) | TypeKind::EnumMember(..)
-			)) || (matches!(to, K::Int(_))
+		) || (matches!(to, K::Int(_)) && self.enum_fits(source, target))
+			|| (matches!(to, K::Int(_))
 			&& self.is_fields(source)
 			&& self.fields_fit(source, target));
 
@@ -1877,6 +1874,13 @@ impl Walker<'_> {
 			let hint = match (to, from) {
 				_ if self.is_fields(source) && matches!(to, K::Int(_)) => {
 					": it doesn't hold every value of the set (one bit per flag): convert to a wider integer type, like `UInt128`"
+				}
+				_ if matches!(
+					self.s.types.kind(source),
+					TypeKind::Enum(..) | TypeKind::EnumMember(..)
+				) && matches!(to, K::Int(_)) =>
+				{
+					": it doesn't hold the value of every member: convert to a wider integer type, like `Integer`"
 				}
 				(K::BigInt, K::Float(_)) => ": round it first, ex: `BigInt(Integer.round(x))`",
 				(K::Int(_), K::Percentage) => ": convert it to a `Float` first, ex: `Float(p)`",

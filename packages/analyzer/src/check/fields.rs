@@ -316,6 +316,34 @@ impl Walker<'_> {
 		}
 	}
 
+	/// Whether the integer type `target` holds the integer value of every
+	/// member an enumeration type may hold (`UInt8(status)`): its pinned
+	/// values, else its declaration indices.
+	pub(super) fn enum_fits(&self, source: TypeId, target: TypeId) -> bool {
+		let types = &self.s.types;
+		let Some(range) = types.interval_of(target) else {
+			return false;
+		};
+		let (nominal, members): (_, Vec<u16>) = match types.kind(source) {
+			TypeKind::EnumMember(nominal, index) => (nominal, vec![index]),
+			TypeKind::Enum(nominal, mask) => {
+				let count = types.sym_list(types.nominal(nominal).members).len() as u16;
+				(
+					nominal,
+					(0..count).filter(|&index| types.mask_has(mask, index)).collect(),
+				)
+			}
+			_ => return false,
+		};
+		members.into_iter().all(|index| {
+			let value = types
+				.as_int(types.payload(nominal, index))
+				.and_then(|ty| ty.literal())
+				.unwrap_or(I256::from(index as i128));
+			range.contains(value)
+		})
+	}
+
 	/// Whether the integer type `target` holds every value of the `Fields`
 	/// type `fields` (`Integer(s)`).
 	pub(super) fn fields_fit(&self, fields: TypeId, target: TypeId) -> bool {

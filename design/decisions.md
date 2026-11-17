@@ -2053,3 +2053,12 @@ layouts and all value assertions. No expected-skip list changes.
   Portable fixtures compare every sized integer's boundaries/powers of two
   with compile-time execution and Bun, then LLVM O0/O3 with checks on/off.
   Runtime, ABI, layout and floating-point rules are unchanged.
+
+Review-fix acceptance: all 40 instruction comparisons against reviewed source
+15d6f7f5 pass +1%; the maximum is graph +36 Ir (+0.000344470%). Full LLVM-enabled
+workspace validation passes 1,405 tests (eight existing ignored); final focused
+arithmetic/JIT runs cover the two late tests, for 1,407 distinct validated tests.
+All 107 IR checks and native/freestanding/wasm corpora pass. No CPU timing claim
+is made. Evidence: `benchmarks/results/2026-11-17-arrays-review{,-before,-gate}.json`
+and its generated Markdown. The independent compile-time widening follow-up is
+in TODO; the already recorded per-unit freestanding O0 linker issue remains.

@@ -836,6 +836,9 @@ impl Walker<'_> {
 			let mut written = w.written_decl(target);
 			let mut origin = w.written_origin(target);
 			for member in members.iter() {
+				if chained {
+					w.a.optional_receivers.insert(member, current);
+				}
 				w.receiver_decl = written.take();
 				let owner_origin = origin.clone();
 				let saved_origin = std::mem::replace(&mut w.receiver_origin, origin.take());
@@ -877,6 +880,7 @@ impl Walker<'_> {
 				w.a.written_types.insert(n, origin);
 			}
 			if chained {
+				w.a.optional_results.insert(n, current);
 				w.s.types.optional(current)
 			} else {
 				current

@@ -15,6 +15,12 @@ impl Generator<'_> {
 	/// The JavaScript of an expression, converted for its sink when the
 	/// analyzer recorded a conversion or a range check there.
 	pub(crate) fn expr(&mut self, n: NodeId) -> Expr {
+		if let Some(value) = self.chain_read(n) {
+			return value;
+		}
+		if self.chain_candidate(n) && self.comptime_value(n).is_none() {
+			return self.optional_chain(n, false);
+		}
 		let value = if self.call_returns_reference(n) && !self.is_object_reference(self.type_of(n))
 		{
 			self.read_reference_call(n)

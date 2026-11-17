@@ -586,6 +586,9 @@ impl Generator<'_> {
 
 	/// A call.
 	pub(crate) fn call(&mut self, n: NodeId, callee: NodeId, arguments: NodeList<'_>) -> Expr {
+		if self.chain_candidate(n) {
+			return self.optional_chain(n, true);
+		}
 		// On success the statement retains borrowed temporaries. On error
 		// release them before an enclosing catch, including argument errors.
 		self.guard_frames.push(Vec::new());
@@ -1483,6 +1486,15 @@ impl Generator<'_> {
 	/// The receiver of a method call whose callee is `receiver.method` (or
 	/// `receiver?.method`: the receiver before `?.`).
 	pub(crate) fn receiver(&mut self, callee: NodeId) -> Expr {
+		if let Some(call) = self
+			.fcx
+			.chain_calls
+			.iter()
+			.rev()
+			.find(|call| call.callee == callee)
+		{
+			return call.receiver.clone();
+		}
 		let callee = self.strip_groups(callee);
 		match self.view(callee) {
 			View::Access { target, members } => self.access_prefix(callee, target, members),
@@ -1493,6 +1505,15 @@ impl Generator<'_> {
 
 	/// The type of the receiver of a method call.
 	pub(crate) fn receiver_type(&self, callee: NodeId) -> TypeId {
+		if let Some(call) = self
+			.fcx
+			.chain_calls
+			.iter()
+			.rev()
+			.find(|call| call.callee == callee)
+		{
+			return call.receiver_type;
+		}
 		match self.view(self.strip_groups(callee)) {
 			View::Access { target, members } | View::OptionalAccess { target, members } => {
 				match members.len() {

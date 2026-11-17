@@ -662,6 +662,10 @@ pub struct Analysis {
 	pub method_instantiations: FxHashMap<NodeId, WrittenType>,
 	/// Every call node: its callee and its arguments in parameter order.
 	pub calls: FxHashMap<NodeId, CallInfo>,
+	/// Receiver types on the present path of an optional chain, keyed by member.
+	pub optional_receivers: FxHashMap<NodeId, TypeId>,
+	/// Present-path results before the chain adds absence (including nullable results).
+	pub optional_results: FxHashMap<NodeId, TypeId>,
 	/// Throwing callbacks given to a non-storing user function: each given
 	/// argument node and the function parameter's type widened with its
 	/// callback errors. Native instances use precisely these signatures.
@@ -1736,6 +1740,8 @@ impl Analysis {
 			function_owners: FxHashMap::default(),
 			method_instantiations: FxHashMap::default(),
 			calls: FxHashMap::default(),
+			optional_receivers: FxHashMap::default(),
+			optional_results: FxHashMap::default(),
 			callback_types: FxHashMap::default(),
 			escapes: rustc_hash::FxHashSet::default(),
 			non_escaping: rustc_hash::FxHashSet::default(),

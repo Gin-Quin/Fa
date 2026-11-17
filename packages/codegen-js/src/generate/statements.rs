@@ -1119,6 +1119,9 @@ impl Generator<'_> {
 	/// `do`, a `loop`, a `return`… (a syntactic test: it only chooses
 	/// between `let x; if (…) { x = … }` and `const x = c ? a : b`).
 	pub(crate) fn needs_statements(&self, n: NodeId) -> bool {
+		if self.chain_candidate(n) {
+			return true;
+		}
 		match self.view(n) {
 			View::Group(inner) | View::Try(inner) => self.needs_statements(inner),
 			View::If {

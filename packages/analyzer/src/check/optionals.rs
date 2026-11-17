@@ -103,11 +103,13 @@ impl Walker<'_> {
 			}
 			for member in members.iter() {
 				let stripped = w.strip_none(current).0;
+				w.a.optional_receivers.insert(member, stripped);
 				match w.member_of(member, stripped) {
 					Some((ty, _)) => current = ty,
 					None => return TypeId::UNKNOWN,
 				}
 			}
+			w.a.optional_results.insert(n, current);
 			w.s.types.optional(current)
 		})
 	}

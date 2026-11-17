@@ -28,6 +28,7 @@ pub(crate) mod modules;
 mod number_api;
 mod numbers;
 mod objects;
+mod optionals;
 mod patterns;
 mod reactivity;
 mod reference_variants;
@@ -135,6 +136,9 @@ struct FnCx {
 	callback_error: Option<String>,
 	reference_layout: fa_analyzer::analysis::ReferenceLayout,
 	reference_result: Option<(String, String, String)>,
+	chain_values: Vec<(NodeId, Expr, TypeId)>,
+	chain_calls: Vec<optionals::ChainCall>,
+	chain_active: Vec<NodeId>,
 }
 
 /// The generator of one file.
@@ -851,7 +855,14 @@ impl<'s> Generator<'s> {
 
 	/// The view of a node.
 	pub(crate) fn view(&self, n: NodeId) -> View<'s> {
-		syntax::view(self.tree, n)
+		match syntax::view(self.tree, n) {
+			View::OptionalAccess { target, members }
+				if self.fcx.chain_calls.iter().any(|call| call.callee == n) =>
+			{
+				View::Access { target, members }
+			}
+			view => view,
+		}
 	}
 
 	/// The node with its parentheses removed.
@@ -865,6 +876,33 @@ impl<'s> Generator<'s> {
 
 	/// The type of a node.
 	pub(crate) fn type_of(&self, n: NodeId) -> TypeId {
+		if let Some((_, _, ty)) = self
+			.fcx
+			.chain_values
+			.iter()
+			.rev()
+			.find(|(node, ..)| *node == n)
+		{
+			return *ty;
+		}
+		if let Some(call) = self
+			.fcx
+			.chain_calls
+			.iter()
+			.rev()
+			.find(|call| call.call == n || call.root == n)
+		{
+			return call.result;
+		}
+		if let Some(call) = self
+			.fcx
+			.chain_calls
+			.iter()
+			.rev()
+			.find(|call| call.callee == n && call.member.is_none())
+		{
+			return call.receiver_type;
+		}
 		self.analysis.type_of(n)
 	}
 

@@ -498,6 +498,9 @@ impl Walker<'_> {
 				Callee::Builtin(builtin) => w.std_call_type(n, builtin, ret, expected),
 				_ => ret,
 			};
+			if optional_call {
+				w.a.optional_results.insert(n, ret);
+			}
 			if optional_call && !matches!(ret, TypeId::VOID | TypeId::NEVER) {
 				w.s.types.optional(ret)
 			} else {

@@ -321,7 +321,7 @@ impl Walker<'_> {
 	/// `await f()`: the call's result, `CONC015` when `f` isn't `async`.
 	fn await_call(&mut self, n: NodeId, call: NodeId, callee: NodeId, ty: TypeId) -> TypeId {
 		let target = self.call_target(call, callee);
-		let callee_ty = self.type_of(self.strip_groups(callee));
+		let callee_ty = self.optional_callable_type(callee);
 		let is_async = self.signature_of(callee_ty).is_some_and(|sig| sig.is_async);
 		let info = match target {
 			Target::Primitive(name, _) => Some(AwaitInfo {
@@ -867,6 +867,15 @@ impl Walker<'_> {
 		}
 	}
 
+	fn optional_callable_type(&self, callee: NodeId) -> TypeId {
+		let callee = self.strip_groups(callee);
+		self.a
+			.optional_results
+			.get(&callee)
+			.copied()
+			.unwrap_or_else(|| self.type_of(callee))
+	}
+
 	/// What a call calls, for the summaries.
 	fn call_target(&mut self, n: NodeId, callee: NodeId) -> Target {
 		if let Some(path) = self.builtin_path(n, callee) {
@@ -885,7 +894,8 @@ impl Walker<'_> {
 			}
 			callee = self.strip_groups(inner);
 		}
-		if let View::Access { target, members } = self.view(callee)
+		if let View::Access { target, members } | View::OptionalAccess { target, members } =
+			self.view(callee)
 			&& let Some(member) = members.last()
 			&& let Resolution::Field(shape, index) = self.a.resolution(member)
 		{
@@ -896,8 +906,13 @@ impl Walker<'_> {
 				.and_then(|index| members.get(index))
 				.unwrap_or(target);
 			if field.flags.contains(FieldFlags::METHOD)
-				&& let TypeKind::Param(param) = self.s.types.kind(self.type_of(receiver))
-			{
+				&& let TypeKind::Param(param) = self.s.types.kind(
+					self.a
+						.optional_receivers
+						.get(&member)
+						.copied()
+						.unwrap_or_else(|| self.type_of(receiver)),
+				) {
 				return Target::Method(AsyncMethod::new(&self.s.types, param, field.name));
 			}
 		}
@@ -919,7 +934,9 @@ impl Walker<'_> {
 			return Target::Local(info.lambda, self.function_label_of(info.symbol, &name));
 		}
 		let node = match self.view(callee) {
-			View::Access { members, .. } => members.last().unwrap_or(callee),
+			View::Access { members, .. } | View::OptionalAccess { members, .. } => {
+				members.last().unwrap_or(callee)
+			}
 			_ => callee,
 		};
 		let resolution = match self.a.resolution(node) {
@@ -948,7 +965,7 @@ impl Walker<'_> {
 				.unwrap_or_default();
 			return Target::External(summary, parameters, name);
 		}
-		let callee_ty = self.type_of(callee);
+		let callee_ty = self.optional_callable_type(callee);
 		match self.signature_of(callee_ty) {
 			Some(sig) if sig.is_async => Target::AsyncValue,
 			_ => Target::Plain,

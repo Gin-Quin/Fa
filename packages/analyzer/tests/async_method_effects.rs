@@ -192,3 +192,21 @@ fn imported_requirements_survive_interface_merging_and_target_changes() {
 		previous = Some(report);
 	}
 }
+
+#[test]
+fn optional_constraint_methods_keep_async_and_blocking_capabilities() {
+	let source = format!(
+		r#"{TYPES}
+async function optional = <Item: {{ describe: async (self) => String }}>(value: Item?): String? => await value?.describe()
+console.log(optional<Slow<"optional">>(Slow {{ name = "Ada" }}))
+"#
+	);
+	for target in ["bun", "node", "web", "native", "wasm"] {
+		assert_target(&source, target, matches!(target, "web" | "wasm"));
+		assert_target(
+			&source.replace("console.log(optional", "console.log(await optional"),
+			target,
+			false,
+		);
+	}
+}

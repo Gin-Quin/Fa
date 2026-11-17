@@ -63,3 +63,53 @@ Goose's suite on the trunk before these optimizations: 8 met, 6 behind, 2 unreso
 ### Next
 
 Land links 1a and the array optimizations; finish the ownership enforcement (moves, `MEM004`, partial moves, the repository migration), then its second step (generic conditions, owning parameters, unique resources on both backends, `with`); implement the `link` contract, the compact native pools and the seven pool ports; string construction and comparison on the new representation; the native expected skips and the analyzer's pending cases; `fa check` quality and speed; the three project shapes on every target.
+
+## 2026-11-17, night — Everything reviewed and merged, the ownership branch judged, the handover written
+
+The user asked for a clean stop at 02:00: every engineer finished or parked, every branch reviewed, one trunk that works, a verdict on the long-running ownership branch, and instructions for the next architect.
+
+### Landed on `main` (one integration, one validation)
+
+All five branches were finished by a deadline given at 18:00, each reviewed in a 60-minute time box, fixed, merged into `integrate/night` and validated together once with LLVM: 1,536 tests of the workspace suite, the program corpus on native, wasm and native-freestanding, the full tiers of the string corpus and of the reference matrix, both build configurations, all green at `d48510e6`.
+
+- **`Set` with the standard hashing and equality of its items** (the `key` option is removed; a `Map` is the collection for a separate key). The review found no regression; it found a defect of the trunk (below).
+- **Native completeness**: references to lookup results, fields common to the alternatives of an anonymous union, flattened optional lookups, module-level references, enumeration conversions. Ratchets 9 / 14 / 75 → 4 / 8 / 70 on the branch (native, wasm, native-freestanding); 6 / 12 / 72 on the merged trunk, with the entries that the JavaScript and analyzer branches recorded for programs they added. The review found three programs that the branch compiled to wrong or unsafe code; two were fixed in the analyzer (a narrowing enumeration conversion is refused; a write to a common union field is an effect like any field write), the third is recorded.
+- **JavaScript follow-ups**: optional started calls (`Task<T>?`), continuations after an optional call, JSON errors identical at compile time and on every engine, the native JSON reader without recursion. The second review found that `Json.parse` had become two to five times slower on JavaScript: fixed.
+- **Analyzer pending cases, first lot**: 110 → 70 pending cases; five parser codes and seven analyzer checks. The review found four defects of the new diagnostics (a cascade, a lost narrowing, a wrong replacement of "not declared"): fixed.
+- **The measurement of `fa check` against `bun check`**: a matched workload in both languages, one reproducible command, a profile by phase, a ranked plan. The verdict is provisional (1.6 to 2.1 times slower on packages, measured at a machine load of 15 to 38): a quiet rerun is the first item of the to-do list. Peak memory 413 MiB.
+
+### The ownership branch: judged, not merged
+
+`feature/ownership` (36 hours of one engineer, 118 commits, 367 files, 25,000 lines) is **not merged and will not be finished**. The design review (`design/reviews/ownership-enforcement-2026-11-17.md`) found the right core (a control-flow graph per body, a backward liveness) placed next to the mechanisms it should have replaced: four answers to "is this the last use?", two use-after-move passes, 5,500 lines of analyzer code in 19 files where a clean design needs about 1,500 in 5. About a third is worth porting. The enforcement is now a plan of 23 slices of a day or less, the first seven without any new error on existing code; the branch is kept as `refs/archive/feature/ownership` for the code to port by path. The cause was the lead's: one all-or-nothing task.
+
+### Two audits (read-only)
+
+- **Diagnostics** (`design/reviews/diagnostics-2026-11-17.md`): 434 codes, 249 programs with one mistake each. 64 cascades, 6 wrong programs accepted, more than 40 pieces of advice that don't fix the program; the harness checks only the code and the line of a diagnostic. Seven style rules adopted.
+- **The command line and the three project shapes** (`design/reviews/tooling-2026-11-17.md`): 34 findings on Bun, Node and web, 11 serious (errors of `workspace.fa` ignored, `fa test <file>` running nothing, `@import` in a standalone file). Native and wasm combinations remain to verify.
+
+Both are cut into small tasks in `design/todo.md`.
+
+### Decisions of the lead (all in `design/decisions.md`)
+
+Ownership: a function takes a parameter through `invalidates <parameter>`; a function value keeps what it reads in use while it is live; the stores of one literal or argument list take effect together; a pattern is a store; a compile-time constant is a fresh value; item types stay invariant; a detached call on a worker queues and releases the handle. Tooling: a mismatching Git tag is skipped with a warning; a declared target is never skipped silently; package cycles are refused. Diagnostics: the seven style rules; an unused `catch` binding doesn't warn; `W-LEX-1` retired. Values: the lengths of nested literals are known; wasm refuses workers until it has threads.
+
+### Known defects of the trunk, found tonight (first items of `design/todo.md`)
+
+- A write through a reference to a lookup result that is absent (`mutable use slot = values.get(7)` then `slot = 5`) is accepted: a crash natively, a write at address 0 on wasm.
+- A module-level reference survives a call that grows its owner (a write into freed storage natively).
+- The textual last-use rule moves a module-level array that a stored function still reads (`4 4` instead of `3 4` on Bun).
+- A float inside a union is compared with IEEE equality natively, even as a set item or a map key.
+- A rest object prints its fields in name order natively and in declaration order on Bun.
+
+### What the night taught
+
+- A deadline with "state at the stop" in the report works: every engineer delivered on time, with what remains written down.
+- A review in a 60-minute time box is enough to find the defects that matter: each of the four found real ones in a branch whose suite was green.
+- Read-only audits by one reviewer each are the cheapest work of the project: an hour, a ranked list.
+- The reviewer who found a small defect is the fastest engineer to fix it. It breaks the separation of roles, so the integration validation must follow.
+- A merge must be checked in both build configurations: a function duplicated by two branches was invisible with LLVM enabled.
+- Eight engineers on six cores did less than four would have: the load made every validation three times longer and every timing meaningless.
+
+### Next
+
+[`design/lead/README.md`](lead/README.md) is the handover to the next architect; `/home/claude-dev/fa-lead/STATE.md` holds the queue. First: the quiet rerun of the checker measurement, the five defects above, then the ownership slices A1 and A2.

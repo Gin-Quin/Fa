@@ -1,5 +1,7 @@
 -- pending: M1 (imported from the values brief)
 -- error: E-OBJ-4
+-- context: the declarations of the first half of the brief's test
 -- brief: ⇒ E-OBJ-4
+type C = { #count: Integer = 0 }
 let d = C {}
 console.log(d.#count)

@@ -44,6 +44,10 @@ fn parse_when_branch(context: &mut Context<'_>) -> WhenBranch {
 		None
 	};
 
+	if context.kind() == TokenKind::If {
+		skip_guard(context);
+	}
+
 	if context.kind() == TokenKind::FatArrow {
 		context.go_to_next_token();
 	} else {
@@ -69,4 +73,18 @@ fn parse_when_branch(context: &mut Context<'_>) -> WhenBranch {
 		binding,
 		value,
 	}
+}
+
+/// `E-WHEN-4`: a guard after a pattern (`Integer as n if n > 0 =>`). It is skipped, up to the
+/// `=>` of the branch.
+fn skip_guard(context: &mut Context<'_>) {
+	let start = context.token().start;
+	context.skip_until(&[TokenKind::FatArrow, TokenKind::Comma]);
+	let end = context.last_end().max(start);
+	context.error_with_code(
+		"E-WHEN-4",
+		"A `when` branch has no guard: remove this `if ...`, and test the condition with an `if` inside the branch",
+		start,
+		end,
+	);
 }

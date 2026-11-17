@@ -11,7 +11,10 @@ pub(crate) fn parse_when(context: &mut Context<'_>) -> usize {
 	context.go_to_next_token();
 
 	let expression = if matches!(context.kind(), TokenKind::BracesOpen | TokenKind::Is) {
-		context.error_at_token("Expected a value after `when`, like `when shape is { ... }`");
+		context.error_at_token_with_code(
+			"E-WHEN-7",
+			"A `when` needs a subject, like `when shape is { ... }`: to test conditions one after the other, write `if ... { ... } else if ... { ... }`",
+		);
 		context.insert_missing()
 	} else {
 		parse_expression(

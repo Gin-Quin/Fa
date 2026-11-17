@@ -10,6 +10,7 @@ use crate::parsing::parse_generic_list::{
 };
 use crate::parsing::parse_index_expression::parse_index_expression;
 use crate::parsing::parse_members::parse_member_items;
+use crate::parsing::parse_pattern::parse_pattern;
 use crate::priority::Priority;
 use crate::tokens::TokenKind;
 use crate::typed_syntax_tree::TypedSyntaxTree;
@@ -211,6 +212,9 @@ pub(crate) fn parse_expression_right(
 				context.go_to_next_token();
 			}
 			let right = parse_operand(context, Priority::Equality, stop_at);
+			if !is_in && context.kind() == TokenKind::As {
+				skip_is_binding(context, left);
+			}
 			let start = context.span(left).start;
 			let end = context.span(right).end;
 			let node = if is_in {
@@ -410,6 +414,9 @@ pub(crate) fn parse_expression_right(
 					span.start,
 					token.end,
 				);
+			}
+			if token_kind == TokenKind::QuestionMark {
+				report_optional_index_or_call(context, left);
 			}
 			context.go_to_next_token();
 			let start = context.span(left).start;
@@ -839,4 +846,45 @@ fn is_effect_index(tree: &TypedSyntaxTree, node: usize) -> bool {
 		}
 		_ => false,
 	}
+}
+
+/// `E-CMP-10`: `as` after `is` (`if value is Integer as number`). The test narrows the value
+/// under its own name; the binding is skipped.
+fn skip_is_binding(context: &mut Context<'_>, left: usize) {
+	let start = context.token().start;
+	context.go_to_next_token();
+	parse_pattern(context);
+	let span = context.span(left);
+	let value = context.text(span.start, span.end).to_string();
+	let end = context.last_end().max(start);
+	context.error_with_code(
+		"E-CMP-10",
+		format!(
+			"`as` only binds in a `when` branch: remove it, `is` narrows `{value}` itself, so use `{value}` where the test holds"
+		),
+		start,
+		end,
+	);
+}
+
+/// `E-OPT-5`: `?[` or `?(` right after a value (`scores?[0]`, `callback?()`): `?.` is the only
+/// safe access. The current token is the `?`.
+fn report_optional_index_or_call(context: &mut Context<'_>, left: usize) {
+	let question = context.token();
+	let next = context.next_token();
+	if next.start != question.end {
+		return;
+	}
+	let span = context.span(left);
+	let value = context.text(span.start, span.end).to_string();
+	let message = match next.kind {
+		TokenKind::BracketsOpen => format!(
+			"There is no `?[`: narrow `{value}` first with `if {value} is not none {{ ... }}`, or write `{value}?.get(...)`"
+		),
+		TokenKind::ParenthesisOpen | TokenKind::ParenthesisOpenFunctionDeclaration => format!(
+			"There is no `?(`: narrow `{value}` first with `if {value} is not none {{ ... }}`, then call it"
+		),
+		_ => return,
+	};
+	context.error_with_code("E-OPT-5", message, question.start, next.end);
 }

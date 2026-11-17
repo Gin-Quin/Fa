@@ -1,4 +1,0 @@
--- pending: M1 (imported from the values brief)
--- review: not self-contained in the brief: (JS) a `catch` around a call into a foreign JS function that throws a `TypeError` must not catch it: the program crashes with the JS error (exit code of the runtime, not a Fa error) — backend test.
--- brief: around a call into a foreign JS function that throws a `TypeError` must not catch it: the program crashes with the JS error (exit code of the runtime, not a Fa error) — backend test.
-catch

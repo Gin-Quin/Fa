@@ -898,14 +898,20 @@ impl Generator<'_> {
 			if kind == SymbolKind::Derived {
 				continue;
 			}
+			let ty = self.analysis.symbols.symbol(symbol).ty;
+			// An immutable parameter (or a let sharing it) can designate a
+			// caller's mutable object. An owned ordinary capture is a value
+			// snapshot regardless of the binding's own mutability.
+			let ordinary_composite = self.is_composite(ty)
+				&& self.types.ownership(ty) == fa_analyzer::types::Ownership::Ordinary;
 			let changes = self.is_mutable_place(symbol)
 				|| self.aliases.contains_key(&symbol)
-				|| kind == SymbolKind::Use;
+				|| kind == SymbolKind::Use
+				|| ordinary_composite;
 			let reactive = kind == SymbolKind::Reactive;
 			if !changes || (self.is_module_value(symbol) && !reactive && !module_values) {
 				continue;
 			}
-			let ty = self.analysis.symbols.symbol(symbol).ty;
 			let current = Expr::name(self.name_of(symbol), true);
 			let value = if self.is_composite(ty) {
 				self.copy_value(current, ty)

@@ -1,0 +1,115 @@
+-- prints: 111 111
+-- prints: 410 410
+-- prints: 2 2
+-- prints: 1 1
+-- prints: before before
+-- prints: 123 123
+-- prints: 11 11
+-- prints: 1 1
+
+type Reader = () => Integer
+
+function make = (): (Integer, Reader, Reader) => {
+	mutable n = 1
+	function read = (): Integer => n
+	n = 2
+	(read(), read, read)
+}
+function summary = (): Integer => {
+	let result = make()
+	result[0] * 100 + result[1]() * 10 + result[2]()
+}
+static compiled = @summary()
+console.log(compiled, summary())
+
+function makeSibling = (): (Integer, Reader) => {
+	mutable n = 1
+	function read = (): Integer => n
+	n = 2
+	function borrowed = (): Integer => read() + n
+	function owned = (): Integer => read() * 10
+	n = 3
+	(borrowed(), owned)
+}
+function siblingSummary = (): Integer => {
+	let result = makeSibling()
+	result[0] * 100 + result[1]()
+}
+static siblings = @siblingSummary()
+console.log(siblings, siblingSummary())
+
+function live = (): Integer => {
+	mutable n = 1
+	function read = (): Integer => n
+	n = 2
+	read()
+}
+static borrowed = @live()
+console.log(borrowed, live())
+
+
+type Counter = { value: Integer }
+function captureAlias = (box: Counter): Reader => {
+	let local = box
+	function read = (): Integer => local.value
+	read
+}
+function aliasSnapshot = (): Integer => {
+	mutable box: Counter = { value = 1 }
+	let read = captureAlias(box)
+	box.value = 2
+	read()
+}
+static aliases = @aliasSnapshot()
+console.log(aliases, aliasSnapshot())
+
+type Label = { name: String }
+type LabelReader = () => String
+function captureLabel = (box: Label): LabelReader => {
+	function read = (): String => box.name
+	read
+}
+function projectedSnapshot = (): String => {
+	mutable box = { name = "before", items = [1] }
+	let read = captureLabel(box)
+	box.name = "after"
+	read()
+}
+static projected = @projectedSnapshot()
+console.log(projected, projectedSnapshot())
+
+
+function iterations = (): Integer => {
+	mutable readers: Array<Reader> = []
+	for i in 1..4 {
+		function read = (): Integer => i
+		readers.push(read)
+	}
+	mutable result = 0
+	for read in readers { result = result * 10 + read() }
+	result
+}
+static loopSnapshots = @iterations()
+console.log(loopSnapshots, iterations())
+
+function genericFactory = <T>(value: T): Reader => {
+	mutable n = 1
+	function read = (ignored: T = value): Integer => n
+	n = 2
+	() => read()
+}
+function genericSummary = (): Integer => genericFactory(4)() * 10 + genericFactory("text")()
+static genericSnapshots = @genericSummary()
+console.log(genericSnapshots, genericSummary())
+
+
+function keepSpecialized = (operation: (Integer) => Integer): Reader => () => operation(3)
+function specializedFactory = (): Reader => {
+	mutable n = 1
+	function tagged = <T>(value: T): Integer => n
+	n = 2
+	keepSpecialized(tagged)
+}
+function specializedSummary = (): Integer => specializedFactory()()
+static specialized = @specializedSummary()
+console.log(specialized, specializedSummary())

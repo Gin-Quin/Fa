@@ -346,18 +346,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
 		if function.lambda {
 			// a local function using locals around it: its environment
-			let (captures, by_reference) = (function.captures.clone(), function.by_reference);
-			let running = self.running_environment(&function);
-			let environment = match running {
-				Some(environment) => environment,
-				None => self.build_environment(&captures, by_reference, node)?,
-			};
-			if !by_reference && running.is_none() {
-				let ty = self.own_function_type(&function, node);
-				let owner =
-					self.make_closure_of(self.pointer_type().const_null(), environment, ty)?;
-				self.fresh(owner);
-			}
+			let environment = self.named_environment(&function, node)?;
 			arguments.push(environment.into());
 		}
 		for (position, ((repr, has_default), argument)) in

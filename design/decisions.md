@@ -2254,3 +2254,20 @@ collection uses completed object metadata to exclude them from owning stores.
 Ordinary element data copies without `copy`; an element's actual collection data
 still makes it a structure. This implements the existing relation specification,
 without adding copies of linked elements or changing their identities.
+
+### Ownership enforcement: declaration environment bindings (implementation, 2026-11-17)
+
+Bind named local environments once per declaration execution in native code and
+the compile-time VM. Derived environment inputs combine the existing data capture
+list with published named-callee handle dependencies, without a new publication
+table. Native calls borrow the bound environment, handle reads retain it, and
+lexical cleanup releases its initial owner; self slots and frame-boundary capture
+collectors transport the same handle. VM declarations use existing local/closure
+operations and stage typed ordinary projections. Ordinary JavaScript composite
+captures snapshot even borrowed parameters and immutable aliases. Capturing named
+generic specializations select the instance entry with this environment; generic
+value-table producers that still cannot transport it fail explicitly at entry
+emission instead of generating a null environment. This is a copy-first
+prerequisite: it enables no capture transfers and leaves the analyzer's source
+observations conservative. Full conditional source separation, transfer plans,
+early direct calls and unsupported generic table producers remain point-2 work.

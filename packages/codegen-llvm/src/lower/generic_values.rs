@@ -904,6 +904,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		let function = self.functions[&key].clone();
 		let thunk = matches!(kind, ProducerKind::Declaration);
+		if thunk && function.lambda {
+			return Err(self.unsupported(
+				node.index(),
+				"a capturing named generic function value entry",
+			));
+		}
 		let entry = if thunk {
 			self.thunk_of(&function)?
 		} else {

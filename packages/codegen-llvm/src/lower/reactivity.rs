@@ -506,12 +506,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let data = self.analysis.symbols.symbol(symbol);
 				let declared = self.tree.spans[data.decl_node.index()];
 				let outside = declared.end <= span.start || declared.start >= span.end;
-				let value = !matches!(
-					data.kind,
-					SymbolKind::Function
-						| SymbolKind::Type | SymbolKind::Namespace
-						| SymbolKind::Requirement { .. }
-				);
+				let value = self.capture_has_value(symbol);
 				if outside && value && !found.contains(&symbol) {
 					found.push(symbol);
 				}

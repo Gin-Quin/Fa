@@ -120,6 +120,70 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn a_capturing_named_generic_table_refuses_only_emitted_entries() {
+		for called in [false, true] {
+			let result = if called { "operation(1)" } else { "7" };
+			let source = format!(
+				r#"
+				function apply = (operation: <T>(value: T) => Integer): Integer => {result}
+				function example = (seed: Integer): Integer => {{
+					function tagged = <T>(value: T): Integer => seed
+					apply(tagged)
+				}}
+				console.log(example(7))
+			"#
+			);
+			for target in [Target::Native, Target::Wasm] {
+				let mut session = Session::new();
+				let file = session.set_source("main", Arc::from(source.as_str()));
+				session.analyze_file(file);
+				let output = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+					.join("fa-checks")
+					.join(format!("named-generic-{target:?}-{called}"));
+				let result = compile(
+					&session,
+					file,
+					"test.fa",
+					target,
+					&Options::default(),
+					&output,
+				);
+				if called {
+					assert!(
+						matches!(result, Err(fa_codegen_llvm::Error::Unsupported { ref message, .. }) if message.contains("capturing named generic function value entry")),
+						"{result:?}"
+					);
+				} else {
+					assert!(result.is_ok(), "{result:?}");
+				}
+			}
+		}
+	}
+
+	#[test]
+	fn named_handles_share_one_declaration_environment() {
+		let source = r#"
+			type Reader = () => Integer
+			function choose = (n: Integer): (Integer, Reader, Reader) => {
+				function read = (): Integer => n
+				(read(), read, read)
+			}
+			console.log(choose(1)[0])
+		"#;
+		for (name, target) in [
+			("named-declaration-native", Target::Native),
+			("named-declaration-wasm", Target::Wasm),
+		] {
+			let ir = ir_at_target(name, source, true, OptLevel::O0, target);
+			let body = function(&ir, "fa.choose");
+			assert_eq!(body.matches("call ptr @fa_alloc(").count(), 1, "{body}");
+			let read = function(&ir, "fa.read");
+			assert!(!read.contains("@fa_alloc("), "{read}");
+			assert!(!ir.contains("fa.copy_environment"), "{ir}");
+		}
+	}
+
+	#[test]
 	fn copying_an_owned_function_handle_only_retains_its_environment() {
 		let source =
 			include_str!("../../analyzer/tests/cases/ownership-function-handle-sharing.fa");

@@ -1876,6 +1876,27 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				.into_pointer_value();
 			saved = self.bind_captures(environment, &captures, by_reference)?;
 		}
+		if lambda && let Some(symbol) = info.symbol {
+			let original = self.functions[&key].clone();
+			let environment = self
+				.frame()
+				.self_environment
+				.expect("a running environment")
+				.1;
+			let entry = self.async_value_entry(
+				&original,
+				original.value.as_global_value().as_pointer_value(),
+				false,
+			)?;
+			let ty = self.own_function_type(&original, declaration);
+			let handle = self.make_closure_of(entry, environment, ty)?;
+			let slot = self.alloca(handle.repr, "self.function")?;
+			self.builder
+				.build_store(slot.pointer, handle.value.expect("a callable"))?;
+			// The invocation already protects this environment. Nested
+			// declarations retain it when they capture the self handle.
+			self.slots.insert(symbol, slot);
+		}
 		// the parameters, then their defaults in order
 		let mut index = u32::from(lambda)
 			+ u32::from(function.return_slot)
@@ -2741,7 +2762,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					this.compound_assignment(node, op, target, value)
 				})
 			}
-			View::Function { .. } | View::TypeDecl { .. } => Ok(Val::void()),
+			View::Function { .. } => self.bind_function_declaration(node),
+			View::TypeDecl { .. } => Ok(Val::void()),
 			View::If {
 				condition,
 				then_body,

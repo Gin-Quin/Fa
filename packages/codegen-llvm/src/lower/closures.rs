@@ -29,6 +29,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.struct_type(&[pointer.into(), pointer.into()], false)
 	}
 
+	/// A local value that must cross a runtime frame boundary. Capturing
+	/// function names designate their declaration binding, not fresh data.
+	pub(super) fn capture_has_value(&self, symbol: SymbolId) -> bool {
+		let data = self.analysis.symbols.symbol(symbol);
+		match data.kind {
+			SymbolKind::Function => !self
+				.analysis
+				.environment_captures(data.decl_node)
+				.is_empty(),
+			SymbolKind::Type
+			| SymbolKind::Namespace
+			| SymbolKind::TypeParameter
+			| SymbolKind::Test
+			| SymbolKind::Requirement { .. } => false,
+			_ => true,
+		}
+	}
+
 	/// The locals of enclosing functions that a lambda reads.
 	pub(crate) fn find_captures(&mut self, lambda: NodeId) -> Vec<SymbolId> {
 		// Use checked reads, not every resolved name in the syntax tree:
@@ -36,20 +54,74 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// navigation, but do not capture or read those parameters.
 		let mut captures: Vec<_> = self
 			.analysis
-			.function(lambda)
+			.environment_captures(lambda)
 			.into_iter()
-			.flat_map(|info| &info.captures)
-			.copied()
 			.filter(|&symbol| {
 				let data = self.analysis.symbols.symbol(symbol);
-				!matches!(
-					data.kind,
-					SymbolKind::Function | SymbolKind::Type | SymbolKind::Namespace
-				) && self.owner_of_scope(data.scope).is_some()
+				self.capture_has_value(symbol) && self.owner_of_scope(data.scope).is_some()
 			})
 			.collect();
 		captures.sort();
 		captures
+	}
+
+	/// One callable binding per execution of a local declaration. The
+	/// binding owns its environment until the lexical scope ends.
+	pub(super) fn bind_function_declaration(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
+		let captures = self.find_captures(node);
+		if captures.is_empty() {
+			return Ok(Val::void());
+		}
+		let Some(info) = self.analysis.function(node) else {
+			return Err(self.unsupported(node.index(), "this local function declaration"));
+		};
+		let Some(symbol) = info.symbol else {
+			return Err(self.unsupported(node.index(), "a local function without a binding"));
+		};
+		let by_reference = !self.analysis.escapes.contains(&info.lambda);
+		let ty = self.analysis.symbols.symbol(symbol).ty;
+		let environment = self.build_environment(&captures, by_reference, node)?;
+		// Entries vary with specialization and async calling convention;
+		// the declaration binding stores the common environment only.
+		let owner = self.make_closure_of(self.pointer_type().const_null(), environment, ty)?;
+		let slot = self.alloca(owner.repr, "local.function")?;
+		self.builder
+			.build_store(slot.pointer, owner.value.expect("a callable"))?;
+		self.slots.insert(symbol, slot);
+		self.own_local(symbol, slot);
+		Ok(Val::void())
+	}
+
+	/// A direct call borrows the declaration's environment; a handle read
+	/// retains it. Never rebuild an owned snapshot at a use.
+	pub(super) fn named_environment(
+		&mut self,
+		function: &super::Function<'ctx>,
+		node: NodeId,
+	) -> Result<PointerValue<'ctx>, Error> {
+		if let Some(environment) = self.running_environment(function) {
+			return Ok(environment);
+		}
+		if let Some(symbol) = function.info.symbol
+			&& let Some(&slot) = self.slots.get(&symbol)
+		{
+			let pair = self
+				.load(slot)?
+				.value
+				.expect("a callable")
+				.into_struct_value();
+			return Ok(self
+				.builder
+				.build_extract_value(pair, 1, "")?
+				.into_pointer_value());
+		}
+		if function.by_reference {
+			return self.build_environment(&function.captures, true, node);
+		}
+		Err(self.unsupported(
+			node.index(),
+			"a local function whose declaration environment is not available",
+		))
 	}
 
 	/// The common lifetime header, then captured values (or pointers to them).
@@ -392,12 +464,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				{
 					let key = self.instance(declaration, node)?;
 					let function = self.functions[&key].clone();
-					let thunk = self.thunk_of(&function)?;
-					let entry = self.async_value_entry(
-						&function,
-						thunk.as_global_value().as_pointer_value(),
-						true,
-					)?;
 					// the type of the instance
 					let list = self.analysis.instantiation(node).expect("an instantiation");
 					let arguments: Vec<TypeId> = self
@@ -408,51 +474,45 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						.collect();
 					let generics = self.generic_functions[&declaration].generics.clone();
 					let ty = self.substitute_params(self.type_of(node), &generics, &arguments);
-					return self.make_closure_of(entry, self.pointer_type().const_null(), ty);
+					return self.named_function_handle(&function, node, ty);
 				}
 				return self.generic_declaration_value(declaration, node);
 			}
 			return Err(self.unsupported(node.index(), "this function value"));
 		};
+		let ty = self.own_function_type(&function, node);
+		self.named_function_handle(&function, node, ty)
+	}
+
+	fn named_function_handle(
+		&mut self,
+		function: &super::Function<'ctx>,
+		node: NodeId,
+		ty: TypeId,
+	) -> Result<Val<'ctx>, Error> {
 		if function.lambda {
 			// a local function using locals around it: its own environment
-			let (target, captures, by_reference) = (
-				function.value,
-				function.captures.clone(),
-				function.by_reference,
-			);
-			let running = self.running_environment(&function);
-			let environment = match running {
-				Some(environment) => environment,
-				None => self.build_environment(&captures, by_reference, node)?,
-			};
+			let (target, by_reference) = (function.value, function.by_reference);
+			let environment = self.named_environment(function, node)?;
 			let entry = self.async_value_entry(
-				&function,
+				function,
 				target.as_global_value().as_pointer_value(),
 				false,
 			)?;
-			let ty = self.own_function_type(&function, node);
 			let closure = self.make_closure_of(entry, environment, ty)?;
 			let closure = if by_reference {
 				closure
 			} else {
-				// A self handle is an additional owner of the existing block;
-				// a newly built environment already carries its initial owner.
-				let closure = if running.is_some() {
-					self.emit_copy(closure)?
-				} else {
-					closure
-				};
+				let closure = self.emit_copy(closure)?;
 				self.fresh(closure)
 			};
 			// given where more errors are allowed: adapted (`adapt_function_errors`)
 			return self.convert(closure, Repr::Function(self.type_of(node)), node.index());
 		}
-		let thunk = self.thunk_of(&function)?;
+		let thunk = self.thunk_of(function)?;
 		// an async function: its async instance too (tasks.rs)
 		let entry =
-			self.async_value_entry(&function, thunk.as_global_value().as_pointer_value(), true)?;
-		let ty = self.own_function_type(&function, node);
+			self.async_value_entry(function, thunk.as_global_value().as_pointer_value(), true)?;
 		let closure = self.make_closure_of(entry, self.pointer_type().const_null(), ty)?;
 		// given where more errors are allowed: adapted (`adapt_function_errors`)
 		self.convert(closure, Repr::Function(self.type_of(node)), node.index())

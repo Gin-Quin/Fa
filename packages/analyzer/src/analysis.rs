@@ -1937,6 +1937,27 @@ impl Analysis {
 		self.functions.get(&node)
 	}
 
+	/// Runtime environment inputs: data captures and handles of capturing
+	/// local callees. A handle preserves the callee's declaration snapshot.
+	pub fn environment_captures(&self, node: NodeId) -> Vec<SymbolId> {
+		let Some(info) = self.function(node) else {
+			return Vec::new();
+		};
+		let mut captures = info.captures.clone();
+		if let Some(dependencies) = self.named_function_dependencies.get(&info.lambda) {
+			captures.extend(dependencies.iter().copied().filter(|&symbol| {
+				let declaration = self.symbols.symbol(symbol).decl_node;
+				self.function(declaration).is_some_and(|callee| {
+					self.function_capture_states.get(&callee.lambda)
+						!= Some(&FunctionCaptureState::Empty)
+				})
+			}));
+		}
+		captures.sort_unstable();
+		captures.dedup();
+		captures
+	}
+
 	/// The `type` declaration at a node.
 	pub fn type_decl(&self, node: NodeId) -> Option<&TypeDecl> {
 		self.type_decls.get(&node)

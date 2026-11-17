@@ -1974,20 +1974,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		block: NodeId,
 		node: NodeId,
 	) -> Result<Vec<(SymbolId, Slot<'ctx>)>, Error> {
-		use fa_analyzer::symbols::{Resolution, SymbolKind};
+		use fa_analyzer::symbols::Resolution;
 		let span = self.tree.spans[block.index()];
 		let mut symbols = Vec::new();
 		let mut stack = vec![block.index()];
 		while let Some(current) = stack.pop() {
 			if let Resolution::Local(symbol) = self.analysis.resolution(NodeId::new(current)) {
 				let data = self.analysis.symbols.symbol(symbol);
-				let variable = !matches!(
-					data.kind,
-					SymbolKind::Function
-						| SymbolKind::Type | SymbolKind::Namespace
-						| SymbolKind::TypeParameter
-						| SymbolKind::Test
-				);
+				let variable = self.capture_has_value(symbol);
 				let declared = self.tree.spans[data.decl_node.index()];
 				let outside = declared.start < span.start || declared.start >= span.end;
 				if variable && outside && !symbols.contains(&symbol) {

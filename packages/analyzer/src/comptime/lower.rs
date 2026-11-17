@@ -244,10 +244,11 @@ impl<'a> Lowerer<'a> {
 				default: None,
 			});
 		}
-		let captures: Vec<Slot> = info
-			.captures
-			.iter()
-			.map(|&symbol| {
+		let captures: Vec<Slot> = self
+			.a
+			.environment_captures(info.lambda)
+			.into_iter()
+			.map(|symbol| {
 				self.borrowed_symbols.insert(symbol);
 				self.bind(symbol)
 			})
@@ -258,6 +259,14 @@ impl<'a> Lowerer<'a> {
 				param.default.map(|default| self.bound_argument(default));
 		}
 		let mut prologue = Vec::new();
+		if let Some(symbol) = info.symbol {
+			let slot = self.bind(symbol);
+			self.borrowed_symbols.insert(symbol);
+			prologue.push(Expr::Let(
+				slot,
+				Expr::CurrentFunction(fn_key(self.file, node)).boxed(),
+			));
+		}
 		for param in &info.params {
 			if matches!(
 				syntax::view(self.tree, param.node),
@@ -522,11 +531,18 @@ impl<'a> Lowerer<'a> {
 					return Expr::CurrentFunction(fn_key(self.file, data.decl_node));
 				}
 				let info = self.a.function(data.decl_node);
-				let captures = info.map(|info| info.captures.clone()).unwrap_or_default();
+				let captures = self.a.environment_captures(data.decl_node);
 				let key = fn_key(self.file, data.decl_node);
 				if captures.is_empty() {
 					Expr::Function(key)
 				} else {
+					if self
+						.a
+						.escapes
+						.contains(&info.expect("a captured function").lambda)
+					{
+						return self.not_known(n, "the function's declaration environment");
+					}
 					let mut slots = Vec::with_capacity(captures.len());
 					for capture in captures {
 						match self.slots.get(&capture) {
@@ -894,7 +910,8 @@ impl<'a> Lowerer<'a> {
 			}
 			View::Assignment { target, value, .. } => self.assignment(target, value),
 			View::UpdateFields { target, value } => self.update_fields(target, value),
-			View::TypeDecl { .. } | View::Namespace { .. } | View::Function { .. } => Expr::none(),
+			View::Function { .. } => self.function_declaration(n),
+			View::TypeDecl { .. } | View::Namespace { .. } => Expr::none(),
 			View::ExportValue { value, .. } => self.expr(value),
 			View::ExportFunction { .. } | View::ExportType { .. } | View::ExportNamespace(_) => {
 				Expr::none()
@@ -1183,15 +1200,34 @@ impl<'a> Lowerer<'a> {
 
 	/// A function literal: a closure over the slots of its captures.
 	fn lambda(&mut self, n: NodeId) -> Expr {
-		let captures = self
-			.a
-			.function(n)
-			.map(|info| info.captures.clone())
-			.unwrap_or_default();
+		let captures = self.a.environment_captures(n);
 		let mut slots = Vec::with_capacity(captures.len());
+		let lambda = self.a.function(n).map_or(n, |info| info.lambda);
+		let owned = self.a.escapes.contains(&lambda);
+		let mut preparation = Vec::new();
+		let mut temporary = Vec::new();
 		for capture in captures {
 			match self.slots.get(&capture) {
-				Some(&slot) => slots.push(slot),
+				Some(&slot) => {
+					let ty = self.a.symbols.symbol(capture).ty;
+					let plan = self.copy_plan(ty, ty);
+					if owned
+						&& self.types().ownership(ty) == crate::types::Ownership::Ordinary
+						&& !matches!(
+							plan.steps[plan.root as usize],
+							fa_interpreter::ir::CopyStep::Value
+						) {
+						let snapshot = self.temp();
+						preparation.push(Expr::Let(
+							snapshot,
+							Expr::Copy(plan, Expr::Local(slot).boxed()).boxed(),
+						));
+						temporary.push(snapshot);
+						slots.push(snapshot);
+					} else {
+						slots.push(slot);
+					}
+				}
 				None => {
 					let name = self
 						.session
@@ -1203,11 +1239,31 @@ impl<'a> Lowerer<'a> {
 				}
 			}
 		}
-		Expr::Closure {
+		let closure = Expr::Closure {
 			function: fn_key(self.file, n),
 			captures: slots,
-			borrow: !self.a.escapes.contains(&n),
+			borrow: !owned,
+		};
+		if preparation.is_empty() {
+			return closure;
 		}
+		let result = self.temp();
+		preparation.push(Expr::Let(result, closure.boxed()));
+		preparation.extend(temporary.into_iter().map(Expr::Move));
+		preparation.push(Expr::Move(result));
+		Expr::Block(preparation)
+	}
+
+	fn function_declaration(&mut self, node: NodeId) -> Expr {
+		if self.a.environment_captures(node).is_empty() {
+			return Expr::none();
+		}
+		let Some(symbol) = self.a.function(node).and_then(|info| info.symbol) else {
+			return self.unsupported("a function declaration without a binding");
+		};
+		let value = self.lambda(node);
+		let slot = self.bind(symbol);
+		Expr::Let(slot, value.boxed())
 	}
 
 	/// `if`, or the branch an `@if` took.
@@ -1599,11 +1655,7 @@ impl<'a> Lowerer<'a> {
 				let mut args = self.arguments(&info.arguments, Some(callee), arguments);
 				self.prepend_generic_arguments(n, callee, self.file, declaration, &mut args);
 				let symbol = self.a.symbols.symbol_of_decl(declaration);
-				let captures = self
-					.a
-					.function(declaration)
-					.map(|info| info.captures.clone())
-					.unwrap_or_default();
+				let captures = self.a.environment_captures(declaration);
 				if captures.is_empty() {
 					Expr::CallFunction(fn_key(self.file, declaration), args)
 				} else {

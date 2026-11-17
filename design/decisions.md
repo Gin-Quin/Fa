@@ -2724,6 +2724,7 @@ arguments still retain their place. Borrowing a compile-time constant gives it
 caller-lived temporary storage. JSON default closures capture their snapshot
 slots by value, matching their nonescaping parser lifetime.
 
+<<<<<<< HEAD
 ## Ownership enforcement: verdict on `feature/ownership` and language decisions (lead, 2026-11-17)
 
 The enforcement of the ownership rules was given on 2026-11-16 as one all-or-nothing task. After 36 hours the branch `feature/ownership` held 118 commits, 367 files and 25,000 added lines, and nothing that could be reviewed or merged. It was stopped and reviewed as a design: [`reviews/ownership-enforcement-2026-11-17.md`](reviews/ownership-enforcement-2026-11-17.md). Decisions:
@@ -2755,3 +2756,55 @@ From the audit [`reviews/tooling-2026-11-17.md`](reviews/tooling-2026-11-17.md):
 - **A Git tag whose `package.fa` version doesn't match its name (`DEP003`) is skipped with a warning** when versions are resolved; it is an error only when that exact version is requested. One bad tag of a library must not block every consumer's `fa update`.
 - **A distribution of Fa always ships `fa-native` next to `fa`.** A target that a package declares is never skipped silently: without `fa-native`, `fa build` builds the other targets, reports the native ones as failed (`CLI009`) and exits with 1, as today.
 - **Dependency cycles between packages are refused**, with a diagnostic that names the cycle. Files of one package may refer to each other freely; packages form an acyclic graph (they are compiled, cached and published as units).
+=======
+## check-speed (2026-11-17)
+
+The checker audit uses the existing seeded compiler generator and a TypeScript
+renderer of its restricted fixture grammar, preserving constants, function bodies
+and module edges. Main paired inputs have no target-dependent branches: Fa and
+TypeScript each check one program. Compile-time statics become ordinary TS
+constants; TS does not check Fa's ownership, thrown-error sets or integer bounds.
+The old unrelated TypeScript 6 API fixture is not a checker-speed baseline.
+
+Bun's built-in checker reports TypeScript semantics through
+`process.versions.typescript`; the audit requires this to match the repository's
+pinned native TypeScript version and validates generated inputs with that native
+compiler independently. Installing the TypeScript 6 API does not select Bun's
+checker. Every measured run starts a fresh process with a warm filesystem cache.
+
+The lead clarified that the <=1.20 goal concerns **wall time at default
+parallelism**, both tools on CPUs 0–4 on the shared machine. CPU 5/one worker is
+the CPU-cost reference. At least eleven interleaved Fa/Bun/identical-Fa rounds
+retain both ratio of medians and paired median/quartiles. The existing ±0.05
+threshold/control rule applies to the metric being judged: near the threshold,
+both control estimators must differ from one by strictly less than 3%; straddling
+estimators are unresolved. Profiles use CPUs 0–4. Callgrind exclusive instruction
+categories supplement existing broad wall-phase timings; they are not converted
+into fictional per-phase milliseconds. No checker optimization is part of this
+audit. See `benchmarks/compiler/README.md` for the reproducible command.
+
+The resource collector measures RSS in GNU time's post-exec child: Linux wait4
+otherwise retains the Python launcher's earlier high-water mark for small tools.
+CPU keeps microsecond wait4 precision for the whole waited command, including the
+identical small GNU-time launcher on both sides. The first reference timing
+series is retained, with separate eleven-round RSS supplements for its affected
+small rows. Every completed new round is checkpointed and resume keeps it.
+
+Optimized Rust Walker symbols omit their source module. The phase attribution
+therefore records a method-to-phase registry from the formatted source impls,
+with source hashes; allocator accounting and shared syntax decoding stay separate.
+Exclusive categories partition user-space instructions; inclusive caller costs
+are retained separately. Kernel time and scheduler waiting are not converted into
+instruction-based phase milliseconds.
+
+Validation without LLVM exposed missing compile_file/run unavailable-result APIs.
+Their non-LLVM stubs now match the other compile APIs and have direct tests, so
+runtime-guarded native fixtures still compile. The checker implementation and the
+measured release binary are unchanged.
+
+The lead's overload rule is explicit: finish matched-input correctness,
+instruction profiling and memory first; timing requires one-minute load <6.
+Each completed timing round is retained if a load spike stops the run. An explicit
+--allow-busy produces one provisional series with observed load beside the
+figures, without a 20% acceptance claim. The lead reruns it in a quiet window.
+>>>>>>> tooling/check-speed

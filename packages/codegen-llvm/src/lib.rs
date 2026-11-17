@@ -76,6 +76,49 @@ pub fn compile(
 	Err(Error::Unavailable)
 }
 
+/// Without LLVM: always [`Error::Unavailable`].
+#[cfg(not(fa_llvm))]
+pub fn compile_file(
+	_path: &std::path::Path,
+	_target: Target,
+	_options: &Options,
+	_output: &std::path::Path,
+) -> Result<Artifact, Error> {
+	Err(Error::Unavailable)
+}
+
+#[cfg(all(test, not(fa_llvm)))]
+#[test]
+fn compiling_a_file_without_llvm_reports_unavailable() {
+	let path = std::path::Path::new("unused.fa");
+	assert!(matches!(
+		compile_file(path, Target::Native, &Options::default(), path),
+		Err(Error::Unavailable)
+	));
+}
+
+/// Without LLVM: always [`Error::Unavailable`].
+#[cfg(not(fa_llvm))]
+pub fn run(_artifact: &Artifact, _arguments: &[&str]) -> Result<std::process::Output, Error> {
+	Err(Error::Unavailable)
+}
+
+#[cfg(all(test, not(fa_llvm)))]
+#[test]
+fn running_an_artifact_without_llvm_reports_unavailable() {
+	let artifact = Artifact {
+		target: Target::Native,
+		options: Options::default(),
+		output: "unused".into(),
+		loader: None,
+		ir: None,
+		c_library: None,
+		output_size: 0,
+		timings: Timings::default(),
+	};
+	assert!(matches!(run(&artifact, &[]), Err(Error::Unavailable)));
+}
+
 /// What the backend compiles into one module.
 #[derive(Clone, Copy)]
 pub enum Source<'a> {

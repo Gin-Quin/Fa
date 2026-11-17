@@ -395,6 +395,28 @@ Each command runs once under `/usr/bin/time -v`, with `--timings`. The runner re
 - the nodes of the trees and the bytes they hold (nodes, spans and sources), and the bytes of the per-node side tables of the analyses (types, resolutions, flags; the maps keyed by node are not counted),
 - the peak RSS of the process.
 
+### Checker against TypeScript
+
+[`compiler/check_speed.py`](compiler/README.md) is the paired checker audit:
+release `fa check` and Bun's built-in `bun check`, matching the repository-pinned
+TypeScript 7 semantics. It renders the same seeded program in both languages,
+checks it with pinned native TS7 too, and retains eleven interleaved rounds with
+an identical-Fa control, CPU/wall/RSS and quartiles. Default parallelism on CPUs
+0–4 is the <=1.20 wall-time goal on this shared machine; CPU 5/one worker is the
+CPU-cost reference. The command, source equivalence, cache policy and profiling
+limits are documented in the linked guide.
+
+The [2026-11-17 audit](results/2026-11-17-check-speed.md) and its
+[raw samples/profile](results/2026-11-17-check-speed.json) retain the first
+interleaved series. **Every timing verdict is provisional**: one-minute load was
+well above six on the shared six-core host. The 67.16-billion-instruction profile,
+matched inputs, memory results and [ranked follow-ups](../design/todo.md#5-fa-check-and-the-three-project-shapes)
+are ready; a fresh-report quiet rerun is documented in the compiler guide.
+
+The historical compiler tables below compare Fa before/after pipeline changes.
+`packages/benchmark-typescript`'s 77-line TS6 API fixture is a separate experiment,
+not an equivalent TypeScript version of the generated Fa package.
+
 ### Compiler baseline
 
 Measured on 2026-11-02 at `fc9f174` (before any step of the parallel pipeline) with `just bench-compiler` (seed 1, 500 lines per file, a 4,000 MB cap), on the 6-core virtual machine of the [Rust baseline](#rust-baseline). The machine was busy (load average 9 to 12 on 6 cores), so the wall times are about twice what an idle machine gives, and the CPU column shows the time `fa` waited for a core rather than any parallelism: `fa` runs on one thread. The **CPU time** (user + system) and the **peak RSS** are the stable figures: an earlier run at a load of 9 gave walls of 3.16 s and 29.7 s for `fa check` at 100 and 1,000 files, for CPU times within 10% of these and the same RSS.

@@ -1,4 +1,4 @@
--- Storing a local closure is not its eventual reference-lifetime escape.
+-- Storage snapshots captures; a replaced closure need not outlive its owner.
 type Callback = () => Integer
 type Holder = { callback: Callback }
 function make = (): Callback => {
@@ -6,7 +6,7 @@ function make = (): Callback => {
 	use value = values.add(7)
 	mutable holder: Holder = { callback = () => value }
 	value = 9
-	console.log(holder.callback()) -- prints: 9
+	console.log(holder.callback()) -- prints: 7
 	holder.callback = () => 42
 	holder.callback
 }
@@ -16,6 +16,6 @@ function local = () => {
 	use value = values.add(10)
 	let callbacks: InlineArray<Callback, 1> = [() => value]
 	value = 11
-	console.log(callbacks[0]()) -- prints: 11
+	console.log(callbacks[0]()) -- prints: 10
 }
 local()

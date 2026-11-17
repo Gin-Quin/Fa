@@ -103,6 +103,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		&self,
 		node: NodeId,
 	) -> Option<(fa_analyzer::ids::TypeId, bool)> {
+		if self
+			.analysis
+			.has_flags(node, fa_analyzer::analysis::NodeFlags::GENERIC_APPLICATION)
+		{
+			return None;
+		}
 		let View::Call { callee, .. } = self.view(node) else {
 			return None;
 		};

@@ -1,9 +1,12 @@
 -- InlineArray capacity capabilities and reference locators share generic calls.
 type Node = { value: Integer }
-function first = <Item, capacity: UInt32>(values: InlineArray<Item, capacity>): Item in values
-	throws IndexError => try values[0]
-function replace = <Item, capacity: UInt32>(values: InlineArray<Item, capacity>, value: Item)
-	throws IndexError mutates values[..] => {
+function first = <Item, capacity: UInt32>(
+	values: InlineArray<Item, capacity>
+): Item in values throws IndexError => try values[0]
+function replace = <Item, capacity: UInt32>(
+	values: InlineArray<Item, capacity>
+	value: Item
+) throws IndexError mutates values[..] => {
 	use target = try first<Item, capacity>(values)
 	target = copy value
 }
@@ -24,5 +27,5 @@ function check = (): Integer throws IndexError => {
 	if item is Integer { number + node.value + item + numbers[1] } else { 0 }
 }
 static result = @check()
-console.log(result) -- prints: 50
+console.log(result)      -- prints: 50
 console.log(try check()) -- prints: 50

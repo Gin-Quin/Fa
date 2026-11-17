@@ -1530,145 +1530,6 @@ intact, and the policy survives re-rendering of combined JSON. Its default
 historical near-threshold policy is unchanged. See the dated ports results.
 
 
-## Links reference review fixes (2026-11-16)
-
-Reference contracts name parameters of their own function, or module values;
-parameters captured from an outer function cannot accidentally become the inner
-function's parameter at the same ordinal. Validate reference defaults in the
-callee against the same owner contract as given arguments. Flow origins, rather
-than the last syntactic alias, determine every possible owner and all-path
-freshness at joins and structured returns. Reject reference types before erasure
-at every owned type-expression root. Async reference results fail at declaration.
-
-As the lead decided, writes through `node: Node in self.nodes` are covered by
-`mutates node.world` and by `mutates self.nodes[..].world`. Infer the narrow form;
-callers apply the declared form. An escaping closure cannot retain a reference
-into a local collection; MEM004 identifies the collection and suggests a data
-snapshot or an owner that outlives the closure.
-
-Objects use the direct-object JavaScript ABI through parameters and results.
-Primitive and mixed-union places cache an accessor carrier in the container (or
-its weak cache), with pool slot identity retained and retired on removal. Generic
-functions receive a hidden representation flag for each type parameter, forwarded
-through generic calls and imports; a mixed union needs a slot even when its
-current value is an object. No call creates a new object wrapper. Ordinary storage
-continues to follow its data's ownership rules.
-
-The evaluator uses evaluated frame/slot/key paths with frame generations,
-caller-lived argument/default storage and stable pool slots. Nonescaping captures
-borrow those paths; escaping data captures keep snapshots. Native structured
-results merge addresses rather than loaded values. No interpreter address or
-internal carrier is a public constant. The link/relation initialization rules
-remain as decided: link defaults are explicit; collection-maintained sides start
-empty.
-
-Native map policies use canonical stable type names in both whole-program and
-split builds. Before lowering, retain each unit's map-use type templates and
-complete generic application tuples in the shared type store. Resolve them by
-type substitution, identifying binders by declaration and position, so imported
-and forwarding calls restrict the concrete maps they actually use. Keep tuple
-correlation and leave unused generic declarations and unrelated maps optimized.
-Type-growing recursive substitutions widen only the affected key/value family;
-cache fact reads and validation use the same family matching. Imported signatures
-and helper caches retain exact type bindings; map conversions require matching
-physical storage policies. Hash helpers use the same bound shape keys as copy
-and drop helpers. Generic map deletion also runs through the evaluator's existing
-mutating callback path, with separate key and value callback arguments.
-
-A scratch type store receives global module identities as well as global type
-identities. Promote the source module before merging a substituted generic
-object back out of the scratch store; otherwise its application/name metadata
-can index a nonexistent local module. This applies to call-layout substitution,
-generic function-value instances and selected method argument lists.
-
-Implicit generic-to-concrete function conversions bind the same erased
-capabilities as explicit applications. JavaScript binds them once with the
-function value, preserving the task-first async entry and generic owner
-arguments; callbacks and monomorphic reference-function aliases therefore keep
-their visible argument positions. Generic type applications are static prefixes
-when selecting an associated function in JavaScript and compile-time lowering.
-Native Sync values compare canonical exact types across local/global stores.
-
-Full validation exposed interleaved hot-reload status formatting. Build the
-status text before printing it, keeping each message contiguous when stderr
-and application stdout are collected together; existing assertions stay intact.
-
-A generic associated function value captures exactly its fixed owner's complete
-argument prefix, including phantom types, value parameters and forwarded method
-selections. Reuse positioned producer bindings for that prefix, anchored to the
-function declaration; lambdas keep their enclosing context. Entry construction
-validates the prefix, appends the function value's own arguments and rebases its
-method selections before checking substituted constraints or creating an
-instance. Imported type-function proxies read their generic lists from the same
-published function metadata as native instances. Split cache generation
-`reference-results-6` invalidates records with the earlier producer semantics.
-
-The existing awaited-task starter regression waits for explicit completion
-through cooperative yields. Elapsed sleeps cannot establish that a detached task
-has resumed under load; all starter-order and live module-value assertions stay
-unchanged.
-
-## Links second reference review fixes (2026-11-16)
-
-Lead decision: JavaScript primitive references use the pair (innermost container,
-key). A reference parameter passes the two parts as two arguments; this extra
-argument is exclusive to primitive reference parameters. A reference result
-returns one part and leaves the other in a module-level temporary, read by the
-caller immediately after the synchronous call. Async reference results remain
-forbidden. Calls through a function value use the general pair convention for
-its function type. A known function can return only the key when all paths
-locate an element of its named owner, or only the container when its key is
-static. Local references rewrite reads/writes to direct member accesses;
-object references remain the objects. No reference cells, caches or generic
-representation flags are part of this convention.
-
-Implementation choices: evaluated value provenance is interned with flow state,
-including projected closure origins and weak unknown-index updates. Call effects
-use existential overlap; result/dependent-owner proofs require every reachable
-origin. Formal effect roots remain distinct from normalized owner paths. The
-JavaScript result's key is a live shared-runtime module binding, published after
-callee cleanup and consumed immediately. Portable result-layout and generic
-representation-sensitivity summaries are included in interfaces and hashes.
-Only sensitive generic representations get emitted bodies; generic callbacks
-select existing functions through static properties, without reference binding
-wrappers. Numeric, async and reference entry names compose in one selection.
-Map object replacement preserves existing identities wherever a caller may hold
-a bare reference. The deterministic pairwise test keeps explicit diagnostic and
-value oracles, plus fixed join/escape and locator regressions.
-
-Primitive pool locators retain the existing slot array directly. Separate live
-indices drive iteration, and a free list reuses dead slots; former references
-are already statically invalid, so no runtime identity generation is required.
-Native object-cache producer `reference-results-7` invalidates artifacts from
-the earlier provenance/borrow-result lowering.
-
-Second-round sibling audit: evaluated reference-result paths are published in
-the module interface and included in its hash. Unknown callable results carry
-a descendant bound, kept separately from a formal dependent parameter's root.
-This preserves narrow formal effects while invalidating a returned nested slot
-when its inner collection changes. Primitive local reseating uses scalar locals
-and a selector, with a container/key alternative for member places; no box or
-closure is allocated. Whole writes to optional storage replace its value, since
-its previous payload may be absent.
-
-Static result locators include literal nonnegative array indices and map keys,
-not only field names. They are exported and hashed with their key representation;
-a negative array index remains general because normalization depends on length.
-The generated matrix includes nested arrays, string and Int64 map keys, negative
-array indices and calls through function values using those functions.
-
-Sequence-index provenance distinguishes negative and possibly negative indices
-from raw numeric keys. Their normalized position may overlap a positive index;
-map keys remain raw. Length-derived index facts are snapshots, so growing a
-collection does not reinterpret a previously selected position. Formal index
-parameters remain available when publishing declared effects. Value blocks
-publish origins at `walk_block`, including blocks checked directly by branches.
-
-Native object-cache producer `reference-results-8` invalidates objects emitted
-before evaluated block/callable provenance correctly marked escaping closures.
-Optional owned storage can be absent and is replaced; a selected bare-object
-reference always writes in place, including a generic object body whose type
-parameter itself conservatively admits `none` during type checking.
 ### Lead continuation decisions (2026-11-16)
 
 The language study owns one-way pool links, compact reference widths and bounded
@@ -2166,6 +2027,146 @@ freestanding imports fixtures no longer linked; the trunk's leak-checked
 per-unit map packages failed the same way. Wasm and ThinLTO objects are
 unchanged. The object-cache version is bumped.
 
+## Links reference review fixes (2026-11-16)
+
+Reference contracts name parameters of their own function, or module values;
+parameters captured from an outer function cannot accidentally become the inner
+function's parameter at the same ordinal. Validate reference defaults in the
+callee against the same owner contract as given arguments. Flow origins, rather
+than the last syntactic alias, determine every possible owner and all-path
+freshness at joins and structured returns. Reject reference types before erasure
+at every owned type-expression root. Async reference results fail at declaration.
+
+As the lead decided, writes through `node: Node in self.nodes` are covered by
+`mutates node.world` and by `mutates self.nodes[..].world`. Infer the narrow form;
+callers apply the declared form. An escaping closure cannot retain a reference
+into a local collection; MEM004 identifies the collection and suggests a data
+snapshot or an owner that outlives the closure.
+
+Objects use the direct-object JavaScript ABI through parameters and results.
+Primitive and mixed-union places cache an accessor carrier in the container (or
+its weak cache), with pool slot identity retained and retired on removal. Generic
+functions receive a hidden representation flag for each type parameter, forwarded
+through generic calls and imports; a mixed union needs a slot even when its
+current value is an object. No call creates a new object wrapper. Ordinary storage
+continues to follow its data's ownership rules.
+
+The evaluator uses evaluated frame/slot/key paths with frame generations,
+caller-lived argument/default storage and stable pool slots. Nonescaping captures
+borrow those paths; escaping data captures keep snapshots. Native structured
+results merge addresses rather than loaded values. No interpreter address or
+internal carrier is a public constant. The link/relation initialization rules
+remain as decided: link defaults are explicit; collection-maintained sides start
+empty.
+
+Native map policies use canonical stable type names in both whole-program and
+split builds. Before lowering, retain each unit's map-use type templates and
+complete generic application tuples in the shared type store. Resolve them by
+type substitution, identifying binders by declaration and position, so imported
+and forwarding calls restrict the concrete maps they actually use. Keep tuple
+correlation and leave unused generic declarations and unrelated maps optimized.
+Type-growing recursive substitutions widen only the affected key/value family;
+cache fact reads and validation use the same family matching. Imported signatures
+and helper caches retain exact type bindings; map conversions require matching
+physical storage policies. Hash helpers use the same bound shape keys as copy
+and drop helpers. Generic map deletion also runs through the evaluator's existing
+mutating callback path, with separate key and value callback arguments.
+
+A scratch type store receives global module identities as well as global type
+identities. Promote the source module before merging a substituted generic
+object back out of the scratch store; otherwise its application/name metadata
+can index a nonexistent local module. This applies to call-layout substitution,
+generic function-value instances and selected method argument lists.
+
+Implicit generic-to-concrete function conversions bind the same erased
+capabilities as explicit applications. JavaScript binds them once with the
+function value, preserving the task-first async entry and generic owner
+arguments; callbacks and monomorphic reference-function aliases therefore keep
+their visible argument positions. Generic type applications are static prefixes
+when selecting an associated function in JavaScript and compile-time lowering.
+Native Sync values compare canonical exact types across local/global stores.
+
+Full validation exposed interleaved hot-reload status formatting. Build the
+status text before printing it, keeping each message contiguous when stderr
+and application stdout are collected together; existing assertions stay intact.
+
+A generic associated function value captures exactly its fixed owner's complete
+argument prefix, including phantom types, value parameters and forwarded method
+selections. Reuse positioned producer bindings for that prefix, anchored to the
+function declaration; lambdas keep their enclosing context. Entry construction
+validates the prefix, appends the function value's own arguments and rebases its
+method selections before checking substituted constraints or creating an
+instance. Imported type-function proxies read their generic lists from the same
+published function metadata as native instances. Split cache generation
+`reference-results-6` invalidates records with the earlier producer semantics.
+
+The existing awaited-task starter regression waits for explicit completion
+through cooperative yields. Elapsed sleeps cannot establish that a detached task
+has resumed under load; all starter-order and live module-value assertions stay
+unchanged.
+
+## Links second reference review fixes (2026-11-16)
+
+Lead decision: JavaScript primitive references use the pair (innermost container,
+key). A reference parameter passes the two parts as two arguments; this extra
+argument is exclusive to primitive reference parameters. A reference result
+returns one part and leaves the other in a module-level temporary, read by the
+caller immediately after the synchronous call. Async reference results remain
+forbidden. Calls through a function value use the general pair convention for
+its function type. A known function can return only the key when all paths
+locate an element of its named owner, or only the container when its key is
+static. Local references rewrite reads/writes to direct member accesses;
+object references remain the objects. No reference cells, caches or generic
+representation flags are part of this convention.
+
+Implementation choices: evaluated value provenance is interned with flow state,
+including projected closure origins and weak unknown-index updates. Call effects
+use existential overlap; result/dependent-owner proofs require every reachable
+origin. Formal effect roots remain distinct from normalized owner paths. The
+JavaScript result's key is a live shared-runtime module binding, published after
+callee cleanup and consumed immediately. Portable result-layout and generic
+representation-sensitivity summaries are included in interfaces and hashes.
+Only sensitive generic representations get emitted bodies; generic callbacks
+select existing functions through static properties, without reference binding
+wrappers. Numeric, async and reference entry names compose in one selection.
+Map object replacement preserves existing identities wherever a caller may hold
+a bare reference. The deterministic pairwise test keeps explicit diagnostic and
+value oracles, plus fixed join/escape and locator regressions.
+
+Primitive pool locators retain the existing slot array directly. Separate live
+indices drive iteration, and a free list reuses dead slots; former references
+are already statically invalid, so no runtime identity generation is required.
+Native object-cache producer `reference-results-7` invalidates artifacts from
+the earlier provenance/borrow-result lowering.
+
+Second-round sibling audit: evaluated reference-result paths are published in
+the module interface and included in its hash. Unknown callable results carry
+a descendant bound, kept separately from a formal dependent parameter's root.
+This preserves narrow formal effects while invalidating a returned nested slot
+when its inner collection changes. Primitive local reseating uses scalar locals
+and a selector, with a container/key alternative for member places; no box or
+closure is allocated. Whole writes to optional storage replace its value, since
+its previous payload may be absent.
+
+Static result locators include literal nonnegative array indices and map keys,
+not only field names. They are exported and hashed with their key representation;
+a negative array index remains general because normalization depends on length.
+The generated matrix includes nested arrays, string and Int64 map keys, negative
+array indices and calls through function values using those functions.
+
+Sequence-index provenance distinguishes negative and possibly negative indices
+from raw numeric keys. Their normalized position may overlap a positive index;
+map keys remain raw. Length-derived index facts are snapshots, so growing a
+collection does not reinterpret a previously selected position. Formal index
+parameters remain available when publishing declared effects. Value blocks
+publish origins at `walk_block`, including blocks checked directly by branches.
+
+Native object-cache producer `reference-results-8` invalidates objects emitted
+before evaluated block/callable provenance correctly marked escaping closures.
+Optional owned storage can be absent and is replaced; a selected bare-object
+reference always writes in place, including a generic object body whose type
+parameter itself conservatively admits `none` during type checking.
+
 ## Links reference landing: merge with the trunk (2026-11-17)
 
 Reference owner paths also carry InlineArray borrows, including generic capacity
@@ -2183,9 +2184,9 @@ lookups retain matching families and invalidation logging. Exact helper type
 bindings, aggregate/async function entries and reference results remain combined;
 the object-cache generation includes both branches and a landing suffix.
 
-Aggregate construction records owned-handle capture transfers without declaring
-that a local borrowed capture has left its lifetime boundary. The eventual
-boundary checks evaluated origins after field replacements. A closure that owns
+Aggregate construction snapshots captures and records owned-handle transfers,
+without declaring that a local borrowed capture has left its lifetime boundary.
+The eventual boundary checks evaluated origins after field replacements. A closure that owns
 its captured handle reads that owned capture when called; the original local
 remains consumed. Explicit generic applications produce function values, so they
 do not use the synchronous reference-result container/key read protocol.

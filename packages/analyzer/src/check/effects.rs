@@ -2754,16 +2754,11 @@ impl Walker<'_> {
 		}
 	}
 
-	/// Storing a closure moves its owned handles immediately. Borrowed capture
-	/// lifetimes are checked when the evaluated value leaves its local owner.
+	/// Stored closures snapshot their captures. Check borrowed lifetimes at
+	/// the eventual escape, after replacements of local fields or items.
 	pub(crate) fn store_closures(&mut self, value: NodeId, at: NodeId) {
 		for closure in self.evaluated_origins(value).closures {
-			if let Some(lambda) = closure.callable.local()
-				&& self.a.functions.get(&lambda).is_some_and(|info| {
-					info.captures
-						.iter()
-						.any(|&symbol| self.is_moved_handle(self.a.symbols.symbol(symbol).ty))
-				}) {
+			if let Some(lambda) = closure.callable.local() {
 				self.snapshot_closure(lambda, at);
 			}
 		}

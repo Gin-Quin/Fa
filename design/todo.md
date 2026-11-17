@@ -143,8 +143,8 @@ types and must not be replaced by fact-name equality.
 - **Deferred Goose pool ports (lead, 2026-11-16).** The
   [sixteen-port audit](../benchmarks/audit/ports/README.md) records all structures,
   passes and intended Rust rows. Scene/interp/sexp/calc/tree/binary-trees/graph
-  wait for the language study of one-way growing-pool links, compact widths and
-  bounded inline ordered lists (`InlineArray` of owned items is implemented). Do not
+  wait for implementation of the adopted one-way growing-pool links, compact widths and
+  bounded inline link lists ([decision](pool-links.md); `InlineArray` of owned items is implemented). Do not
   use CArray integer-link approximations. Retain the current main rows until then; when replacing them, keep recursive
   variants and change Rust pairings together. Sexp needs reverse sibling order
   and its parser error path. The scene-children probe now rejects unsupported Array reference fields as REF010; convert it to explicit links when their storage is implemented.

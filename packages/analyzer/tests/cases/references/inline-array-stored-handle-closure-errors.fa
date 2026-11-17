@@ -3,9 +3,11 @@ async function compute = (): Integer => 1
 function check = () => {
 	let task = start compute()
 	mutable count = 0
-	let callbacks: InlineArray<() => Task<Integer>, 1> = [() => {
-		count += 1 -- error: REF021
-		task
-	}]
+	let callbacks: InlineArray<() => Task<Integer>, 1> = [
+		() => {
+			count += 1 -- error: REF021
+			task
+		}
+	]
 }
 check()

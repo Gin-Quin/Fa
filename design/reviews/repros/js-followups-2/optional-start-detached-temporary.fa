@@ -1,0 +1,40 @@
+-- The detached optional start emits `let $t1; … $t1 = faDetach(…)`: $t1 is never read.
+-- Optional starts produce an optional task; absent calls create no task.
+function defaultSuffix = (): String => {
+	console.log("default")
+	"!"
+}
+type Box = {
+	name: String
+	async function describe = (self, suffix: String = defaultSuffix()): String => self.name + suffix
+	async function maybe = (self): String? => none
+	function length = (self): Integer => self.name.length
+	function tagged = (self, value: Integer): Integer => value
+}
+async function check = (box: Box?) => {
+	let task: Task<String>? = start box?.describe()
+	if task is none { console.log("none") } else { console.log(await task) }
+	let size: Task<Integer>? = start box?.length()
+	if size is not none { console.log(await size) }
+	let nullable: Task<String?>? = start box?.maybe()
+	if nullable is not none { console.log(await nullable) }
+	let text: String? = if box is not none { box.name } else { none }
+	let trimmed: Task<String>? = start text?.trim()
+	if trimmed is not none { console.log(await trimmed) }
+	start box?.describe("detached")
+	let skipped = start box?.tagged(
+		if box is not none { 7 } else {
+			console.log("bad argument")
+			0
+		}
+	)
+	if skipped is not none { console.log(await skipped) }
+}
+await check(none) -- prints: none
+await check(Box { name = "Ada" })
+-- prints: default
+-- prints: Ada!
+-- prints: 3
+-- prints: none
+-- prints: Ada
+-- prints: 7

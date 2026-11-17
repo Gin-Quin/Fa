@@ -1,0 +1,7 @@
+-- Whole-program native lowering (fa build, LLVM harness) refuses the present
+-- continuation with internal type names; `fa run` (per unit) prints 6 with an argument.
+type Inner = { name: String, function upper = (self): String => self.name.toUpperCase() }
+type Outer = { function direct = (self): Inner => Inner { name = "direct" } }
+function presentContinuation = (value: Outer?): Integer? => value?.direct().upper().length
+let present = arguments.get(0) is not none
+console.log(presentContinuation(if present { Outer {} } else { none }))

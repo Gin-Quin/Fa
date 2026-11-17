@@ -2215,3 +2215,15 @@ context, including a Default entry, while names and calls inside the lambda
 belong to its Body entry. Default-local function declarations use that default's
 own block-entry barrier. The temporary pending guard for this context-identity
 collision is removed; independent missing layout/invocation facts stay pending.
+
+## Ownership enforcement: nested capture input transport (2026-11-17)
+
+Creating a nested closure is an observation of its inputs from the active
+enclosing function. Frozen capture origins identify that function and binding;
+record the binding on its FnCx at creation, while the creation-time flow is
+available. Normal completion then publishes its concrete capture list, type
+and source using the existing pipeline. This fills enclosing environments that
+previously omitted data read only by a nested closure; it does not flatten named
+callee handles or change the declaration-time environment policy. Logical-only
+inputs encountered in an unfinished specialization remain pending until their
+concrete facts exist.

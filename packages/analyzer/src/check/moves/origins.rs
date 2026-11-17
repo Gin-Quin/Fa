@@ -1,6 +1,7 @@
 //! Ownership observations retain storage origin before aliases are expanded.
 
 use crate::check::Walker;
+use crate::flow::PlaceRoot;
 use crate::flow::ownership::{Origin, Source, Sources, project_sources};
 use crate::ids::{NodeId, PlaceId, SymbolId};
 
@@ -75,6 +76,23 @@ impl Walker<'_> {
 		place: PlaceId,
 	) {
 		let mut sources = self.ownership_sources(symbol, place);
+		// Constructing a nested closure uses the enclosing environment's
+		// inputs even when that body never names them directly. Record the
+		// input while its function context and creation-time flow are live.
+		for source in &sources {
+			if let Origin::Capture { function, input } = source.origin
+				&& let PlaceRoot::Symbol(symbol) = self.places.get(input).root
+				&& let Some(context) = self
+					.body
+					.functions
+					.iter_mut()
+					.find(|context| context.node == function)
+				&& !context.captures.contains(&symbol)
+			{
+				context.captures.push(symbol);
+				self.retention_version += 1;
+			}
+		}
 		sources.sort_unstable();
 		sources.dedup();
 		let key = (lambda, symbol);

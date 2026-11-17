@@ -293,7 +293,17 @@ mod tests {
 		let inner = function(&session, analysis, "inner");
 		let graph = &analysis.ownership_source_graph;
 		let creation = inner.declaration.unwrap();
-		assert!(graph.entries[&entry(outer.lambda, true)].pending);
+		assert!(!graph.entries[&entry(outer.lambda, true)].pending);
+		assert_eq!(outer.captures, inner.captures);
+		for &symbol in &outer.captures {
+			assert!(analysis.capture_types.contains_key(&(outer.lambda, symbol)));
+			assert!(
+				analysis
+					.ownership_sources
+					.captures
+					.contains_key(&(outer.lambda, symbol))
+			);
+		}
 		assert!(
 			graph.entries.contains_key(&entry(outer.lambda, true)),
 			"outer {:?}; inner {:?}; escapes {:?}; states {:?}",

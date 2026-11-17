@@ -1,0 +1,22 @@
+-- prints: 7 7
+
+type Reader = () => Integer
+type Maker = () => Reader
+
+function make = (seed: Integer): Maker => {
+	function outer = (): Reader => {
+		function inner = (): Integer => seed
+		inner
+	}
+	outer
+}
+
+function summary = (): Integer => {
+	let factory = make(7)
+	let reader = factory()
+	let second = reader
+	reader() + second() - 7
+}
+
+static compiled = @summary()
+console.log(compiled, summary())

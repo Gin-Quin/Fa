@@ -2723,3 +2723,29 @@ Ordinary String arguments are immutable values; explicitly dependent String
 arguments still retain their place. Borrowing a compile-time constant gives it
 caller-lived temporary storage. JSON default closures capture their snapshot
 slots by value, matching their nonescaping parser lifetime.
+
+## check-speed (2026-11-17)
+
+The checker audit uses the existing seeded compiler generator and a TypeScript
+renderer of its restricted fixture grammar, preserving constants, function bodies
+and module edges. Main paired inputs have no target-dependent branches: Fa and
+TypeScript each check one program. Compile-time statics become ordinary TS
+constants; TS does not check Fa's ownership, thrown-error sets or integer bounds.
+The old unrelated TypeScript 6 API fixture is not a checker-speed baseline.
+
+Bun's built-in checker reports TypeScript semantics through
+`process.versions.typescript`; the audit requires this to match the repository's
+pinned native TypeScript version and validates generated inputs with that native
+compiler independently. Installing the TypeScript 6 API does not select Bun's
+checker. Every measured run starts a fresh process with a warm filesystem cache.
+
+The lead clarified that the <=1.20 goal concerns **wall time at default
+parallelism**, both tools on CPUs 0–4 on the shared machine. CPU 5/one worker is
+the CPU-cost reference. At least eleven interleaved Fa/Bun/identical-Fa rounds
+retain both ratio of medians and paired median/quartiles. The existing ±0.05
+threshold/control rule applies to the metric being judged: near the threshold,
+both control estimators must differ from one by strictly less than 3%; straddling
+estimators are unresolved. Profiles use CPUs 0–4. Callgrind exclusive instruction
+categories supplement existing broad wall-phase timings; they are not converted
+into fictional per-phase milliseconds. No checker optimization is part of this
+audit. See `benchmarks/compiler/README.md` for the reproducible command.

@@ -140,6 +140,11 @@ let task = start greet() -- binds the default now; runs the body on its first tu
 console.log(await task)
 ```
 
+An optional call stays optional when started: `start receiver?.method()` gives
+`Task<Result>?`, with no task when the receiver is absent. Narrow it or supply a
+fallback before awaiting the task. An awaited optional call, `await receiver?.method()`,
+gives `Result?`. Both forms skip arguments and defaults when absent.
+
 A `Task` is the handle of a computation started with `start`. Its type declares its result and its errors, like a function type: starting `fetchData` gives a `Task<Response> throws HttpError`.
 
 ```fa

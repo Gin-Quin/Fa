@@ -2558,3 +2558,14 @@ The general function-declaration fallback remains a feature refusal: the checker
 Retain checked receiver types per optional-chain member and the exact result before a call adds absence. A present result can itself be nullable; reconstructing it by removing None loses that distinction. JavaScript lowers the whole chain continuation under its guard, including lifted argument statements, builtin helpers, local/imported methods and awaited calls. Scoped evaluated receiver/callee bindings preserve single evaluation and the existing reference-call ABI; no runtime wrapper or closure is introduced. Async capability lookup uses the present callable signature and selected optional constraint method, preserving CONC010 on a forbidden blocking call.
 
 Optional member resolution shares the ordinary resolver, including written field origins and generic owner instantiations. Inference passes a written origin through an optional parameter. The generator records present receiver/callee overlays only while lowering that invocation, then restores the outer context. Builtin fields and methods use the same present-member path; the former partial local-method guard and raw optional-member emitter were removed.
+
+## JavaScript follow-up review fixes (2026-11-17)
+
+Optional chaining adds absence to the operation it guards. In particular,
+`start receiver?.method()` gives `Task<Result>?`, not `Task<Result?>`: no task is
+created on the absent path. The concurrency page did not explicitly settle that
+combination; the lead authorized this reading in the review-fix assignment.
+Direct `await receiver?.method()` gives `Result?`. Started arguments, defaults
+and detachment stay inside the guard. The analyzer's present-result table keeps
+chain-added absence separate from an optional declared result, including a
+returned optional function pointer; ordinary continuation never strips the latter.

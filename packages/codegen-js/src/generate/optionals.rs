@@ -63,6 +63,11 @@ impl<'s> Generator<'s> {
 		self.chain_value(node, raw.then_some(node), &mut |_, value, _| value)
 	}
 
+	/// Starting and detaching belong inside the same guard as the call.
+	pub(super) fn optional_start(&mut self, node: NodeId, call: NodeId, callee: NodeId) -> Expr {
+		self.chain_call(node, call, callee, None, &mut |_, value, _| value)
+	}
+
 	fn chain_value(&mut self, node: NodeId, raw: Option<NodeId>, next: &mut Next<'_, 's>) -> Expr {
 		match syntax::view(self.tree, node) {
 			View::Access { target, members } | View::OptionalAccess { target, members } => {

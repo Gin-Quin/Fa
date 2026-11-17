@@ -182,7 +182,11 @@ impl Walker<'_> {
 		// `a?.f()`: called when `a` is not `none`, `none` otherwise
 		let optional_call = self.is_optional_chain(callee);
 		let callee_ty = if optional_call {
-			self.strip_none(callee_ty).0
+			self.a
+				.optional_results
+				.get(&callee)
+				.copied()
+				.unwrap_or(callee_ty)
 		} else {
 			callee_ty
 		};

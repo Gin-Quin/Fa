@@ -838,7 +838,10 @@ impl Walker<'_> {
 			let mut current = if optional {
 				w.optional_receiver(n, target, receiver)
 			} else if chained {
-				w.strip_none(receiver).0
+				w.a.optional_results
+					.get(&target)
+					.copied()
+					.unwrap_or(receiver)
 			} else {
 				receiver
 			};
@@ -848,6 +851,7 @@ impl Walker<'_> {
 			let mut written = w.written_decl(target);
 			let mut origin = w.written_origin(target);
 			for member in members.iter() {
+				// Consecutive `?.` operators share one syntax node.
 				if optional {
 					current = w.strip_none(current).0;
 				}

@@ -490,11 +490,13 @@ impl Walker<'_> {
 			View::Call { .. } => {
 				self.tasks.modes.insert(operand, Mode::Started);
 				self.tasks.start_errors.insert(operand, TypeId::NEVER);
-				let expected_result =
-					expected.and_then(|expected| match self.s.types.kind(expected) {
+				let expected_result = expected.and_then(|expected| {
+					let expected = self.strip_none(expected).0;
+					match self.s.types.kind(expected) {
 						TypeKind::Task(result, _) => Some(result),
 						_ => None,
-					});
+					}
+				});
 				// the places its effects change: the task changes them (A2)
 				let outer = self.tasks.collected.replace(Vec::new());
 				let result = self.check(value, expected_result);
@@ -525,7 +527,12 @@ impl Walker<'_> {
 					if w.s.types.is_recovering(result) {
 						return TypeId::UNKNOWN;
 					}
-					w.task_type(result, errors)
+					if let Some(&present) = w.a.optional_results.get(&operand) {
+						let task = w.task_type(present, errors);
+						w.s.types.optional(task)
+					} else {
+						w.task_type(result, errors)
+					}
 				})
 			}
 			_ => {

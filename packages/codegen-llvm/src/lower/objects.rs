@@ -1976,6 +1976,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		target: NodeId,
 		members: NodeList<'_>,
 	) -> Result<Val<'ctx>, Error> {
+		self.optional_invocation(node, target, members, |this| this.call_present(node))
+	}
+
+	pub(super) fn optional_invocation(
+		&mut self,
+		node: NodeId,
+		target: NodeId,
+		members: NodeList<'_>,
+		invoke: impl FnOnce(&mut Self) -> Result<Val<'ctx>, Error>,
+	) -> Result<Val<'ctx>, Error> {
 		let repr = self.node_repr(node)?;
 		let result = match repr.has_value() {
 			true => Some(self.alloca(repr, "chain")?),
@@ -2002,7 +2012,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let receiver = self.present_or_exit(value, end)?;
 		let called = self.region(result.map(|_| repr), node, |this| {
 			this.pending_receiver = Some(receiver);
-			let called = this.call_present(node);
+			let called = invoke(this);
 			this.pending_receiver = None;
 			called
 		})?;

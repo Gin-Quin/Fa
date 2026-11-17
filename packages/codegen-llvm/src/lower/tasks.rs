@@ -1907,12 +1907,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: NodeId,
 		operand: NodeId,
 	) -> Result<Val<'ctx>, Error> {
+		let call = self.ungrouped(operand);
+		if self.pending_receiver.is_none()
+			&& let View::Call { callee, .. } = self.view(call)
+			&& let View::OptionalAccess { target, members } = self.view(callee)
+		{
+			return self.optional_invocation(node, target, members, |this| {
+				this.start_expression(node, operand)
+			});
+		}
 		let Some(info) = self.analysis.starts.get(&node).cloned() else {
 			return Err(self.unsupported(node.index(), "this `start`"));
 		};
 		let immediate = self.tasks.immediate == Some(node);
 		self.tasks.immediate = None;
-		let task = self.type_of(node);
+		let task = self.without_none(self.type_of(node));
 		if let Some(block) = info.block {
 			return self.start_do(node, block, &info, immediate);
 		}

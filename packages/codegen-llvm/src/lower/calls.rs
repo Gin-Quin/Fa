@@ -28,6 +28,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// `value?.method()`
 		if let View::Call { callee, .. } = self.view(node)
 			&& let View::OptionalAccess { target, members } = self.view(callee)
+			&& self.pending_receiver.is_none()
 		{
 			return self.optional_call(node, target, members);
 		}

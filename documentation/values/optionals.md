@@ -123,6 +123,16 @@ user?.greet() -- method call: none if there is no user
 let city = user?.address?.city -- String?: `user` and `address` are both optional
 ```
 
+A method's own optional result needs another guard: `user?.findAddress()?.city`.
+The chain's short circuit does not remove absence from a method's result, an
+optional field, or a returned function pointer.
+
+Starting an optional call also short-circuits: `start user?.load()` has type
+`Task<Result>?`. When the receiver is `none`, it creates no task and evaluates
+neither arguments nor defaults. Handle the absent case before awaiting or using
+the task. A detached optional start does nothing when absent. `await user?.load()`
+awaits the call only when present and yields `Result?`.
+
 `?.` on a value that is not optional is an error. A `?.` call to a method that returns nothing can only be a statement: its value can't be used.
 
 `?.` is the only safe access operator: there is no `?[...]` or `?(...)`. To index an optional collection or to call an optional function pointer, narrow it first:

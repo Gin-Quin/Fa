@@ -290,10 +290,48 @@ mod with_llvm {
 				target.name()
 			);
 		}
+		let stderr = String::from_utf8(result.stderr).unwrap();
 		assert!(
-			result.stderr.is_empty(),
-			"{}",
-			String::from_utf8_lossy(&result.stderr)
+			matrix_stderr_is_expected(&stderr, options.dev()),
+			"{stderr}"
 		);
+	}
+
+	/// O0's documented, nonfatal turn warning depends on host scheduling and
+	/// wasm JIT latency. It is not an InlineArray semantic or allocator failure.
+	fn matrix_stderr_is_expected(stderr: &str, dev: bool) -> bool {
+		stderr.is_empty()
+			|| dev
+				&& stderr.lines().all(|line| {
+					let Some(rest) = line.strip_prefix("warning: a task kept the thread for ")
+					else {
+						return false;
+					};
+					let Some((milliseconds, site)) = rest.split_once(" ms (") else {
+						return false;
+					};
+					milliseconds.bytes().all(|byte| byte.is_ascii_digit())
+						&& milliseconds.parse::<u64>().is_ok_and(|value| value >= 50)
+						&& site
+							.strip_suffix("): await Task.yield() or move the work to a worker")
+							.is_some_and(|site| !site.is_empty())
+				})
+	}
+
+	#[test]
+	fn matrix_diagnostics_keep_errors_and_leaks_fatal() {
+		let warning = "warning: a task kept the thread for 57 ms (main, at its end): await Task.yield() or move the work to a worker\n";
+		assert!(matrix_stderr_is_expected("", false));
+		assert!(matrix_stderr_is_expected(warning, true));
+		assert!(!matrix_stderr_is_expected(warning, false));
+		for stderr in [
+			"leak: 1 blocks\n".to_string(),
+			"warning: unexpected diagnostic\n".to_string(),
+			format!("{warning}leak: 1 blocks\n"),
+			warning.replace("57 ms", "not-a-number ms"),
+			warning.replace("57 ms", "0 ms"),
+		] {
+			assert!(!matrix_stderr_is_expected(&stderr, true), "{stderr}");
+		}
 	}
 }

@@ -1,0 +1,24 @@
+-- References initialize after their owners, before functions can read them.
+-- prints: 1 7 7
+-- prints: 0 -1 7
+-- prints: 1 -1 7
+-- file: application/main.fa
+export function = () => { library.check() }
+-- file: library/check.fa
+mutable values: Map<String, Integer> = [("a", 1)]
+mutable use current = values.get("a")
+mutable items: Array<Integer?> = [none, 7]
+mutable use selected = items.get(1)
+use fixed = selected
+function read = (): Integer => current ?? 0
+function readSelected = (): Integer => selected ?? -1
+function readFixed = (): Integer => fixed ?? -1
+export function = () => {
+	console.log(read(), readSelected(), readFixed())
+	reuse current = none
+	reuse selected = none
+	console.log(read(), readSelected(), readFixed())
+	reuse current = values.get("a")
+	reuse selected = items.get(0)
+	console.log(read(), readSelected(), readFixed())
+}

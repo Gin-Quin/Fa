@@ -952,14 +952,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		index: Val<'ctx>,
 		node: NodeId,
 	) -> Result<Val<'ctx>, Error> {
-		let Repr::Array(item_type) = array.repr else {
+		let (Repr::Array(item_type) | Repr::Growing(item_type)) = array.repr else {
 			return Err(self.unsupported(node.index(), "`get` on this value"));
 		};
 		let item = self.item_repr(item_type, node)?;
-		let Some(scalar) = Scalar::of(item) else {
+		let Some(repr) = item.optional() else {
 			return Err(self.unsupported(node.index(), "`get` on this array"));
 		};
-		let repr = Repr::Optional(scalar);
+		if repr == Repr::None {
+			return Ok(Val::none());
+		}
 		let result = self.alloca(repr, "got")?;
 		let ty = self.llvm_type(repr);
 		self.builder
@@ -967,7 +969,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let index = self
 			.convert(index, Repr::Int(IntRepr::I64), node.index())?
 			.int();
-		if item == Repr::Str {
+		let growing = matches!(array.repr, Repr::Growing(_));
+		if item == Repr::Str && !growing {
 			let out = self.alloca(Repr::Str, "character")?;
 			self.builder
 				.build_store(out.pointer, self.string_type.const_zero())?;
@@ -993,8 +996,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			)?;
 			return Ok(Val::new(repr, raw));
 		}
-		let (items, length) =
-			self.array_parts(array.value.expect("an array").into_pointer_value())?;
+		let pointer = array.value.expect("an array").into_pointer_value();
+		let (items, length) = if growing {
+			(pointer, self.growing_length(&self.builder, pointer)?)
+		} else {
+			self.array_parts(pointer)?
+		};
 		let index = self.counted_from_end(index, length)?;
 		let inside = self
 			.builder
@@ -1004,7 +1011,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder
 			.build_conditional_branch(inside, present, end)?;
 		self.builder.position_at_end(present);
-		let pointer = self.item_pointer(items, item, index)?;
+		let pointer = if growing {
+			self.growing_at(&self.builder, items, item, index)?
+		} else {
+			self.item_pointer(items, item, index)?
+		};
 		let value = self.load(Slot {
 			pointer,
 			repr: item,
@@ -1045,49 +1056,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			values.push(value);
 		}
-		if let Repr::Growing(item_type) = array.repr {
+		if matches!(array.repr, Repr::Growing(_)) {
 			match (path, values.as_slice()) {
 				("Array#push", [value]) => {
 					let slot = self.push_receiver_slot(node, arguments[0])?;
 					self.growing_push(array, *value, node, Some(arguments[0]), slot)?;
 					return Ok(Val::void());
 				}
-				("Array#get", [index]) => {
-					// in bounds: the item, else `none`
-					let item = self.item_repr(item_type, node)?;
-					let Some(scalar) = Scalar::of(item) else {
-						return Err(self.unsupported(node.index(), "`get` on this array"));
-					};
-					let repr = Repr::Optional(scalar);
-					let result = self.alloca(repr, "got")?;
-					self.builder
-						.build_store(result.pointer, super::zero_of(self.llvm_type(repr)))?;
-					let index = self
-						.convert(*index, Repr::Int(IntRepr::I64), node.index())?
-						.int();
-					let pointer = array.value.expect("an array").into_pointer_value();
-					let length = self.growing_length(&self.builder, pointer)?;
-					let index = self.counted_from_end(index, length)?;
-					let inside =
-						self.builder
-							.build_int_compare(IntPredicate::ULT, index, length, "")?;
-					let present = self.append_block("get_present");
-					let end = self.append_block("end_get");
-					self.builder
-						.build_conditional_branch(inside, present, end)?;
-					self.builder.position_at_end(present);
-					let pointer = self.growing_at(&self.builder, pointer, item, index)?;
-					let value = self.load(Slot {
-						pointer,
-						repr: item,
-					})?;
-					let value = self.convert(value, repr, node.index())?;
-					self.builder
-						.build_store(result.pointer, value.value.expect("an optional"))?;
-					self.builder.build_unconditional_branch(end)?;
-					self.builder.position_at_end(end);
-					return self.load(result);
-				}
+				("Array#get", [index]) => return self.array_get(array, *index, node),
 				_ => {}
 			}
 		}
@@ -2533,7 +2509,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.slots.insert(symbol, Slot { pointer, repr });
 		}
 		if info.rest.is_some() {
-			return Err(self.unsupported(node.index(), "a rest pattern in a `for`"));
+			let value = self.load(item)?;
+			self.bind_rest(info, value, node)?;
 		}
 		Ok(())
 	}
@@ -2880,6 +2857,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.expect("llvm.assume");
 			self.builder.build_call(assume, &[external.into()], "")?;
 		}
+		// A rest binding owns its projection for this iteration, including
+		// when the body leaves through `break` or `continue`.
+		let mark = self.mark();
 		let destructured = pattern.and_then(|pattern| self.analysis.pattern(pattern).cloned());
 		match (variable, copy_slot) {
 			_ if destructured.is_some() => {
@@ -2902,7 +2882,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				node,
 			)?;
 		}
-		let mark = self.mark();
 		if let Some(copy) = copy_slot {
 			// dropped at the end of each round, and by `break` and `continue`
 			self.cleanups

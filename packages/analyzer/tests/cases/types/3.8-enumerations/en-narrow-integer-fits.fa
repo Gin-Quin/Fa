@@ -1,0 +1,12 @@
+-- A narrower integer type that holds every possible value converts without a check.
+type Status = Enum { archived = 70000, pending = 0, active = 200 }
+type Color = Enum { red, green, blue }
+function byte = (value: Status.active | Status.pending): UInt8 => UInt8(value)
+function colorByte = (value: Color): UInt8 => UInt8(value)
+console.log(
+	byte(Status.active)
+	byte(Status.pending)
+	colorByte(Color.blue)
+	Int32(Status.archived)
+)
+-- prints: 200 0 2 70000

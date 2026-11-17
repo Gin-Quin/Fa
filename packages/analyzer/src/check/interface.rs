@@ -320,6 +320,8 @@ impl Walker<'_> {
 					SymbolKind::Function => true,
 					SymbolKind::Let
 					| SymbolKind::Mutable
+					| SymbolKind::Use
+					| SymbolKind::MutableUse
 					| SymbolKind::Reactive
 					| SymbolKind::Derived
 					| SymbolKind::Namespace

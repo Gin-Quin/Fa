@@ -33,6 +33,9 @@ impl Generator<'_> {
 					PatternBinding::None => {}
 				}
 			}
+			if let Some((symbol, _)) = info.rest {
+				symbols.push(symbol);
+			}
 		}
 		symbols
 	}

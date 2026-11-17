@@ -1,0 +1,13 @@
+-- Control: the same program with an indexed reference instead of a lookup.
+mutable numbers: Array<Integer> = [1, 2, 3]
+mutable use found = numbers[1]
+function grow = () mutates numbers => {
+	for index in 0..1000 { numbers.push(index) }
+}
+function write = (): Integer mutates numbers => {
+	found = 7
+	found
+}
+grow()
+console.log(write())
+console.log(numbers.get(1) ?? -1)

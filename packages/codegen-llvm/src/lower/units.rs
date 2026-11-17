@@ -1383,7 +1383,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				interface.declared.get(node).is_some_and(|declared| {
 					matches!(
 						declared.kind,
-						SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive
+						SymbolKind::Let
+							| SymbolKind::Mutable | SymbolKind::Reactive
+							| SymbolKind::Use | SymbolKind::MutableUse
 					)
 				})
 			})
@@ -1397,7 +1399,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			let statement = self.declaring_statement(node);
 			if !matches!(
 				self.view(statement),
-				View::Declaration { .. } | View::ExportValue { .. } | View::Destructuring { .. }
+				View::Declaration { .. }
+					| View::ExportValue { .. }
+					| View::Destructuring { .. }
+					| View::Use { .. }
 			) {
 				return Err(self.unsupported(node.index(), "this module value (split build)"));
 			}

@@ -1,0 +1,4 @@
+-- error: E-NUM-16
+-- An integer type that can't hold every member's value has no conversion from the enumeration.
+type Status = Enum { archived = 70000, pending = 0, active = 200 }
+function small = (value: Status): UInt8 => UInt8(value)

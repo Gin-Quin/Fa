@@ -1,0 +1,9 @@
+-- Field order of a runtime anonymous object (control for the rest order).
+function make = (value: Integer): { zeta: Integer, alpha: Integer } => {
+	let result = { zeta = value, alpha = value * 10 }
+	result
+}
+console.log(make(1))
+mutable list: Array<{ zeta: Integer, alpha: Integer }> = []
+for index in 0..2 { list.push({ zeta = index, alpha = index }) }
+console.log(list)

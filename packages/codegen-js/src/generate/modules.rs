@@ -578,7 +578,7 @@ impl Generator<'_> {
 		let symbol = self.analysis.symbols.symbol_of_decl(decl)?;
 		matches!(
 			self.analysis.symbols.symbol(symbol).kind,
-			SymbolKind::Let | SymbolKind::Mutable
+			SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Use | SymbolKind::MutableUse
 		)
 		.then_some(symbol)
 	}

@@ -2932,3 +2932,120 @@ The pre-parse scan of every String input of 2002 code units or more made `Json.p
 limit is now checked on the parsed value by an iterative container walk
 (`faJsonTooDeep`), and the Fa scanner runs only on the error path, where it names the
 error with the native wording; outcomes are unchanged.
+
+## Native completeness (2026-11-17)
+
+Enumeration integer conversions preserve the backend's declaration-index ABI.
+Unpinned members widen their unsigned index; pinned members read a private
+constant table built from nominal payload literals, in the destination integer
+representation. Every unit can construct that table from shared type metadata,
+without an exported runtime table or a second enum representation. Names,
+matching, parsing and iteration continue to use declaration indices.
+
+Range field writes retain the packed range ABI. Assignment resolves the owning
+place once, then updates the bound and its presence flag together; clearing a
+bound stores zero so range keys keep canonical hashes. Equality compares all
+flags and only the present bounds. No heap storage or new runtime helper is
+needed for ranges, including generic, async and per-unit compilation.
+
+Rest patterns use the analyzer's rest type for object projection and the existing
+owned range-slice lowering for arrays. Loop rests own their projected values;
+ordinary loop bindings still designate their original fields. Destructured
+function parameters bind the same PatternInfo after receiving each argument,
+before later defaults or the body read its names. This also fixes the previously
+masked uninitialized bindings in tuples-ranges-patterns.fa.
+
+Destructuring defaults join in the bound symbol's representation (or the nested
+pattern's nonoptional source type), rather than PatternElement.ty, which describes
+the optional field as read. Keep the existing lazy branch and ordinary ownership
+helpers on each arm, including nullable collection/union storage and errors.
+
+JavaScript module generation enumerates rest symbols along with a pattern's
+ordinary/nested symbols. The same enumeration declares module values and exports
+initializers, so the program's analyzed init order can import every rest binding.
+
+The InlineArray conformance matrix accepts the exact documented nonfatal long-turn
+warning only in dev/O0 builds. Its old empty-stderr oracle was incorrect: wasm
+JIT latency and host scheduling can exceed the 50 ms threshold without changing
+any Fa result. Exit status, all stdout lines, leaks and every other diagnostic
+remain strict, as do O3 diagnostics; a negative oracle test guards those cases.
+The dedicated async-long-turn runtime regression still requires the warning.
+
+Loop rest projections belong to the iteration's cleanup scope. Take the existing
+mark before binding the pattern in array and pool/columnar loops; keep iterable
+temporaries in their surrounding scope and retain the existing copy-slot cleanup.
+This covers fallthrough, continue and break without changing ownership rules,
+copy/drop helpers or collection layout/optimization decisions. The owned-array
+field regression exposed five leaked blocks before this integration fix.
+
+
+## Native completeness: nullable lookup references (2026-11-17)
+
+Collection lookup references share the existing nullable address ABI of user
+reference results. Reseating to `none` writes a null address into the reference
+holder; it creates neither an optional value slot nor an owned temporary. Strip
+parentheses and `try` before recognizing every built-in reference producer.
+Capture discovery traverses named call argument values only: a key resolves to
+the callee parameter and is metadata, not a captured variable.
+
+
+## Native completeness: common union fields (2026-11-17)
+
+Select the actual anonymous-union payload layout by its tag before projecting a
+common field. Equal field layouts merge addresses, preserving borrowed reads and
+writable aliases; heterogeneous fields merge an owned value of the complete
+joined field type before ordinary narrowing. Runtime alternative tags use the
+concrete type in the shared store, so local analyzed types, generic substitutions
+and separately compiled consumers agree. This retains written type origins.
+
+
+## Native completeness: optional array lookups (2026-11-17)
+
+Flatten lookup optionality at the representation boundary. Already optional items
+keep their representation, and None-only items have no value to load. Array and
+GrowingArray share the get lowering while retaining their own addressing;
+collection-reference reads use the same optional representation rule. Receiver
+and index evaluation still occur for None-only lookups.
+
+## Native completeness: module reference initialization (2026-11-17)
+
+Module references participate in the existing value initialization graph, with
+keys and initializer dependencies published in interfaces. Both backends emit
+ordinary initializer functions for them; native per-unit builds do so as well.
+The designation borrows its owner and contributes no second owned value.
+Native functions determine a shared reference's slot representation and nullable
+address convention from its declaration before initializers are lowered. An
+optional stored item keeps its own representation. Nullable-reference metadata
+is per file, just like the address holders; equal SymbolIds in separate files
+must not share that state.
+
+## Native completeness: optional-valued reference reads (2026-11-17)
+
+An optional Use/MutableUse can begin at an ordinary optional-valued slot, then
+receive an absent lookup by reseating or aliasing. Read it through the existing
+flattened optional loader regardless of its first designation. The loader accepts
+both nullable addresses to scalar items and addresses to stored optionals; no
+reference cell or copied referent is needed.
+
+JavaScript scalar reference metadata also derives optionality from the declared
+type, so a present first designation cannot disable nullable container access
+after reseating. Immutable aliases inherit the same locator convention.
+
+## Native completeness: directory-entry exclusions (2026-11-17)
+
+The common anonymous-union field lowering also handles directory entries with
+different literal names and paths. The existing multi-file @readDirectory case
+passes native, wasm and freestanding with its unchanged output oracle. Remove
+its native annotation and wasm/freestanding ratchets; no separate directory
+lowering or target-specific implementation is needed.
+
+## Native completeness review: enumeration to a narrower integer (2026-11-17)
+
+`UInt8(status)` with a member pinned to `70000` was accepted and truncated natively (112) while
+Bun printed 70000. The conversion of an enumeration to an integer type now exists only when the type
+holds the value of every member the source type may hold (its pinned values, else its declaration
+indices), exactly like the conversion of a `Fields` value (`E-NUM-16`, "convert to a wider integer
+type"). Refusing rather than checking with `ArithmeticError`: the page groups enumerations with
+fields, whose conversion is refused, and an enumeration's value set is known statically, so a
+check could only fail on a type the programmer chose too small. A narrowed member type (`Status.active`)
+needs room for its own values only. Every engine agrees because the program is refused.

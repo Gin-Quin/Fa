@@ -91,6 +91,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// The global id of a member type of an anonymous union (`Integer` in
 	/// `Integer | String`), registered for printing.
 	pub(crate) fn type_id(&self, ty: TypeId) -> u64 {
+		// A generic instance may reach the same alternative through a local
+		// analyzed type or through a substituted shared type. Both must name
+		// the same runtime tag, including in a separately compiled unit.
+		let ty = self.shared_type(self.concrete_type(ty));
 		let mut ids = self.type_ids.borrow_mut();
 		let next = match self.is_split() {
 			true => self.stable_type_id(ty),
@@ -678,16 +682,28 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A pointer to the data of a box whose member is known.
-	fn box_data_pointer(
+	pub(super) fn box_data_pointer(
 		&self,
 		pointer: PointerValue<'ctx>,
 		ty: TypeId,
 		node: NodeId,
 	) -> Result<Slot<'ctx>, Error> {
 		let Some((nominal, index)) = self.member_of_type(ty) else {
-			return Err(
-				self.unsupported(node.index(), "the data of a union whose member isn't known")
-			);
+			let repr = self.repr_of(ty, node.index())?;
+			if !matches!(repr, Repr::Object(_)) {
+				return Err(
+					self.unsupported(node.index(), "the data of a union whose member isn't known")
+				);
+			}
+			return Ok(Slot {
+				pointer: self.builder.build_struct_gep(
+					self.box_type(Some(repr)),
+					pointer,
+					1,
+					"",
+				)?,
+				repr,
+			});
 		};
 		let data = self.member_data(nominal, index).unwrap_or(TypeId::UNKNOWN);
 		let repr = self.repr_of(data, node.index())?;
@@ -1860,6 +1876,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		current_type: TypeId,
 		member: NodeId,
 	) -> Result<(Val<'ctx>, TypeId), Error> {
+		if value.repr == Repr::Union
+			&& let Some((slot, owned)) =
+				self.common_union_field(value, current_type, member, false)?
+		{
+			let value = self.load(slot)?;
+			let value = if owned { self.fresh(value) } else { value };
+			let value = self.narrow_to(value, self.node_repr(member)?, member)?;
+			return Ok((value, self.type_of(member)));
+		}
 		match self.analysis.resolution(member) {
 			Resolution::Field(..) => {
 				if matches!(value.repr, Repr::Union | Repr::InlineUnion(_)) {
@@ -2267,6 +2292,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		members: impl Iterator<Item = NodeId>,
 	) -> Result<Slot<'ctx>, Error> {
 		for member in members {
+			if slot.repr == Repr::Union {
+				let value = self.load(slot)?;
+				if let Some((field, _)) =
+					self.common_union_field(value, current_type, member, true)?
+				{
+					slot = field;
+					current_type = self.type_of(member);
+					continue;
+				}
+			}
 			// `guard.value`: the value of the locked mutex (parallel.rs)
 			if let Resolution::Builtin(builtin) = self.analysis.resolution(member)
 				&& fa_analyzer::builtins::get(builtin).path == "Guard#value"

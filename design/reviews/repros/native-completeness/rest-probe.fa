@@ -1,0 +1,43 @@
+-- Rest patterns and destructuring defaults: closures, loops with break/continue, generics, nested defaults.
+type Person = { name: String, city: String, age: Integer, nickname: String? }
+let people: Array<Person> = [
+	{
+		name = "Ada with a long enough name"
+		city = "London, a long city name"
+		age = 36
+		nickname = none
+	}
+	{ name = "Bob", city = "Paris", age = 40, nickname = "bobby, nickname beyond inline" }
+	{ name = "Cyd", city = "Rome", age = 50, nickname = none }
+]
+for { name, ...rest } in people {
+	if rest.age > 45 { break }
+	console.log(name, rest.city, rest.age)
+}
+for { age, ...others } in people {
+	if age == 40 { continue }
+	console.log(others.name, others.nickname ?? "-")
+}
+let { nickname = "default nickname beyond inline capacity", ...remaining } = people[0]
+console.log(nickname, remaining.name)
+let [head, ...tail] = [10, 20, 30, 40]
+console.log(head, tail)
+let [one, two, ...empty] = ["first string beyond inline capacity", "second"]
+console.log(one, two, empty)
+function describe = ({ name, ...details }: Person): String => "{name} from {details.city}"
+console.log(people.map(describe))
+function firstAndRest = <Item>(items: Array<Item>): Array<Item> throws IndexError => {
+	try let [_first, ...after] = copy items
+	after
+}
+console.log(firstAndRest(["x", "y beyond inline capacity of strings", "z"]) catch _error => [])
+console.log(firstAndRest([1]) catch _error => [])
+function greet = ({ nickname = "anonymous friend beyond inline capacity" }: Person): String =>
+	"hi {nickname}"
+console.log(people.map(greet))
+let strings = ["a string beyond the inline capacity of strings", "b"]
+function captureRest = (): Array<String> => {
+	let [_x, ...after] = copy strings
+	after
+}
+console.log(captureRest())

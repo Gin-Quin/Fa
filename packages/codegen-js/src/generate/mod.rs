@@ -449,7 +449,7 @@ impl<'s> Generator<'s> {
 				View::TypeDecl { .. } | View::ExportType { .. } => functions.push(statement),
 				View::Test { .. } | View::Namespace { .. } | View::ExportNamespace(_) => {}
 				_ if self.is_name_alias(statement) => {}
-				View::Declaration { .. } | View::ExportValue { .. }
+				View::Declaration { .. } | View::ExportValue { .. } | View::Use { .. }
 					if module_file || members.contains(&statement) =>
 				{
 					if let Some(symbol) = self.value_symbol(statement) {

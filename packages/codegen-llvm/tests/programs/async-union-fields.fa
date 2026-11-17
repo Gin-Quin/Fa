@@ -1,0 +1,11 @@
+use { sleep } = std.time
+type A = { kind: "a", text: String }
+type B = { aPadding: Integer, kind: "b", text: String }
+async function read = (value: A | B): String => {
+	await sleep(0)
+	"{value.kind}: {value.text}"
+}
+console.log(await read({ kind = "a", text = "async managed payload beyond inline storage" }))
+console.log(await read({ aPadding = 9, kind = "b", text = "second managed payload beyond inline storage" }))
+-- prints: a: async managed payload beyond inline storage
+-- prints: b: second managed payload beyond inline storage

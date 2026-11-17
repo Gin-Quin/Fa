@@ -360,6 +360,15 @@ subfields; no owned temporary may replace the designated place. Local `use`
 keeps it, while an ordinary owning store follows the data's copy/move rules.
 Relation-field borrows read the target address once, rather than aliasing the
 field that can later be reassigned. Columnar references keep their row locator.
+Collection lookups retain the element's slot address through optional narrowing;
+an absent lookup and `reuse reference = none` both use a null address. Parentheses
+and `try` preserve this designation without evaluating a lookup again.
+Functions that access module references determine the referent layout and
+nullable-address convention from the declaration before module initializers are
+lowered; optional collection items retain their complete stored representation.
+Optional reference reads use the flattened optional loader even when the first
+designation was an ordinary optional-valued slot: a later reseating may supply a
+null address instead. An immutable alias snapshots that address in the same way.
 
 JavaScript passes and returns object references as the objects themselves, with
 `undefined` for an absent reference. A local primitive reference is a direct
@@ -371,6 +380,9 @@ chooses direct reads and writes of those locals; its other alternative uses the
 container and key. Copying that reference with `use` snapshots the selector and
 location, without copying the referent or allocating a cell. A map slot uses its existing `get`/`set` operations; a primitive pool
 uses its slot array and stable slot index, with direct member accesses. There are no accessor cells or reference caches.
+An optional primitive reference keeps nullable container access even when its
+initial designation is a present optional-valued slot; `reuse` may later select
+an absent lookup, and immutable aliases preserve that optionality.
 
 At a function boundary a primitive or mixed-union reference has two parts:
 **(innermost container, key)**. For `values[i]` these are `(values, i)`;

@@ -1,0 +1,8 @@
+use { sleep } = std.time
+async function lookup = <Item>(items: Array<Item?>, index: Integer): Item? => {
+	await sleep(0)
+	items.get(index)
+}
+let values: Array<String?> = ["async managed string beyond inline capacity", none]
+console.log(await lookup(values, 0), await lookup(values, 1), await lookup(values, 9))
+-- prints: async managed string beyond inline capacity none none

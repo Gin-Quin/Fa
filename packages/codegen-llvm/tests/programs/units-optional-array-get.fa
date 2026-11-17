@@ -1,0 +1,15 @@
+-- require-split: true
+-- asynchronous: false
+-- prints: 3 none none
+-- prints: split managed string beyond inline capacity none none
+-- file: application/main.fa
+export function = () => {
+	let values: Array<Integer?> = [3, none]
+	console.log(library.lookup(values, 0), library.lookup(values, 1), library.lookup(values, 9))
+	let texts: GrowingArray<String?> = ["split managed string beyond inline capacity", none]
+	console.log(library.growingLookup(texts, 0), library.growingLookup(texts, 1), library.growingLookup(texts, 9))
+}
+-- file: library/lookup.fa
+export function = <Item>(items: Array<Item?>, index: Integer): Item? => items.get(index)
+-- file: library/growingLookup.fa
+export function = <Item>(items: GrowingArray<Item?>, index: Integer): Item? => items.get(index)

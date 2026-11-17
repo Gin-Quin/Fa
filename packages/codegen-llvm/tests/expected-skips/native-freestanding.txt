@@ -1,86 +1,74 @@
 # The programs the native-freestanding target doesn't pass yet, with the reason
 # (`tests/programs.rs`): any other compile error fails.
-analyzer/tests/cases/advanced/04-reference-types-use-mutable-use-reuse/adv-4.5-06.fa: line 3: a `use` of this value is not supported by the native backend yet
-analyzer/tests/cases/comptime/directories.fa: main.fa:4:19: this member is not supported by the native backend yet
 analyzer/tests/cases/comptime/for-per-item.fa: main.fa:19:14: a value of type `Void` is not supported by the native backend yet
-analyzer/tests/cases/modules/field-defaults-across-files.fa: application/main.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/std/json-defaults-across-files.fa: application/main.fa:4:27: error[AN004]: `Json.parse` doesn't exist without a C library (`native-freestanding`): build for `native`
-analyzer/tests/cases/types/3.11-generics-angle-brackets/generic-function-value-environments.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/types/3.11-generics-angle-brackets/gn-6.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/types/3.11-generics-angle-brackets/numeric-union-across-modules.fa: application/main.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/types/3.11-generics-angle-brackets/numeric-union-integer-instances.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/types/3.11-generics/gn-1.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/types/3.11-generics/gn-2.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/types/3.11-generics/gn-6.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/types/3.11-generics/gn-8.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/types/3.13-type-conversion/cv-1.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/types/3.4-anonymous-unions-and-optionals/un-15.fa: line 5: this member is not supported by the native backend yet
-analyzer/tests/cases/types/3.4-anonymous-unions-and-optionals/un-5.fa: line 4: this member is not supported by the native backend yet
-analyzer/tests/cases/types/3.5-named-unions-and-errors/nu-1.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/types/3.5-named-unions-and-errors/nu-8.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/types/3.8-enumerations/en-1.fa: line 5: converting a value from Enum(NominalId(2147483659)) to Int(IntRepr { bits: 64, signed: true }) is not supported by the native backend yet
-analyzer/tests/cases/types/3.8-enumerations/en-2.fa: line 3: converting a value from Enum(NominalId(2147483659)) to Int(IntRepr { bits: 64, signed: true }) is not supported by the native backend yet
-analyzer/tests/cases/types/3.9-fields-and-key-sets/fields-json.fa: line 8: error[AN004]: `Json.stringify` doesn't exist without a C library (`native-freestanding`): build for `native`
-analyzer/tests/cases/types/3.9-fields-and-key-sets/key-sets.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/types/5.1-array-t/ar-11.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/values/06-numbers/T-NUM-2.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/values/06-numbers/T-NUM-24.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/values/06-numbers/T-NUM-25.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/values/06-numbers/T-NUM-26-a.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/values/06-numbers/T-NUM-26-b.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/values/06-numbers/T-NUM-29.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/values/06-numbers/T-NUM-30.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/values/06-numbers/T-NUM-31.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/values/06-numbers/T-NUM-32.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/values/06-numbers/T-NUM-34.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/values/06-numbers/T-NUM-4.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/values/06-numbers/T-NUM-40.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/values/06-numbers/T-NUM-5.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/values/06-numbers/T-NUM-55.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/values/06-numbers/T-NUM-56.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/values/06-numbers/T-NUM-6-a.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/values/06-numbers/T-NUM-6-b.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/values/06-numbers/T-NUM-8.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/values/07-strings-and-characters/T-STR-11.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/values/09-none-and-optionals/T-OPT-7.fa: line 3: `get` on this array is not supported by the native backend yet
-analyzer/tests/cases/values/10-tuples/T-TUP-6.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/values/12-ranges/T-RNG-2.fa: line 3: this place is not supported by the native backend yet
-analyzer/tests/cases/values/13-comparison-equality-is-membership-logic/T-CMP-17.fa: line 3: comparing these values is not supported by the native backend yet
-analyzer/tests/cases/values/16-destructuring/T-DST-3.fa: line 2: converting a value from Optional(Int(IntRepr { bits: 64, signed: true })) to Int(IntRepr { bits: 64, signed: true }) is not supported by the native backend yet
-analyzer/tests/cases/values/16-destructuring/T-DST-4.fa: line 2: converting a value from Optional(Int(IntRepr { bits: 64, signed: true })) to Int(IntRepr { bits: 64, signed: true }) is not supported by the native backend yet
-analyzer/tests/cases/values/16-destructuring/T-DST-5.fa: line 3: a rest pattern is not supported by the native backend yet
-analyzer/tests/cases/values/16-destructuring/T-DST-6.fa: line 3: a rest pattern is not supported by the native backend yet
-analyzer/tests/cases/values/17-conditionals/T-IF-4.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-analyzer/tests/cases/values/17-conditionals/T-WHEN-13.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-cli/tests/programs/array-callbacks-generics.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
+analyzer/tests/cases/modules/field-defaults-across-files.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/std/json-defaults-across-files.fa: target limit: std.json requires libc (AN004); build for native
+analyzer/tests/cases/types/3.11-generics-angle-brackets/generic-function-value-environments.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/types/3.11-generics-angle-brackets/gn-6.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/types/3.11-generics-angle-brackets/numeric-union-across-modules.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/types/3.11-generics-angle-brackets/numeric-union-integer-instances.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/types/3.11-generics/gn-1.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/types/3.11-generics/gn-2.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/types/3.11-generics/gn-6.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/types/3.11-generics/gn-8.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/types/3.13-type-conversion/cv-1.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/types/3.4-anonymous-unions-and-optionals/un-15.fa: documented target limit: Float output requires snprintf from libc on native-freestanding; build for native or wasm
+analyzer/tests/cases/types/3.5-named-unions-and-errors/nu-1.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/types/3.5-named-unions-and-errors/nu-8.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/types/3.9-fields-and-key-sets/fields-json.fa: target limit: std.json requires libc (AN004); build for native
+analyzer/tests/cases/types/3.9-fields-and-key-sets/key-sets.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/types/5.1-array-t/ar-11.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/values/06-numbers/T-NUM-2.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/values/06-numbers/T-NUM-24.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/values/06-numbers/T-NUM-25.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/values/06-numbers/T-NUM-26-a.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/values/06-numbers/T-NUM-26-b.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/values/06-numbers/T-NUM-29.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/values/06-numbers/T-NUM-30.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/values/06-numbers/T-NUM-31.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/values/06-numbers/T-NUM-32.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/values/06-numbers/T-NUM-34.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/values/06-numbers/T-NUM-4.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/values/06-numbers/T-NUM-40.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/values/06-numbers/T-NUM-5.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/values/06-numbers/T-NUM-55.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/values/06-numbers/T-NUM-56.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/values/06-numbers/T-NUM-6-a.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/values/06-numbers/T-NUM-6-b.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/values/06-numbers/T-NUM-8.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/values/07-strings-and-characters/T-STR-11.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/values/10-tuples/T-TUP-6.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/values/17-conditionals/T-IF-4.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+analyzer/tests/cases/values/17-conditionals/T-WHEN-13.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+cli/tests/programs/array-callbacks-generics.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
 cli/tests/programs/builtin-methods.fa: line 34: `Integer#checkedPow` is not supported by the native backend yet
-cli/tests/programs/c-arrays.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-cli/tests/programs/compound-assignments.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-cli/tests/programs/conversions.fa: line 6: values of type `BigInt` is not supported by the native backend yet
-cli/tests/programs/fast-paths.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-cli/tests/programs/float32.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-cli/tests/programs/floats.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-cli/tests/programs/integer-arithmetic.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-cli/tests/programs/js-deep-values.fa: Json.stringify needs a C library (AN004)
+cli/tests/programs/c-arrays.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+cli/tests/programs/compound-assignments.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+cli/tests/programs/conversions.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+cli/tests/programs/fast-paths.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+cli/tests/programs/float32.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+cli/tests/programs/floats.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+cli/tests/programs/integer-arithmetic.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+cli/tests/programs/js-deep-values.fa: target limit: std.json requires libc (AN004); build for native
 cli/tests/programs/js-million-copy.fa: runtime: recursive deep copy/equality exhausts the stack at one million nodes; use iterative native helpers
 cli/tests/programs/number-api.fa: line 47: this name is not supported by the native backend yet
-cli/tests/programs/percentages.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-cli/tests/programs/printing.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-cli/tests/programs/special-names.fa: line 27: error[AN004]: `Json.stringify` doesn't exist without a C library (`native-freestanding`): build for `native`
-cli/tests/programs/tuples-ranges-patterns.fa: line 27: this place is not supported by the native backend yet
-cli/tests/programs/unions-and-enums.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-codegen-llvm/tests/programs/big-integers-native.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-codegen-llvm/tests/programs/block-copies.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-codegen-llvm/tests/programs/columnars.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-codegen-llvm/tests/programs/float-integer-guards.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-codegen-llvm/tests/programs/floats_and_strings.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-codegen-llvm/tests/programs/growing-blocks.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-codegen-llvm/tests/programs/inline-union-kinds.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-codegen-llvm/tests/programs/integers.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-codegen-llvm/tests/programs/memory.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-codegen-llvm/tests/programs/packed-arrays.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-codegen-llvm/tests/programs/recursive-container-layout.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
-codegen-llvm/tests/programs/units-generic-values.fa: application/main.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
+cli/tests/programs/percentages.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+cli/tests/programs/printing.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+cli/tests/programs/special-names.fa: target limit: std.json requires libc (AN004); build for native
+cli/tests/programs/tuples-ranges-patterns.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
+cli/tests/programs/unions-and-enums.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+codegen-llvm/tests/programs/big-integers-native.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+codegen-llvm/tests/programs/block-copies.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+codegen-llvm/tests/programs/columnars.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+codegen-llvm/tests/programs/float-integer-guards.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+codegen-llvm/tests/programs/floats_and_strings.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+codegen-llvm/tests/programs/growing-blocks.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+codegen-llvm/tests/programs/inline-union-kinds.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+codegen-llvm/tests/programs/integers.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+codegen-llvm/tests/programs/memory.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+codegen-llvm/tests/programs/packed-arrays.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+codegen-llvm/tests/programs/recursive-container-layout.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
+codegen-llvm/tests/programs/units-generic-values.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
 
 # js/followups LLVM audit: remaining optional continuation lowering.
 cli/tests/programs/optional-calls.fa: native continuation after an optional call lacks present-result lowering (Optional<Object> to Object); requires the full chain normalizer

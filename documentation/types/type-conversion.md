@@ -178,6 +178,8 @@ assert Integer(Color.red) == 0
 assert Integer(Permissions { read, write }) == 0b011
 ```
 
+The integer type must hold every value the enumeration or the set may have: `UInt8(status)` is an error when a member of `status`'s type is pinned to `70000`, and the message says to convert to a wider type, like `Integer`. A narrowed value only needs room for its possible members: `UInt8(value)` is valid with `value: Status.active`.
+
 ## Strings
 
 Any value is converted to a string by interpolation, or by calling its `toString` method. There is no `String(value)`: these are the two ways.

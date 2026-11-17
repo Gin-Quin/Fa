@@ -1,0 +1,15 @@
+-- Field order of a rest object bound by a `for` over an Array and over a Columnar.
+type Person = { name: String, zeta: Integer, alpha: Integer }
+function make = (count: Integer): Array<Person> => {
+	mutable people: Array<Person> = []
+	for index in 0..count { people.push({ name = "p{index}", zeta = index, alpha = index * 10 }) }
+	people
+}
+for { name, ...rest } in make(2) { console.log(name, rest) }
+let columnar: Columnar<Person> = Columnar<Person>.from(make(1))
+for { name, ...rest } in columnar { console.log(name, rest) }
+function single = (person: Person): String => {
+	let { name, ...rest } = person
+	"{name} {rest}"
+}
+console.log(single(make(1)[0] catch _error => Person { name = "x", zeta = 0, alpha = 0 }))

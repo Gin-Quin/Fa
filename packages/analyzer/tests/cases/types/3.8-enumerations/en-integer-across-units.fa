@@ -1,0 +1,17 @@
+-- require-split: true
+-- file: library/status.fa
+export namespace = {
+	type Status = Enum { archived = 70000, pending = 0, active = 200 }
+	function code = (value: Status): Integer => Integer(value)
+	function taggedCode = <Tag>(value: Status, _tag: Tag): Integer => Integer(value)
+}
+-- file: application/main.fa
+type Status = library.status.Status
+export function = () => {
+	for status in Status.members {
+		console.log(library.status.code(status), library.status.taggedCode(status, true))
+	}
+}
+-- prints: 70000 70000
+-- prints: 0 0
+-- prints: 200 200

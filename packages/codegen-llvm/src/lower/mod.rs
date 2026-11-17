@@ -80,6 +80,7 @@ mod tree_payloads;
 mod tree_strings;
 mod trees;
 mod tuples;
+mod union_fields;
 mod union_inlining;
 pub(crate) mod units;
 pub(crate) mod values;
@@ -2110,6 +2111,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				{
 					self.frame_mut().readonly_strings.insert(pointer);
 				}
+				self.bind_parameter_pattern(param.node, param.symbol)?;
 				continue;
 			}
 			let slot = self.alloca(repr, "parameter")?;
@@ -2158,6 +2160,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					}
 				}
 			}
+			self.bind_parameter_pattern(param.node, param.symbol)?;
 		}
 		if let Some(sig) = info.sig {
 			let requires = self.types().sig(sig).requires;
@@ -2467,18 +2470,19 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Ok(*slot);
 		}
 		let data = self.analysis.symbols.symbol(symbol);
+		if matches!(data.kind, SymbolKind::Use | SymbolKind::MutableUse)
+			&& self.shared.contains_key(&symbol)
+		{
+			// a top-level reference that functions read: its address in a global
+			let repr = self.shared_reference_repr(symbol, node)?;
+			self.reference_holder(symbol, repr);
+			return self.slot_of(symbol, node);
+		}
 		let repr = self.repr_of(data.ty, node.index())?;
 		if !repr.has_value() {
 			return Err(self.unsupported(node.index(), "a local without a value"));
 		}
 		let owner = self.owner_of_scope(data.scope);
-		if matches!(data.kind, SymbolKind::Use | SymbolKind::MutableUse)
-			&& self.shared.contains_key(&symbol)
-		{
-			// a top-level reference that functions read: its address in a global
-			self.reference_holder(symbol, repr);
-			return self.slot_of(symbol, node);
-		}
 		let slot = if self.shared.contains_key(&symbol) {
 			let ty = self.llvm_type(repr);
 			let constant = self.immutable_scalar(symbol)?;
@@ -3044,7 +3048,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					return Ok(Val::new(repr, array));
 				}
 				let slot = self.slot_of(symbol, node)?;
-				if self.nullable_references.contains_key(&symbol)
+				// A mutable alias can start at an optional-valued slot and
+				// later designate an absent lookup. Both layouts read through
+				// the flattened optional loader, regardless of the initializer.
+				if (self.nullable_references.contains_key(&symbol)
+					|| matches!(kind, SymbolKind::Use | SymbolKind::MutableUse))
 					&& matches!(self.node_repr(node), Ok(Repr::Optional(_)))
 				{
 					return self.optional_element(slot.pointer, slot.repr, node);
@@ -3213,6 +3221,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let value_lowered = self.expr(value)?;
 		if value_lowered.repr == Repr::Never {
 			return Ok(Val::never());
+		}
+		if self.range_assignment(target, value_lowered)? {
+			return Ok(Val::void());
 		}
 		// an array read from a place into an array local: its items are
 		// copied into the local's own block (no allocation, nothing leaked)

@@ -455,6 +455,10 @@ pub struct Walker<'s> {
 	pub(crate) hoisted_blocks: rustc_hash::FxHashSet<NodeId>,
 	/// The place each `use` alias and `for` variable over a collection designates.
 	pub(crate) aliases: FxHashMap<SymbolId, PlaceId>,
+	/// The members naming a field common to every alternative of an anonymous
+	/// union (`value.count`): a field step of their receiver's place, though
+	/// they have no single shape to resolve to.
+	pub(crate) common_union_fields: rustc_hash::FxHashSet<NodeId>,
 	/// Borrowed call results, recorded once after that evaluation's effects.
 	pub(crate) effect_protected_references: Vec<SymbolId>,
 	pub(crate) invalid_reference_arguments: rustc_hash::FxHashSet<NodeId>,
@@ -659,6 +663,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		implicit_write_calls: Vec::new(),
 		key_sets: key_sets::KeySetState::default(),
 		aliases: FxHashMap::default(),
+		common_union_fields: rustc_hash::FxHashSet::default(),
 		effect_protected_references: Vec::new(),
 		invalid_reference_arguments: rustc_hash::FxHashSet::default(),
 		reference_results: FxHashMap::default(),

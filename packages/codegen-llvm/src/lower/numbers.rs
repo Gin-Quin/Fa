@@ -4,7 +4,7 @@
 //! `saturating*`, `checked*`, `sqrt`, `isNaN`…).
 
 use fa_analyzer::analysis::{Argument, CallInfo, NodeFlags};
-use fa_analyzer::ids::NodeId;
+use fa_analyzer::ids::{NodeId, NominalId};
 use fa_analyzer::syntax::View;
 use inkwell::values::{BasicMetadataValueEnum, FloatValue, IntValue};
 use inkwell::{FloatPredicate, IntPredicate};
@@ -14,6 +14,56 @@ use crate::lower::Lowering;
 use crate::lower::values::{IntRepr, Repr, Val};
 
 impl<'ctx> Lowering<'_, 'ctx> {
+	/// Enumerations store declaration indices, independently of pinned values.
+	pub(crate) fn enum_integer(
+		&self,
+		value: Val<'ctx>,
+		nominal: NominalId,
+		int: IntRepr,
+	) -> Result<Val<'ctx>, Error> {
+		let types = self.types();
+		let count = types.sym_list(types.nominal(nominal).members).len();
+		let pinned = types.as_int(types.payload(nominal, 0)).is_some();
+		let result = if pinned {
+			let entries: Vec<_> = (0..count)
+				.map(|index| {
+					let literal = types
+						.as_int(types.payload(nominal, index as u16))
+						.and_then(|ty| ty.literal())
+						.expect("every member of a pinned enumeration has a literal value");
+					self.const_int(int.bits, literal)
+				})
+				.collect();
+			let ty = self.int_type(int.bits);
+			let array = ty.const_array(&entries);
+			let table = self
+				.module
+				.add_global(array.get_type(), None, "fa.enum_values");
+			table.set_initializer(&array);
+			table.set_constant(true);
+			table.set_linkage(inkwell::module::Linkage::Private);
+			let pointer = unsafe {
+				self.builder.build_in_bounds_gep(
+					array.get_type(),
+					table.as_pointer_value(),
+					&[self.context.i32_type().const_zero(), value.int()],
+					"",
+				)?
+			};
+			self.builder.build_load(ty, pointer, "")?.into_int_value()
+		} else {
+			self.int_to(
+				value.int(),
+				IntRepr {
+					bits: 32,
+					signed: false,
+				},
+				int,
+			)?
+		};
+		Ok(Val::new(Repr::Int(int), result))
+	}
+
 	/// The value of a constant of the number types (`Integer.maxValue`,
 	/// `Float.infinity`…), or `None` for another path.
 	pub(crate) fn number_constant(

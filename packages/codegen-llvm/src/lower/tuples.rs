@@ -8,7 +8,8 @@
 //!   evaluated once, then each element is read and bound in order.
 
 use fa_analyzer::analysis::{NodeFlags, PatternBinding};
-use fa_analyzer::ids::{NodeId, TypeId};
+use fa_analyzer::ids::{NodeId, SymbolId, TypeId};
+use fa_analyzer::symbols::Resolution;
 use fa_analyzer::syntax::{NodeList, View};
 use fa_analyzer::types::TypeKind;
 use inkwell::IntPredicate;
@@ -445,36 +446,45 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Array(item_type) if self.node_repr(index)? == Repr::Range => {
 				let array = self.expr(target)?;
 				let range = self.expr(index)?;
-				let item = self.item_repr(item_type, node)?;
-				let size = inkwell::types::BasicType::size_of(&self.llvm_type(item))
-					.expect("a sized item");
-				let size = self
-					.builder
-					.build_int_cast(size, self.context.i64_type(), "")?;
 				let (start, end, flags) = self.range_parts(range)?;
-				let out = self.alloca(Repr::Array(item_type), "slice")?;
-				let slice = self.runtime.function("fa_array_slice")?;
-				let error = self
-					.call_value(
-						slice,
-						&[
-							array.value.expect("an array").into(),
-							start.into(),
-							end.into(),
-							flags.into(),
-							size.into(),
-							out.pointer.into(),
-						],
-					)?
-					.into_pointer_value();
-				self.raise_if_error(error)?;
-				// the items are copied bytewise: an item that owns memory needs its own
-				let sliced = self.load(out)?;
-				self.copy_items(sliced.value.expect("an array").into_pointer_value(), item)?;
-				Ok(Some(self.fresh(sliced)))
+				Ok(Some(self.array_slice_value(
+					node, array, item_type, start, end, flags,
+				)?))
 			}
 			_ => Ok(None),
 		}
+	}
+
+	/// An owned slice, shared by indexing and array rest patterns.
+	pub(crate) fn array_slice_value(
+		&mut self,
+		node: NodeId,
+		array: Val<'ctx>,
+		item_type: TypeId,
+		start: IntValue<'ctx>,
+		end: IntValue<'ctx>,
+		flags: IntValue<'ctx>,
+	) -> Result<Val<'ctx>, Error> {
+		let item = self.item_repr(item_type, node)?;
+		let size = self.item_size(item)?;
+		let out = self.alloca(Repr::Array(item_type), "slice")?;
+		let error = self
+			.call_value(
+				self.runtime.function("fa_array_slice")?,
+				&[
+					array.value.expect("an array").into(),
+					start.into(),
+					end.into(),
+					flags.into(),
+					size.into(),
+					out.pointer.into(),
+				],
+			)?
+			.into_pointer_value();
+		self.raise_if_error(error)?;
+		let sliced = self.load(out)?;
+		self.copy_items(sliced.value.expect("an array").into_pointer_value(), item)?;
+		Ok(self.fresh(sliced))
 	}
 
 	/// The place `tuple[0]`, or `None` for another target.
@@ -563,6 +573,103 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.build_extract_value(structure, 2, "")?
 			.into_int_value();
 		Ok((start, end, flags))
+	}
+
+	/// Writes a logical range field into its packed bounds/flags storage.
+	pub(crate) fn range_assignment(
+		&mut self,
+		target: NodeId,
+		value: Val<'ctx>,
+	) -> Result<bool, Error> {
+		let View::Access {
+			target: base,
+			members,
+		} = self.view(target)
+		else {
+			return Ok(false);
+		};
+		let Some(member) = members.iter().last() else {
+			return Ok(false);
+		};
+		let Resolution::Builtin(builtin) = self.analysis.resolution(member) else {
+			return Ok(false);
+		};
+		let (index, flag) = match fa_analyzer::builtins::get(builtin).path {
+			"Range#start" => (0, HAS_START),
+			"Range#end" => (1, HAS_END),
+			"Range#includesEnd" => (2, INCLUSIVE),
+			_ => return Ok(false),
+		};
+		let slot = self.place(base)?;
+		let slot = self.place_members(
+			slot,
+			self.type_of(base),
+			members.iter().take(members.len() - 1),
+		)?;
+		let range = self.load(slot)?.value.expect("a range").into_struct_value();
+		let flags = self
+			.builder
+			.build_extract_value(range, 2, "")?
+			.into_int_value();
+		let (present, range) = if index == 2 {
+			(
+				self.convert(value, Repr::Bool, target.index())?.int(),
+				range,
+			)
+		} else {
+			let value = self.convert(
+				value,
+				Repr::Optional(Scalar::Int(IntRepr::I64)),
+				target.index(),
+			)?;
+			let (present, bound) = self.split_optional(&self.builder, value)?;
+			// Keep absent bounds canonical, including for range keys' hashes.
+			let bound = self.builder.build_select(
+				present,
+				bound.int(),
+				self.context.i64_type().const_zero(),
+				"",
+			)?;
+			let range = self
+				.builder
+				.build_insert_value(range, bound, index, "")?
+				.into_struct_value();
+			(present, range)
+		};
+		let bit = flags.get_type().const_int(flag, false);
+		let cleared = self
+			.builder
+			.build_and(flags, self.builder.build_not(bit, "")?, "")?;
+		let set = self.builder.build_or(cleared, bit, "")?;
+		let flags = self.builder.build_select(present, set, cleared, "")?;
+		let range = self.builder.build_insert_value(range, flags, 2, "")?;
+		self.store(
+			slot,
+			Val::new(Repr::Range, range.into_struct_value()),
+			target,
+		)?;
+		Ok(true)
+	}
+
+	pub(crate) fn ranges_equal(
+		&self,
+		left: Val<'ctx>,
+		right: Val<'ctx>,
+	) -> Result<IntValue<'ctx>, Error> {
+		let (a, b, flags) = self.range_parts(left)?;
+		let (c, d, other_flags) = self.range_parts(right)?;
+		let mut equal = self
+			.builder
+			.build_int_compare(IntPredicate::EQ, flags, other_flags, "")?;
+		for (left, right, flag) in [(a, c, HAS_START), (b, d, HAS_END)] {
+			let same = self
+				.builder
+				.build_int_compare(IntPredicate::EQ, left, right, "")?;
+			let absent = self.builder.build_not(self.range_flag(flags, flag)?, "")?;
+			let same = self.builder.build_or(absent, same, "")?;
+			equal = self.builder.build_and(equal, same, "")?;
+		}
+		Ok(equal)
 	}
 
 	/// Whether a flag of a range is set.
@@ -793,6 +900,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(Val::void())
 	}
 
+	/// Destructures a received parameter before later defaults use its bindings.
+	pub(crate) fn bind_parameter_pattern(
+		&mut self,
+		node: NodeId,
+		symbol: SymbolId,
+	) -> Result<(), Error> {
+		if let View::DestructuredParameter { pattern, .. } = self.view(node) {
+			let slot = self.slot_of(symbol, node)?;
+			let value = self.load(slot)?;
+			self.bind_pattern(pattern, value)?;
+		}
+		Ok(())
+	}
+
 	/// Binds the elements of a pattern ([`fa_analyzer::analysis::PatternInfo`]) to a value.
 	pub(crate) fn bind_pattern(&mut self, pattern: NodeId, value: Val<'ctx>) -> Result<(), Error> {
 		let Some(info) = self.analysis.pattern(pattern).cloned() else {
@@ -871,9 +992,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let read = match (read, element.default) {
 				(None, Some(default)) => self.expr(default)?,
 				(Some(read), Some(default)) if matches!(read.repr, Repr::Optional(_)) => {
-					let target = self.repr_of(element.ty, pattern.index())?;
-					let result = self.alloca(target, "with_default")?;
 					let (present, inner) = self.split_optional(&self.builder, read)?;
+					let target = match element.binding {
+						PatternBinding::Symbol(symbol) => self.slot_of(symbol, pattern)?.repr,
+						PatternBinding::Nested(nested) => {
+							let ty = self.analysis.pattern(nested).expect("a nested pattern").ty;
+							self.repr_of(ty, nested.index())?
+						}
+						PatternBinding::None => inner.repr,
+					};
+					let result = self.alloca(target, "with_default")?;
 					let given = self.append_block("given_field");
 					let fallback = self.append_block("default_field");
 					let join = self.append_block("bound_field");
@@ -905,9 +1033,68 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				PatternBinding::None => {}
 			}
 		}
-		if info.rest.is_some() {
-			return Err(self.unsupported(pattern.index(), "a rest pattern"));
-		}
+		self.bind_rest(&info, value, pattern)?;
+		Ok(())
+	}
+	/// Rest bindings own a projection of the remaining fields or a slice.
+	pub(crate) fn bind_rest(
+		&mut self,
+		info: &fa_analyzer::analysis::PatternInfo,
+		value: Val<'ctx>,
+		node: NodeId,
+	) -> Result<(), Error> {
+		let Some((symbol, _)) = info.rest else {
+			return Ok(());
+		};
+		let slot = self.slot_of(symbol, node)?;
+		let rest = match (value.repr, slot.repr) {
+			(Repr::Array(item), Repr::Array(_)) => {
+				let start = self
+					.context
+					.i64_type()
+					.const_int(info.elements.len() as u64, false);
+				self.array_slice_value(
+					node,
+					value,
+					item,
+					start,
+					self.context.i64_type().const_zero(),
+					self.context.i8_type().const_int(HAS_START, false),
+				)?
+			}
+			(Repr::Object(source), Repr::Object(target)) => {
+				let fields = self.types().fields_of(target).to_vec();
+				let mut rest = self.object_type(target).get_undef();
+				for (index, field) in fields.iter().enumerate() {
+					let source_index = self
+						.types()
+						.fields_of(source)
+						.iter()
+						.position(|entry| entry.name == field.name)
+						.expect("a rest field belongs to the source");
+					let repr = self.field_repr(source, source_index, node.index())?;
+					let raw = self.builder.build_extract_value(
+						value.value.expect("an object").into_struct_value(),
+						source_index as u32,
+						"",
+					)?;
+					let read = Val::new(repr, raw);
+					let target_repr = self.field_repr(target, index, node.index())?;
+					let owned = self.owned_as(read, target_repr, None)?;
+					if let Some(raw) = owned.value {
+						rest = self
+							.builder
+							.build_insert_value(rest, raw, index as u32, "")?
+							.into_struct_value();
+					}
+				}
+				self.fresh(Val::new(slot.repr, rest))
+			}
+			_ => return Err(self.unsupported(node.index(), "a rest pattern of this value")),
+		};
+		let rest = self.owned_as(rest, slot.repr, None)?;
+		self.store(slot, rest, node)?;
+		self.own_local(symbol, slot);
 		Ok(())
 	}
 }

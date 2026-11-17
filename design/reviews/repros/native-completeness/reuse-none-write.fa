@@ -1,0 +1,6 @@
+-- A reference to an optional-valued slot, reseated to `none`, then written.
+mutable values: Array<Integer?> = [3, none]
+mutable use slot = values[0]
+reuse slot = none
+slot = 5
+console.log(values, slot)

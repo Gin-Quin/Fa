@@ -1,0 +1,16 @@
+-- require-split: true
+-- file: library/ranges.fa
+export function = <Item>(item: Item, bound: Integer?): Range => {
+	mutable box = { item = item, range = 1..5 }
+	box.range.start = bound
+	box.range.end = 7
+	box.range.includesEnd = true
+	box.range
+}
+-- file: application/main.fa
+export function = (arguments: Array<String>): Integer => {
+	let range = library.ranges("x", none)
+	console.log(range, range == ..=7, range != ..7)
+	0
+}
+-- prints: ..=7 true true

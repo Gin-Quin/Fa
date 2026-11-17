@@ -1,0 +1,10 @@
+-- Writable common fields keep the selected payload's actual storage.
+type A = { kind: "a", count: Integer, nested: { value: Integer } }
+type B = { aPadding: Integer, kind: "b", count: Integer, nested: { value: Integer } }
+mutable a: A | B = { kind = "a", count = 1, nested = { value = 3 } }
+mutable b: A | B = { aPadding = 100, kind = "b", count = 2, nested = { value = 4 } }
+a.count += 1
+b.count += 1
+a.nested.value += 2
+b.nested.value += 2
+console.log(a.count, a.nested.value, b.count, b.nested.value) -- prints: 2 5 3 6

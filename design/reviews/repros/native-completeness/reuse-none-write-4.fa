@@ -1,0 +1,8 @@
+-- An absent map lookup, then written through the reference without testing it.
+function run = (): String => {
+	mutable scores: Map<String, Integer> = [("a", 1)]
+	mutable use slot = scores.get("missing")
+	slot = 5
+	"{scores} {slot}"
+}
+console.log(run())

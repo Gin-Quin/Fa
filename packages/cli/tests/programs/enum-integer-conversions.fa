@@ -1,0 +1,42 @@
+-- Declaration positions and pinned values are independent, including after
+-- function returns, optional narrowing, generic calls and asynchronous suspension.
+type Color = Enum { red, green, blue }
+type Status = Enum { archived = 70000, pending = 0, active = 200 }
+type Wide = Enum { first = 4294967296, last = 9007199254740991 }
+
+function code = (value: Status): Integer => Integer(value)
+function genericCode = <Tag>(value: Status, _tag: Tag): Integer => Integer(value)
+function byteCode = (value: Status.active): UInt8 => UInt8(value)
+
+for color in Color.members {
+	console.log(Integer(color))
+}
+-- prints: 0
+-- prints: 1
+-- prints: 2
+for status in Status.members {
+	console.log(code(status), genericCode(status, "tag"))
+}
+-- prints: 70000 70000
+-- prints: 0 0
+-- prints: 200 200
+console.log(byteCode(Status.active), Int32(Status.archived)) -- prints: 200 70000
+for value in Wide.members {
+	console.log(Integer(value))
+}
+-- prints: 4294967296
+-- prints: 9007199254740991
+function fromFlag = (archived: Boolean): Status => if archived { Status.archived } else { Status.active }
+let returned = fromFlag(true)
+console.log(code(returned), returned.toString()) -- prints: 70000 archived
+let maybe: Status? = Status.active
+if maybe is not none {
+	console.log(Integer(maybe)) -- prints: 200
+}
+
+use { sleep } = std.time
+async function delayedCode = (value: Status): Integer => {
+	await sleep(1)
+	Integer(value)
+}
+console.log(await delayedCode(Status.archived)) -- prints: 70000

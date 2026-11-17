@@ -44,6 +44,7 @@ pub(crate) struct FileState<'a, 'ctx> {
 	slots: FxHashMap<SymbolId, Slot<'ctx>>,
 	owned_locals: FxHashMap<SymbolId, Slot<'ctx>>,
 	references: FxHashMap<SymbolId, (inkwell::values::PointerValue<'ctx>, Repr)>,
+	nullable_references: FxHashMap<SymbolId, ()>,
 	content_view_slots:
 		FxHashMap<(SymbolId, Option<inkwell::values::FunctionValue<'ctx>>), Slot<'ctx>>,
 	provided: FxHashMap<NodeId, Slot<'ctx>>,
@@ -85,6 +86,7 @@ impl<'a, 'ctx> FileState<'a, 'ctx> {
 			slots: FxHashMap::default(),
 			owned_locals: FxHashMap::default(),
 			references: FxHashMap::default(),
+			nullable_references: FxHashMap::default(),
 			content_view_slots: FxHashMap::default(),
 			provided: FxHashMap::default(),
 			symbol_functions: FxHashMap::default(),
@@ -166,6 +168,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			slots,
 			owned_locals,
 			references,
+			nullable_references,
 			content_view_slots,
 			provided,
 			symbol_functions,
@@ -188,7 +191,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		for (index, symbol) in symbols.symbols().iter().enumerate() {
 			if !matches!(
 				symbol.kind,
-				SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive
+				SymbolKind::Let
+					| SymbolKind::Mutable
+					| SymbolKind::Reactive
+					| SymbolKind::Use
+					| SymbolKind::MutableUse
 			) {
 				continue;
 			}
@@ -537,7 +544,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				View::Namespace { value, .. } | View::ExportNamespace(value) => {
 					self.namespace_values(value, out);
 				}
-				View::Declaration { .. } => out.push(statement),
+				View::Declaration { .. } | View::Use { .. } => out.push(statement),
 				_ => {}
 			}
 		}

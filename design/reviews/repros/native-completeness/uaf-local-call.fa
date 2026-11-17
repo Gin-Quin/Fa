@@ -1,0 +1,12 @@
+-- Control: a local lookup reference, and a call that pushes onto its owner.
+mutable numbers: Array<Integer> = [1, 2, 3]
+function grow = () mutates numbers => {
+	for index in 0..1000 { numbers.push(index) }
+}
+function run = (): Integer mutates numbers => {
+	mutable use found = numbers.get(1)
+	grow()
+	if found is not none { found = 7 }
+	numbers.get(1) ?? -1
+}
+console.log(run())

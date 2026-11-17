@@ -170,3 +170,12 @@ function middleThird = (length: Integer): Range => (length // 3)..(2 * length //
 let data = [1, 2, 3, 4, 5, 6, 7, 8, 9]
 let middle = data[middleThird(data.length)] catch error => [] -- [4, 5, 6]
 ```
+
+:::implementation
+LLVM stores a range by value as `{ i64 start, i64 end, i8 flags }`. The flags
+record whether each bound is present and whether the end is inclusive. Writing
+a field updates its bound and presence bit, or the inclusive bit, in the owning
+place. An absent bound stores zero so equal range keys have equal hashes.
+Equality compares the flags and the present bounds. Range copies are independent,
+including when stored in an object or an array, or passed through generic code.
+:::

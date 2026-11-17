@@ -22,7 +22,7 @@ use inkwell::builder::Builder;
 use inkwell::values::{FunctionValue, IntValue, PointerValue};
 
 use crate::error::Error;
-use crate::lower::values::{IntRepr, Repr, Scalar, Val};
+use crate::lower::values::{IntRepr, Repr, Val};
 use crate::lower::{LoopFrame, Lowering, Slot};
 
 /// How a `for` reaches the elements that never move of a collection.
@@ -499,17 +499,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			repr => repr,
 		};
 		// an optional value (a map's `T?` values): absent reads as `none` too
-		let repr = match value_repr {
-			Repr::Optional(_) => value_repr,
-			_ => match Scalar::of(value_repr) {
-				Some(scalar) => Repr::Optional(scalar),
-				None => {
-					return Err(
-						self.unsupported(node.index(), "an optional reference to this value")
-					);
-				}
-			},
-		};
+		let repr = value_repr
+			.optional()
+			.ok_or_else(|| self.unsupported(node.index(), "an optional reference to this value"))?;
+		if repr == Repr::None {
+			return Ok(Val::none());
+		}
 		let result = self.alloca(repr, "element")?;
 		self.builder
 			.build_store(result.pointer, super::zero_of(self.llvm_type(repr)))?;
@@ -836,6 +831,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			pointer: address,
 			repr: element,
 		};
+		let mark = self.mark();
 		match (variable, copy_slot) {
 			// the fields of an element of a columnar, straight from the runs
 			// of its chunk
@@ -844,13 +840,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					unreachable!()
 				};
 				let (chunk, slot) = chunk.expect("a chunk");
-				self.bind_columns(
-					destructured.as_ref().expect("a pattern"),
-					object,
-					chunk,
-					slot,
-					node,
-				)?;
+				let info = destructured.as_ref().expect("a pattern");
+				self.bind_columns(info, object, chunk, slot, node)?;
+				if info.rest.is_some() {
+					let value = self.load(element_slot)?;
+					self.bind_rest(info, value, node)?;
+				}
 			}
 			_ if destructured.is_some() => {
 				self.bind_item_pattern(
@@ -869,7 +864,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			_ => {}
 		}
-		let mark = self.mark();
 		if let Some(copy) = copy_slot {
 			self.cleanups
 				.borrow_mut()

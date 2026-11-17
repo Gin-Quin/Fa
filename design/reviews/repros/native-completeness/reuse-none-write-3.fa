@@ -1,0 +1,8 @@
+-- A lookup on an optional-item array, absent, then written.
+function run = (index: Integer): String => {
+	mutable values: Array<Integer?> = [3, none]
+	mutable use slot = values.get(index)
+	slot = 5
+	"{values} {slot}"
+}
+console.log(run(7))

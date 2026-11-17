@@ -1,0 +1,7 @@
+-- error: EFF003
+-- A common union field written through a parameter needs `mutates`, as for an object.
+type A = { kind: "a", count: Integer }
+type B = { aPadding: Integer, kind: "b", count: Integer }
+function bump = (value: A | B) => {
+	value.count += 1
+}

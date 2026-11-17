@@ -17,7 +17,7 @@ Unique ownership takes precedence: an array of resources is unique, not a copyab
 
 ### Ordinary values
 
-Numbers, booleans, `none`, ranges, enumerations, flags, strings, and nonrecursive objects, tuples, optionals and unions containing only ordinary values have value semantics. Assignment leaves both values usable. Strings are ordinary values: a string is an immutable sequence; `+=` replaces a variable's value, and never changes another string.
+Numbers, booleans, `none`, ranges, enumerations, flags, strings, and nonrecursive objects, tuples, optionals, unions, `CArray` and `InlineArray` values containing only ordinary data have value semantics. Assignment leaves both values usable. Strings are ordinary values: a string is an immutable sequence; `+=` replaces a variable's value, and never changes another string.
 
 ```fa
 mutable person = { name = "Ana", age = 20 }
@@ -32,9 +32,9 @@ An object whose only non-scalar fields are strings is ordinary. `String` never r
 
 ### Structures
 
-A **structure** is a collection, a value of a recursive type, or any value owning one transitively through fields, tuples, optionals or unions. Its owned data can grow without a bound given by the type, so it is never copied silently: its last use moves, and otherwise keeping two owners needs `copy` (`MEM004`). This category excludes scalars, strings, ranges, enumerations, flags, and nonrecursive objects, tuples, optionals and unions made only of those. Unique ownership still takes precedence; references borrow and shared handles keep identity rather than duplicating their payload.
+A **structure** is an unbounded collection, a value of a recursive type, or any value owning either transitively through fields, tuples, optionals or unions. Its owned data can grow without a bound given by the type, so it is never copied silently: its last use moves, and otherwise keeping two owners needs `copy` (`MEM004`). This category excludes scalars, strings, ranges, enumerations, flags, and nonrecursive objects, tuples, optionals and unions made only of those. Unique ownership still takes precedence; references borrow and shared handles keep identity rather than duplicating their payload.
 
-The collection types are `Bytes`, `Array`, `GrowingArray`, `Set`, `GrowingSet`, `Map`, `GrowingMap`, `Pool`, `GrowingPool`, `Columnar`, `GrowingColumnar` and `OrderedColumnar`. This includes tables represented by maps or columnars, and a relation collection when materialized as an owned value. A relation field itself is a link, not an owned copy of its targets.
+The unbounded collection types are `Bytes`, `Array`, `GrowingArray`, `Set`, `GrowingSet`, `Map`, `GrowingMap`, `Pool`, `GrowingPool`, `Columnar`, `GrowingColumnar` and `OrderedColumnar`. This includes tables represented by maps or columnars, and a relation collection when materialized as an owned value. A relation field itself is a link, not an owned copy of its targets.
 
 An object owns a structure when one of its data fields is a collection, a recursive value, or owns one transitively. Tuples, optionals and unions own the structures in their items or alternatives; named-union payloads follow the same rule. A union is copyable only if every remaining alternative is copyable. Narrowing to a particular alternative uses that alternative's category. A fixed inline `CArray` or bounded `InlineArray` owns its initialized items; fixed inline storage alone does not make it a structure. An `InlineArray` of ordinary items is ordinary; structure or unique items propagate their category. Copying synchronization handles inside one preserves their shared state. See [inline arrays](/collections/inline-arrays#ownership-and-values). References and shared handles stop this traversal: a reference borrows its target, a synchronization handle shares its state.
 

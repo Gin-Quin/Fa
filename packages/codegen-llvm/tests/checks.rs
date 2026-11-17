@@ -231,12 +231,8 @@ mod with_llvm {
 		] {
 			let ir = ir_at_target(name, source, true, OptLevel::O0, target);
 			let ramp = function(&ir, "fa.lambda.async");
-			assert_eq!(
-				ramp.matches("call { ptr, ptr } @fa.copy").count(),
-				1,
-				"{ramp}"
-			);
-			let retain = ramp.find("call { ptr, ptr } @fa.copy").unwrap();
+			assert_eq!(ramp.matches("call void @fa.copy").count(), 1, "{ramp}");
+			let retain = ramp.find("call void @fa.copy").unwrap();
 			assert!(retain < ramp.find("label %first_turn").unwrap(), "{ramp}");
 			for suffix in ["resume", "destroy", "cleanup"] {
 				let body = function(&ir, &format!("fa.lambda.async.{suffix}"));

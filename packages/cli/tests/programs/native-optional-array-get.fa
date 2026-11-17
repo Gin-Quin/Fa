@@ -22,6 +22,17 @@ reuse current = values.get(9)
 assert current is none
 console.log(values) -- prints: [6, none]
 
+-- The first designation is an optional stored value, then a nullable address.
+function reseated = (index: Integer): Integer? => {
+	mutable items: Array<Integer?> = [1, none]
+	mutable use selected = items[0]
+	reuse selected = items.get(index)
+	use snapshot = selected
+	assert (selected ?? -1) == (snapshot ?? -1)
+	selected
+}
+console.log(reseated(0), reseated(1), reseated(9)) -- prints: 1 none none
+
 mutable calls = 0
 function next = (): Integer mutates calls => { calls += 1
 	3

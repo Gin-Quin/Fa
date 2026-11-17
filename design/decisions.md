@@ -2809,3 +2809,11 @@ address convention from its declaration before initializers are lowered. An
 optional stored item keeps its own representation. Nullable-reference metadata
 is per file, just like the address holders; equal SymbolIds in separate files
 must not share that state.
+
+## Native completeness: optional-valued reference reads (2026-11-17)
+
+An optional Use/MutableUse can begin at an ordinary optional-valued slot, then
+receive an absent lookup by reseating or aliasing. Read it through the existing
+flattened optional loader regardless of its first designation. The loader accepts
+both nullable addresses to scalar items and addresses to stored optionals; no
+reference cell or copied referent is needed.

@@ -366,6 +366,9 @@ and `try` preserve this designation without evaluating a lookup again.
 Functions that access module references determine the referent layout and
 nullable-address convention from the declaration before module initializers are
 lowered; optional collection items retain their complete stored representation.
+Optional reference reads use the flattened optional loader even when the first
+designation was an ordinary optional-valued slot: a later reseating may supply a
+null address instead. An immutable alias snapshots that address in the same way.
 
 JavaScript passes and returns object references as the objects themselves, with
 `undefined` for an absent reference. A local primitive reference is a direct

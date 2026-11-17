@@ -3048,7 +3048,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					return Ok(Val::new(repr, array));
 				}
 				let slot = self.slot_of(symbol, node)?;
-				if self.nullable_references.contains_key(&symbol)
+				// A mutable alias can start at an optional-valued slot and
+				// later designate an absent lookup. Both layouts read through
+				// the flattened optional loader, regardless of the initializer.
+				if (self.nullable_references.contains_key(&symbol)
+					|| matches!(kind, SymbolKind::Use | SymbolKind::MutableUse))
 					&& matches!(self.node_repr(node), Ok(Repr::Optional(_)))
 				{
 					return self.optional_element(slot.pointer, slot.repr, node);

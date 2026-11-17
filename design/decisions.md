@@ -2547,3 +2547,7 @@ Destructuring defaults join in the bound symbol's representation (or the nested
 pattern's nonoptional source type), rather than PatternElement.ty, which describes
 the optional field as read. Keep the existing lazy branch and ordinary ownership
 helpers on each arm, including nullable collection/union storage and errors.
+
+JavaScript module generation enumerates rest symbols along with a pattern's
+ordinary/nested symbols. The same enumeration declares module values and exports
+initializers, so the program's analyzed init order can import every rest binding.

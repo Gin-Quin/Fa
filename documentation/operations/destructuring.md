@@ -220,4 +220,6 @@ including in loop bodies and async frames.
 An optional field with a default branches on presence and joins in storage of
 the binding's nonoptional type, including for a nested pattern. Only the absent
 branch evaluates the default; both branches use the ordinary ownership helpers.
+JavaScript modules collect named, nested and rest bindings when declaring module
+values and exporting their shared initialization function.
 :::

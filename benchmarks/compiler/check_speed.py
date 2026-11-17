@@ -86,7 +86,7 @@ def prepare(args, data):
 def measure(args, data):
     data.setdefault("series", [])
     for fixture in data["fixtures"]:
-        for mode in ("single", "default"):
+        for mode in args.modes:
             row = {"files": fixture["files"], "mode": mode, "start": snapshot(), "samples": {}, "orders": [], "runner_sha256": digest(__file__)}
             cmds = commands(args, fixture, mode)
             row["commands"] = cmds
@@ -141,10 +141,12 @@ def profile(args, data):
     result = {"files": fixture["files"], "timings": {}, "runner_sha256": digest(__file__)}
     for mode in ("single", "default"):
         command = commands(args, fixture, mode)["fa"] + ["--timings"]
-        measured = run(command, timeout=300)
-        text = measured.stderr.decode()
-        (directory / f"timings-{mode}.txt").write_text(text)
-        result["timings"][mode] = text
+        path = directory / f"timings-{mode}.txt"
+        measured = corpus_sample(command, output_path=path, timeout=300)
+        if measured["failure"] or measured["exit"]:
+            raise RuntimeError(f"phase profile failed: {measured}")
+        result["timings"][mode] = path.read_text()
+        result.setdefault("timing_resources", {})[mode] = measured
     executable = shutil.which("valgrind") or str(Path.home() / ".local/bin/valgrind")
     output = directory / "callgrind.out"
     command = ["taskset", "-c", "0-4", "env", "RAYON_NUM_THREADS=1", executable,
@@ -178,7 +180,7 @@ def profile(args, data):
     save(args, data)
 
 
-def corpus_sample(command):
+def corpus_sample(command, output_path=None, timeout=60):
     with tempfile.TemporaryFile() as output:
         start = time.perf_counter()
         child = subprocess.Popen(command, stdout=output, stderr=output)
@@ -193,12 +195,16 @@ def corpus_sample(command):
                 rss = next((int(line.split()[1]) for line in proc.splitlines() if line.startswith("VmRSS:")), 0)
             except FileNotFoundError:
                 rss = 0
-            if failure is None and (rss > 512 * 1024 or time.perf_counter() - start > 60):
+            if failure is None and (rss > 512 * 1024 or time.perf_counter() - start > timeout):
                 failure = "memory limit" if rss > 512 * 1024 else "timeout"
                 child.kill()
             time.sleep(.002)
         output.seek(0)
         diagnostics = output.read()
+        if output_path is not None:
+            output_path.write_bytes(diagnostics)
+        if usage.ru_maxrss > 512 * 1024:
+            failure = "memory limit"
         return {"wall": time.perf_counter() - start, "user": usage.ru_utime,
                 "system": usage.ru_stime, "cpu": usage.ru_utime + usage.ru_stime,
                 "peak_rss_kib": usage.ru_maxrss, "exit": child.returncode,
@@ -265,11 +271,14 @@ def main():
     parser.add_argument("--no-build", action="store_true", help="use an already-built release checker")
     parser.add_argument("--lines", type=int, default=500)
     parser.add_argument("--runs", type=int, default=11)
+    parser.add_argument("--modes", type=lambda s: s.split(','), default=["single", "default"])
     parser.add_argument("--directory", type=Path, default=ROOT / "benchmarks/build/check-speed")
     parser.add_argument("--report", type=Path, default=ROOT / "benchmarks/results/check-speed.json")
     parser.add_argument("--fa", type=Path, default=ROOT / "target/release/fa")
     parser.add_argument("--bun", type=Path, default=Path.home() / ".bun/bin/bun")
     args = parser.parse_args()
+    if any(mode not in ("single", "default") for mode in args.modes):
+        parser.error("modes must be single and/or default")
     if args.runs < 1 or any(count < 1 for count in args.files) or args.lines < 50:
         parser.error("runs/files must be positive and lines >= 50")
     args.directory = args.directory.resolve()

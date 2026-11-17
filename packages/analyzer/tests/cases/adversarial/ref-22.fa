@@ -5,15 +5,15 @@ function example = (people: Array<Person>) throws IndexError mutates people => {
 	use beforeLast = try people[people.length - 2]
 	people.pop()
 	console.log(beforeLast.name) -- error: REF001
-	console.log(last.name) -- error: REF001
+	console.log(last.name)       -- error: REF001
 }
 
 -- With two elements, both expressions are nonnegative snapshots of one length.
 function twoOrMore = (people: Array<Person>) throws IndexError mutates people => {
- if people.length < 2 { return }
- use last = try people[people.length - 1]
- use beforeLast = try people[people.length - 2]
- people.pop()
- console.log(beforeLast.name)
- console.log(last.name) -- error: REF001
+	if people.length < 2 { return }
+	use last = try people[people.length - 1]
+	use beforeLast = try people[people.length - 2]
+	people.pop()
+	console.log(beforeLast.name)
+	console.log(last.name) -- error: REF001
 }

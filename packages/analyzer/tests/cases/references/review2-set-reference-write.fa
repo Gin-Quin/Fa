@@ -1,25 +1,25 @@
 mutable values: Set<Integer> = [7, 9]
 use item = values.find((value) => value == 7)
-if item is not none { item = 11 } -- error: CL031
+if item is not none { item = 11 }                                                  -- error: CL031
 function wrong = (values: Set<Integer>, item: Integer in values) mutates item => { -- error: EFF011
- use target = item
- target = 12 -- error: CL031
+	use target = item
+	target = 12 -- error: CL031
 }
 
 type Node = { keys: Set<Integer> }
 function nested = (nodes: Array<Node>, node: Node in nodes) mutates node.keys => { -- error: EFF011
- use found = node.keys.find((value) => value == 7)
- if found is not none { found = 9 } -- error: CL031
+	use found = node.keys.find((value) => value == 7)
+	if found is not none { found = 9 } -- error: CL031
 }
 
 type PickKey = (nodes: Array<Node>) => Integer in nodes throws IndexError
 function unknownResult = (nodes: Array<Node>, pick: PickKey) throws IndexError => {
- use key = try pick(nodes)
- key = 9 -- error: CL031
+	use key = try pick(nodes)
+	key = 9 -- error: CL031
 }
 
 mutable map: Map<String, Integer> = [("a", 1)]
 for (key, value) in map {
- use alias = key
- alias = "b" -- error: CL031
+	use alias = key
+	alias = "b" -- error: CL031
 }

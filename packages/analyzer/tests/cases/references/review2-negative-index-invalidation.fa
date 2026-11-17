@@ -1,20 +1,23 @@
 type Node = { children: Array<Integer> }
 function literal = (values: Array<Node>): Integer throws IndexError mutates values[..].children => {
- use last = try values[-1]
- use child = try last.children[0]
- try values[0].children.clear()
- child -- error: REF001
+	use last = try values[-1]
+	use child = try last.children[0]
+	try values[0].children.clear()
+	child -- error: REF001
 }
 function builtin = (values: Array<Node>): Integer throws IndexError mutates values[..].children => {
- use last = values.get(-1)
- if last is none { return 0 }
- use child = try last.children[0]
- try values[0].children.clear()
- child -- error: REF001
+	use last = values.get(-1)
+	if last is none { return 0 }
+	use child = try last.children[0]
+	try values[0].children.clear()
+	child -- error: REF001
 }
-function variable = (values: Array<Node>, index: Integer): Integer throws IndexError mutates values[..].children => {
- use selected = try values[index]
- use child = try selected.children[0]
- try values[0].children.clear()
- child -- error: REF001
+function variable = (
+	values: Array<Node>
+	index: Integer
+): Integer throws IndexError mutates values[..].children => {
+	use selected = try values[index]
+	use child = try selected.children[0]
+	try values[0].children.clear()
+	child -- error: REF001
 }

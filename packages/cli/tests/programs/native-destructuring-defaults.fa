@@ -1,7 +1,7 @@
 type Option<Item> = { value: Item? }
 function choose = <Item>(optional: Item?, fallback: Item): Item => {
-	let option: Option<Item> = { value = optional }
-	let { value = fallback } = option
+	let option: Option<Item> = { value = copy optional }
+	let { value = copy fallback } = option
 	value
 }
 console.log(choose<Integer>(none, 4), choose<Integer>(7, 4))
@@ -16,7 +16,7 @@ function fallback = (): String => {
 	"fresh"
 }
 function text = (input: String?): String => {
-	let options: Option<String> = { value = input }
+	let options: Option<String> = { value = copy input }
 	let { value = fallback(), missing = "absent" } = options
 	"{value} {missing}"
 }
@@ -38,7 +38,7 @@ console.log(nested(Parent { child = none }), nested(Parent { child = Child { lab
 type Failure = Errors { missing }
 function fail = (): String throws Failure => throw Failure.missing
 function throwing = (input: String?): String throws Failure => {
-	let options: Option<String> = { value = input }
+	let options: Option<String> = { value = copy input }
 	let { value = try fail() } = options
 	value
 }
@@ -46,7 +46,7 @@ console.log(throwing("safe") catch _error => "caught", throwing(none) catch _err
 -- prints: safe caught
 
 async function delayed = (input: Array<String>?): Array<String> => {
-	let options: Option<Array<String>> = { value = input }
+	let options: Option<Array<String>> = { value = copy input }
 	let { value = ["async"] } = options
 	await std.time.sleep(1)
 	value

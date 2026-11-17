@@ -6,8 +6,8 @@ let { value = "module default" } = configuration
 export namespace = {
 	function describe = (): String => value
 	function choose = <Item>(input: Item?, fallback: Item): Item => {
-		let option: { value: Item? } = { value = input }
-		let { value = fallback } = option
+		let option: { value: Item? } = { value = copy input }
+		let { value = copy fallback } = option
 		value
 	}
 }

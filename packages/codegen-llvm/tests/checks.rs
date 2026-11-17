@@ -1445,7 +1445,7 @@ console.log(items, stable, words, maybe)
 		let hot: usize = many
 			.split("\n\n")
 			.filter(|block| !block.starts_with("push_grow"))
-			.map(|block| count(&block, " = load "))
+			.map(|block| count(block, " = load "))
 			.sum();
 		// the slot, the length, the capacity and the items, once
 		assert_eq!(hot, 4, "{many}");
@@ -1668,12 +1668,12 @@ console.log(items, stable, words, maybe)
 			("call", "grow(items)"),
 			(
 				"capture",
-				"function change = () mutates items => { items.push(9) }\nchange()",
+				"function observe = (): Integer => items.length\nconsole.log(observe())",
 			),
 			("callback", "apply(items, grow)"),
 		] {
 			let source = format!(
-				"function grow = (items: GrowingArray<Integer>) mutates items.length => items.push(9)\nfunction apply = (items: GrowingArray<Integer>, action: (values: GrowingArray<Integer>) => Void mutates values) mutates items => action(items)\nfunction run = () => {{\nmutable items: GrowingArray<Integer> = [0]\nfor 0..2 {{\nfor 0..2 {{ {change} }}\nitems.push(7)\nconsole.log(items.length)\n}}\n}}\nrun()\n"
+				"function grow = (items: GrowingArray<Integer>) mutates items => items.push(9)\nfunction apply = (items: GrowingArray<Integer>, action: (values: GrowingArray<Integer>) => Void mutates values) mutates items => action(items)\nfunction run = () => {{\nmutable items: GrowingArray<Integer> = [0]\nfor 0..2 {{\nfor 0..2 {{ {change} }}\nitems.push(7)\nconsole.log(items.length)\n}}\n}}\nrun()\n"
 			);
 			let ir = ir_of(&format!("growing-cache-reject-{name}"), &source);
 			let body = function(&ir, "fa.run");
@@ -1841,7 +1841,7 @@ console.log(items, stable, words, maybe)
 		let hot: usize = many
 			.split("\n\n")
 			.filter(|block| !block.starts_with("push_next_segment"))
-			.map(|block| count(&block, " = load "))
+			.map(|block| count(block, " = load "))
 			.sum();
 		// the slot, the cursor, the end and the length, once
 		assert_eq!(hot, 4, "{many}");

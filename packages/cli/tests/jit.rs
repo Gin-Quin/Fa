@@ -92,21 +92,33 @@ fn bulk_growing_appends_and_narrow_remainders_work_in_jit_and_cached_units() {
 		],
 	);
 	for opt in ["-O0", "-O3"] {
-		let arguments = ["run", "--target=native", "--asynchronous=false", opt];
-		let (stdout, stderr, code) = fa(&arguments, &folder, true);
-		assert_eq!((stdout.as_str(), code), ("bulk jit ok\n", 0), "{stderr}");
-		assert!(stderr.contains("jit: loaded "), "{stderr}");
-		assert!(
-			!stderr.contains("jit: loaded 1 object "),
-			"separate units: {stderr}"
-		);
-		let cached = fa(&arguments, &folder, true);
-		assert_eq!(
-			(cached.0, without_trace(&cached.1), cached.2),
-			(stdout.clone(), String::new(), code)
-		);
-		let linked = fa(&arguments, &folder, false);
-		assert_eq!(linked, (stdout, String::new(), code));
+		for split in [false, true] {
+			let mut arguments = vec!["run", "--target=native", opt];
+			if !split {
+				arguments.push("--asynchronous=false");
+			}
+			arguments.push(".");
+			let (stdout, stderr, code) = fa(&arguments, &folder, true);
+			assert_eq!((stdout.as_str(), code), ("bulk jit ok\n", 0), "{stderr}");
+			let loaded = stderr
+				.lines()
+				.find_map(|line| {
+					line.strip_prefix("jit: loaded ")?
+						.split(' ')
+						.next()?
+						.parse::<usize>()
+						.ok()
+				})
+				.expect("the JIT loads objects");
+			assert!(if split { loaded > 2 } else { loaded == 1 }, "{stderr}");
+			let cached = fa(&arguments, &folder, true);
+			assert_eq!(
+				(cached.0, without_trace(&cached.1), cached.2),
+				(stdout.clone(), String::new(), code)
+			);
+			let linked = fa(&arguments, &folder, false);
+			assert_eq!(linked, (stdout, String::new(), code));
+		}
 	}
 }
 

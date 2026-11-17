@@ -1,4 +1,4 @@
--- All Int32 boundaries and powers of two: interpreter, Bun and LLVM agree.
+-- Every power of two ±1 and the endpoints: exact interpreter/Bun/LLVM agreement.
 static inputs: Array<Int32> = [
 	-2147483648
 	-2147483647
@@ -186,36 +186,48 @@ static inputs: Array<Int32> = [
 static divisors: Array<Int32> = [1, 2, 7, 16, 2147483647, -1, -2, -7, -2147483648]
 function dynamic = (value: Int32, divisor: Int32): (Int32, Int32) throws DivisionByZero =>
 	((try value // divisor), (try value %% divisor))
-function literals = (value: Int32): (Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int32) =>
+function literals = (
+	value: Int32
+): (Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int32) =>
 	(value // 1, value %% 1, value // 2, value %% 2, value // 7, value %% 7, value // 16, value
-		%% 16)
-function wide = (value: Int32): (Int128, Int128) => {
-	let quotient: Int128 = value // 65537
-	let rest: Int128 = value %% 65537
-	(quotient, rest)
-}
-function rows = (): Array<(Int32, Int32)> throws DivisionByZero => {
-	mutable output: Array<(Int32, Int32)> = []
+		%% 16, value %% -1, value // -2, value %% -2, value // -7, value %% -7)
+function wide = (value: Int32): (Int128, Int128) => (value // 65537, value %% 65537)
+function rows = (): String throws DivisionByZero => {
+	mutable output = ""
 	for value in inputs {
 		for divisor in divisors {
 			if value == Int32.minValue and divisor == -1 {
 				assert value %% divisor == 0
 				continue
 			}
-			output.push(try dynamic(value, divisor))
+			let (quotient, rest) = try dynamic(value, divisor)
+			output += "{quotient},{rest};"
 		}
 	}
 	output
 }
-static expected: Array<(Int32, Int32)> = @rows()
-function literalRows = (): Array<(Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int32)> =>
-	inputs.map(literals)
-static literalExpected: Array<(Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int32)> = @literalRows()
-function wideRows = (): Array<(Int128, Int128)> => inputs.map(wide)
-static wideExpected: Array<(Int128, Int128)> = @wideRows()
+function literalRows = (): String => {
+	mutable output = ""
+	for value in inputs {
+		let actual = literals(value)
+		output += "{actual[0]},{actual[1]},{actual[2]},{actual[3]},{actual[4]},{actual[5]},{actual[6]},{actual[7]},{actual[8]},{actual[9]},{actual[10]},{actual[11]},{actual[12]};"
+	}
+	output
+}
+function wideRows = (): String => {
+	mutable output = ""
+	for value in inputs {
+		let (quotient, rest) = wide(value)
+		output += "{quotient},{rest};"
+	}
+	output
+}
+static expected = @rows()
+static literalExpected = @literalRows()
+static wideExpected = @wideRows()
 assert (try rows()) == expected
-assert inputs.map(literals) == literalExpected
-assert inputs.map(wide) == wideExpected
+assert literalRows() == literalExpected
+assert wideRows() == wideExpected
 function zeroDivision = (value: Int32, divisor: Int32): Boolean => {
 	let _result = value // divisor catch _error => return true
 	false

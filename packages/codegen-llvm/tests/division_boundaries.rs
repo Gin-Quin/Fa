@@ -14,14 +14,36 @@ fn division_boundaries_at_every_width_and_optimization_level() {
 	let programs = manifest.join("../cli/tests/programs");
 	let output = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fa-division-boundaries");
 	for name in [
-		"Int8", "Int16", "Int32", "Int64", "Int128", "UInt8", "UInt16", "UInt32", "UInt64",
-		"UInt128", "Integer",
+		"Int8",
+		"Int16",
+		"Int32",
+		"Int64",
+		"Int128",
+		"UInt8",
+		"UInt16",
+		"UInt32",
+		"UInt64",
+		"UInt128",
+		"Integer",
+		"IntegerNative",
+		"Byte",
+		"BigInt",
 	] {
-		let source = programs.join(format!("division-boundaries-{}.fa", name.to_lowercase()));
+		let source = if name == "IntegerNative" {
+			manifest.join("tests/programs/division-boundaries-integer-native.fa")
+		} else {
+			programs.join(format!("division-boundaries-{}.fa", name.to_lowercase()))
+		};
+		let printed_name = if name == "IntegerNative" {
+			"Integer native"
+		} else {
+			name
+		};
 		for target in [Target::Native, Target::NativeFreestanding, Target::Wasm] {
 			for opt_level in [OptLevel::O0, OptLevel::O3] {
 				for overflow_checks in [false, true] {
 					let case = format!("{name}-{}-{opt_level:?}-{overflow_checks}", target.name());
+					eprintln!("division boundary {case}");
 					let artifact = fa_codegen_llvm::compile_file(
 						&source,
 						target,
@@ -39,7 +61,7 @@ fn division_boundaries_at_every_width_and_optimization_level() {
 					assert!(result.status.success(), "{case}: {result:?}");
 					assert_eq!(
 						result.stdout,
-						format!("division {name} ok\n").as_bytes(),
+						format!("division {printed_name} ok\n").as_bytes(),
 						"{case}"
 					);
 					assert!(result.stderr.is_empty(), "{case}: {result:?}");

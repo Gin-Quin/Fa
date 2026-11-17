@@ -4,6 +4,7 @@ The single list of open work, in the order of [the journal's Next roadmap](journ
 
 ## 1. Trunk follow-ups
 
+- **Compile-time widened arithmetic.** `comptime::lower::arithmetic` takes its check range from the expression's storage type instead of the compute width / widened sink. An Int8 parameter's `value %% 65537` returned to Int128 prints 65409 on Bun/native for -128, but `@` reports META013. The archived pre-review compiler does the same. Reproduction: `design/reviews/repros/perf-arrays/signed-wide-comptime.fa`; preserve intermediate compute checks and final sink checks when fixing it.
 - **Boolean-fill CPU control.** The implemented block fill has a complete passing 40-row instruction gate; its first sieve CPU series fails the identical-binary control (0.970 / 0.900). Retain all 105 samples in `benchmarks/results/2026-11-16-arrays-boolean.json`; any quiet recheck must be separately labelled. CPU gains and Goose/Rust goal verdicts remain unresolved. No further fill-lowering change is implied by this noisy series.
 - **Finish the trunk transition.** Review is delivered in `review/trunk-merge`; C1 and M1 are fixed. After final lead acceptance, move the trunk to `main` and retire the old line names. Renaming is outside this integration task.
 - **Remaining pending performance branch.** Measure and review split streams separately before integration; that optimization was deliberately excluded here. Use the recorded 2026-11-16 trunk baseline (section 4) with exact inputs, outputs and toolchain manifests.

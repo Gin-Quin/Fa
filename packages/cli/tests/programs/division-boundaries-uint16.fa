@@ -1,4 +1,4 @@
--- All UInt16 boundaries and powers of two: interpreter, Bun and LLVM agree.
+-- Every power of two ±1 and the endpoints: exact interpreter/Bun/LLVM agreement.
 static inputs: Array<UInt16> = [
 	0
 	1
@@ -56,24 +56,38 @@ function literals = (
 	(value // 1, value %% 1, value // 2, value %% 2, value // 7, value %% 7, value // 16, value
 		%% 16)
 function wide = (value: UInt16): (UInt128, UInt128) => (value // 65537, value %% 65537)
-function rows = (): Array<(UInt16, UInt16)> throws DivisionByZero => {
-	mutable output: Array<(UInt16, UInt16)> = []
+function rows = (): String throws DivisionByZero => {
+	mutable output = ""
 	for value in inputs {
 		for divisor in divisors {
-			output.push(try dynamic(value, divisor))
+			let (quotient, rest) = try dynamic(value, divisor)
+			output += "{quotient},{rest};"
 		}
 	}
 	output
 }
-static expected: Array<(UInt16, UInt16)> = @rows()
-function literalRows = (): Array<(UInt16, UInt16, UInt16, UInt16, UInt16, UInt16, UInt16, UInt16)> =>
-	inputs.map(literals)
-static literalExpected: Array<(UInt16, UInt16, UInt16, UInt16, UInt16, UInt16, UInt16, UInt16)> = @literalRows()
-function wideRows = (): Array<(UInt128, UInt128)> => inputs.map(wide)
-static wideExpected: Array<(UInt128, UInt128)> = @wideRows()
+function literalRows = (): String => {
+	mutable output = ""
+	for value in inputs {
+		let actual = literals(value)
+		output += "{actual[0]},{actual[1]},{actual[2]},{actual[3]},{actual[4]},{actual[5]},{actual[6]},{actual[7]};"
+	}
+	output
+}
+function wideRows = (): String => {
+	mutable output = ""
+	for value in inputs {
+		let (quotient, rest) = wide(value)
+		output += "{quotient},{rest};"
+	}
+	output
+}
+static expected = @rows()
+static literalExpected = @literalRows()
+static wideExpected = @wideRows()
 assert (try rows()) == expected
-assert inputs.map(literals) == literalExpected
-assert inputs.map(wide) == wideExpected
+assert literalRows() == literalExpected
+assert wideRows() == wideExpected
 function zeroDivision = (value: UInt16, divisor: UInt16): Boolean => {
 	let _result = value // divisor catch _error => return true
 	false

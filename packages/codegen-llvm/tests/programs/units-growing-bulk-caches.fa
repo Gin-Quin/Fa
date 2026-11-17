@@ -1,4 +1,5 @@
 -- require-split: true
+-- asynchronous: false
 -- prints: per-unit ok
 -- file: application/main.fa
 export function = () throws IndexError => {

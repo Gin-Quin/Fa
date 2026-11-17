@@ -2768,3 +2768,13 @@ temporaries in their surrounding scope and retain the existing copy-slot cleanup
 This covers fallthrough, continue and break without changing ownership rules,
 copy/drop helpers or collection layout/optimization decisions. The owned-array
 field regression exposed five leaked blocks before this integration fix.
+
+
+## Native completeness: nullable lookup references (2026-11-17)
+
+Collection lookup references share the existing nullable address ABI of user
+reference results. Reseating to `none` writes a null address into the reference
+holder; it creates neither an optional value slot nor an owned temporary. Strip
+parentheses and `try` before recognizing every built-in reference producer.
+Capture discovery traverses named call argument values only: a key resolves to
+the callee parameter and is metadata, not a captured variable.

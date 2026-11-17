@@ -360,6 +360,9 @@ subfields; no owned temporary may replace the designated place. Local `use`
 keeps it, while an ordinary owning store follows the data's copy/move rules.
 Relation-field borrows read the target address once, rather than aliasing the
 field that can later be reassigned. Columnar references keep their row locator.
+Collection lookups retain the element's slot address through optional narrowing;
+an absent lookup and `reuse reference = none` both use a null address. Parentheses
+and `try` preserve this designation without evaluating a lookup again.
 
 JavaScript passes and returns object references as the objects themselves, with
 `undefined` for an absent reference. A local primitive reference is a direct

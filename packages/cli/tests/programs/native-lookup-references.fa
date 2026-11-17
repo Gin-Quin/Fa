@@ -1,0 +1,35 @@
+-- Lookup references keep their slots through narrowing, copying and reseating.
+mutable calls = 0
+function key = (): String mutates calls => {
+	calls += 1
+	"a"
+}
+function exercise = <Item>(first: Item, second: Item): Array<Item> mutates calls => {
+	mutable items = [first, second]
+	mutable use selected = items.find((_item, index) => index == 0)
+	use saved = selected
+	reuse selected = (none)
+	assert selected is none
+	reuse selected = items.get(-1)
+	if selected is not none { selected = first }
+	if saved is not none { saved = second }
+	reuse selected = items.find((_item, index) => index == 99)
+	assert selected is none
+	reuse selected = items.get(0)
+	if selected is not none { selected = first }
+
+	mutable map: Map<String, Item> = [("a", first), ("b", second)]
+	let before = calls
+	mutable use current = (map.get(key()))
+	assert calls == before + 1
+	reuse current = none
+	assert current is none
+	reuse current = (map.get("missing"))
+	assert current is none
+	reuse current = (map.get("b"))
+	if current is not none { current = first }
+	[items[0], items[1], map["b"]]
+}
+console.log(exercise(7, 9)) -- prints: [7, 7, 7]
+console.log(exercise("a string beyond inline capacity", "another string beyond inline capacity")) -- prints: ["a string beyond inline capacity", "a string beyond inline capacity", "a string beyond inline capacity"]
+console.log(exercise({ value = 3 }, { value = 5 }).map((item) => item.value)) -- prints: [3, 3, 3]

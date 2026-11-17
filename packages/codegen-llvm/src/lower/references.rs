@@ -849,6 +849,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Some(&(holder, _)) = self.references.get(&symbol) else {
 			return Err(self.unsupported(node.index(), "this `reuse`"));
 		};
+		// Absence designates no slot. Keep the nullable address convention of
+		// lookup and user-function results rather than manufacturing a value.
+		if self.node_repr(value)? == Repr::None {
+			self.builder
+				.build_store(holder, self.pointer_type().const_null())?;
+			return Ok(Val::void());
+		}
 		let place = match self.collection_reference(value)? {
 			Some((place, _)) => place,
 			None => self.reference_place(value)?,
@@ -999,10 +1006,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if let Some(reference) = self.array_reference(node)? {
 			return Ok(Some(reference));
 		}
-		if let Some(found) = self.pool_reference(value)? {
+		if let Some(found) = self.pool_reference(node)? {
 			return Ok(Some(found));
 		}
-		Ok(self.map_get_reference(value)?.map(|slot| (slot, true)))
+		Ok(self.map_get_reference(node)?.map(|slot| (slot, true)))
 	}
 
 	/// The place a reference designates: a place, or the result of a call

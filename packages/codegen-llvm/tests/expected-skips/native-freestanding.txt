@@ -1,6 +1,5 @@
 # The programs the native-freestanding target doesn't pass yet, with the reason
 # (`tests/programs.rs`): any other compile error fails.
-analyzer/tests/cases/advanced/04-reference-types-use-mutable-use-reuse/adv-4.5-06.fa: line 3: a `use` of this value is not supported by the native backend yet
 analyzer/tests/cases/comptime/directories.fa: main.fa:4:19: this member is not supported by the native backend yet
 analyzer/tests/cases/comptime/for-per-item.fa: main.fa:19:14: a value of type `Void` is not supported by the native backend yet
 analyzer/tests/cases/modules/field-defaults-across-files.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
@@ -59,7 +58,6 @@ cli/tests/programs/js-million-copy.fa: runtime: recursive deep copy/equality exh
 cli/tests/programs/number-api.fa: line 47: this name is not supported by the native backend yet
 cli/tests/programs/percentages.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
 cli/tests/programs/printing.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native
-cli/tests/programs/references.fa: line 42: a `use` of this value is not supported by the native backend yet
 cli/tests/programs/special-names.fa: target limit: std.json requires libc (AN004); build for native
 cli/tests/programs/tuples-ranges-patterns.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
 cli/tests/programs/unions-and-enums.fa: target limit: formatting Float, Float32 or Percentage values needs libc snprintf; build for native

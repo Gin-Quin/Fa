@@ -1,0 +1,21 @@
+use { sleep } = std.time
+async function exercise = () => {
+	mutable values = [10, 20]
+	mutable use selected = values.find((value) => value == 10)
+	await sleep(0)
+	reuse selected = none
+	assert selected is none
+	reuse selected = values.get(-1)
+	if selected is not none { selected += 3 }
+	mutable map: Map<String, String> = [("a", "managed string beyond inline storage")]
+	mutable use text = (map.get("a"))
+	await sleep(0)
+	reuse text = none
+	assert text is none
+	reuse text = map.get("a")
+	if text is not none { console.log(text) }
+	console.log(values)
+}
+await exercise()
+-- prints: managed string beyond inline storage
+-- prints: [10, 23]

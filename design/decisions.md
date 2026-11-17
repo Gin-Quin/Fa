@@ -2495,3 +2495,28 @@ The eventual boundary checks evaluated origins after field replacements. A closu
 its captured handle reads that owned capture when called; the original local
 remains consumed. Explicit generic applications produce function values, so they
 do not use the synchronous reference-result container/key read protocol.
+
+
+## Links landing with the String redesign (2026-11-17)
+
+Portable reference result provenance retains a slice bit in addition to its
+unknown index/key projection. Publish and hash it with the semantic interface;
+whole slice writes stay REF016 through calls and aliases. Bytes is an owner
+collection for dependent reference parameters/results, with Byte items represented
+as Uint8Array/key locators in JavaScript. A read-only string unit or slice result
+uses the general pair with a reserved null key, without a carrier allocation.
+
+Native String, Bytes and array reference results receive trailing caller-owned
+view-descriptor storage. Ordinary referent addresses are preserved; temporary
+view descriptors are snapshotted before the callee returns. The same tail
+parameter is forwarded by function-value thunks and error adapters and declared
+by imported units. String units are inline descriptors copied into that caller
+storage. Cache keys distinguish the convention. This avoids returning pointers
+to dead callee allocas while keeping primitive/object reference results unchanged.
+
+Compile-time references retain evaluated frame/owner paths, with the String
+redesign's allocation preflights, Bytes slice edits and checked key-set paths.
+Ordinary String arguments are immutable values; explicitly dependent String
+arguments still retain their place. Borrowing a compile-time constant gives it
+caller-lived temporary storage. JSON default closures capture their snapshot
+slots by value, matching their nonescaping parser lifetime.

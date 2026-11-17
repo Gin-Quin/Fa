@@ -1,0 +1,20 @@
+-- A String stored in an array is a replaceable value, unlike a unit of text.
+-- opt-level: 0
+type Node = { name: String }
+type Read = (nodes: Array<Node>) => String in nodes throws IndexError
+function first = (nodes: Array<Node>): String in nodes throws IndexError => try nodes[0].name
+function forward = (nodes: Array<Node>, read: Read): String in nodes throws IndexError =>
+	try read(nodes)
+function rename = (nodes: Array<Node>, name: String in nodes, value: String) mutates name => {
+	use target = name
+	target = value
+}
+function exercise = (): Integer throws IndexError => {
+	mutable nodes: Array<Node> = [{ name = "before" }]
+	use name = try forward(nodes, first)
+	rename(nodes, name, "after")
+	nodes[0].name.length
+}
+static result = @exercise()
+console.log(result)         -- prints: 5
+console.log(try exercise()) -- prints: 5

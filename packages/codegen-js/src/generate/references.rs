@@ -966,6 +966,8 @@ impl Generator<'_> {
 			let name = self.declare(symbol);
 			let keyword = if self.is_module_value(symbol) || self.guard_binding(&name) {
 				""
+			} else if mutable {
+				"let "
 			} else {
 				"const "
 			};

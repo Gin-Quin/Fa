@@ -1069,7 +1069,9 @@ impl Interface {
 					18,
 					key_hash(decl),
 					types.path_hash(origin.path),
-					u128::from(origin.descendant) | u128::from(origin.readonly) << 1,
+					u128::from(origin.descendant)
+						| u128::from(origin.readonly) << 1
+						| u128::from(origin.slice) << 2,
 				));
 			}
 		}

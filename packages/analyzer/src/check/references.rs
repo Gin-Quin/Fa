@@ -135,7 +135,12 @@ impl Walker<'_> {
 		let target = self.strip_groups(target);
 		let slice_place = |place| {
 			let entry = self.places.get(place);
-			if matches!(entry.step, Some(Step::Index(_))) && self.type_of(target) == TypeId::BYTES && entry.parent.and_then(|parent| self.place_type(parent)) == Some(TypeId::BYTES) { return true; }
+			if matches!(entry.step, Some(Step::Index(_)))
+				&& self.type_of(target) == TypeId::BYTES
+				&& entry.parent.and_then(|parent| self.place_type(parent)) == Some(TypeId::BYTES)
+			{
+				return true;
+			}
 			matches!(
 				self.places.get(place).step,
 				Some(Step::All | Step::Range(..) | Step::Characters)
@@ -177,8 +182,20 @@ impl Walker<'_> {
 				.copied()
 				.any(|mut place| {
 					for _ in 0..=self.reference_parameters.len() {
-						if matches(place) { return true; }
-						let Some(owner) = self.places.get(place).parent.is_none().then(|| self.place_symbol(place)).flatten().and_then(|symbol| self.reference_parameters.get(&symbol)) else { return false; };
+						if matches(place) {
+							return true;
+						}
+						let Some(owner) = self
+							.places
+							.get(place)
+							.parent
+							.is_none()
+							.then(|| self.place_symbol(place))
+							.flatten()
+							.and_then(|symbol| self.reference_parameters.get(&symbol))
+						else {
+							return false;
+						};
 						place = *owner;
 					}
 					false
@@ -1864,13 +1881,19 @@ impl Walker<'_> {
 					pending.push((self.s.types.payload(nominal, index), reached))
 				}
 				TypeKind::String | TypeKind::StringLit(_) => {
-					if self.s.types.satisfies(TypeId::STRING, referent)
+					if property == ReferenceReach::Owned
+						&& self.s.types.satisfies(TypeId::STRING, referent)
 					{
 						return true;
 					}
 				}
 				TypeKind::Bytes => {
-					if property == ReferenceReach::Owned && (self.s.types.satisfies(TypeId::BYTE, referent) || self.s.types.satisfies(TypeId::BYTES, referent)) { return true; }
+					if property == ReferenceReach::Owned
+						&& (self.s.types.satisfies(TypeId::BYTE, referent)
+							|| self.s.types.satisfies(TypeId::BYTES, referent))
+					{
+						return true;
+					}
 				}
 				TypeKind::Param(_) | TypeKind::Unknown => {
 					if reached || property == ReferenceReach::Owned {

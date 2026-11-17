@@ -2808,3 +2808,10 @@ Each completed timing round is retained if a load spike stops the run. An explic
 --allow-busy produces one provisional series with observed load beside the
 figures, without a 20% acceptance claim. The lead reruns it in a quiet window.
 >>>>>>> tooling/check-speed
+
+## Diagnostics audit: style rules and decisions (lead, 2026-11-17)
+
+From the audit [`reviews/diagnostics-2026-11-17.md`](reviews/diagnostics-2026-11-17.md). **The seven rules of its §5 are the style of every diagnostic**: the shape "what is wrong: how to fix it" (lowercase, contractions, an exact fix written "write `…`" and exported as a machine-applicable fix); the user's own names and types; the documentation's vocabulary (value, reference, element, field, member, method, error, optional; never place, temporary, sink, facts, consumed, "the analyzer"); every other place as a note with its location, never "(line N)" in the text; one error per mistake (sorted by position, no cascade, no warning that depends on a failed check); "Fa has no `X`: write `Y`" for a construct of another language, "not implemented yet" only for documented Fa and with the workaround; one printed code scheme with every code documented.
+
+- **An unused `catch` binding doesn't warn.** A `catch` names its error by syntax (`E-ERR-9`), and a `catch` that gives a fallback (`catch error => 0`) is the common, documented form: `W-DECL-2` is not reported for it.
+- Open: which code scheme is printed (the area codes such as `MEM004`, or the `E-…`/`W-…` names); the other becomes an alias.

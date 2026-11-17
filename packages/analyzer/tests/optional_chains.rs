@@ -110,3 +110,26 @@ fn generic_awaited_and_reactive_nullable_results_keep_their_absence() {
 		&["E-OPT-1"],
 	);
 }
+
+#[test]
+fn optional_start_hint_binds_the_task_instead_of_starting_it_again() {
+	let mut session = Session::new();
+	let source = format!(
+		"{BOX}\nasync function bad = (box: Box?) => {{\n\tlet task: Task<String> = start box?.describe()\n}}"
+	);
+	let file = session.set_source("main", Arc::from(source.as_str()));
+	session.analyze_file(file);
+	let diagnostics = session.diagnostics(file);
+	let error = diagnostics
+		.iter()
+		.find(|d| d.code.id == "E-OPT-1")
+		.expect("E-OPT-1");
+	assert!(
+		error
+			.message
+			.contains("bind it first (`let value = start box?.describe()`)"),
+		"{}",
+		error.message
+	);
+	assert!(!error.message.contains("`if start"), "{}", error.message);
+}

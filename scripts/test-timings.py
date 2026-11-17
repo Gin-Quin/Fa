@@ -24,6 +24,12 @@ def main():
         "seconds": round(time.monotonic() - started, 6),
         "exit": result.returncode,
     }
+    if sys.platform == "linux":
+        import resource
+
+        usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+        record.update(max_rss_kib=usage.ru_maxrss, user_seconds=usage.ru_utime,
+                      system_seconds=usage.ru_stime)
     destination = os.environ.get("FA_SUITE_TIMINGS")
     if destination:
         # Cargo runs test binaries sequentially. Descendant runners, if any,

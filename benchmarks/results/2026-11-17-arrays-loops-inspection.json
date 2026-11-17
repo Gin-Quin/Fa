@@ -1,0 +1,52 @@
+{
+  "fa": {
+    "start": "0x5920",
+    "mod32": 0,
+    "bytes": 75,
+    "instructions": 17,
+    "branches": [
+      {
+        "address": "0x595f",
+        "mod32": 31,
+        "length": 2,
+        "crosses_32_byte_boundary": true,
+        "instruction": "ja     596b <main+0xd7b>"
+      },
+      {
+        "address": "0x5969",
+        "mod32": 9,
+        "length": 2,
+        "crosses_32_byte_boundary": false,
+        "instruction": "jae    5920 <main+0xd30>"
+      }
+    ],
+    "binary_sha256": "af56e2c99837f01bc19c7bde0093a63f69523f90665362ed280f064c6ca1351b"
+  },
+  "rust": {
+    "start": "0x15190",
+    "mod32": 16,
+    "bytes": 75,
+    "instructions": 17,
+    "branches": [
+      {
+        "address": "0x151cf",
+        "mod32": 15,
+        "length": 2,
+        "crosses_32_byte_boundary": false,
+        "instruction": "ja     151db <_RNvCsg11J4KvFuHP_4main4main+0x3ab>"
+      },
+      {
+        "address": "0x151d9",
+        "mod32": 25,
+        "length": 2,
+        "crosses_32_byte_boundary": false,
+        "instruction": "jae    15190 <_RNvCsg11J4KvFuHP_4main4main+0x360>"
+      }
+    ],
+    "binary_sha256": "805897c18078212d68eca9cb3ad615b89f3b2abd4a612af04ce2d770fe8e6e22"
+  },
+  "same_operations_and_order_except_counter_register": true,
+  "cpu_control_passes": true,
+  "causal_alignment_speedup_established": false,
+  "production_change": false
+}

@@ -2007,3 +2007,23 @@ layouts and all value assertions. No expected-skip list changes.
   runtime ABI change, string change or relaxed floating-point rule is involved.
 - Measurements and validation are recorded in the array performance report;
   CPU acceptance requires the retained interleaved same-binary control.
+
+
+## Array performance — conditional loop inspection (2026-11-17)
+
+- Retain each first 21-round series and require the identical-binary control
+  to pass on both estimators. Particle control 1.045095/1.033545 fails: all
+  its CPU verdicts are not resolved, and its loop is not inspected or changed.
+- Mandelbrot control 1.011932/1.006945 passes. Fa/Goose 1.010024/1.017118
+  meets the goal; Fa/Rust 1.040557/1.052847 remains behind. Its loop has the
+  same 17 instructions, 75 bytes and FP operation order as Rust, except the
+  counter register. The Fa loop begins at 0x5920 (0 modulo 32), Rust at
+  0x15190 (16 modulo 32). Fa's two-byte forward exit branch at 0x595f
+  straddles a 32-byte boundary; Rust's at 0x151cf does not. The inspected
+  binary hashes match those timed by the driver.
+- This is a concrete placement hypothesis, not a demonstrated causal speedup.
+  Keep production lowering unchanged and leave a bounded branch-placement
+  experiment as a follow-up. Do not infer an alignment policy from a single
+  pair of binaries. No benchmark source, arithmetic or FP flag changes.
+  Raw samples, strict-control publication and inspection live in the dated
+  arrays-loops result files and the array report.

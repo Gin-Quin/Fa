@@ -189,6 +189,7 @@ struct CallbackState {
 	source: Loan,
 	temporary: Option<Owner>,
 	container: Container,
+	pool_slots: Vec<usize>,
 	mutating: bool,
 }
 
@@ -352,6 +353,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 			PlaceView::Entry(_) => memory::values_size(2),
 			PlaceView::Array(items) => memory::values_size(items.len()),
 			PlaceView::Bytes(bytes) => bytes.len(),
+			PlaceView::Text(_, from, to) => (to - from).saturating_mul(10),
 			_ => return Ok(view.materialize()),
 		};
 		self.interpreter
@@ -797,6 +799,8 @@ impl<'i, 'h> Machine<'i, 'h> {
 		let length = match parent {
 			PlaceView::Value(Value::Array(items) | Value::Tuple(items)) => Some(items.len()),
 			PlaceView::Value(Value::Bytes(bytes)) => Some(bytes.len()),
+			PlaceView::Value(Value::String(text)) => Some(text.len()),
+			PlaceView::Text(_, from, to) => Some(to - from),
 			PlaceView::Bytes(bytes) => Some(bytes.len()),
 			PlaceView::Array(items) => Some(items.len()),
 			_ => None,
@@ -1096,6 +1100,13 @@ impl<'i, 'h> Machine<'i, 'h> {
 				PlaceStep::Field(name) => builtins::field_mut(current, name)?,
 				PlaceStep::Index(key) => builtins::index_mut(current, key.clone())?,
 				PlaceStep::Item(index) => match current {
+					Value::Pool(pool) => Arc::make_mut(pool)
+						.slots
+						.get_mut(*index)
+						.and_then(Option::as_mut)
+						.ok_or_else(|| {
+							Error::Stop("internal: an iterated pool item was invalidated".into())
+						})?,
 					Value::Array(items) | Value::Tuple(items) | Value::Set(items) => {
 						Arc::make_mut(items).get_mut(*index).ok_or_else(|| {
 							Error::Stop("internal: an iterated item was invalidated".into())
@@ -1199,6 +1210,9 @@ impl<'i, 'h> Machine<'i, 'h> {
 				}
 				PlaceView::Value(Value::Map(value)) if shared || Arc::strong_count(value) > 1 => {
 					memory::values_size(value.len().saturating_mul(2))
+				}
+				PlaceView::Value(Value::Pool(value)) if shared || Arc::strong_count(value) > 1 => {
+					value.slots.len().saturating_mul(size_of::<Option<Value>>())
 				}
 				PlaceView::Value(Value::Bytes(value)) if shared || Arc::strong_count(value) > 1 => {
 					value.len()
@@ -1360,8 +1374,21 @@ impl<'i, 'h> Machine<'i, 'h> {
 			PlaceView::Array(items) => (Container::Array, items.len()),
 			PlaceView::Value(Value::Set(items)) => (Container::Set, items.len()),
 			PlaceView::Value(Value::Map(entries)) => (Container::Map, entries.len()),
+			PlaceView::Value(Value::Pool(pool)) => (Container::Pool, pool.len),
 			_ => return Err(Error::Stop("a callback receiver must be a collection".into()).into()),
 		};
+		let pool_slots = if let PlaceView::Value(Value::Pool(pool)) = view {
+			self.interpreter
+				.reserve(pool.len.saturating_mul(size_of::<usize>()))?;
+			pool.slots
+				.iter()
+				.enumerate()
+				.filter_map(|(index, value)| value.as_ref().map(|_| index))
+				.collect()
+		} else {
+			Vec::new()
+		};
+
 		let mut arguments: Vec<_> = arguments.collect();
 		if path == "Json.parse" {
 			let input = self.value(receiver.clone())?;
@@ -1401,6 +1428,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 			source,
 			temporary,
 			container,
+			pool_slots,
 			mutating,
 		};
 		let make = Callback::new(path, container, length, arguments, staged);
@@ -1419,7 +1447,11 @@ impl<'i, 'h> Machine<'i, 'h> {
 			if matches!(state.container, Container::Map) {
 				PlaceStep::Entry(position)
 			} else {
-				PlaceStep::Item(position)
+				PlaceStep::Item(if matches!(state.container, Container::Pool) {
+					state.pool_slots[position]
+				} else {
+					position
+				})
 			},
 			false,
 		)?;
@@ -1464,6 +1496,14 @@ impl<'i, 'h> Machine<'i, 'h> {
 							delete,
 							Value::None,
 						),
+						Value::Pool(pool) => {
+							if delete {
+								let pool = Arc::make_mut(pool);
+								if pool.slots[state.pool_slots[position]].take().is_some() {
+									pool.len -= 1;
+								}
+							}
+						}
 						Value::Map(entries) => compact_item(
 							Arc::make_mut(entries).as_mut_slice(),
 							position,
@@ -1598,6 +1638,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 					Container::Map => Value::Map(Arc::new(entries)),
 					Container::Set => Value::Set(Arc::new(values)),
 					Container::Array => Value::array(values),
+					Container::Pool => Value::Pool(Arc::new(Pool::new(values))),
 				}
 				.into())
 			}
@@ -1607,6 +1648,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 					Value::Array(items) | Value::Set(items) => {
 						finish_deletions(Arc::make_mut(items), kept, unvisited, || Value::None)
 					}
+					Value::Pool(_) => {}
 					Value::Map(entries) => {
 						finish_deletions(Arc::make_mut(entries), kept, unvisited, || {
 							(Value::None, Value::None)
@@ -2053,6 +2095,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 				(items.len(), false)
 			}
 			PlaceView::Value(Value::Map(entries)) => (entries.len(), true),
+			PlaceView::Value(Value::Pool(pool)) => (pool.slots.len(), false),
 			PlaceView::Entry(_) => (2, false),
 			PlaceView::Array(items) => (items.len(), false),
 			PlaceView::Value(Value::Bytes(bytes)) => (bytes.len(), false),
@@ -2142,6 +2185,11 @@ impl<'i, 'h> Machine<'i, 'h> {
 					position,
 					entries,
 				} => {
+					if let PlaceView::Value(Value::Pool(pool)) = self.read_loan(source)? {
+						while *position < *length && pool.slots[*position].is_none() {
+							*position += 1;
+						}
+					}
 					if *position >= *length {
 						None
 					} else {

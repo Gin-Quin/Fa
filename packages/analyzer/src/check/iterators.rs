@@ -174,7 +174,7 @@ impl Walker<'_> {
 					)
 				})
 				.collect();
-			self.record_alias_origins(symbol, value, places.first().copied());
+			self.record_alias_origins(symbol, value, &places);
 			let state = self.facts.refs.state(crate::flow::refs::RefState {
 				places: places.into(),
 				opaque: false,

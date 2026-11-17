@@ -11,11 +11,13 @@ pub(crate) enum Container {
 	Array,
 	Set,
 	Map,
+	Pool,
 }
 
 enum Kind {
 	Json(Box<crate::json::Reader>),
 	Find,
+	FindIndex,
 	Filter,
 	Delete,
 	Map,
@@ -82,10 +84,17 @@ pub(crate) struct Callback {
 
 impl Callback {
 	pub fn handles(path: &str) -> bool {
+		if let Some(("Pool" | "Columnar" | "OrderedColumnar", operation)) = path.split_once('#') {
+			return matches!(
+				operation,
+				"find" | "filter" | "map" | "every" | "some" | "reduce"
+			);
+		}
 		matches!(
 			path,
 			"Json.parse"
 				| "Array#find"
+				| "Array#findIndex"
 				| "Set#find" | "Map#find"
 				| "Array#filter"
 				| "Set#filter"
@@ -107,7 +116,13 @@ impl Callback {
 	pub fn mutating(path: &str) -> bool {
 		matches!(
 			path,
-			"Array#sortInPlace" | "Array#deleteWhere" | "Map#deleteWhere" | "Set#deleteWhere"
+			"Array#sortInPlace"
+				| "Array#deleteWhere"
+				| "Map#deleteWhere"
+				| "Set#deleteWhere"
+				| "Pool#deleteWhere"
+				| "Columnar#deleteWhere"
+				| "OrderedColumnar#deleteWhere"
 		)
 	}
 
@@ -139,6 +154,8 @@ impl Callback {
 				_ => false,
 			};
 			Kind::Json(Box::new(crate::json::Reader::new(&input, schema, strict)?))
+		} else if path.ends_with("#findIndex") {
+			Kind::FindIndex
 		} else if path.ends_with("#find") {
 			Kind::Find
 		} else if path.ends_with("#filter") {
@@ -219,9 +236,13 @@ impl Callback {
 		}
 		if let Some(value) = returned {
 			match self.kind {
-				Kind::Find => {
+				Kind::Find | Kind::FindIndex => {
 					if boolean(value)? {
-						return Ok(Progress::Done(Output::Found(Some(self.position))));
+						return Ok(Progress::Done(if matches!(self.kind, Kind::FindIndex) {
+							Output::Value(Value::int(self.position as i64).into())
+						} else {
+							Output::Found(Some(self.position))
+						}));
 					}
 				}
 				Kind::Filter => {
@@ -275,7 +296,7 @@ impl Callback {
 					arguments.push(Argument::Value(Value::int(self.position as i64).into()));
 				}
 			}
-			Container::Set => arguments.push(Argument::Item(self.position)),
+			Container::Set | Container::Pool => arguments.push(Argument::Item(self.position)),
 		}
 		Ok(Progress::Call {
 			function: self.function.as_ref().expect("a checked callback").clone(),
@@ -286,7 +307,7 @@ impl Callback {
 
 	fn finish(self: Box<Self>) -> Result<Progress, Error> {
 		let output = match self.kind {
-			Kind::Find => Output::Found(None),
+			Kind::Find | Kind::FindIndex => Output::Found(None),
 			Kind::Quantifier(every) => Output::Value(Value::Boolean(every).into()),
 			Kind::Reduce => Output::Value(self.total),
 			Kind::Filter => Output::Selected(self.container, self.selected),

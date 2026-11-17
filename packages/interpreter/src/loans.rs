@@ -28,6 +28,7 @@ pub(crate) enum Step {
 pub(crate) enum View<'v> {
 	Integer(ethnum::I256),
 	Bytes(&'v [u8]),
+	Text(&'v crate::text::Text, usize, usize),
 	Array(&'v [Value]),
 	Value(&'v Value),
 	Entry(&'v (Value, Value)),
@@ -38,6 +39,7 @@ impl<'v> View<'v> {
 		match self {
 			Self::Integer(value) => Value::Integer(value),
 			Self::Bytes(bytes) => Value::Bytes(Arc::new(bytes.to_vec())),
+			Self::Text(text, from, to) => Value::String(text.slice(from, to)),
 			Self::Array(items) => Value::array(items.to_vec()),
 			Self::Value(value) => value.clone(),
 			Self::Entry((key, value)) => Value::Tuple(Arc::new(vec![key.clone(), value.clone()])),
@@ -58,6 +60,32 @@ impl<'v> View<'v> {
 			};
 			return Ok(Self::Value(if position == 0 { &pair.0 } else { &pair.1 }));
 		}
+		let text = match self {
+			Self::Value(Value::String(text)) => Some((text, 0, text.len())),
+			Self::Text(text, from, to) => Some((text, from, to)),
+			_ => None,
+		};
+		if let Some((text, from, to)) = text {
+			return match step {
+				Step::Index(Value::Range {
+					start,
+					end,
+					inclusive,
+				}) => {
+					let (start, end) = builtins::slice_bounds(*start, *end, *inclusive, to - from)?;
+					Ok(Self::Text(text, from + start, from + end))
+				}
+				Step::Index(key) => {
+					let index = builtins::position(builtins::integer(key)?, to - from)?;
+					Ok(Self::Text(text, from + index, from + index + 1))
+				}
+				Step::Field(name) if name.as_ref() == "length" => {
+					Ok(Self::Integer(((to - from) as u64).into()))
+				}
+				_ => Err(Error::Stop("unsupported string projection".into())),
+			};
+		}
+
 		let bytes = match self {
 			Self::Value(Value::Bytes(bytes)) => Some(bytes.as_slice()),
 			Self::Bytes(bytes) => Some(bytes),
@@ -122,6 +150,14 @@ impl<'v> View<'v> {
 			Step::Field(name) => builtins::field_ref(value, name)?,
 			Step::Index(index) => builtins::index_ref(value, index)?,
 			Step::Item(index) => match value {
+				Value::Pool(pool) => {
+					pool.slots
+						.get(*index)
+						.and_then(Option::as_ref)
+						.ok_or_else(|| {
+							Error::Stop("internal: an iterated pool item was invalidated".into())
+						})?
+				}
 				Value::Array(items) | Value::Tuple(items) | Value::Set(items) => {
 					items.get(*index).ok_or_else(|| {
 						Error::Stop("internal: an iterated item was invalidated".into())

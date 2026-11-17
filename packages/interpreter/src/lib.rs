@@ -856,7 +856,7 @@ mod tests {
 				captures: Vec::new(),
 				slots: 2,
 				body: Expr::If(
-					Expr::CallFunction(FnKey(0, 20), vec![Arg::Value(*local(0))]).boxed(),
+					Expr::CallFunction(FnKey(0, 20), vec![Arg::Value(*local(0))].into()).boxed(),
 					Expr::Equals(
 						local(1),
 						Expr::Arith(ArithOp::Multiply, INTEGER, local(0), int(10).boxed()).boxed(),
@@ -1479,7 +1479,8 @@ mod tests {
 			Expr::Let(0, Expr::Array(vec![Item::One(int(7))]).boxed()),
 			Expr::Let(
 				1,
-				Expr::CallFunction(key, vec![Arg::Value(Expr::Borrow(owner, false))]).boxed(),
+				Expr::CallFunction(key, vec![Arg::Value(Expr::Borrow(owner, false))].into())
+					.boxed(),
 			),
 			Expr::Assign(reference, int(9).boxed()),
 			Expr::Local(0),
@@ -1491,6 +1492,7 @@ mod tests {
 		// The public host entry has no lowered caller argument slot; it creates
 		// one, and materializes the reference before disposing its root frame.
 		let function = Value::Function(Arc::new(crate::value::Closure {
+			environment: None,
 			function: key,
 			captured: Vec::new(),
 			bound: Vec::new(),
@@ -1498,7 +1500,7 @@ mod tests {
 		let value = Interpreter::new(&mut host, Limits::default())
 			.call_value(&function, vec![Value::array(vec![Value::int(9)])]);
 		assert_eq!(value, Ok(Value::int(9)));
-		let omitted = Expr::Dereference(Expr::CallFunction(key, vec![Arg::Default]).boxed());
+		let omitted = Expr::Dereference(Expr::CallFunction(key, vec![Arg::Default].into()).boxed());
 		assert_eq!(run(&mut host, &omitted, 0), Ok(Value::int(7)));
 	}
 
@@ -1552,164 +1554,46 @@ mod tests {
 				]),
 			}),
 		);
-		let escaped = Expr::Dereference(Expr::CallFunction(key, Vec::new()).boxed());
+		let escaped = Expr::Dereference(Expr::CallFunction(key, Vec::new().into()).boxed());
 		assert!(
-			matches!(run(&mut host, &escaped, 0), Err(Error::Stop(message)) if message.contains("outlived its collection"))
+			matches!(run(&mut host, &escaped, 0), Err(Error::Stop(message)) if message.contains("escapes a local owner"))
 		);
 	}
 
 	#[test]
-	fn callback_builtins_preserve_results_and_atomic_mutations() {
-		let mut host = Functions::default();
-		let predicate = Expr::Equals(
-			Expr::Arith(ArithOp::Remainder, INTEGER, local(0), int(2).boxed()).boxed(),
-			int(0).boxed(),
-			false,
-		);
-		for (key, body, slots) in [
-			(20, predicate, 1),
-			(
-				21,
-				Expr::Arith(ArithOp::Add, INTEGER, local(0), local(1)),
-				2,
-			),
-			(
-				22,
-				Expr::Arith(ArithOp::Subtract, INTEGER, local(0), local(1)),
-				2,
-			),
-			(
-				23,
-				Expr::If(
-					Expr::Equals(local(0), int(2).boxed(), false).boxed(),
-					Expr::Throw(Expr::Const(Value::error("Bad", Vec::new())).boxed()).boxed(),
-					Some(Expr::Const(Value::Boolean(true)).boxed()),
-				),
-				1,
-			),
-		] {
-			host.0.insert(
-				FnKey(0, key),
-				Arc::new(Function {
-					name: "callback".into(),
-					params: (0..slots)
-						.map(|slot| Param {
-							slot,
-							default: None,
-						})
-						.collect(),
-					captures: Vec::new(),
-					slots,
-					body,
-				}),
-			);
-		}
-		let values = || {
-			Expr::Array(
-				[1, 2, 3, 4]
-					.into_iter()
-					.map(|n| Item::One(int(n)))
-					.collect(),
-			)
-		};
-		let callback = |key| Expr::Function(FnKey(0, key));
-		for (path, expected) in [
-			("Array#filter", "[2, 4]"),
-			("Array#find", "2"),
-			("Array#some", "true"),
-			("Array#every", "false"),
-		] {
-			let expression = Expr::Builtin(path, vec![values(), callback(20)]);
-			assert_eq!(
-				run(&mut host, &expression, 0).map(|value| value.to_text()),
-				Ok(expected.into())
-			);
-		}
-		let reduce = Expr::Builtin("Array#reduce", vec![values(), callback(21), int(0)]);
-		assert_eq!(run(&mut host, &reduce, 0), Ok(Value::int(10)));
-		let set = Expr::Set(
-			[1, 2, 3, 4]
-				.into_iter()
-				.map(|n| Item::One(int(n)))
-				.collect(),
-		);
-		let filtered = Expr::Builtin("Set#filter", vec![set, callback(20)]);
-		assert_eq!(
-			run(&mut host, &filtered, 0),
-			Ok(Value::Set(Arc::new(vec![Value::int(2), Value::int(4)])))
-		);
-		host.0.insert(
-			FnKey(0, 24),
-			Arc::new(Function {
-				name: "evenKeyWithValue".into(),
-				params: (0..2)
-					.map(|slot| Param {
-						slot,
-						default: None,
-					})
-					.collect(),
-				captures: Vec::new(),
-				slots: 2,
-				body: Expr::If(
-					Expr::CallFunction(FnKey(0, 20), vec![Arg::Value(*local(0))]).boxed(),
-					Expr::Equals(
-						local(1),
-						Expr::Arith(ArithOp::Multiply, INTEGER, local(0), int(10).boxed()).boxed(),
-						false,
-					)
-					.boxed(),
-					Some(Expr::Const(Value::Boolean(false)).boxed()),
-				),
-			}),
-		);
-		let map = Expr::Map(
-			[1, 2]
-				.into_iter()
-				.map(|n| Item::One(Expr::Tuple(vec![int(n), int(n * 10)])))
-				.collect(),
-		);
-		let filtered = Expr::Builtin("Map#filter", vec![map, callback(24)]);
-		assert_eq!(
-			run(&mut host, &filtered, 0),
-			Ok(Value::Map(Arc::new(vec![(Value::int(2), Value::int(20))])))
-		);
-		for compare in [None, Some(callback(22))] {
-			let mut arguments = vec![Expr::Array(
-				[3, 1, 2].into_iter().map(|n| Item::One(int(n))).collect(),
-			)];
-			arguments.extend(compare);
-			assert_eq!(
-				run(&mut host, &Expr::Builtin("Array#sort", arguments), 0)
-					.map(|value| value.to_text()),
-				Ok("[1, 2, 3]".into())
-			);
-		}
-		let place = Place {
+	fn pool_references_keep_slot_identity_across_equal_items_and_deletions() {
+		let owner = Place {
 			slot: 0,
 			steps: Vec::new(),
 		};
-		let unchanged = Expr::Block(vec![
-			Expr::Let(0, values().boxed()),
-			Expr::Catch {
-				body: Expr::Mutate("Array#deleteWhere", place.clone(), vec![callback(23)]).boxed(),
-				slot: None,
-				handler: Expr::none().boxed(),
-			},
-			Expr::Read(place.clone()),
+		let selected = Place {
+			slot: 1,
+			steps: Vec::new(),
+		};
+		let second = Place {
+			slot: 2,
+			steps: Vec::new(),
+		};
+		let program = Expr::Block(vec![
+			Expr::Let(0, Expr::Pool(Vec::new()).boxed()),
+			Expr::Bind(
+				1,
+				Expr::BorrowBuiltin("Pool#add", owner.clone(), vec![int(7)]).boxed(),
+			),
+			Expr::Bind(
+				2,
+				Expr::BorrowBuiltin("Pool#add", owner.clone(), vec![int(7)]).boxed(),
+			),
+			Expr::Mutate("Pool#delete", owner.clone(), vec![Expr::Lend(selected)]),
+			Expr::Assign(second.clone(), int(9).boxed()),
+			Expr::Tuple(vec![
+				Expr::Builtin("Pool#size", vec![Expr::Lend(owner.clone())]),
+				Expr::Read(second),
+			]),
 		]);
 		assert_eq!(
-			run(&mut host, &unchanged, 1).map(|value| value.to_text()),
-			Ok("[1, 2, 3, 4]".into())
-		);
-		let changed = Expr::Block(vec![
-			Expr::Let(0, values().boxed()),
-			Expr::Mutate("Array#deleteWhere", place.clone(), vec![callback(20)]),
-			Expr::Mutate("Array#sortInPlace", place.clone(), vec![callback(22)]),
-			Expr::Read(place),
-		]);
-		assert_eq!(
-			run(&mut host, &changed, 1).map(|value| value.to_text()),
-			Ok("[1, 3]".into())
+			run(&mut Functions::default(), &program, 3).map(|value| value.to_text()),
+			Ok("(1, 9)".into())
 		);
 	}
 }

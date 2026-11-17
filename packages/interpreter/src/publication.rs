@@ -22,6 +22,7 @@ impl Interpreter<'_> {
 				Value::Array(items) | Value::Tuple(items) | Value::Set(items) => {
 					(0, Arc::as_ptr(items) as usize, items.len())
 				}
+				Value::Pool(pool) => (5, Arc::as_ptr(pool) as usize, pool.len),
 				Value::Object(object) => (1, Arc::as_ptr(object) as usize, object.fields.len()),
 				Value::Map(entries) => (
 					2,
@@ -72,6 +73,7 @@ impl Interpreter<'_> {
 				Value::Array(items) | Value::Tuple(items) | Value::Set(items) => {
 					pending.extend(items.iter())
 				}
+				Value::Pool(pool) => pending.extend(pool.values()),
 				Value::Object(object) => {
 					pending.extend(object.fields.iter().map(|(_, value)| value))
 				}
@@ -121,6 +123,7 @@ mod tests {
 			Value::array(vec![borrowed.clone()]),
 			Value::Tuple(Arc::new(vec![borrowed.clone()])),
 			Value::Set(Arc::new(vec![borrowed.clone()])),
+			Value::Pool(Arc::new(crate::value::Pool::new(vec![borrowed.clone()]))),
 			Value::Map(Arc::new(vec![(borrowed.clone(), Value::None)])),
 			Value::Map(Arc::new(vec![(Value::None, borrowed.clone())])),
 			Value::object(vec![("nested", borrowed.clone())]),

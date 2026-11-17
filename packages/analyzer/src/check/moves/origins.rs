@@ -109,19 +109,21 @@ impl Walker<'_> {
 		&mut self,
 		alias: SymbolId,
 		value: NodeId,
-		place: Option<PlaceId>,
+		places: &[PlaceId],
 	) {
 		if !self.body.flow.reachable {
 			return;
 		}
-		let sources =
-			place.map_or_else(
-				Sources::new,
-				|place| match crate::lower::copies::value_place_root(&self.tree, &self.a, value) {
-					Some(symbol) => self.ownership_sources(symbol, place),
-					None => std::iter::once(Source::direct(place)).collect(),
-				},
-			);
+		let root = crate::lower::copies::value_place_root(&self.tree, &self.a, value);
+		let mut sources = Sources::new();
+		for &place in places {
+			match root {
+				Some(symbol) => sources.extend(self.ownership_sources(symbol, place)),
+				None => sources.push(Source::direct(place)),
+			}
+		}
+		sources.sort_unstable();
+		sources.dedup();
 		self.body.flow.ownership_aliases.set(alias, sources);
 	}
 

@@ -4,9 +4,9 @@ function check = () => {
 	let task = start compute()
 	mutable count = 0
 	let callbacks: InlineArray<() => Task<Integer>, 1> = [
-		() => {
+		() => { -- error: MEM003
 			count += 1 -- error: REF021
-			task
+			task -- error: MEM002
 		}
 	]
 }

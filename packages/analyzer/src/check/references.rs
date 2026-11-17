@@ -94,7 +94,7 @@ impl Walker<'_> {
 		};
 		// declaring the name again: only over an invalidated `use`
 		self.check_declared_again(n, name, symbol);
-		self.record_alias_origins(symbol, value, place);
+		self.record_alias_origins(symbol, value, &origins);
 		if let Some(place) = place {
 			self.aliases.insert(symbol, place);
 			if self.body.flow.reachable {
@@ -1274,7 +1274,7 @@ impl Walker<'_> {
 		else {
 			return TypeId::VOID;
 		};
-		self.record_alias_origins(symbol, value, place);
+		self.record_alias_origins(symbol, value, &origins);
 		if let Some(place) = place {
 			self.aliases.insert(symbol, place);
 		}
@@ -1347,6 +1347,11 @@ impl Walker<'_> {
 	/// Capturing an alias cannot extend its collection's lifetime. Check the
 	/// same collection origins as returned references, including joined aliases.
 	pub(super) fn check_escaping_references(&mut self, lambda: NodeId, at: NodeId) {
+		// An owned snapshot in a local container does not itself let a
+		// collection reference leave the owner's activation. The evaluated
+		// closure origins are checked again at an actual escaping use.
+		if self.capture_snapshot_is_local(at) { return; }
+
 		let mut pending = vec![lambda];
 		let mut visited = rustc_hash::FxHashSet::default();
 		while let Some(lambda) = pending.pop() {
@@ -1379,7 +1384,7 @@ impl Walker<'_> {
 					}) {
 						continue;
 					}
-					if !self.reported_once.insert((at, "MEM004")) {
+					if !self.reported_once.insert((lambda, "MEM004")) || !self.reported_once.insert((at, "MEM004")) {
 						continue;
 					}
 					let owner = self.place_text(owner);
@@ -1393,6 +1398,18 @@ impl Walker<'_> {
 					self.report(diagnostic);
 				}
 			}
+		}
+	}
+
+	fn capture_snapshot_is_local(&self, mut node: NodeId) -> bool {
+		loop {
+			match self.view(node) {
+				View::Declaration { .. } => return self.a.symbols.symbol_of_decl(node).is_some_and(|symbol| !self.declared_outside_functions(symbol)),
+				_ => {}
+			}
+			let Some(parent) = self.parent(node) else { return false; };
+			if matches!(self.view(parent), View::Return(_) | View::Lambda { .. } | View::Call { .. }) { return false; }
+			node = parent;
 		}
 	}
 
@@ -1493,12 +1510,6 @@ impl Walker<'_> {
 		};
 
 		for symbol in captures {
-			if self.is_captured(symbol)
-				&& let Some(cx) = self.body.functions.last_mut()
-				&& !cx.captures.contains(&symbol)
-			{
-				cx.captures.push(symbol);
-			}
 			// a captured task (worker's handle, resource) moved away since
 			if self.body.flow.reachable
 				&& let Some(&(_, at)) = self

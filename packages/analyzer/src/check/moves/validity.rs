@@ -14,15 +14,20 @@ impl Walker<'_> {
 	/// Take the place snapshot while aliases and narrowing still describe
 	/// this read. Later `reuse` must not rewrite an earlier observation.
 	pub(crate) fn note_place_read(&mut self, node: NodeId) {
-		if self.body.flow.reachable
-			&& let Some(place) = self.place_of(node)
-		{
-			self.record_ownership_read(node, &[place]);
-			self.move_places.insert(node, vec![place]);
+		if !self.body.flow.reachable {
+			return;
+		}
+		let places = self.places_of(node);
+		if places.is_empty() {
+			return;
+		}
+		self.record_ownership_read(node, &places);
+		for &place in &places {
 			if let Some(symbol) = self.place_symbol(place) {
 				self.record_move_read(node, symbol);
 			}
 		}
+		self.move_places.insert(node, places);
 	}
 
 	pub(super) fn check_move_validity(&mut self, graph: &Graph) {

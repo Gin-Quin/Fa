@@ -958,7 +958,6 @@ impl Walker<'_> {
 					self.a.symbols.symbol(variable).kind,
 					SymbolKind::LoopVariable { copy: false }
 				) {
-				self.record_alias_origins(variable, iterable, Some(item_place));
 				self.aliases.insert(variable, item_place);
 				item_places.push((variable, item_place));
 			}
@@ -969,7 +968,6 @@ impl Walker<'_> {
 				&& let Some(value) = items.get(1)
 				&& let Some(variable) = self.a.symbols.symbol_of_decl(value)
 			{
-				self.record_alias_origins(variable, iterable, Some(item_place));
 				self.aliases.insert(variable, item_place);
 				item_places.push((variable, item_place));
 			}
@@ -980,6 +978,7 @@ impl Walker<'_> {
 				.iter()
 				.filter_map(|&(other, place)| (other == variable).then_some(place))
 				.collect();
+			self.record_alias_origins(variable, iterable, &places);
 			let state = self.facts.refs.state(crate::flow::refs::RefState {
 				places,
 				opaque: false,

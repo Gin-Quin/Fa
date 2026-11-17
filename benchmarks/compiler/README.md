@@ -72,7 +72,10 @@ The largest fixture gets separate `fa check --timings` runs for broad wall phase
 and Callgrind (one worker on CPUs 0–4) for function instruction attribution.
 Exclusive categories are disjoint: parsing/reading, scanning/resolution, type
 checking, flow/effects, references/moves/relations, compile time, rendering,
-pipeline/session and runtime/other. They are **instruction attribution**, not
+pipeline/session, shared syntax decoding and runtime/other. Optimized Rust
+inherent-method names omit their source module; a source-backed method registry
+assigns Walker methods to those phases, and its map/source hashes stay in JSON.
+They are **instruction attribution**, not
 inferred wall milliseconds; optimized inlining charges code to its surviving
 caller. `--timings` phases overlap (pipeline contains parse and analysis), so they
 must not be added together. Raw Callgrind and annotation files stay in

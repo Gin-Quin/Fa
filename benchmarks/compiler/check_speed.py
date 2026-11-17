@@ -44,7 +44,7 @@ def comparison(a, b, metric, control):
     estimates = [result["ratio_of_medians"], result["median"]]
     result["threshold"] = 1.2
     if ((estimates[0] <= 1.2) != (estimates[1] <= 1.2)
-            or (any(abs(v - 1.2) <= .05 for v in estimates) and not control_passes(control))):
+            or (any(abs(v - 1.2) <= .05 + 1e-12 for v in estimates) and not control_passes(control))):
         result["verdict"] = "unresolved"
     else:
         result["verdict"] = "met" if all(v <= 1.2 for v in estimates) else "behind"
@@ -137,27 +137,66 @@ def measure(args, data):
 
 # Exclusive instruction attribution: disjoint categories, not overlapping inclusive sums.
 # Optimizer inlining moves helper costs into their caller. Keep unclassified runtime visible.
-def category(name):
+def walker_method_phases():
+    # Optimized Rust names omit the source module for inherent Walker methods.
+    # Rustfmt puts each impl at column zero and its methods at one hard tab.
+    groups = {
+        "scanning_resolving": ("modules", "interface"),
+        "flow_effects": ("control", "narrowing", "proofs", "effects", "tasks", "callbacks", "reactivity", "concurrency", "errors"),
+        "references_moves_relations": ("references", "reference_sensitivity", "provenance", "moves", "relations"),
+        "compile_time": ("comptime",),
+    }
+    methods, sources = {}, {}
+    for group, modules in groups.items():
+        for module in modules:
+            path = ROOT / f"packages/analyzer/src/check/{module}.rs"
+            if not path.exists():
+                continue
+            sources[str(path.relative_to(ROOT))] = digest(path)
+            inside = False
+            for line in path.read_text().splitlines():
+                if re.match(r"^impl(?:<[^>]*>)?\s+Walker(?:<.*>)?\s*\{", line):
+                    inside = True
+                elif line == "}":
+                    inside = False
+                match = re.match(r"^\t(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)", line)
+                if inside and match:
+                    name = match[1]
+                    if name in methods and methods[name] != group:
+                        raise RuntimeError(f"ambiguous Walker method phase: {name}")
+                    methods[name] = group
+    return methods, sources
+
+
+METHOD_PHASES, METHOD_PHASE_SOURCES = walker_method_phases()
+
+
+def category(name, methods=None):
+    match = re.search(r"(?:<fa_analyzer::check::Walker>|fa_analyzer::check::Walker)::(\w+)", name)
+    phases = METHOD_PHASES if methods is None else methods
+    if match and match[1] in phases:
+        return phases[match[1]]
     rules = [
         ("compile_time", ("fa_interpreter", "fa_analyzer::comptime", "::check::comptime")),
-        ("references_moves_relations", ("::check::references", "::check::moves", "::check::relations", "::flow::values")),
+        ("references_moves_relations", ("::check::references", "::check::reference_sensitivity", "::check::moves", "::check::relations", "::flow::values")),
         ("flow_effects", ("::flow::", "::check::flow", "::check::effects", "::check::control", "::check::conditions", "::check::tasks")),
         ("reading_parsing", ("fa_parser::", "::parse_module", "std::fs::", "std::io::")),
-        ("scanning_resolving", ("fa_codebase_parser::", "fa_analyzer::scan", "fa_analyzer::graph", "::check::modules", "::symbols::", "::resolve")),
+        ("scanning_resolving", ("fa_codebase_parser::", "fa_analyzer::scan", "fa_analyzer::graph", "::check::modules", "::check::interface", "::symbols::", "::resolve")),
         ("rendering", ("fa::report", "::diagnostics::", "fa::color")),
-        ("types_checking", ("fa_analyzer::types", "fa_analyzer::check::", "fa_analyzer::syntax")),
+        ("syntax_decode", ("fa_analyzer::syntax",)),
+        ("types_checking", ("fa_analyzer::types", "fa_analyzer::check::")),
         ("pipeline_session", ("fa_analyzer::", "fa::")),
     ]
     return next((group for group, patterns in rules if any(p in name for p in patterns)), "runtime_other")
 
 
-def parse_annotation(annotation):
+def parse_annotation(annotation, methods=None):
     functions = []
     for line in annotation.splitlines():
         match = re.match(r"\s*([\d,]+)\s+\([^)]*\)\s+(.*)", line)
         if match and "PROGRAM TOTALS" not in match[2]:
             functions.append({"instructions": int(match[1].replace(",", "")),
-                              "function": match[2], "category": category(match[2])})
+                              "function": match[2], "category": category(match[2], methods)})
     total = re.search(r"([\d,]+)\s+\([^)]*\)\s+PROGRAM TOTALS", annotation)
     if not total or not functions:
         raise ValueError("Callgrind annotation has no totals/functions")
@@ -170,11 +209,13 @@ def annotate_profile(args, data):
     if digest(output) != result["callgrind"]["sha256"]:
         raise RuntimeError("Callgrind artifact changed")
     annotate = shutil.which("callgrind_annotate") or str(Path.home() / ".local/valgrind/usr/bin/callgrind_annotate")
+    result.setdefault("walker_method_phases", METHOD_PHASES)
+    result.setdefault("phase_registry_sources", METHOD_PHASE_SOURCES)
     for inclusive in (False, True):
         annotation = run([annotate, f"--inclusive={'yes' if inclusive else 'no'}",
                           "--auto=no", "--threshold=100", output]).stdout.decode()
         (output.parent / ("functions-inclusive.txt" if inclusive else "functions.txt")).write_text(annotation)
-        total, functions = parse_annotation(annotation)
+        total, functions = parse_annotation(annotation, result["walker_method_phases"])
         result["instructions"] = total
         result["inclusive_functions" if inclusive else "functions"] = functions
     groups = {}
@@ -192,7 +233,8 @@ def profile(args, data):
     fixture = data["fixtures"][-1]
     directory = args.directory / "profile"
     directory.mkdir(parents=True, exist_ok=True)
-    result = {"files": fixture["files"], "timings": {}, "runner_sha256": RUNNER_SHA256}
+    result = {"files": fixture["files"], "timings": {}, "runner_sha256": RUNNER_SHA256,
+              "walker_method_phases": METHOD_PHASES, "phase_registry_sources": METHOD_PHASE_SOURCES}
     for mode in ("single", "default"):
         command = commands(args, fixture, mode)["fa"] + ["--timings"]
         path = directory / f"timings-{mode}.txt"
@@ -288,7 +330,8 @@ def markdown(data):
         w, c = row["comparisons"]["wall"], row["comparisons"]["cpu"]
         ctrl = " / ".join(f"{row['controls'][m]['ratio_of_medians']:.3f},{row['controls'][m]['median']:.3f} {'pass' if row['controls'][m]['passes'] else 'fail'}" for m in ("wall", "cpu"))
         rss = [max(s["peak_rss_kib"] for s in row.get("rss_samples", row["samples"])[label]) / 1024 for label in ("fa", "bun")]
-        lines.append(f"| {row['files']} | {row['mode']} | {dist(a['wall'])} | {dist(b['wall'])} | {w['ratio_of_medians']:.3f} / {w['median']:.3f} [{w['q1']:.3f},{w['q3']:.3f}] | {w['verdict']} | {c['ratio_of_medians']:.3f} / {c['median']:.3f} | {ctrl} | {rss[0]:.1f} / {rss[1]:.1f} |")
+        goal = w['verdict'] if row['mode'] == 'default' else 'reference only'
+        lines.append(f"| {row['files']} | {row['mode']} | {dist(a['wall'])} | {dist(b['wall'])} | {w['ratio_of_medians']:.3f} / {w['median']:.3f} [{w['q1']:.3f},{w['q3']:.3f}] | {goal} | {c['ratio_of_medians']:.3f} / {c['median']:.3f} | {ctrl} | {rss[0]:.1f} / {rss[1]:.1f} |")
     lines += ["", "| Files | Mode | Tool | User Q1 / med / Q3 | System Q1 / med / Q3 | CPU Q1 / med / Q3 | CPU/wall (median ratio) | RSS MiB Q1 / med / Q3 |", "|---:|---|---|---:|---:|---:|---:|---:|"]
     for row in data.get("series", []):
         for label in ("fa", "bun"):

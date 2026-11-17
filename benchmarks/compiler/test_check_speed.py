@@ -18,6 +18,8 @@ class StatisticsTests(unittest.TestCase):
         self.assertEqual(comparison(a, b, "wall", control)["verdict"], "met")
         control["median"] = 1.03
         self.assertEqual(comparison(a, b, "wall", control)["verdict"], "unresolved")
+        for margin in (1.15, 1.25):
+            self.assertEqual(comparison([{"wall": margin}] * 11, b, "wall", control)["verdict"], "unresolved")
         self.assertEqual(comparison([{"wall": 2.}] * 11, b, "wall", control)["verdict"], "behind")
 
     def test_quartiles_retain_all_samples(self):
@@ -28,6 +30,12 @@ class StatisticsTests(unittest.TestCase):
         self.assertEqual(category("fa_analyzer::check::moves::finish_moves"), "references_moves_relations")
         self.assertEqual(category("fa_analyzer::types::store::kind"), "types_checking")
         self.assertEqual(category("malloc"), "runtime_other")
+
+    def test_optimized_walker_names_use_their_source_phase(self):
+        self.assertEqual(category("???:<fa_analyzer::check::Walker>::record_value_origins"), "references_moves_relations")
+        self.assertEqual(category("???:<fa_analyzer::check::Walker>::publish_interface"), "scanning_resolving")
+        self.assertEqual(category("???:<fa_analyzer::check::Walker>::finish_tasks"), "flow_effects")
+        self.assertEqual(category("fa_analyzer::syntax::view"), "syntax_decode")
 
     def test_child_rss_excludes_parent_high_water(self):
         allocation = bytearray(64 << 20)

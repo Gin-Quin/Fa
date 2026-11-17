@@ -1,0 +1,24 @@
+-- file: package.fa
+export = { name = "asyncStreamedSplits" }
+-- file: application/main.fa
+-- Async functions keep ordinary split storage across suspension.
+async function count = <T>(_marker: T, input: String): Integer => {
+	let text = input
+	let parts = text.split(" ").filter((part) => not part.isEmpty())
+	await Task.yield()
+	mutable count = 0
+	for part in parts {
+		await Task.yield()
+		count += part.length
+	}
+	count + parts.length
+}
+export async function = (): Integer => {
+	let one = start count(0, "😀 a")
+	let two = start count("marker", " é abc ")
+	assert (await one) == 5
+	assert (await two) == 6
+	console.log("async split fallback ok")
+	-- prints: async split fallback ok
+	0
+}

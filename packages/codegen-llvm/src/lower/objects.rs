@@ -1640,6 +1640,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		let first = members.first().expect("a member");
 		if members.len() == 1
+			&& matches!(self.analysis.resolution(first), Resolution::Builtin(id)
+				if fa_analyzer::builtins::get(id).path == "Array#length")
+			&& let Some(length) = self.split_stream_length(target)?
+		{
+			return Ok(length);
+		}
+		if members.len() == 1
 			&& let Resolution::Builtin(property) = self.analysis.resolution(first)
 			&& fa_analyzer::builtins::get(property).path == "String#length"
 			&& matches!(self.view(target), View::Call { .. })

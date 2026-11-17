@@ -2944,10 +2944,75 @@ console.log(try read(T.One { child = T.Leaf { value = 7 } }, false))
 	}
 
 	#[test]
+	fn private_nonempty_splits_stream_only_supported_observers() {
+		for target in [Target::Native, Target::Wasm] {
+			let source = "function run = (input: String): Integer => {\nlet text = input\nlet parts = text.split(\" \").filter((part) => not part.isEmpty())\nmutable sum = 0\nfor part, index in parts { sum += part.length + index }\nsum + parts.length\n}\nconsole.log(run(arguments.get(0) ?? \"a b\"))\n";
+			let ir = ir_at_target("split-stream", source, false, OptLevel::O0, target);
+			let body = function(&ir, "fa.run");
+			assert!(body.contains("@fa_string_split_next("), "{body}");
+			let loop_body = body.split_once("for_split_body:").expect("a stream loop").1;
+			let loop_body = loop_body
+				.split_once("for_split_step:")
+				.expect("a loop step")
+				.0;
+			assert!(loop_body.contains("@llvm.assume("), "{loop_body}");
+			assert!(!body.contains("@fa_string_split_nonempty_views("), "{body}");
+			assert!(!body.contains("@fa_array_"), "{body}");
+			let optimized = ir_at_target(
+				"split-stream-optimized",
+				source,
+				false,
+				OptLevel::O3,
+				target,
+			);
+			let optimized = optimized.as_str();
+			assert!(
+				!optimized.contains("@fa_string_split_nonempty_views("),
+				"{optimized}"
+			);
+
+			assert!(optimized.contains("split_next_unicode"), "{optimized}");
+			for (name, observation) in [
+				("capacity", "console.log(parts.capacity)"),
+				("index", "console.log(parts.get(0))"),
+				(
+					"capture",
+					"function action = () => parts.length\nconsole.log(action())",
+				),
+				("repeat", "for part in parts { sum += part.length }"),
+				(
+					"nested",
+					"for 0..2 { for part in parts { sum += part.length } }",
+				),
+			] {
+				let source = source.replace(
+					"sum + parts.length",
+					&format!("{observation}\nsum + parts.length"),
+				);
+				let ir = ir_at_target(
+					&format!("split-materialized-{name}"),
+					&source,
+					false,
+					OptLevel::O0,
+					target,
+				);
+				assert!(
+					!ir.contains("@fa_string_split_next("),
+					"{name}/{target:?}: {ir}"
+				);
+				assert!(
+					ir.contains("@fa_string_split_nonempty_views("),
+					"{name}/{target:?}: {ir}"
+				);
+			}
+		}
+	}
+
+	#[test]
 	fn pure_nonempty_split_filters_are_fused_and_other_callbacks_are_not() {
 		let ir = ir_of(
 			"split-nonempty",
-			"function run = (text: String): Integer => {\nmutable source = text\nlet parts = source.split(\" \").filter((part) => not part.isEmpty())\nparts.length\n}\nconsole.log(run(\"a b\"))\n",
+			"function run = (text: String): Integer => {\nmutable source = text\nlet parts = source.split(\" \").filter((part) => not part.isEmpty())\nparts.length + parts.capacity\n}\nconsole.log(run(\"a b\"))\n",
 		);
 		assert!(ir.contains("@fa_string_split_nonempty_views("), "{ir}");
 		assert!(!ir.contains("filter_keep"), "{ir}");

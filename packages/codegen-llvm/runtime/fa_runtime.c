@@ -2873,12 +2873,20 @@ static size_t next_byte(const uint8_t *text, size_t length, size_t offset, uint8
 		ByteVector word;
 		__builtin_memcpy(&word, text + offset, 16);
 		ByteVector matches = word == wanted;
+#if defined(__x86_64__)
+		// SSE2's byte mask locates the first match directly. Both loads are
+		// still bounded by the vector loop; no padding beyond the span is read.
+		typedef char MaskVector __attribute__((vector_size(16)));
+		uint32_t found = (uint32_t)__builtin_ia32_pmovmskb128((MaskVector)matches);
+		if (found) { return offset + (size_t)__builtin_ctz(found); }
+#else
 		uint64_t halves[2];
 		__builtin_memcpy(halves, &matches, 16);
 		uint64_t found = halves[0] ? halves[0] : halves[1];
 		if (found) {
 			return offset + (halves[0] ? 0 : 8) + (size_t)(__builtin_ctzll(found) >> 3);
 		}
+#endif
 	}
 	for (; offset + 8 <= length; offset += 8) {
 		uint64_t word;
@@ -3261,6 +3269,23 @@ static void *split_text(const uint8_t *text, size_t length, size_t capacity,
 	if (separator_length == 1) {
 		room = 1 + count_byte(text, length, separator[0]);
 		raw_capacity = 0;
+	}
+	if (views && separator_length == 1) {
+		// room is the exact raw count, including discarded empty parts.
+		// The source is stable and the header stays private during this fill.
+		FaArrayHeader *parts = fa_array_new(0, (int64_t)room, sizeof(FaString));
+		FaString *items = (FaString *)(void *)parts->items;
+		size_t start = 0, count = 0;
+		for (;;) {
+			size_t end = next_byte(text, length, start, separator[0]);
+			if (!nonempty || start != end) {
+				items[count++] = (FaString){text + start, end - start, KIND_MASK | SIMPLE};
+			}
+			if (end == length) { break; }
+			start = end + 1;
+		}
+		parts->length = (int64_t)count;
+		return parts;
 	}
 #endif
 	Splitting splitting = {text, 0, separator_length,
@@ -3746,6 +3771,76 @@ static __attribute__((noinline)) void *split_unicode(const uint8_t *text, size_t
 	}
 	if (raw_capacity) { fa_array_reserve(parts, (int64_t)raw_capacity, sizeof(FaString)); }
 	return parts;
+}
+
+/// The non-ASCII stream walks UTF-16 positions once. Its cursor can name
+/// either half of a surrogate pair, just like the materialized split. Each
+/// part carries its unit count; neither headers nor earlier parts are scanned.
+static __attribute__((noinline)) int32_t split_next_unicode(
+    const uint8_t *text, size_t length, size_t capacity,
+    const uint8_t *separator, size_t separator_length, size_t *cursor, FaString *out) {
+	while (*cursor <= length * 2) {
+		size_t first = *cursor;
+		UnitReader candidate = {text, length, first, 0};
+		for (;;) {
+			UnitReader after;
+			if (match_unit_range(candidate, separator, separator_length, &after)) {
+				*cursor = after.position;
+				break;
+			}
+			if (read_unit(&candidate) < 0) {
+				*cursor = length * 2 + 1;
+				break;
+			}
+		}
+		if (candidate.units) {
+			unit_slice_positions(text, length, capacity, first, candidate.position,
+			                     candidate.units, out, 1);
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/// Next nonempty split view over stable bytes. The caller proves that the
+/// separator is nonempty and the array is private: only one readonly traversal
+/// and length reads observe it. The ASCII path uses the shared bounded vector
+/// search, fuses the filter and writes one descriptor, without an array header.
+FA_EXPORT __attribute__((always_inline)) int32_t
+fa_string_split_next(const uint8_t *text, size_t length, size_t capacity,
+                     const uint8_t *separator, size_t separator_length,
+                     size_t *cursor, FaString *out) {
+	if (!separator_length) { return 0; }
+	if (!(capacity & SIMPLE)) {
+		return split_next_unicode(text, length, capacity, separator, separator_length, cursor, out);
+	}
+	while (*cursor <= length) {
+		size_t start = *cursor;
+		size_t end = next_byte(text, length, start, separator[0]);
+		while (separator_length <= length - end) {
+			if (bytes_at(text, length, end, separator, separator_length)) { break; }
+			end = next_byte(text, length, end + 1, separator[0]);
+		}
+		if (separator_length > length - end) { end = length; }
+		*cursor = end == length ? length + 1 : end + separator_length;
+		if (end != start) {
+			*out = (FaString){text + start, end - start, KIND_MASK | SIMPLE};
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/// A length read before traversal or after an early exit needs a full count.
+/// A completed traversal publishes its count in the caller instead.
+FA_EXPORT size_t fa_string_split_count(const uint8_t *text, size_t length, size_t capacity,
+                                       const uint8_t *separator, size_t separator_length) {
+	size_t cursor = 0, count = 0;
+	FaString part;
+	while (fa_string_split_next(text, length, capacity, separator, separator_length, &cursor, &part)) {
+		count += 1;
+	}
+	return count;
 }
 
 static __attribute__((always_inline)) const void *slice_bounds(int64_t count,

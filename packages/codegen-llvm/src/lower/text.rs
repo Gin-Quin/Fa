@@ -1056,6 +1056,30 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(())
 	}
 
+	/// A view-producing operation proved this descriptor never stores inline
+	/// bytes, including on its outlined Unicode edge. Keep that fact at the
+	/// consumption site so hashes, copies and reads need no inline snapshot.
+	pub(crate) fn assume_external_string(&self, pointer: PointerValue<'ctx>) -> Result<(), Error> {
+		let capacity_pointer = self
+			.builder
+			.build_struct_gep(self.string_type, pointer, 2, "")?;
+		let capacity = self
+			.builder
+			.build_load(self.usize, capacity_pointer, "")?
+			.into_int_value();
+		let flag = self
+			.builder
+			.build_and(capacity, self.string_inline_flag(), "")?;
+		let external =
+			self.builder
+				.build_int_compare(IntPredicate::EQ, flag, self.usize.const_zero(), "")?;
+		let assume = inkwell::intrinsics::Intrinsic::find("llvm.assume")
+			.and_then(|intrinsic| intrinsic.get_declaration(self.module, &[]))
+			.expect("llvm.assume");
+		self.builder.build_call(assume, &[external.into()], "")?;
+		Ok(())
+	}
+
 	/// The bytes and the length of a string value.
 	pub(crate) fn string_parts(
 		&self,

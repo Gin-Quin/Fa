@@ -1635,6 +1635,49 @@ static void drop_test_string_parts(FaArrayHeader *parts) {
 	fa_array_free(parts, sizeof(FaString));
 }
 
+// Compare streamed views with the ordinary UTF-16 split, including virtual
+// edges and lone surrogates. The stream itself never allocates.
+static void test_split_streams(void) {
+	const char *texts[] = {"", " ", "a  b ", "aa::b::::ccc::", "é 😀 é 🇫🇷", "\xED\xA0\x80 x \xED\xB0\x80", "aaabaaaaab"};
+	const char *separators[] = {" ", "::", "😀", "é", "aa", "\xED\xB8\x80"};
+	for (size_t ti = 0; ti < sizeof texts / sizeof *texts; ti += 1) {
+		const uint8_t *text = (const uint8_t *)texts[ti];
+		size_t length = c_length(texts[ti]);
+		for (size_t si = 0; si < sizeof separators / sizeof *separators; si += 1) {
+			const uint8_t *sep = (const uint8_t *)separators[si];
+			size_t sep_length = c_length(separators[si]);
+			for (int ascii = 0; ascii <= 1; ascii += 1) {
+				if (ascii && !simple_flag(text, length)) { continue; }
+				size_t capacity = ascii ? SIMPLE : 0;
+				FaArrayHeader *expected = fa_string_split_nonempty_views(text, length, capacity, sep, sep_length);
+				long before = allocated;
+				size_t cursor = 0, count = 0;
+				FaString part;
+				while (fa_string_split_next(text, length, capacity, sep, sep_length, &cursor, &part)) {
+					CHECK(count < (size_t)expected->length);
+					FaString item = ((FaString *)(void *)expected->items)[count++];
+					CHECK(part.bytes == item.bytes && part.length == item.length);
+					CHECK(fa_string_length(part.bytes, part.length, part.capacity) == fa_string_length(item.bytes, item.length, item.capacity));
+				}
+				CHECK(count == (size_t)expected->length);
+				CHECK(fa_string_split_count(text, length, capacity, sep, sep_length) == count);
+				CHECK(allocated == before);
+				drop_test_string_parts(expected);
+			}
+		}
+	}
+	const uint8_t pair[] = {0xF0, 0x9F, 0x98, 0x80};
+	for (size_t edge = 0; edge < 2; edge += 1) {
+		const uint8_t *text = pair + edge * 2;
+		size_t length = edge ? 2 : 3, cursor = 0;
+		FaString part;
+		CHECK(fa_string_split_next(text, length, STRING_COUNTED_VIEW | 1, (const uint8_t *)" ", 1, &cursor, &part));
+		CHECK(part.bytes == text && part.length == length);
+		CHECK(fa_string_length(part.bytes, part.length, part.capacity) == 1);
+		CHECK(!fa_string_split_next(text, length, STRING_COUNTED_VIEW | 1, (const uint8_t *)" ", 1, &cursor, &part));
+	}
+}
+
 static void test_unicode_transform_counts(void) {
 	fa_release_builder();
 	long before = allocated;
@@ -3058,6 +3101,7 @@ int main(void) {
 	test_tree_regions();
 	test_utf8_input();
 	test_unicode_transform_counts();
+	test_split_streams();
 	test_canonical_split_views_without_edges();
 	test_arguments();
 	test_strict_file_text();

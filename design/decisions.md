@@ -1976,3 +1976,7 @@ Recursive calls borrow the running concrete entry's environment; self handles re
 ### Ownership enforcement: native collection union moves (2026-11-17)
 
 Keep the declared result union available through native return injection. A type-erased `Repr::Union` cannot identify a collection alternative. Collection injection selects a language-compatible item type, with generic arguments resolved, and separately checks its physical layout. The shared implicit-destination query refuses conversions inside a structure, while explicit converting copies keep their existing destination query. Primitive literal/range widening transfers storage; it never authorizes a deep conversion because two layouts happen to match.
+
+### Ownership enforcement: revisioned compile-time code (2026-11-17)
+
+The Walker and SessionHost share one function cache. Stamp each lowering with a session-wide fact revision; retention/capture settlement, final move facts and source invalidation advance it, so a caller cannot retain stale code merely because its own source is unchanged. Invalidate memoized purity with those facts, keeping active recursion guards separate. This prepares coordinated environment activation; reachable invocation/capture plans must still settle before evaluation, including per-key specialization identity, rather than relying on invalidation to repair already-computed values.

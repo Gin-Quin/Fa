@@ -710,6 +710,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 	walker.finish_relations();
 	// the last uses that are copies are moves (moves.rs)
 	walker.finish_moves();
+	// Demand-time code precedes these final ownership facts.
+	walker.s.comptime.invalidate_functions();
 	// the static sets of reactivity, and its tables (reactivity.rs)
 	walker.finish_reactivity();
 	// the values never used (unused.rs)

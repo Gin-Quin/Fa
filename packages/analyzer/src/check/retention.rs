@@ -203,6 +203,7 @@ impl Walker<'_> {
 		self.a.kept_parameters = kept;
 		self.a.unknown_kept_parameters = unknown;
 		self.finish_retained_callback_escapes();
+		self.s.comptime.invalidate_functions();
 		self.retention_checked_version = Some(version);
 	}
 

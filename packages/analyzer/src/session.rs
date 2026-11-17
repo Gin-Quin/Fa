@@ -765,6 +765,7 @@ impl Session {
 	fn forget_comptime(&mut self, file: FileId) {
 		let comptime = &mut self.comptime;
 		comptime.functions.retain(|key, _| key.0 != file.0);
+		comptime.invalidate_functions();
 		comptime.globals.retain(|key, _| key.0 != file.0);
 		comptime.purity.retain(|key, _| key.0 != file.0);
 	}

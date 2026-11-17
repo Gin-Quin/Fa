@@ -180,7 +180,7 @@ mod with_llvm {
 				"fa.ranged",
 				"fa.mapPack",
 				"fa.setPack",
-				"fa.packGeneric",
+				"fa.packGeneric.0",
 			] {
 				let body = function(&ir, name);
 				assert!(!body.contains("@fa.copy"), "{body}");

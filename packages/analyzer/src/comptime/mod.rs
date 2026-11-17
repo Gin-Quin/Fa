@@ -19,7 +19,7 @@ pub mod schema;
 
 use std::sync::Arc;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use fa_interpreter::ir::{Expr, FnKey, Function, GlobalKey, Item, Part, Place, Step};
 use fa_interpreter::{Error, Value};
@@ -44,6 +44,13 @@ pub enum GlobalState {
 	Done(Result<Value, Error>),
 }
 
+/// Function code lowered against one revision of the session's facts.
+#[derive(Debug)]
+pub struct CachedFunction {
+	revision: u64,
+	function: Arc<Function>,
+}
+
 /// The compile-time state of a session.
 #[derive(Debug)]
 pub struct State {
@@ -57,11 +64,16 @@ pub struct State {
 	/// `configuration` (none for a standalone file).
 	pub configuration: Option<Value>,
 	/// The lowered functions, by key.
-	pub functions: FxHashMap<FnKey, Arc<Function>>,
+	pub functions: FxHashMap<FnKey, CachedFunction>,
+	/// Shared by demand-time and finished-file hosts. A change in any file
+	/// can affect a reachable callable's retention and environment plans.
+	fact_revision: u64,
 	/// The values of module-level values, by key.
 	pub globals: FxHashMap<GlobalKey, GlobalState>,
 	/// The impure primitive each function may reach (`None`: pure).
 	pub purity: FxHashMap<FnKey, Option<String>>,
+	/// Keep recursion guards separate from revisioned memoized answers.
+	pub(crate) purity_active: FxHashSet<FnKey>,
 }
 
 impl Default for State {
@@ -71,9 +83,40 @@ impl Default for State {
 			freestanding: false,
 			configuration: None,
 			functions: FxHashMap::default(),
+			fact_revision: 0,
 			globals: FxHashMap::default(),
 			purity: FxHashMap::default(),
+			purity_active: FxHashSet::default(),
 		}
+	}
+}
+
+impl State {
+	pub(crate) fn cached_function(&self, key: FnKey) -> Option<Arc<Function>> {
+		self.functions
+			.get(&key)
+			.filter(|cached| cached.revision == self.fact_revision)
+			.map(|cached| Arc::clone(&cached.function))
+	}
+
+	pub(crate) fn cache_function(&mut self, key: FnKey, function: Arc<Function>) {
+		self.functions.insert(
+			key,
+			CachedFunction {
+				revision: self.fact_revision,
+				function,
+			},
+		);
+	}
+
+	/// Invalidate transitive consumers too: a caller's own source need not
+	/// change when a callee's capture or retention facts settle.
+	pub(crate) fn invalidate_functions(&mut self) {
+		self.fact_revision = self
+			.fact_revision
+			.checked_add(1)
+			.expect("a compile-time fact revision");
+		self.purity.clear();
 	}
 }
 
@@ -364,6 +407,36 @@ fn visit_argument(argument: &fa_interpreter::ir::Arg, f: &mut dyn FnMut(&Expr)) 
 
 #[cfg(test)]
 mod tests {
+	#[test]
+	fn finished_analysis_does_not_reuse_demand_time_function_code() {
+		use fa_interpreter::Host;
+
+		let (mut session, file) = crate::analyze_source(
+			"function identity = (value: Integer): Integer => value\nstatic initial = @identity(1)\nconsole.log(initial)\n",
+		);
+		assert!(
+			session.diagnostics(file).is_empty(),
+			"{:?}",
+			session.diagnostics(file)
+		);
+		let key = *session
+			.comptime
+			.functions
+			.keys()
+			.next()
+			.expect("a demand-time lowering");
+		let cached = Arc::clone(&session.comptime.functions[&key].function);
+		let mut host = super::host::SessionHost {
+			session: &mut session,
+		};
+		let settled = host.function(key).unwrap();
+		assert!(
+			!Arc::ptr_eq(&cached, &settled),
+			"file-final ownership facts require a new lowering"
+		);
+		assert!(Arc::ptr_eq(&settled, &host.function(key).unwrap()));
+	}
+
 	use super::*;
 	use crate::ids::NodeId;
 

@@ -49,8 +49,8 @@ impl Host for SessionHost<'_> {
 	}
 
 	fn function(&mut self, key: FnKey) -> Result<Arc<Function>, Error> {
-		if let Some(function) = self.session.comptime.functions.get(&key) {
-			return Ok(Arc::clone(function));
+		if let Some(function) = self.session.comptime.cached_function(key) {
+			return Ok(function);
 		}
 		let function = self
 			.lower(FileId(key.0), NodeId(key.1))
@@ -58,8 +58,7 @@ impl Host for SessionHost<'_> {
 		let function = Arc::new(function);
 		self.session
 			.comptime
-			.functions
-			.insert(key, Arc::clone(&function));
+			.cache_function(key, Arc::clone(&function));
 		Ok(function)
 	}
 

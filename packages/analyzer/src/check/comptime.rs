@@ -130,9 +130,18 @@ impl Walker<'_> {
 		if let Some(found) = self.s.comptime.purity.get(&key) {
 			return Some(found.clone());
 		}
-		// a cycle is pure until proven otherwise
-		self.s.comptime.purity.insert(key, None);
-		let function = self.function(key).ok()?;
+		// A revision may change during dependency rehydration. Its memoized
+		// answers expire, but the traversal's recursion guards remain live.
+		if !self.s.comptime.purity_active.insert(key) {
+			return Some(None);
+		}
+		let function = match self.function(key) {
+			Ok(function) => function,
+			Err(_) => {
+				self.s.comptime.purity_active.remove(&key);
+				return None;
+			}
+		};
 		let mut found = comptime::impurity(&function.body, &mut |key| self.function_impurity(key));
 		for param in &function.params {
 			if found.is_none()
@@ -141,6 +150,7 @@ impl Walker<'_> {
 				found = comptime::impurity(default, &mut |key| self.function_impurity(key));
 			}
 		}
+		self.s.comptime.purity_active.remove(&key);
 		self.s.comptime.purity.insert(key, found.clone());
 		Some(found)
 	}
@@ -1174,11 +1184,11 @@ impl Host for Walker<'_> {
 	}
 
 	fn function(&mut self, key: FnKey) -> Result<Arc<Function>, Error> {
-		if let Some(function) = self.s.comptime.functions.get(&key) {
-			return Ok(Arc::clone(function));
+		if let Some(function) = self.s.comptime.cached_function(key) {
+			return Ok(function);
 		}
 		let function = Arc::new(self.lower_function(key)?);
-		self.s.comptime.functions.insert(key, Arc::clone(&function));
+		self.s.comptime.cache_function(key, Arc::clone(&function));
 		Ok(function)
 	}
 

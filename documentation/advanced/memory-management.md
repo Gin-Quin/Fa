@@ -516,6 +516,10 @@ A move is a JavaScript assignment; source invalidation is checked at compile tim
 
 Copy/read/write/drop operations and binary worker codecs are generated at build time from analyzed types; generic consumers receive the required concrete operations. Execution does not compile functions, interpret Fa schemas, or serialize protected data as JSON. Recursive copies use a worklist rather than the JavaScript call stack.
 
+### Compile-time evaluation
+
+Demand-time checking and finished-file evaluation share revisioned function code. Changes to retention/capture facts, final move decisions and source invalidation advance a session-wide revision, including for callers in other files. Both hosts reuse only current entries. Purity traversal keeps its active recursion guards separately from cached answers. Reachable environment and invocation plans must be settled before evaluation; invalidating code cannot repair a value already produced under an incorrect plan.
+
 ### Integration status
 
 The `copy` syntax and existing copy operations are available in this slice. The category predicates and concrete `MEM005` payload checks are available. Generic-dependent error payload constraints are checked by the subsequent instantiation-conditions slice. `MEM004`, complete `MEM003`, alias/branch/loop moves, unique-resource borrows, portable generic/capture conditions, recursive moves and binary transport are the subsequent ownership slices. The rules above are the specification those slices must satisfy; current acceptance of a prohibited copy is not permission to rely on it.

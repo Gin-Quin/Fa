@@ -1714,8 +1714,9 @@ impl Walker<'_> {
 			let mut copies = Vec::new();
 			for value in arguments {
 				let value = self.strip_groups(value);
-				if self.read_local(value).is_some() {
-					// copied, moved at its last use (moves.rs, foreign.rs)
+				if self.read_local(value).is_some() || !self.places_of(value).is_empty() {
+					// A detached argument is a store, including a projected
+					// field or a returned reference, not only a local name.
 					self.note_copy_site(value);
 					copies.push((value, false));
 				}

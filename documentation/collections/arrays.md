@@ -188,7 +188,7 @@ function read = (items: Array<Integer>) => console.log(items)
 read(copy small)
 ```
 
-The only exception is literal and range widening within one primitive type; those types have the primitive's storage:
+The only exception is literal and range widening within one primitive type, at any depth of the item type. Tuples and objects with the same fields may differ only by those widenings: `[("é", 0), ("日", 1)]` can be stored as `Array<(String, Integer)>` without `copy`. These types have the primitive components' storage:
 
 ```fa
 let exact: Array<1 | 2> = [1, 2]
@@ -202,6 +202,8 @@ The same exception covers `Array<Integer<min = 0, max = 10>>` to `Array<Integer>
 A generic signature `<Item: { name: String }>(items: Array<Item>)` preserves the actual item type and borrows without a conversion. The rule is identical on every target. See [type conversion](/types/type-conversion#converting-the-inside-of-a-structure).
 
 ## Slicing and copying
+
+The ownership and conversion restrictions apply to stores. Equality and ordering, `is`, membership, printing and hashing for a lookup only inspect their operands: they retain their comparability rules and never copy or convert either collection.
 
 Assigning an existing array moves it at last use. To keep both arrays, write `let duplicate = copy original`. This is the general structure rule, including recursive values and elements owning structures. `get`, indexing and iteration borrow elements; storing a borrowed structure element requires `copy`. See [memory management](/advanced/memory-management).
 

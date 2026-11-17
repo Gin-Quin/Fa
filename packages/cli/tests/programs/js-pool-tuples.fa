@@ -2,7 +2,7 @@ mutable pool: Pool<Tuple<Integer, Array<String>>> = []
 use pair = pool.add((1, ["one"]))
 pair[0] = 2
 console.log(pool) -- prints: [(2, ["one"])]
-mutable snapshot = pool
+mutable snapshot = copy pool
 use original = pool.find((pair) => pair[0] == 2)
 if original is not none { try original[1][0] = "two" }
 console.log(snapshot, pool) -- prints: [(2, ["one"])] [(2, ["two"])]

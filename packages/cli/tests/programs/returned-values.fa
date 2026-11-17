@@ -1,13 +1,13 @@
 -- A call result and a conditional value are values: they never share the
 -- contents of the place they were read from.
-function same = (items: Array<Integer>): Array<Integer> => items
+function same = (items: Array<Integer>): Array<Integer> => copy items
 mutable current = [1, 2]
 let kept = same(current)
 current.push(3)
 console.log(kept, current)
 -- prints: [1, 2] [1, 2, 3]
 
-function first = (rows: Array<Array<Integer>>): Array<Integer> throws IndexError => try rows[0]
+function first = (rows: Array<Array<Integer>>): Array<Integer> throws IndexError => try copy rows[0]
 mutable grid = [[1], [2]]
 let row = try first(grid)
 grid[0].push(5)
@@ -16,7 +16,7 @@ console.log(row, grid)
 
 type Box = { items: Array<Integer> }
 function itemsOf = (box: Box): Array<Integer> => {
-	return box.items
+	return copy box.items
 }
 mutable box = Box { items = [1] }
 let items = itemsOf(box)
@@ -25,7 +25,7 @@ console.log(items, box)
 -- prints: [1] { items = [1, 2] }
 
 mutable data = [1, 2]
-function snapshot = (): Array<Integer> => data
+function snapshot = (): Array<Integer> => copy data
 let saved = snapshot()
 data.push(3)
 console.log(saved, data)
@@ -42,13 +42,13 @@ console.log(built())
 mutable a = [1]
 let b = [2]
 let flag = a.length > 0
-mutable pick = if flag { a } else { b }
+mutable pick = if flag { copy a } else { copy b }
 pick.push(9)
 console.log(a, b, pick)
 -- prints: [1] [2] [1, 9]
 mutable lifted = if flag {
 	console.log("lifted")
-	a
+	copy a
 } else {
 	b
 }

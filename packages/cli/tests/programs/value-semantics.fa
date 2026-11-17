@@ -1,12 +1,12 @@
 -- Objects and arrays are values: a `mutable` copy never changes the original.
 let original = { count = 1, items = [1, 2] }
-mutable duplicate = original
+mutable duplicate = copy original
 duplicate.count = 2
 duplicate.items.push(3)
 console.log(original, duplicate)
 -- prints: { count = 1, items = [1, 2] } { count = 2, items = [1, 2, 3] }
 mutable numbers = [1, 2, 3]
-let snapshot = numbers
+let snapshot = copy numbers
 numbers.push(4)
 console.log(snapshot, numbers)
 -- prints: [1, 2, 3] [1, 2, 3, 4]

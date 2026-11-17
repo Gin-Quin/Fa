@@ -618,8 +618,8 @@ impl Walker<'_> {
 			_ => {
 				left != TypeId::VOID
 					&& right != TypeId::VOID
-					&& (self.s.types.assignable(left, right, Mode::Read).is_ok()
-						|| self.s.types.assignable(right, left, Mode::Read).is_ok()
+					&& (self.s.types.assignable(left, right, Mode::Inspect).is_ok()
+						|| self.s.types.assignable(right, left, Mode::Inspect).is_ok()
 						|| self.optional_numbers_compatible(left, right)
 						|| self.optional_values_compatible(left, right))
 			}
@@ -645,8 +645,8 @@ impl Walker<'_> {
 		if a == TypeId::NEVER || b == TypeId::NEVER {
 			return false;
 		}
-		self.s.types.assignable(a, b, Mode::Read).is_ok()
-			|| self.s.types.assignable(b, a, Mode::Read).is_ok()
+		self.s.types.assignable(a, b, Mode::Inspect).is_ok()
+			|| self.s.types.assignable(b, a, Mode::Inspect).is_ok()
 	}
 
 	/// An optional integer compared with an integer of another storage (`m == 3` with `m: Int8?`).
@@ -1079,11 +1079,16 @@ impl Walker<'_> {
 			return self.memo(n, |w| {
 				let comparable = w.s.types.is_recovering(value_ty)
 					|| w.s.types.is_recovering(item)
-					|| w.s.types.satisfies(value_ty, item)
-					|| w.s.types.satisfies(item, value_ty)
+					|| w.s.types.assignable(value_ty, item, Mode::Inspect).is_ok()
+					|| w.s.types.assignable(item, value_ty, Mode::Inspect).is_ok()
 					|| w.s
 						.types
-						.satisfies(w.s.types.widen(value_ty), w.s.types.widen(item));
+						.assignable(
+							w.s.types.widen(value_ty),
+							w.s.types.widen(item),
+							Mode::Inspect,
+						)
+						.is_ok();
 				if !comparable {
 					let message = format!(
 						"a `{}` is never equal to an item of a `{}`: `is in` compares the value with the items",

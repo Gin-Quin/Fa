@@ -43,7 +43,7 @@ type Palette = {
 }
 
 let palette = Palette { name = "p" }
-let colors = Palette.Color.members
+let colors = copy Palette.Color.members
 console.log(palette.first(), Palette.Color.blue, colors.length) -- prints: green blue 3
 console.log(palette.shade(true), palette.shade(false)) -- prints: Shade.Dark { depth = 3 } Shade.Light
 let shade: Palette.Shade = palette.shade(true)

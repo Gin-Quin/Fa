@@ -2229,6 +2229,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		// the whole value, or the value of an optional
 		let whole = slot.repr == repr
+			|| self.same_layout(slot.repr, repr)
 			|| matches!(slot.repr, Repr::Optional(scalar) if scalar.repr() == repr);
 		if !whole {
 			return None;

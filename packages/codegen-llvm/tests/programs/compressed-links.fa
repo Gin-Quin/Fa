@@ -30,12 +30,12 @@ type Tree = {
 	-- a copy of a root back into a new tree
 	function graft = (base: Tree, depth: Integer): Tree => Tree {
 		value = 0
-		left = base
+		left = copy base
 		right = Tree.build(depth, 1)
 	}
 }
 
-function optional = (tree: Tree): Tree? => tree
+function optional = (tree: Tree): Tree? => copy tree
 
 type Chain = {
 	label: String
@@ -54,11 +54,11 @@ type Chain = {
 
 for round in 0..3 {
 	let root = Tree.build(10, 1)
-	let duplicate = root
+	let duplicate = copy root
 	assert root.count() == 2047
 	assert duplicate.sum() == root.sum()
 	assert duplicate == root
-	let left = root.left
+	let left = copy root.left
 	assert left?.count() == 1023
 	assert root.left?.left?.value == 4
 	assert root.right?.right?.value == 7
@@ -74,7 +74,7 @@ for round in 0..3 {
 	let chain = Chain.make(200)
 	assert chain.length() == 201
 	assert chain.next?.next?.label == "node 198 of a chain long enough to own its text"
-	let kept = chain
+	let kept = copy chain
 	assert kept.letters() == chain.letters()
 }
 

@@ -90,7 +90,10 @@ function readers = (): Array<() => Integer> => {
 	mutable total = 1
 	mutable items = [1]
 	mutable functions: Array<() => Integer> = []
-	functions.push(() => total + items.length)
+	functions.push(do {
+		let itemsSnapshot = copy items
+		() => total + itemsSnapshot.length
+	})
 	total = 2
 	items.push(2)
 	functions.push(() => total + items.length)

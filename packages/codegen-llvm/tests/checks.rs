@@ -395,6 +395,30 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn nested_primitive_widening_and_inspection_do_not_copy_collections() {
+		let source = include_str!(
+			"../../analyzer/tests/cases/collections/ownership-nested-item-widening.fa"
+		);
+		for target in [Target::Native, Target::Wasm] {
+			let ir = ir_at_target(
+				"nested-primitive-widening",
+				source,
+				true,
+				OptLevel::O0,
+				target,
+			);
+			let body = function(&ir, "fa.exercise");
+			assert!(
+				!body
+					.lines()
+					.any(|line| line.contains("call") && line.contains("ptr @fa.copy")),
+				"{target:?}: {body}"
+			);
+			assert!(!ir.contains("@fa.convert_copy"), "{target:?}: {ir}");
+		}
+	}
+
+	#[test]
 	fn an_owned_async_environment_is_retained_before_suspending() {
 		let source = include_str!("programs/async-ownership-environments.fa");
 		for (name, target) in [

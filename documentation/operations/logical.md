@@ -36,6 +36,8 @@ if user { -- error: expected a `Boolean`, found `User?`. Use `user is not none`.
 
 ## Equality
 
+The ownership and conversion restrictions apply to stores. Equality and ordering, `is`, membership, printing and hashing for a lookup only inspect their operands: they retain their comparability rules and never copy or convert either collection. A comparison is not a store, so collection item invariance does not require a conversion or `copy` here.
+
 `==` and `!=` compare **values**:
 
 ```fa

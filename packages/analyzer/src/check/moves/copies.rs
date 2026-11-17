@@ -58,13 +58,83 @@ impl Walker<'_> {
 			String::new()
 		};
 		let diagnostic = self.diagnostic(&MEM004, value, format!("converting `{source}` from `{}` to `{}` changes items or recursive parts from `{}` to `{}`: the items are stored differently and the conversion walks the whole value; write `copy {source}`, even at its last use{generic}{enclosing}", self.display(actual), self.display(target), self.display(source_item), self.display(target_item)))
-			.with_fix(Fix { title: format!("Convert every part with `copy {source}`"), edits: vec![self.explicit_copy_edit(value)] });
+			.with_fix(Fix { title: format!("Convert every part with `copy {source}`"), edits: self.explicit_copy_edits(value) });
 		self.report_flow(diagnostic);
+	}
+
+	fn explicit_copy_edits(&self, value: NodeId) -> Vec<TextEdit> {
+		let mut current = value;
+		while let Some(parent) = self.parent(current) {
+			match self.view(parent) {
+				View::Access { target, .. } | View::OptionalAccess { target, .. }
+					if target == current =>
+				{
+					current = parent
+				}
+				View::Call { callee, .. } if callee == current => current = parent,
+				View::Start(call) if call == current => {
+					// `start` is contextual before a name or `do`; a grouped
+					// receiver would turn it into an ordinary function name.
+					let mut name = "receiverSnapshot".to_string();
+					let mut suffix = 2;
+					while self.s.types.syms.get(&name).is_some() {
+						name = format!("receiverSnapshot{suffix}");
+						suffix += 1;
+					}
+					let span = self.span(parent);
+					let source = self.tree.text(value.index());
+					return vec![
+						TextEdit {
+							location: Location {
+								file: self.file,
+								span: SourceSpan::new(span.start, span.start),
+							},
+							replacement: format!("do {{\n\tlet {name} = copy {source}\n\t"),
+						},
+						TextEdit {
+							location: Location {
+								file: self.file,
+								span: self.span(value),
+							},
+							replacement: name,
+						},
+						TextEdit {
+							location: Location {
+								file: self.file,
+								span: SourceSpan::new(span.end, span.end),
+							},
+							replacement: "\n}".into(),
+						},
+					];
+				}
+				_ => break,
+			}
+		}
+		vec![self.explicit_copy_edit(value)]
 	}
 
 	/// A shorthand field keeps its name: `{ items = copy items }`.
 	fn explicit_copy_edit(&self, value: NodeId) -> TextEdit {
-		let start = self.span(value).start;
+		let span = self.span(value);
+		let postfix = self
+			.parent(value)
+			.is_some_and(|parent| match self.view(parent) {
+				View::Access { target, .. }
+				| View::OptionalAccess { target, .. }
+				| View::Index { target, .. } => target == value,
+				View::Call { callee, .. } => callee == value,
+				_ => false,
+			});
+		if postfix {
+			return TextEdit {
+				location: Location {
+					file: self.file,
+					span,
+				},
+				replacement: format!("(copy {})", self.tree.text(value.index())),
+			};
+		}
+		let start = span.start;
 		let shorthand = matches!(self.view(value), View::Name(_))
 			&& self.parent(value).is_some_and(|parent| {
 				matches!(
@@ -343,7 +413,7 @@ impl Walker<'_> {
 			View::Index { index, .. } => {
 				!matches!(self.s.types.kind(self.a.type_of(index)), TypeKind::Range)
 			}
-			View::Call { .. } => crate::lower::copies::element_view(&self.tree, &self.a, node)
+			View::Call { .. } => self.reference_results.contains_key(&node) || crate::lower::copies::element_view(&self.tree, &self.a, node)
 				.is_some_and(|(_, collection)| !collection),
 			_ => false,
 		}
@@ -369,16 +439,12 @@ impl Walker<'_> {
 	}
 
 	fn report_structure_copy(&mut self, value: NodeId, later: Option<NodeId>) {
-		let edit = self.explicit_copy_edit(value);
+		let edits = self.explicit_copy_edits(value);
 		// A conversion on a containing result can already offer the very
 		// same Copy boundary. Keep its more precise diagnostic, rather than
 		// making a fix-all insert `copy` twice at that boundary.
 		if self.output.iter().any(|diagnostic| {
-			diagnostic.code.id == MEM004.id
-				&& diagnostic
-					.fixes
-					.iter()
-					.any(|fix| fix.edits.as_slice() == std::slice::from_ref(&edit))
+			diagnostic.code.id == MEM004.id && diagnostic.fixes.iter().any(|fix| fix.edits == edits)
 		}) {
 			return;
 		}
@@ -430,7 +496,7 @@ impl Walker<'_> {
 		}
 		diagnostic = diagnostic.with_fix(Fix {
 			title: format!("Make an independent copy of `{text}`"),
-			edits: vec![edit],
+			edits,
 		});
 		self.report(diagnostic);
 	}
@@ -489,6 +555,73 @@ mod tests {
 		);
 		assert!(fixed.contains("=> copy items ?? []"));
 		analyzed(&fixed);
+	}
+
+	#[test]
+	fn detached_calls_check_structure_field_and_reference_stores() {
+		let source = "async function report = (items: Array<Integer>) => console.log(items)\nmutable holder = { items = [1] }\nstart report(holder.items)\ntry holder.items[0] = 2\n";
+		let (session, file) = crate::analyze_source(source);
+		let diagnostics = session.diagnostics(file);
+		assert_eq!(
+			diagnostics
+				.iter()
+				.map(|diagnostic| diagnostic.code.id)
+				.collect::<Vec<_>>(),
+			["MEM004"]
+		);
+		let edit = &diagnostics[0].fixes[0].edits[0];
+		let mut fixed = source.to_string();
+		fixed.replace_range(
+			edit.location.span.start as usize..edit.location.span.end as usize,
+			&edit.replacement,
+		);
+		assert!(fixed.contains("start report(copy holder.items)"));
+		analyzed(&fixed);
+	}
+
+	#[test]
+	fn a_user_reference_result_is_borrowed_at_an_owning_store() {
+		let source = "function first = (rows: Array<Array<Integer>>): Array<Integer> in rows throws IndexError => try rows[0]\nlet rows = [[1]]\nlet result = try first(rows)\nconsole.log(result, rows)\n";
+		let (session, file) = crate::analyze_source(source);
+		let diagnostics = session.diagnostics(file);
+		assert_eq!(diagnostics.iter().map(|diagnostic| diagnostic.code.id).collect::<Vec<_>>(), ["MEM004"]);
+		let edit = &diagnostics[0].fixes[0].edits[0];
+		let mut fixed = source.to_string();
+		fixed.replace_range(edit.location.span.start as usize..edit.location.span.end as usize, &edit.replacement);
+		analyzed(&fixed);
+	}
+
+	#[test]
+	fn detached_receiver_copy_fix_preserves_the_postfix_call() {
+		let source = "type Holder = { items: Array<Integer>, async function report = (self) => console.log(self.items) }\nmutable holder = Holder { items = [1] }\nstart holder.report()\nconsole.log(holder.items)\n";
+		let (session, file) = crate::analyze_source(source);
+		let diagnostics = session.diagnostics(file);
+		let diagnostic = diagnostics
+			.iter()
+			.find(|diagnostic| diagnostic.code.id == "MEM004")
+			.expect("a receiver copy diagnostic");
+		let mut edits = diagnostic.fixes[0].edits.clone();
+		edits.sort_by_key(|edit| std::cmp::Reverse(edit.location.span.start));
+		let mut fixed = source.to_string();
+		for edit in edits {
+			fixed.replace_range(
+				edit.location.span.start as usize..edit.location.span.end as usize,
+				&edit.replacement,
+			);
+		}
+		assert!(
+			fixed.contains("let receiverSnapshot = copy holder"),
+			"{fixed}"
+		);
+		assert!(fixed.contains("start receiverSnapshot.report()"), "{fixed}");
+		let (fixed_session, fixed_file) = analyzed(&fixed);
+		assert!(
+			fixed_session
+				.analysis(fixed_file)
+				.starts
+				.values()
+				.all(|start| start.detached)
+		);
 	}
 
 	#[test]
@@ -736,6 +869,34 @@ mod tests {
 		);
 		analyzed(
 			"let exact: Array<\"a\"> = [\"a\"]\nlet wider: Array<\"a\" | \"b\"> = exact\nconsole.log(wider)\n",
+		);
+	}
+
+	#[test]
+	fn literal_and_range_widening_preserves_nested_item_storage() {
+		for (source, target) in [
+			("[(\"é\", 0), (\"日\", 1)]", "Array<(String, Integer)>"),
+			(
+				"[{ label = \"é\", pair = (0, true) }]",
+				"Array<{ label: String, pair: (Integer, Boolean) }>",
+			),
+		] {
+			analyzed(&format!(
+				"let values = {source}\nfunction read = (items: {target}) => console.log(items)\nread(values)\nlet wide: {target} = values\nconsole.log(wide)\n"
+			));
+		}
+	}
+
+	#[test]
+	fn comparisons_inspect_items_without_authorizing_a_store_conversion() {
+		analyzed(
+			"let values: Array<{ name: String, age: Integer }> = [{ name = \"Ana\", age = 2 }]\nlet names: Array<{ name: String }> = [{ name = \"Ana\" }]\nconsole.log(values == names)\n",
+		);
+		assert_eq!(
+			codes(
+				"let values = [{ name = \"Ana\", age = 2 }]\nlet names: Array<{ name: String }> = values\nconsole.log(names)\n"
+			),
+			["MEM004"]
 		);
 	}
 

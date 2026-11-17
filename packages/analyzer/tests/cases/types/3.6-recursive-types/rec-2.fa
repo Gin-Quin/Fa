@@ -2,6 +2,6 @@
 type Node = { value: String, child: Node? }
 type Link = { value: String, child: Link? }
 let node = Node { value = "a", child = Node { value = "b", child = none } }
-let link: Link = node
+let link: Link = copy node
 console.log(link.child?.value)
 -- prints: b

@@ -25,11 +25,11 @@ function grow = (tree: Tree) mutates tree => {
 
 function extract = (): Tree throws IndexError => {
 	let root = build(2, 3)
-	try root.children[2]
+	try copy root.children[2]
 }
 
 mutable tree = build(2, 3)
-let original = tree
+let original = copy tree
 grow(tree)
 assert sum(original) == 5
 assert sum(tree) == 15

@@ -5,7 +5,7 @@ mutable head: Link? = none
 for index in 0..20000 {
 	head = Link { value = index, next = head }
 }
-mutable snapshot = head
+mutable snapshot = copy head
 console.log(snapshot == head) -- prints: true
 if head is not none {
 	head.value = -1

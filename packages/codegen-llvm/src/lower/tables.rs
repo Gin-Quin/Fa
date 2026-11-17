@@ -1000,12 +1000,33 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.comparison_function(repr, self.frame().same_value_zero)
 	}
 
+	pub(super) fn nested_equals_pair_function(
+		&mut self,
+		left: Repr,
+		right: Repr,
+	) -> Result<FunctionValue<'ctx>, Error> {
+		self.comparison_pair_function(left, right, self.frame().same_value_zero)
+	}
+
 	fn comparison_function(
 		&mut self,
 		repr: Repr,
 		same_value_zero: bool,
 	) -> Result<FunctionValue<'ctx>, Error> {
-		let key = format!("equals {same_value_zero} {}", self.shape_key(repr));
+		self.comparison_pair_function(repr, repr, same_value_zero)
+	}
+
+	fn comparison_pair_function(
+		&mut self,
+		repr: Repr,
+		other: Repr,
+		same_value_zero: bool,
+	) -> Result<FunctionValue<'ctx>, Error> {
+		let key = format!(
+			"equals {same_value_zero} {} {}",
+			self.shape_key(repr),
+			self.shape_key(other)
+		);
 		if let Some(function) = self.drop_functions.borrow().get(&key) {
 			return Ok(*function);
 		}
@@ -1028,6 +1049,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let b = function.get_nth_param(1).expect("b").into_pointer_value();
 		let node = NodeId::new(0);
 		let equal = if let Repr::Tuple(ty) = repr
+			&& repr == other
 			&& let Some((item, _)) = self.inline_info(ty)
 		{
 			let a = self.inline_view_at(Slot { pointer: a, repr }, ty)?;
@@ -1035,7 +1057,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.arrays_equal(a, b, item, node)?
 		} else {
 			let a = self.load(Slot { pointer: a, repr })?;
-			let b = self.load(Slot { pointer: b, repr })?;
+			let b = self.load(Slot {
+				pointer: b,
+				repr: other,
+			})?;
 			self.values_equal_any(a, b, node)?
 		};
 		let result = self.builder.build_int_z_extend(equal, i32, "")?;

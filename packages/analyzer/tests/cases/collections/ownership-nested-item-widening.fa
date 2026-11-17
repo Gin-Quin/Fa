@@ -1,0 +1,24 @@
+-- Primitive literal/range widening preserves storage at every item depth.
+function exercise = (): Integer => {
+	let exact = [("é", 0), ("日", 1)]
+	function size = (items: Array<(String, Integer)>) => items.length
+	let before = size(exact)
+	let wide: Array<(String, Integer)> = exact
+	assert wide == [("é", 0), ("日", 1)]
+	let records = [{ label = "é", pair = (0, true) }]
+	function recordsSize = (items: Array<{ label: String, pair: (Integer, Boolean) }>) => items.length
+	let count = recordsSize(records)
+	let widened: Array<{ label: String, pair: (Integer, Boolean) }> = records
+	assert widened[0].pair[0] == 0
+	let complete: Array<{ name: String, age: Integer }> = [{ name = "Ana", age = 2 }]
+	let names: Array<{ name: String }> = [{ name = "Ana" }]
+	assert complete != names
+	type Narrow = { label: "a" | "b", next: Narrow? }
+	type Broad = { label: String, next: Broad? }
+	let narrow = Narrow { label = "a", next = Narrow { label = "b" } }
+	let broad = Broad { label = "a", next = Broad { label = "b" } }
+	assert narrow == broad
+	before + wide.length + count
+}
+static compiled = @exercise()
+console.log(compiled, exercise()) -- prints: 5 5

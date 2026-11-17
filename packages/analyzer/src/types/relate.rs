@@ -25,6 +25,10 @@ use crate::types::{FieldFlags, FloatBits, NominalKind, TypeFlags, TypeKind};
 pub enum Mode {
 	/// Read through a view (a parameter, a `use`): fields are views.
 	Read,
+	/// Inspect compatible values without storing or converting either operand.
+	Inspect,
+	/// Inspect an aggregate component, preserving its existing scalar storage rules.
+	InspectView,
 	/// Copied into a new place (`let`, `mutable`, a field of a new object): values may convert.
 	Copy,
 	/// Viewed inside an aggregate, without conversion: storages must match.
@@ -161,7 +165,7 @@ impl TypeStore {
 			}
 			return Err(best);
 		}
-		let view = mode == Mode::View;
+		let view = matches!(mode, Mode::View | Mode::InspectView);
 		match (s, t) {
 			(K::Int(a), K::Int(b)) => {
 				let (a, b) = (*self.int(a), *self.int(b));
@@ -236,6 +240,8 @@ impl TypeStore {
 				}
 				let item_mode = if mode == Mode::Copy {
 					Mode::Copy
+				} else if matches!(mode, Mode::Inspect | Mode::InspectView) {
+					Mode::InspectView
 				} else {
 					Mode::View
 				};
@@ -249,7 +255,7 @@ impl TypeStore {
 				if kind_a != kind_b {
 					return Err(Reason::Mismatch);
 				}
-				if mode != Mode::Copy
+				if !matches!(mode, Mode::Copy | Mode::Inspect | Mode::InspectView)
 					&& (!self.same_structure_item(item_a, item_b)
 						|| !self.same_structure_item(key_a, key_b))
 				{
@@ -257,6 +263,8 @@ impl TypeStore {
 				}
 				let parts = if mode == Mode::Copy {
 					Mode::Copy
+				} else if matches!(mode, Mode::Inspect | Mode::InspectView) {
+					Mode::InspectView
 				} else {
 					Mode::View
 				};
@@ -301,6 +309,8 @@ impl TypeStore {
 		let target_fields = self.shape_fields(target).to_vec();
 		let field_mode = if mode == Mode::Copy {
 			Mode::Copy
+		} else if matches!(mode, Mode::Inspect | Mode::InspectView) {
+			Mode::InspectView
 		} else {
 			Mode::View
 		};

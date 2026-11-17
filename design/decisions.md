@@ -2814,3 +2814,7 @@ Ordinary String arguments are immutable values; explicitly dependent String
 arguments still retain their place. Borrowing a compile-time constant gives it
 caller-lived temporary storage. JSON default closures capture their snapshot
 slots by value, matching their nonescaping parser lifetime.
+
+### Ownership enforcement: inspecting comparisons and nested literal widening (lead, 2026-11-17)
+
+Ownership and conversion restrictions apply to stores. Read-only equality, ordering, `is`, membership, printing and hashing for lookup retain their prior compatibility rules and inspect the items without copying or converting either collection. Primitive literal/range widening is storage-preserving at every depth of an item type: the same tuple/object shape with only such component widenings (for example `("é", 0)` as `(String, Integer)`) does not require `copy`, including when stored in an array. Different primitive types, extra union alternatives/optionality, projected fields and different recursive types still require explicit conversion with `copy`.

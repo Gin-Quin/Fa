@@ -11,7 +11,7 @@ async function report = (label: String, values: Array<Integer>) => {
 async function main = () => {
 	await sleep(1)
 	mutable numbers = [1, 2, 3]
-	start report("call", numbers)
+	start report("call", copy numbers)
 	start do {
 		await sleep(10)
 		console.log("block {numbers}")

@@ -1347,10 +1347,19 @@ impl Walker<'_> {
 	/// Capturing an alias cannot extend its collection's lifetime. Check the
 	/// same collection origins as returned references, including joined aliases.
 	pub(super) fn check_escaping_references(&mut self, lambda: NodeId, at: NodeId) {
+		let mut at = at;
+		while let View::Block { statements } = self.view(at) {
+			let Some(last) = statements.last() else {
+				break;
+			};
+			at = last;
+		}
 		// An owned snapshot in a local container does not itself let a
 		// collection reference leave the owner's activation. The evaluated
 		// closure origins are checked again at an actual escaping use.
-		if self.capture_snapshot_is_local(at) { return; }
+		if self.capture_snapshot_is_local(at) {
+			return;
+		}
 
 		let mut pending = vec![lambda];
 		let mut visited = rustc_hash::FxHashSet::default();
@@ -1384,9 +1393,13 @@ impl Walker<'_> {
 					}) {
 						continue;
 					}
-					if !self.reported_once.insert((lambda, "MEM004")) || !self.reported_once.insert((at, "MEM004")) {
+					if self.reported_once.contains(&(lambda, "MEM004"))
+						|| self.reported_once.contains(&(at, "MEM004"))
+					{
 						continue;
 					}
+					self.reported_once.insert((lambda, "MEM004"));
+					self.reported_once.insert((at, "MEM004"));
 					let owner = self.place_text(owner);
 					let name = self
 						.s
@@ -1403,12 +1416,22 @@ impl Walker<'_> {
 
 	fn capture_snapshot_is_local(&self, mut node: NodeId) -> bool {
 		loop {
-			match self.view(node) {
-				View::Declaration { .. } => return self.a.symbols.symbol_of_decl(node).is_some_and(|symbol| !self.declared_outside_functions(symbol)),
-				_ => {}
+			if matches!(self.view(node), View::Declaration { .. }) {
+				return self
+					.a
+					.symbols
+					.symbol_of_decl(node)
+					.is_some_and(|symbol| !self.declared_outside_functions(symbol));
 			}
-			let Some(parent) = self.parent(node) else { return false; };
-			if matches!(self.view(parent), View::Return(_) | View::Lambda { .. } | View::Call { .. }) { return false; }
+			let Some(parent) = self.parent(node) else {
+				return false;
+			};
+			if matches!(
+				self.view(parent),
+				View::Return(_) | View::Lambda { .. } | View::Call { .. }
+			) {
+				return false;
+			}
 			node = parent;
 		}
 	}

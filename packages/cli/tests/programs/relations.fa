@@ -49,7 +49,7 @@ let duplicate = cleo
 console.log(duplicate.friends.size, cleo.friends.size) -- prints: 0 2
 
 -- a copy of the club: its members are linked to each other
-mutable other = club
+mutable other = copy club
 use otherCleo = other.members.find((member) => member.name == "Cleo")
 console.log(otherCleo?.friends.size ?? 0, otherCleo?.team?.title ?? "none") -- prints: 2 Blue
 console.log(other.captain?.name ?? "none") -- prints: Cleo

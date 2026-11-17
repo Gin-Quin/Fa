@@ -45,7 +45,7 @@ console.log(TextEncoder, Uint8Array, Promise, long.length, long[150..152] catch 
 type P = { v: Float }
 let nan = 0.0 / 0.0
 let values = [1.0, nan]
-let duplicate = values
+let duplicate = copy values
 let p = P { v = nan }
 let points = [p]
 console.log(values == duplicate, points == points, nan == nan) -- prints: false false false

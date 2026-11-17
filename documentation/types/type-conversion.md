@@ -66,6 +66,8 @@ let human: Human = animal -- valid: Human and Animal are the same type
 
 ## Converting the inside of a structure
 
+The ownership and conversion restrictions apply to stores. Equality and ordering, `is`, membership, printing and hashing for a lookup only inspect their operands: they retain their comparability rules and never copy or convert either collection.
+
 An implicit conversion never converts the inside of a [structure](/advanced/memory-management#structures). Changing a collection's item type, a field within its items, or a recursive part builds a new structure by converting every part. Write `copy value` in the expected type, even at the source's last use and even when passing an argument to a borrowed parameter (`MEM004` otherwise):
 
 ```fa
@@ -85,7 +87,7 @@ let wide: Wide = copy small
 console.log(wide.value)
 ```
 
-Item types are invariant for implicit conversions with one exception: literal and range widening within the same primitive type. `Array<1 | 2>` and `Array<Integer<min = 0, max = 10>>` can be moved or borrowed as `Array<Integer>`; `Array<"a" | "b">` as `Array<String>`; a boolean literal as `Boolean`. A literal or range has its primitive type's storage. This exception never copies items.
+Item types are invariant for implicit conversions with one exception: literal and range widening within the same primitive type. `Array<1 | 2>` and `Array<Integer<min = 0, max = 10>>` can be moved or borrowed as `Array<Integer>`; `Array<"a" | "b">` as `Array<String>`; a boolean literal as `Boolean`. A literal or range has its primitive type's storage. This exception never copies items. The exception holds at any depth: tuples and objects with the same fields may differ only by such widenings. For example, `[("é", 0), ("日", 1)]` can be stored as `Array<(String, Integer)>` without `copy`.
 
 ```fa
 let exact: Array<1 | 2> = [1, 2]

@@ -27,7 +27,7 @@ function first = (h: Holder): Integer => {
 }
 console.log(first(holder))
 -- prints: 3
-mutable box: Holder? = holder
+mutable box: Holder? = copy holder
 if box is not none and box.counter is not none {
 	box.counter.count = 9
 }

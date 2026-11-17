@@ -1528,9 +1528,17 @@ impl<'a> Lowerer<'a> {
 		Expr::Block(statements)
 	}
 
-	/// A normal function returns an owning value. A completed loan is
-	/// materialized at this store; an already owned/moved value transfers.
+	/// A normal result owns its value; a declared reference result forwards
+	/// its loan. An already owned/moved value transfers without another copy.
 	fn owned_result(&self, value: Expr) -> Expr {
+		if self
+			.owner
+			.and_then(|owner| self.a.function(owner))
+			.and_then(|info| info.sig)
+			.is_some_and(|sig| self.types().sig(sig).reference.is_some())
+		{
+			return value;
+		}
 		Expr::Own(value.boxed())
 	}
 
@@ -2510,15 +2518,34 @@ impl<'a> Lowerer<'a> {
 		written: syntax::NodeList<'_>,
 	) -> fa_interpreter::ir::Call {
 		let order = crate::lower::calls::parameter_order(self.tree, written, arguments);
-		let references: Vec<_> = callee.and_then(|callee| match self.types().kind(self.a.type_of(callee)) {
-			TypeKind::Function(sig) => Some(self.types().params(self.types().sig(sig).params).iter().map(|param| param.reference.is_some()).collect()),
-			_ => None,
-		}).unwrap_or_default();
+		let references: Vec<_> = callee
+			.and_then(|callee| match self.types().kind(self.a.type_of(callee)) {
+				TypeKind::Function(sig) => Some(
+					self.types()
+						.params(self.types().sig(sig).params)
+						.iter()
+						.map(|param| param.reference.is_some())
+						.collect(),
+				),
+				_ => None,
+			})
+			.unwrap_or_default();
 		let skip = arguments.len().saturating_sub(references.len());
 		let mut args = Vec::with_capacity(arguments.len());
 		for (position, argument) in arguments.iter().enumerate() {
 			args.push(match argument {
-				Argument::Given(value) => Arg::Value(if position.checked_sub(skip).and_then(|position| references.get(position)).copied().unwrap_or(false) { self.borrow_value(*value) } else { self.bound_argument(*value) }),
+				Argument::Given(value) => Arg::Value(
+					if position
+						.checked_sub(skip)
+						.and_then(|position| references.get(position))
+						.copied()
+						.unwrap_or(false)
+					{
+						self.borrow_value(*value)
+					} else {
+						self.bound_argument(*value)
+					},
+				),
 				Argument::Default | Argument::Missing => Arg::Default,
 				Argument::Variadic(items) => Arg::Variadic(self.items(items.iter().copied())),
 				Argument::Receiver(_) => {

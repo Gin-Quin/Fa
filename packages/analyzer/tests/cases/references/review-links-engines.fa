@@ -64,7 +64,7 @@ function data = (): GrowingPool<Node> => {
 	mutable model: Model = {}
 	use node = model.add(7)
 	node.value = 9
-	model.nodes
+	copy model.nodes
 }
 function checks = (): Array<Integer> throws IndexError => {
 	mutable total = 0

@@ -244,7 +244,16 @@ impl Walker<'_> {
 							| "TcpListener#close" | "TcpStream#close"
 					)
 				});
-				if !consumes_receiver && matches!(self.view(callee), View::Access { .. }) {
+				let stores_receiver = matches!(self.view(callee), View::Access { target, .. } if self.copy_sites.contains(&self.strip_groups(target)));
+				if stores_receiver {
+					// Selecting a declared method borrows the same receiver
+					// before its task store; it is not a later payload use.
+					reads.remove(&callee);
+				}
+				if !consumes_receiver
+					&& !stores_receiver
+					&& matches!(self.view(callee), View::Access { .. })
+				{
 					let places = self.move_places.get(&callee).cloned().unwrap_or_default();
 					self.observe_places(*call, places, &mut reads);
 				}

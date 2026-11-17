@@ -3,7 +3,7 @@
 mutable scores = Pool<Integer>.from([3, 7, 9])
 let big = scores.filter((score) => score > 5)
 console.log(big, big.size) -- prints: [7, 9] 2
-mutable duplicate = scores
+mutable duplicate = copy scores
 console.log(duplicate == scores) -- prints: true
 duplicate.add(1)
 console.log(duplicate == scores, duplicate.size, scores.size) -- prints: false 4 3

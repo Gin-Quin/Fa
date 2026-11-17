@@ -71,6 +71,7 @@ struct Frame {
 	generation: u64,
 	code: Arc<Code>,
 	locals: Vec<Out>,
+	immutable_globals: Vec<Slot>,
 }
 
 enum Input {
@@ -304,6 +305,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 				generation: FRAME_GENERATION.fetch_add(1, Ordering::Relaxed),
 				code,
 				locals,
+				immutable_globals: Vec::new(),
 			}],
 			stack: Vec::new(),
 		})
@@ -430,6 +432,20 @@ impl<'i, 'h> Machine<'i, 'h> {
 			Op::BorrowGlobal(key) => {
 				let value = self.interpreter.host.global(*key)?;
 				let (loan, _) = self.rooted(value.into())?;
+				let globals = &self.frame().immutable_globals;
+				if globals.len() == globals.capacity() {
+					self.interpreter.reserve(
+						globals
+							.len()
+							.saturating_add(1)
+							.saturating_mul(2 * size_of::<Slot>()),
+					)?;
+				}
+				self.frames
+					.last_mut()
+					.expect("an evaluation frame")
+					.immutable_globals
+					.push(loan.owner.slot);
 				Self::done(Out::Loan(loan))
 			}
 			Op::Function(function) => Self::done(Value::Function(Arc::new(Closure::new(
@@ -908,6 +924,11 @@ impl<'i, 'h> Machine<'i, 'h> {
 					Error::Stop("removing a pool element needs its borrowed place".into()).into(),
 				);
 			};
+			self.interpreter.reserve(
+				parent
+					.lookup_bytes()
+					.saturating_add(receiver.lookup_bytes()),
+			)?;
 			if !parent.same_place(receiver) {
 				return Err(
 					Error::Stop("the removed element belongs to a different pool".into()).into(),
@@ -1319,6 +1340,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 		}
 		self.interpreter.depth += 1;
 		self.frames.push(Frame {
+			immutable_globals: Vec::new(),
 			generation,
 			code,
 			locals,
@@ -1874,12 +1896,13 @@ impl<'i, 'h> Machine<'i, 'h> {
 		if loan.owner.frame != self.frames.len() - 1 {
 			return Ok(value);
 		}
-		if !self
-			.frame()
-			.code
-			.params
-			.iter()
-			.any(|&(slot, _)| slot == loan.owner.slot)
+		if !self.frame().immutable_globals.contains(&loan.owner.slot)
+			&& !self
+				.frame()
+				.code
+				.params
+				.iter()
+				.any(|&(slot, _)| slot == loan.owner.slot)
 		{
 			return Err(
 				Error::Stop("internal: a returned reference escapes a local owner".into()).into(),

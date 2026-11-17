@@ -456,6 +456,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						(None, repr) => repr,
 						(Some(Repr::Int(a)), Repr::Int(b)) => Repr::Int(a.common(b)),
 						(Some(a), b) if a == b => a,
+						(Some(Repr::Tuple(a)), Repr::Tuple(b))
+							if types.same_structure_item(a, b)
+								&& self.tuple_type(a) == self.tuple_type(b) =>
+						{
+							Repr::Tuple(a)
+						}
+						(Some(Repr::Object(a)), Repr::Object(b))
+							if types.same_structure_item(a, b)
+								&& self.object_type(a) == self.object_type(b) =>
+						{
+							Repr::Object(a)
+						}
 						// members of different kinds: a box
 						_ => Repr::Union,
 					});
@@ -766,6 +778,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				return merger.nominal(a) == merger.nominal(b);
 			}
 			(Repr::Tuple(a), Repr::Tuple(b)) if self.same_type(a, b) => return true,
+			(Repr::Tuple(a), Repr::Tuple(b)) => {
+				return self.types().same_structure_item(a, b)
+					&& self.tuple_type(a) == self.tuple_type(b);
+			}
 			(Repr::Rec(a), Repr::Rec(b)) => match (self.repr_of(a, 0), self.repr_of(b, 0)) {
 				(Ok(a), Ok(b)) => (a, b),
 				_ => return false,

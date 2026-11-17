@@ -1068,23 +1068,33 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			// structural equality: every field, every item
 			Repr::Object(ty) if op.is_none() => {
+				let Repr::Object(other) = right.repr else {
+					return self.unions_equal(left, right, node);
+				};
+				let fields = self.printed_fields(ty);
+				let other_fields = self.printed_fields(other);
+				if fields.len() != other_fields.len()
+					|| fields
+						.iter()
+						.any(|(name, _, _)| !other_fields.iter().any(|(other, _, _)| name == other))
+				{
+					return Ok(self.context.bool_type().const_zero());
+				}
 				let left_struct = left.value.expect("an object").into_struct_value();
-				let right_value = self.convert(right, left.repr, node.index())?;
-				let right_struct = right_value.value.expect("an object").into_struct_value();
-				let fields = self.object_fields(ty);
+				let right_struct = right.value.expect("an object").into_struct_value();
 				let mut equal = self.context.bool_type().const_int(1, false);
-				for (index, repr) in fields.into_iter().enumerate() {
-					// relation sides don't count (D21)
-					if matches!(repr, Repr::Link(_) | Repr::Links(_)) {
-						continue;
-					}
-					let a = self
-						.builder
-						.build_extract_value(left_struct, index as u32, "")?;
+				for (name, index, field) in fields {
+					let (_, other_index, other_field) = other_fields
+						.iter()
+						.find(|(other, _, _)| *other == name)
+						.expect("matching data fields");
+					let a = self.builder.build_extract_value(left_struct, index, "")?;
 					let b = self
 						.builder
-						.build_extract_value(right_struct, index as u32, "")?;
-					let same = self.values_equal_any(Val::new(repr, a), Val::new(repr, b), node)?;
+						.build_extract_value(right_struct, *other_index, "")?;
+					let a = Val::new(self.repr_of(field, node.index())?, a);
+					let b = Val::new(self.repr_of(*other_field, node.index())?, b);
+					let same = self.values_equal_any(a, b, node)?;
 					equal = self.builder.build_and(equal, same, "")?;
 				}
 				Ok(equal)
@@ -1143,19 +1153,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Map(_) | Repr::Set(_) if op.is_none() => self.tables_equal(left, right, node),
 			// pools and columnars: their elements in slot order
 			Repr::Pool(item_type) | Repr::Columnar(item_type) if op.is_none() => {
-				let right = self.convert(right, left.repr, node.index())?;
 				let left = self.pool_view(left, node)?;
 				let right = self.pool_view(right, node)?;
 				self.arrays_equal(left, right, item_type, node)
 			}
 			Repr::Rec(target) if op.is_none() => {
-				let right = self.convert(right, left.repr, node.index())?;
-				let edge = left.repr;
+				let Repr::Rec(other) = right.repr else {
+					let left = self.unfold_rec(left, target, node.index())?;
+					return self.values_equal_any(left, right, node);
+				};
 				let target = self.repr_of(target, node.index())?;
-				let compare = self.nested_equals_function(target)?;
-				let left = self.edge_address(&self.builder, edge, left.value.expect("an edge"))?;
+				let other = self.repr_of(other, node.index())?;
+				let compare = self.nested_equals_pair_function(target, other)?;
+				let left =
+					self.edge_address(&self.builder, left.repr, left.value.expect("an edge"))?;
 				let right =
-					self.edge_address(&self.builder, edge, right.value.expect("an edge"))?;
+					self.edge_address(&self.builder, right.repr, right.value.expect("an edge"))?;
 				let equal = self
 					.builder
 					.build_call(compare, &[left.into(), right.into()], "")?
@@ -1196,10 +1209,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: NodeId,
 	) -> Result<IntValue<'ctx>, Error> {
 		let item = self.item_repr(item_type, node)?;
+		let other_item_type = match right.repr {
+			Repr::Array(ty) => ty,
+			_ => item_type,
+		};
+		let other_item = self.item_repr(other_item_type, node)?;
 		let a = left.value.expect("an array").into_pointer_value();
 		let b = right.value.expect("an array").into_pointer_value();
 		self.materialize_array(a, item)?;
-		self.materialize_array(b, item)?;
+		self.materialize_array(b, other_item)?;
 		let (a_items, a_length) = self.array_parts(a)?;
 		let (b_items, b_length) = self.array_parts(b)?;
 		let result = self.alloca(Repr::Bool, "equal")?;
@@ -1233,11 +1251,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		let b_pointer = unsafe {
 			self.builder
-				.build_in_bounds_gep(item_type_llvm, b_items, &[index], "")?
+				.build_in_bounds_gep(self.llvm_type(other_item), b_items, &[index], "")?
 		};
 		// A cached declaration breaks recursive Object -> Array -> Object
 		// expansion while preserving the enclosing comparison's NaN rule.
-		let equal = self.nested_equals_function(item)?;
+		let equal = self.nested_equals_pair_function(item, other_item)?;
 		let same = self
 			.builder
 			.build_call(equal, &[a_pointer.into(), b_pointer.into()], "")?

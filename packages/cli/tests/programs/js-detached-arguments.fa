@@ -3,7 +3,7 @@ async function report = (values: Array<Integer>) => {
 	console.log(values)
 }
 mutable values = [1, 2]
-start report(values)
+start report(copy values)
 values[0] = 9
 console.log(values) -- prints: [9, 2]
 await Task.yield()
@@ -29,7 +29,10 @@ try holder.items[0].value = 3
 await Task.yield()
 -- prints: index 2
 
-start holder.report()
+do {
+	let receiverSnapshot = copy holder
+	start receiverSnapshot.report()
+}
 try holder.items[0].value = 4
 await Task.yield()
 -- prints: receiver [{ value = 3 }]
@@ -43,7 +46,7 @@ await Task.yield()
 -- modify the caller's array before the detached task takes its snapshot.
 function bump = (items: Array<Box>): Array<Box> throws IndexError mutates items => {
 	try items[0].value += 1
-	items
+	copy items
 }
 start reportBoxes("nested", try bump(holder.items))
 console.log("nested caller", holder.items) -- prints: nested caller [{ value = 6 }]

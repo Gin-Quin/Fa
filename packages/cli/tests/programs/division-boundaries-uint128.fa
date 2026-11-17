@@ -391,7 +391,8 @@ function literals = (
 ): (UInt128, UInt128, UInt128, UInt128, UInt128, UInt128, UInt128, UInt128) =>
 	(value // 1, value %% 1, value // 2, value %% 2, value // 7, value %% 7, value // 16, value
 		%% 16)
-function wide = (value: UInt128): (UInt128, UInt128) => (value // 65537, value %% 65537)
+function wide = (value: UInt128): (UInt128, UInt128, UInt128, UInt128, UInt128, UInt128) =>
+	(value // 65535, value %% 65535, value // 65536, value %% 65536, value // 65537, value %% 65537)
 function rows = (): String throws DivisionByZero => {
 	mutable output = ""
 	for value in inputs {
@@ -413,8 +414,8 @@ function literalRows = (): String => {
 function wideRows = (): String => {
 	mutable output = ""
 	for value in inputs {
-		let (quotient, rest) = wide(value)
-		output += "{quotient},{rest};"
+		let actual = wide(value)
+		output += "{actual[0]},{actual[1]},{actual[2]},{actual[3]},{actual[4]},{actual[5]};"
 	}
 	output
 }

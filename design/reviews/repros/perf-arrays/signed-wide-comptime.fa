@@ -1,6 +1,6 @@
 function wide = (value: Int8): Int128 => {
-let result: Int128 = value %% 65537
-result
+	let result: Int128 = value %% 65537
+	result
 }
 console.log(wide(-128))
 static result = @wide(-128)

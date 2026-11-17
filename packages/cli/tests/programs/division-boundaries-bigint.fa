@@ -777,7 +777,9 @@ function literals = (
 ): (BigInt, BigInt, BigInt, BigInt, BigInt, BigInt, BigInt, BigInt, BigInt, BigInt, BigInt, BigInt, BigInt) =>
 	(value // 1n, value %% 1n, value // 2n, value %% 2n, value // 7n, value %% 7n, value
 		// 16n, value %% 16n, value %% -1n, value // -2n, value %% -2n, value // -7n, value %% -7n)
-function wide = (value: BigInt): (BigInt, BigInt) => (value // 65537n, value %% 65537n)
+function wide = (value: BigInt): (BigInt, BigInt, BigInt, BigInt, BigInt, BigInt) =>
+	(value // 65535n, value %% 65535n, value // 65536n, value %% 65536n, value // 65537n, value
+		%% 65537n)
 function rows = (): String throws DivisionByZero => {
 	mutable output = ""
 	for value in boundaryValues() {
@@ -799,8 +801,8 @@ function literalRows = (): String => {
 function wideRows = (): String => {
 	mutable output = ""
 	for value in boundaryValues() {
-		let (quotient, rest) = wide(value)
-		output += "{quotient},{rest};"
+		let actual = wide(value)
+		output += "{actual[0]},{actual[1]},{actual[2]},{actual[3]},{actual[4]},{actual[5]};"
 	}
 	output
 }

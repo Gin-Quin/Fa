@@ -1,0 +1,10 @@
+-- An optional guard also encloses an indexed continuation.
+mutable visits = 0
+function index = (): Integer mutates visits => {
+	visits += 1
+	0
+}
+function first = (value: { items: Array<Integer> }?): Integer? throws IndexError mutates visits =>
+	try value?.items[index()]
+console.log(try first(none), visits)
+console.log(try first({ items = [7] }), visits)

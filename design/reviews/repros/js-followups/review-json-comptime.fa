@@ -1,0 +1,16 @@
+-- Json.parse must use the same syntax messages at compile time and runtime.
+use { Json } = std.json
+function message = (text: String | Bytes): String => {
+	let _value: Integer = Json.parse(text) catch error => { return error.message }
+	"ok"
+}
+static empty = message("")
+static comma = message("[1,]")
+console.log(empty)
+console.log(message(""))
+console.log(comma)
+console.log(message("[1,]"))
+static bytes = Bytes.from([255])
+static invalid = message(bytes)
+console.log(invalid)
+console.log(message(bytes))

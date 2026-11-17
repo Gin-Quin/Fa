@@ -1,0 +1,62 @@
+-- Dense alternatives, nested decisions, and sparse/range fallbacks.
+function alternatives = (value: Integer): Integer => when value is {
+	0 | 1 => 10
+	2 => 20
+	3 => 30
+	4 => 40
+	5 => 50
+	6 => 60
+	7 => 70
+	8 => 80
+	9 => 90
+	10 => 100
+	11 => 110
+	12 => 120
+	13 => 130
+	14 => 140
+	15 => 150
+	else => 999
+}
+function ranges = (value: Integer): Integer => when value is {
+	0..2 => 10
+	2 => 20
+	3 => 30
+	4 => 40
+	5 => 50
+	6 => 60
+	7 => 70
+	8 => 80
+	9 => 90
+	10 => 100
+	11 => 110
+	12 => 120
+	13 => 130
+	14 => 140
+	15 => 150
+	else => 999
+}
+function nested = (value: Integer, other: Integer): Integer => when value is {
+	0 => when other is {
+		0 => 42
+		else => 43
+	}
+	1 => 1
+	2 => 2
+	3 => 3
+	4 => 4
+	5 => 5
+	6 => 6
+	7 => 7
+	8 => 8
+	9 => 9
+	10 => 10
+	11 => 11
+	12 => 12
+	13 => 13
+	14 => 14
+	else => -1
+}
+static expected = alternatives(0) + alternatives(1) + alternatives(15) + alternatives(99)
+console.log(expected, alternatives(0) + alternatives(1) + alternatives(15) + alternatives(99)) -- expected 1169 1169
+console.log(ranges(0), ranges(1), ranges(2), ranges(99))                                       -- expected 10 10 20 999
+console.log(nested(0, 0), nested(0, 1), nested(14, 0), nested(99, 0))                          -- expected 42 43 14 -1

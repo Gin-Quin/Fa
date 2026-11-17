@@ -1,0 +1,11 @@
+-- A concrete function value must not bypass a selected method's web restriction.
+type Slow = {
+	async function describe = (self): String => {
+		await std.time.sleep(1)
+		"slow"
+	}
+}
+async function invoke = <Item: { describe: async (self) => String }>(item: Item): String =>
+	await item.describe()
+let bound: async (Slow) => String = invoke
+console.log(bound(Slow {}))

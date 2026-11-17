@@ -1,0 +1,44 @@
+-- Exercise continue, throwing arms, alternatives and nested matches.
+type Failed = Errors { Stop }
+function choose = (value: Integer): Integer throws Failed => when value is {
+	-8 => 12
+	-7 => 13
+	-6 => 14
+	-5 => 15
+	-4 => 16
+	-3 => 17
+	-2 => 18
+	-1 => 19
+	0 => throw Failed.Stop
+	1 => 21
+	2 => 22
+	3 => 23
+	4 => 24
+	5 => 25
+	6 => 26
+	else => 99
+}
+mutable total = 0
+for value in -9..8 {
+	when value is {
+		-8 => { continue }
+		-7 => { total += 1 }
+		-6 => { continue }
+		-5 => { total += 1 }
+		-4 => { continue }
+		-3 => { total += 1 }
+		-2 => { continue }
+		-1 => { total += 1 }
+		0 => { continue }
+		1 => { total += 1 }
+		2 => { continue }
+		3 => { total += 1 }
+		4 => { continue }
+		5 => { total += 1 }
+		6 => { continue }
+		else => { total += 10 }
+	}
+	total += 100
+}
+console.log(total)                                                  -- expected 927
+console.log(choose(0) catch _ => -1, try choose(-8), try choose(7)) -- expected -1 12 99

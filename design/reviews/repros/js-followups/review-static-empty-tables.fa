@@ -1,0 +1,12 @@
+-- Empty compile-time structural tables and independent mutable materializations.
+type Key = { value: Integer }
+static empty: Set<Key> = []
+static byKey: Map<Key, String> = []
+function show = (values: Set<Key>, labels: Map<Key, String>) => {
+	console.log(values.size, values.includes({ value = 1 }), labels.size, labels.get({ value = 1 }))
+}
+show(empty, byKey)
+mutable first = empty
+mutable second = empty
+first.add({ value = 1 })
+console.log(first.size, second.size)

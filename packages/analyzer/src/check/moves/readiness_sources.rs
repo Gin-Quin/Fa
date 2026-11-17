@@ -3,7 +3,7 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::{EARLY, Entry, Propagation, READY};
+use super::{Context, EARLY, Entry, Propagation, READY};
 use crate::analysis::{
 	OwnershipDeclarationGuard, OwnershipEntry, OwnershipEntryMode, OwnershipEntrySources,
 	OwnershipInvocationEdge, OwnershipSourceGraph, OwnershipSources,
@@ -29,7 +29,7 @@ impl Walker<'_> {
 	pub(super) fn publish_ownership_source_graph(
 		&mut self,
 		propagation: &Propagation,
-		bodies: &FxHashMap<NodeId, NodeId>,
+		bodies: &FxHashMap<Context, NodeId>,
 		defaults: &FxHashSet<NodeId>,
 	) {
 		let mut graph = OwnershipSourceGraph::default();
@@ -38,7 +38,7 @@ impl Walker<'_> {
 				.owners
 				.get(&entry.context)
 				.copied()
-				.unwrap_or(entry.context);
+				.unwrap_or(entry.context.node());
 			let pending = propagation.unresolved.contains(&entry.context)
 				|| !bodies.contains_key(&entry.context)
 				|| self.a.ownership_sources.pending_functions.contains(&owner);
@@ -50,11 +50,19 @@ impl Walker<'_> {
 				},
 			);
 		}
-		for (&node, read) in &self.a.ownership_sources.reads.clone() {
+		for node in self
+			.a
+			.ownership_sources
+			.reads
+			.keys()
+			.copied()
+			.collect::<Vec<_>>()
+		{
 			let Some(sources) = self.ownership_read_origins.get(&node).cloned() else {
 				continue;
 			};
-			self.publish_entry_read(&mut graph, propagation, read.context, node, sources);
+			let context = self.invocation_context(node, defaults);
+			self.publish_entry_read(&mut graph, propagation, context, node, sources);
 		}
 		let creations: Vec<_> = self
 			.a
@@ -70,12 +78,7 @@ impl Walker<'_> {
 			})
 			.collect();
 		for (function, creation, captures) in creations {
-			let start = if defaults.contains(&creation) {
-				creation
-			} else {
-				self.parent(creation).unwrap_or(creation)
-			};
-			let context = self.ownership_read_context(start, defaults);
+			let context = self.invocation_context(creation, defaults);
 			let mut sources = Sources::new();
 			for symbol in captures {
 				if let Some(inputs) = self.ownership_capture_origins.get(&(function, symbol)) {
@@ -100,11 +103,15 @@ impl Walker<'_> {
 		&mut self,
 		graph: &mut OwnershipSourceGraph,
 		propagation: &Propagation,
-		context: NodeId,
+		context: Context,
 		node: NodeId,
 		sources: Sources,
 	) {
-		let function = propagation.owners.get(&context).copied().unwrap_or(context);
+		let function = propagation
+			.owners
+			.get(&context)
+			.copied()
+			.unwrap_or(context.node());
 		// Tests, watches and started blocks can retain reads before their
 		// invocation entry has been modeled. Preserve them as pending inputs.
 		graph
@@ -150,7 +157,7 @@ impl Walker<'_> {
 				.owners
 				.get(&entry.context)
 				.copied()
-				.unwrap_or(entry.context);
+				.unwrap_or(entry.context.node());
 			let stored = graph
 				.entries
 				.get_mut(&entry.published())
@@ -183,7 +190,8 @@ impl Walker<'_> {
 						declaration,
 						reached: owned,
 					});
-					for context in std::iter::once(edge.target).chain(edge.defaults.iter().copied())
+					for context in std::iter::once(Context::Body(edge.target))
+						.chain(edge.defaults.iter().copied().map(Context::Default))
 					{
 						let edge = OwnershipInvocationEdge {
 							site: edge.site,
@@ -241,7 +249,11 @@ mod tests {
 	}
 
 	fn entry(context: NodeId, owned: bool) -> OwnershipEntry {
-		Entry { context, owned }.published()
+		Entry {
+			context: Context::Body(context),
+			owned,
+		}
+		.published()
 	}
 
 	#[test]
@@ -319,7 +331,7 @@ mod tests {
 		let calls: Vec<_> = analysis.ownership_source_graph.entries[&entry(invoke.lambda, false)]
 			.calls
 			.iter()
-			.filter(|edge| edge.target.context == read.lambda)
+			.filter(|edge| edge.target.context == Context::Body(read.lambda))
 			.collect();
 		assert_eq!(calls.len(), 2);
 		for edge in calls {
@@ -345,14 +357,14 @@ mod tests {
 		assert_eq!(
 			calls
 				.iter()
-				.filter(|edge| edge.target.context == invoke.lambda)
+				.filter(|edge| edge.target.context == Context::Body(invoke.lambda))
 				.count(),
 			2
 		);
 		assert_eq!(
 			calls
 				.iter()
-				.filter(|edge| edge.target.context == default)
+				.filter(|edge| edge.target.context == Context::Default(default))
 				.count(),
 			1
 		);
@@ -392,19 +404,51 @@ mod tests {
 		);
 	}
 	#[test]
-	fn a_lambda_default_cannot_merge_its_body_and_default_context() {
-		let source = "type Reader = () => Integer\nfunction make = (n: Integer): Integer => {\n function invoke = (callback: Reader = () => n): Integer => callback()\n invoke()\n}\n";
+	fn a_lambda_default_has_distinct_body_and_default_contexts() {
+		let source = "type Reader = () => Integer\nfunction make = (n: Integer): Reader => {\n function invoke = (callback: Reader = () => n): Reader => callback\n invoke()\n}\n";
 		let (session, file) = analyze(source);
 		let analysis = session.analysis(file);
 		let invoke = function(&session, analysis, "invoke");
 		let default = invoke.params[0].default.unwrap();
+		let body = &analysis.ownership_source_graph.entries[&entry(default, false)];
+		let default_key = Entry {
+			context: Context::Default(default),
+			owned: false,
+		}
+		.published();
+		let construction = &analysis.ownership_source_graph.entries[&default_key];
+		assert_ne!(entry(default, false), default_key);
+		assert!(body.reads.values().any(|sources| !sources.is_empty()));
+		assert!(construction.reads.contains_key(&default));
+		let root = &analysis.ownership_source_graph.entries
+			[&entry(function(&session, analysis, "make").lambda, false)];
 		assert!(
-			analysis
-				.ownership_sources
-				.pending_functions
-				.contains(&default)
+			!root
+				.calls
+				.iter()
+				.any(|edge| edge.target == entry(default, false))
 		);
-		assert!(analysis.ownership_source_graph.entries[&entry(invoke.lambda, false)].pending);
-		assert!(analysis.ownership_source_graph.entries[&entry(default, false)].pending);
+	}
+	#[test]
+	fn a_borrowed_default_lambda_calls_from_its_body_only() {
+		let source = "type Reader = () => Integer\nfunction make = (n: Integer): Integer => {\n function read = (): Integer => n\n function invoke = (callback: Reader = () => read()): Integer => callback()\n invoke()\n}\n";
+		let (session, file) = analyze(source);
+		let analysis = session.analysis(file);
+		let invoke = function(&session, analysis, "invoke");
+		let read = function(&session, analysis, "read");
+		let default = invoke.params[0].default.unwrap();
+		let graph = &analysis.ownership_source_graph;
+		let body = &graph.entries[&entry(default, false)];
+		let construction = &graph.entries[&Entry {
+			context: Context::Default(default),
+			owned: false,
+		}
+		.published()];
+		assert!(
+			body.calls
+				.iter()
+				.any(|edge| edge.target.context == Context::Body(read.lambda))
+		);
+		assert!(construction.calls.is_empty());
 	}
 }

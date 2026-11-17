@@ -8,6 +8,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::graph::Graph;
 use crate::analysis::{
 	Argument, Callee, DeclarationReadiness as Ready, FunctionCaptureState, NodeFlags,
+	OwnershipContext as Context,
 };
 use crate::check::Walker;
 use crate::ids::{NodeId, SymbolId, TypeId};
@@ -25,18 +26,18 @@ struct Declaration {
 	lambda: NodeId,
 	node: NodeId,
 	symbol: SymbolId,
-	owner: NodeId,
+	owner: Context,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 struct Entry {
-	context: NodeId,
+	context: Context,
 	owned: bool,
 }
 
 struct Invocation {
 	site: NodeId,
-	caller: NodeId,
+	caller: Context,
 	target: NodeId,
 	direct: bool,
 	defaults: Vec<NodeId>,
@@ -46,9 +47,9 @@ struct Propagation {
 	declarations: Vec<Declaration>,
 	local: FxHashMap<(NodeId, NodeId), u8>,
 	inherited: FxHashMap<Entry, Vec<u8>>,
-	owners: FxHashMap<NodeId, NodeId>,
-	outgoing: FxHashMap<NodeId, Vec<Invocation>>,
-	unresolved: FxHashSet<NodeId>,
+	owners: FxHashMap<Context, NodeId>,
+	outgoing: FxHashMap<Context, Vec<Invocation>>,
+	unresolved: FxHashSet<Context>,
 }
 
 impl Propagation {
@@ -58,13 +59,12 @@ impl Propagation {
 			.owners
 			.get(&entry.context)
 			.copied()
-			.unwrap_or(entry.context);
-		if data.owner == owner {
-			// Defaults run before declarations in the function body.
-			if entry.context != owner {
-				return EARLY;
-			}
+			.unwrap_or(entry.context.node());
+		if data.owner == entry.context {
 			return self.local.get(&(site, data.node)).copied().unwrap_or(0);
+		}
+		if matches!(entry.context, Context::Default(_)) && data.owner == Context::Body(owner) {
+			return EARLY;
 		}
 		if entry.owned {
 			return READY;
@@ -110,7 +110,7 @@ impl Walker<'_> {
 					lambda: info.lambda,
 					node,
 					symbol,
-					owner: self.ownership_body(node),
+					owner: self.invocation_context(node, &defaults),
 				})
 			})
 			.collect();
@@ -126,12 +126,17 @@ impl Walker<'_> {
 			unresolved: FxHashSet::default(),
 		};
 		let mut bodies = FxHashMap::default();
-		bodies.insert(NodeId::new(self.tree.root), NodeId::new(self.tree.root));
+		bodies.insert(
+			Context::Body(NodeId::new(self.tree.root)),
+			NodeId::new(self.tree.root),
+		);
 		for info in self.a.functions.values() {
-			bodies.insert(info.lambda, info.body);
+			bodies.insert(Context::Body(info.lambda), info.body);
 			for default in info.params.iter().filter_map(|param| param.default) {
-				bodies.insert(default, default);
-				propagation.owners.insert(default, info.lambda);
+				bodies.insert(Context::Default(default), default);
+				propagation
+					.owners
+					.insert(Context::Default(default), info.lambda);
 			}
 		}
 		(propagation.outgoing, propagation.unresolved) = self.readiness_invocations(&defaults);
@@ -143,12 +148,16 @@ impl Walker<'_> {
 		self.publish_ownership_source_graph(&propagation, &bodies, &defaults);
 	}
 
-	fn solve_readiness(&self, propagation: &mut Propagation, bodies: &FxHashMap<NodeId, NodeId>) {
+	fn solve_readiness(&self, propagation: &mut Propagation, bodies: &FxHashMap<Context, NodeId>) {
 		let mut queue = VecDeque::new();
 		let mut queued = FxHashSet::default();
 		for &context in bodies.keys() {
 			for owned in [false, true] {
-				let owner = propagation.owners.get(&context).copied().unwrap_or(context);
+				let owner = propagation
+					.owners
+					.get(&context)
+					.copied()
+					.unwrap_or(context.node());
 				if owned
 					&& (!self.a.escapes.contains(&owner)
 						|| self.a.function_capture_states.get(&owner)
@@ -177,7 +186,8 @@ impl Walker<'_> {
 					if modes & if owned { READY } else { EARLY } == 0 {
 						continue;
 					}
-					for context in std::iter::once(edge.target).chain(edge.defaults.iter().copied())
+					for context in std::iter::once(Context::Body(edge.target))
+						.chain(edge.defaults.iter().copied().map(Context::Default))
 					{
 						let target = Entry { context, owned };
 						if propagation.transfer(entry, edge.site, target) && queued.insert(target) {
@@ -193,8 +203,8 @@ impl Walker<'_> {
 	fn readiness_invocations(
 		&mut self,
 		defaults: &FxHashSet<NodeId>,
-	) -> (FxHashMap<NodeId, Vec<Invocation>>, FxHashSet<NodeId>) {
-		let mut outgoing: FxHashMap<NodeId, Vec<Invocation>> = FxHashMap::default();
+	) -> (FxHashMap<Context, Vec<Invocation>>, FxHashSet<Context>) {
+		let mut outgoing: FxHashMap<Context, Vec<Invocation>> = FxHashMap::default();
 		let mut unresolved = FxHashSet::default();
 		for index in 0..self.tree.nodes.len() {
 			let site = NodeId::new(index);
@@ -210,7 +220,7 @@ impl Walker<'_> {
 				continue;
 			}
 			let arguments: Vec<_> = arguments.iter().collect();
-			let caller = self.ownership_read_context(site, defaults);
+			let caller = self.invocation_context(site, defaults);
 			let info = self.a.calls.get(&site).cloned();
 			let direct = info
 				.as_ref()
@@ -295,7 +305,6 @@ impl Walker<'_> {
 		let mut published = std::mem::take(&mut self.a.named_function_readiness);
 		for (&node, state) in &mut published {
 			if state.borrowed != Ready::Pending
-				|| state.owned == Ready::Pending
 				|| self.a.type_of(node) == TypeId::UNSET
 				|| self
 					.a
@@ -312,7 +321,7 @@ impl Walker<'_> {
 			else {
 				continue;
 			};
-			let context = self.ownership_read_context(node, defaults);
+			let context = self.invocation_context(node, defaults);
 			let phase = propagation.phase(
 				Entry {
 					context,
@@ -321,12 +330,15 @@ impl Walker<'_> {
 				index,
 				node,
 			);
-			state.borrowed = match phase {
-				EARLY => Ready::Early,
-				READY => Ready::Ready,
-				3 => Ready::Mixed,
-				_ => Ready::Pending,
-			};
+			state.borrowed = ready_state(phase);
+			state.owned = ready_state(propagation.phase(
+				Entry {
+					context,
+					owned: true,
+				},
+				index,
+				node,
+			));
 		}
 		self.a.named_function_readiness = published;
 	}
@@ -334,7 +346,7 @@ impl Walker<'_> {
 	fn readiness_barriers(
 		&self,
 		propagation: &mut Propagation,
-		bodies: &FxHashMap<NodeId, NodeId>,
+		bodies: &FxHashMap<Context, NodeId>,
 		defaults: &FxHashSet<NodeId>,
 		marker: SymbolId,
 	) {
@@ -357,7 +369,7 @@ impl Walker<'_> {
 		let mut barriers = FxHashMap::default();
 		let commits = FxHashMap::default();
 		for site in sites {
-			let context = self.ownership_read_context(site, defaults);
+			let context = self.invocation_context(site, defaults);
 			let Some(&body) = bodies.get(&context) else {
 				continue;
 			};
@@ -393,7 +405,7 @@ impl Walker<'_> {
 			.owners
 			.get(&entry.context)
 			.copied()
-			.unwrap_or(entry.context);
+			.unwrap_or(entry.context.node());
 		if !escapes {
 			EARLY
 		} else if edge.target == owner {
@@ -407,5 +419,37 @@ impl Walker<'_> {
 				.position(|data| data.lambda == edge.target)
 				.map_or(0, |index| propagation.phase(entry, index, edge.site))
 		}
+	}
+	fn invocation_context(&self, node: NodeId, defaults: &FxHashSet<NodeId>) -> Context {
+		let mut current = node;
+		loop {
+			if current != node
+				&& (matches!(
+					self.view(current),
+					View::Lambda { .. } | View::Test { .. } | View::Watch(_)
+				) || matches!(self.view(current), View::Do(_))
+					&& self
+						.parent(current)
+						.is_some_and(|parent| matches!(self.view(parent), View::Start(_))))
+			{
+				return Context::Body(current);
+			}
+			if defaults.contains(&current) {
+				return Context::Default(current);
+			}
+			let Some(parent) = self.parent(current) else {
+				return Context::Body(current);
+			};
+			current = parent;
+		}
+	}
+}
+
+fn ready_state(phase: u8) -> Ready {
+	match phase {
+		EARLY => Ready::Early,
+		READY => Ready::Ready,
+		3 => Ready::Mixed,
+		_ => Ready::Pending,
 	}
 }

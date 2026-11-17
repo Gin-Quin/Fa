@@ -64,18 +64,6 @@ impl Walker<'_> {
 						(*state == FunctionCaptureState::Pending).then_some(function)
 					}),
 			);
-		// A lambda used directly as a default has two runtime contexts at
-		// one syntax node. Until context identity separates them, neither
-		// its body nor the containing default can provide a settled proof.
-		for info in self.a.functions.values() {
-			for default in info.params.iter().filter_map(|param| param.default) {
-				if self.a.function(default).is_some() {
-					facts.pending_functions.insert(info.lambda);
-					facts.pending_functions.insert(default);
-				}
-			}
-		}
-
 		// A retained key-loop function body can have resolved reads without
 		// current-pass observations. Preserve that incompleteness explicitly,
 		// rather than treating absent reads as a proof that the source died.
@@ -269,7 +257,7 @@ mod tests {
 						.ownership_source_graph
 						.entries
 						.get(&crate::analysis::OwnershipEntry {
-							context: function,
+							context: crate::analysis::OwnershipContext::Body(function),
 							mode: crate::analysis::OwnershipEntryMode::Borrowed,
 						}) {
 					assert!(entry.pending);

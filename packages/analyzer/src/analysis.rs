@@ -1407,7 +1407,8 @@ pub type OwnershipSources = smallvec::SmallVec<[OwnershipSource; 2]>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OwnershipRead {
-	/// The executing body or parameter-default context.
+	/// Syntax owner of the read. The source graph distinguishes a default
+	/// expression from a lambda body even when they share this node.
 	pub context: NodeId,
 	pub sources: OwnershipSources,
 }
@@ -1428,9 +1429,23 @@ pub enum OwnershipEntryMode {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub enum OwnershipContext {
+	Body(NodeId),
+	Default(NodeId),
+}
+
+impl OwnershipContext {
+	pub fn node(self) -> NodeId {
+		match self {
+			Self::Body(node) | Self::Default(node) => node,
+		}
+	}
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct OwnershipEntry {
 	/// A function body, omitted default, or the module root.
-	pub context: NodeId,
+	pub context: OwnershipContext,
 	pub mode: OwnershipEntryMode,
 }
 

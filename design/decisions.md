@@ -2203,3 +2203,15 @@ readiness make an entry pending, never an empty proof. Key rechecking clears
 the graph before rebuilding it. This publication does not activate declaration
 binding or capture transfers: those consumers must resolve the graph at the
 invocation's owning block and retain pending states conservatively.
+
+## Ownership enforcement: distinct invocation contexts (2026-11-17)
+
+Source graph and readiness entries distinguish Body(node) from Default(node).
+An anonymous function written as a parameter default uses one syntax node for
+two different executions: the omitted default constructs its value; a later
+callback invocation runs its body. Neither observations nor call dependencies
+merge across those contexts. Capture construction is classified in its enclosing
+context, including a Default entry, while names and calls inside the lambda
+belong to its Body entry. Default-local function declarations use that default's
+own block-entry barrier. The temporary pending guard for this context-identity
+collision is removed; independent missing layout/invocation facts stay pending.

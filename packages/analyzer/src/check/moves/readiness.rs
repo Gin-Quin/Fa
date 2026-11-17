@@ -237,4 +237,17 @@ mod tests {
 		let source = "function make = (n: Integer): Integer => {\n function first = (again: Boolean): Integer => if again { second() } else { read() }\n function second = (): Integer => first(false)\n let before = first(false)\n function read = (): Integer => n\n before + second()\n}\n";
 		assert_eq!(states(source, "read")[0].borrowed, Ready::Mixed);
 	}
+	#[test]
+	fn a_default_block_has_its_own_declaration_barrier() {
+		let source = "function invoke = (value: Integer = do {\n let n = 1\n let before = read()\n function read = (): Integer => n\n before + read()\n}): Integer => value\ninvoke()\n";
+		let found = states(source, "read");
+		assert_eq!(
+			found.iter().map(|state| state.borrowed).collect::<Vec<_>>(),
+			[Ready::Early, Ready::Ready]
+		);
+		assert_eq!(
+			found.iter().map(|state| state.owned).collect::<Vec<_>>(),
+			[Ready::Early, Ready::Ready]
+		);
+	}
 }

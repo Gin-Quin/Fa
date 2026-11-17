@@ -118,7 +118,6 @@ impl Generator<'_> {
 				self.numeric_bindings.clear();
 				self.reference_bindings = saved_references;
 				self.reference_layout = fa_analyzer::analysis::ReferenceLayout::General;
-				self.emit_reference_family(n, &name);
 				for references in self.reference_variants(n) {
 					let reference = self.reference_suffix(&generics, &references);
 					for numeric in &numbers {
@@ -141,6 +140,7 @@ impl Generator<'_> {
 						}
 					}
 				}
+				self.emit_reference_family(n, &name);
 				// the instance receiving reactive places (D24, reactivity.rs)
 				if self.reactive_instances.contains(&n) {
 					let params: Vec<SymbolId> =

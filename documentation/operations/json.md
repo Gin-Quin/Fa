@@ -28,8 +28,9 @@ nested containers (objects and arrays); a 1001st container fails with
 
 Native serialization bypasses surrogate inspection when the String flags rule it out; otherwise it escapes canonical or virtual cut halves without materializing a borrowed span. Parsing preserves surrogate units as WTF-8, normalizing adjacent halves after unescaping. Bytes input is validated as strict UTF-8 before parsing its tokens directly. JavaScript uses its well-formed JSON.stringify and a strict decoder for byte string tokens.
 
-The interpreter reads containers with an explicit heap stack, using the native
-parser's grammar, diagnostic wording, precedence and 1000-container limit.
+The native parser and interpreter read containers with explicit heap stacks,
+using the same grammar, diagnostic wording, precedence and 1000-container limit.
+This bound is independent of wasm host call-stack limits, including at O0.
 UTF-8 validation precedes grammar checks on Bytes input. Malformed String input
 uses byte-position markers for raw lone UTF-16 units, restored in token values
 and diagnostics; this never rewrites an invalid escape into a valid escape.

@@ -3035,7 +3035,52 @@ static void test_array_view_snapshots(void) {
 	CHECK(allocated_bytes == before);
 }
 
+// The grammar's depth bound is independent of the C/wasm call stack. Check
+// both the complete returned tree and frame cleanup on deep syntax failures.
+static void test_json_depth(void) {
+	fa_release_builder();
+	long before = allocated;
+	for (int mode = 0; mode < 3; mode++) {
+		size_t depth = mode == 0 ? 999 : mode == 1 ? 1000 : 500;
+		uint8_t text[2 * JSON_MAX_DEPTH + 64];
+		const uint8_t prefix[] = "{\"data\":";
+		size_t length = sizeof prefix - 1;
+		copy_bytes(text, prefix, length);
+		for (size_t i = 0; i < depth; i++) text[length++] = '[';
+		text[length++] = '0';
+		if (mode == 2) text[length++] = ',';
+		for (size_t i = 0; i < depth; i++) text[length++] = ']';
+		text[length++] = '}';
+		FaJsonDocument *document = 0;
+		MessageError *error = (MessageError *)fa_json_parse(text, length,
+		    (const uint8_t *)"o0;", &document);
+		if (mode == 0) {
+			CHECK(error == 0 && document != 0);
+			const FaJson *node = document->root.items;
+			for (size_t i = 0; i < depth; i++) {
+				CHECK(node->kind == JSON_ARRAY && node->count == 1);
+				node = node->items;
+			}
+			CHECK(node->kind == JSON_NUMBER && node->integer == 0);
+			fa_json_free(document);
+		} else {
+			CHECK(error != 0 && document == 0);
+			const char *expected = mode == 1 ? "JSON Parse error: Exceeded the maximum depth" :
+			    "JSON Parse error: Unexpected comma at the end of array expression";
+			CHECK(fa_string_equal(string_bytes(&error->message), string_length(&error->message),
+			    (const uint8_t *)expected, c_length(expected)));
+			if (string_owned(error->message.capacity)) {
+				fa_string_free(error->message.bytes, error->message.capacity);
+			}
+			fa_free(error, sizeof(MessageError), sizeof(int64_t));
+		}
+		fa_release_builder();
+		CHECK(allocated == before);
+	}
+}
+
 int main(void) {
+	test_json_depth();
 	test_grapheme_conformance();
 	test_array_view_snapshots();
 	test_storage_hints();

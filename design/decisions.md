@@ -2792,3 +2792,9 @@ lone-unit preservation observable through static and runtime calls.
 Native optional imported/constraint calls use the analyzed present receiver;
 worker calls reuse the value retained by the guard. Native capture discovery
 visits a named argument's value and excludes its navigation-only parameter label.
+
+The full JSON corpus exposed wasm O0 exhausting its host call stack inside the
+recursive C reader before reaching the valid 1000-container boundary. Native
+container parsing now uses explicit frames, with the same token reader,
+arena-backed values, error precedence and depth limit. A sanitizer regression
+checks the complete 1000-container tree and releases on deep malformed inputs.

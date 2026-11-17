@@ -75,6 +75,11 @@ impl<'t> NodeList<'t> {
 		NodeList(self.0.get(count..).unwrap_or(&[]))
 	}
 
+	/// The first `count` nodes.
+	pub fn take(self, count: usize) -> NodeList<'t> {
+		NodeList(&self.0[..count.min(self.0.len())])
+	}
+
 	/// The nodes, in source order.
 	pub fn iter(self) -> impl DoubleEndedIterator<Item = NodeId> + ExactSizeIterator + 't {
 		self.0.iter().copied().map(id)
@@ -665,6 +670,8 @@ pub enum View<'t> {
 	},
 	/// `readonly field: T` in a type.
 	Readonly(NodeId),
+	/// A contextual stored-link field modifier.
+	Link(NodeId),
 }
 
 fn binding_kind(kind: DeclarationKind) -> BindingKind {
@@ -1215,6 +1222,7 @@ pub fn view(tree: &TypedSyntaxTree, n: NodeId) -> View<'_> {
 			paths: list(paths),
 		},
 		Node::Readonly { right } => View::Readonly(id(*right)),
+		Node::Link { right } => View::Link(id(*right)),
 
 		Node::Await { right } => View::Await(id(*right)),
 		Node::Copy { right } => View::Copy(id(*right)),

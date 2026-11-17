@@ -1,0 +1,23 @@
+type Node = { left: Integer, children: Array<Integer> }
+function field = (values: Array<Node>): Integer in values throws IndexError => try values[0].left
+function preserve = (values: Array<Node>, item: Node in values): Integer mutates item.children => {
+	item.children.clear()
+	item.left
+}
+function slot = (values: Array<Node>, inner: Array<Integer> in values): Integer in inner throws IndexError => try inner[0]
+function exercise = (): Array<Integer> throws IndexError => {
+	mutable values: Array<Node> = [{ left = 7, children = [9] }]
+	use left = try field(values)
+	values[0].children.clear()
+	left += 1
+	use item = values[0]
+ let answer = preserve(values, item)
+ values[0].children.push(3)
+ use inner = values[0].children
+ use selected = try slot(values, inner)
+ selected += 1
+ [left, answer, selected]
+}
+static result = @exercise()
+console.log(result)         -- prints: [8, 8, 4]
+console.log(try exercise()) -- prints: [8, 8, 4]

@@ -615,7 +615,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The pointer to an item, after the bounds check when the node has
 	/// `INDEX_CHECK` (an `IndexError`).
-	fn checked_item(
+	pub(super) fn checked_item(
 		&mut self,
 		node: NodeId,
 		array: PointerValue<'ctx>,
@@ -727,6 +727,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		index: NodeId,
 	) -> Result<Slot<'ctx>, Error> {
 		let array = self.expr(target)?;
+		if array.repr == Repr::Bytes {
+			return self.bytes_index_place(node, array, index);
+		}
 		if let Repr::Growing(_) = array.repr {
 			let index_node = index;
 			let index = self.expr(index)?;
@@ -1200,7 +1203,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// that the code point is read from the text without building the array.
 	pub(crate) fn code_points_of(&self, node: NodeId) -> Option<NodeId> {
 		let target = match self.view(node) {
-			View::Index { target, .. } => target,
+			View::Index { target, index } if self.node_repr(index).ok() != Some(Repr::Range) => {
+				target
+			}
 			View::Call { callee, .. } => match self.view(callee) {
 				View::Access { target, members } if members.len() == 1 => target,
 				_ => return None,
@@ -1375,7 +1380,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			fa_analyzer::analysis::Callee::Builtin(id)
 				if matches!(
 					fa_analyzer::builtins::get(id).path,
-					"String#codePoints" | "String#bytes"
+					"String#codePoints" | "String#toUtf8"
 				) =>
 			{
 				Some(inner)
@@ -1385,12 +1390,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// Whether a call that [`Lowering::code_points_call`] found is
-	/// `text.bytes()` rather than `text.codePoints()`.
+	/// `text.toUtf8()` rather than `text.codePoints()`.
 	pub(crate) fn is_bytes_call(&self, call: NodeId) -> bool {
 		matches!(
 			self.analysis.call(call).map(|info| info.callee),
 			Some(fa_analyzer::analysis::Callee::Builtin(id))
-				if fa_analyzer::builtins::get(id).path == "String#bytes"
+				if fa_analyzer::builtins::get(id).path == "String#toUtf8"
 		)
 	}
 
@@ -1403,9 +1408,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 	}
 
-	/// The byte length of a text, as an `i64`.
+	/// The encoded UTF-8 byte length of a text, as an `i64`.
 	pub(crate) fn byte_length(&self, text: Val<'ctx>) -> Result<IntValue<'ctx>, Error> {
-		let (_, length) = self.string_parts(text)?;
+		let length = if let Some(length) = self.frozen_byte_length(text) {
+			length
+		} else {
+			let (bytes, physical) = self.string_parts(text)?;
+			self.call_value(
+				self.runtime.function("fa_string_encoded_length")?,
+				&[
+					bytes.into(),
+					physical.into(),
+					self.string_capacity(text)?.into(),
+				],
+			)?
+			.into_int_value()
+		};
 		self.int_to(
 			length,
 			IntRepr {
@@ -1416,7 +1434,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		)
 	}
 
-	/// The number of items of `text.codePoints()` or `text.bytes()` (`call`),
+	/// The number of items of `text.codePoints()` or `text.toUtf8()` (`call`),
 	/// without the array: an `i64`.
 	pub(crate) fn text_view_length(
 		&mut self,
@@ -1442,7 +1460,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		position: IntValue<'ctx>,
 		index: NodeId,
 	) -> Result<IntValue<'ctx>, Error> {
-		let (bytes, _) = self.string_parts(text)?;
+		let (bytes, physical) = self.string_parts(text)?;
 		let length = self.byte_length(text)?;
 		let i64 = self.context.i64_type();
 		let position = if self.may_be_negative(index) {
@@ -1459,15 +1477,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let branch = self.builder.build_conditional_branch(inside, read, end)?;
 		self.likely(branch)?;
 		self.builder.position_at_end(read);
-		let address = unsafe {
-			self.builder
-				.build_in_bounds_gep(self.context.i8_type(), bytes, &[position], "")?
-		};
+		let offset = self.builder.build_int_cast(position, self.usize, "")?;
 		let byte = self
-			.builder
-			.build_load(self.context.i8_type(), address, "byte")?
+			.call_value(
+				self.runtime.function("fa_string_utf8_byte")?,
+				&[
+					bytes.into(),
+					physical.into(),
+					self.string_capacity(text)?.into(),
+					offset.into(),
+				],
+			)?
 			.into_int_value();
-		let byte = self.builder.build_int_z_extend(byte, i64, "")?;
+		self.runtime_integer_range(byte, 0, 256)?;
+		let byte = self.builder.build_int_z_extend_or_bit_cast(byte, i64, "")?;
 		self.builder.build_unconditional_branch(end)?;
 		self.builder.position_at_end(end);
 		let code = self.builder.build_phi(i64, "byte_or_missing")?;
@@ -1516,7 +1539,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// `text.codePoints().get(index)`: a `UInt32?`.
-	fn code_point_get(
+	pub(super) fn code_point_get(
 		&mut self,
 		node: NodeId,
 		code_points: NodeId,
@@ -2253,7 +2276,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let mark = self.mark();
 					self.frame_mut()
 						.catches
-						.push((failed_block, error_pointer, mark));
+						.push((failed_block, Some(error_pointer), mark));
 				}
 				let order = self.call_collection_callback(
 					closure,

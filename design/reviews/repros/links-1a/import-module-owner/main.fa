@@ -1,0 +1,3 @@
+use a = add(3)
+reset()
+console.log(a.value)

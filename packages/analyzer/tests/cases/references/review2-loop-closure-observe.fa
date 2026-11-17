@@ -1,0 +1,15 @@
+-- error: MEM004
+-- Expected: MEM004 (escaping closure captures a reference into a local pool), through a loop result.
+type Node = { value: Integer }
+type Callback = () => Integer
+function make = (): Callback => {
+ mutable values: GrowingPool<Node> = []
+ use node = values.add({ value = 7 })
+ let callback = loop {
+  break () => node.value
+ }
+ node.value = 8
+ callback
+}
+let read = make()
+console.log(read())

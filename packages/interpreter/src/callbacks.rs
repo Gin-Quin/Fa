@@ -9,15 +9,18 @@ use ethnum::I256;
 use crate::builtins;
 use crate::eval::{self, Error};
 use crate::ir::CompareOp;
-use crate::value::{Value, contains};
+use crate::value::{Pool, Value, contains};
 
 enum Container {
 	Array,
+	Pool,
 	Set,
 	Map,
 }
 enum Kind {
+	Json(Box<crate::json::Reader>),
 	Find,
+	FindIndex,
 	Filter(Container, bool),
 	Map(bool),
 	Quantifier(bool),
@@ -33,6 +36,7 @@ pub(crate) struct Callback {
 	output: Vec<Value>,
 	total: Value,
 	sort_position: usize,
+	map: bool,
 }
 
 pub(crate) enum Progress {
@@ -46,9 +50,20 @@ pub(crate) enum Progress {
 
 impl Callback {
 	pub fn handles(path: &str) -> bool {
+		if let Some(("Pool" | "Columnar" | "OrderedColumnar", operation)) = path.split_once('#') {
+			return matches!(
+				operation,
+				"find" | "filter" | "map" | "every" | "some" | "reduce"
+			);
+		}
 		matches!(
 			path,
-			"Array#find"
+			"Json.parse"
+				| "Array#find"
+				| "Pool#find"
+				| "Columnar#find"
+				| "OrderedColumnar#find"
+				| "Array#findIndex"
 				| "Set#find" | "Map#find"
 				| "Array#filter"
 				| "Set#filter"
@@ -68,7 +83,15 @@ impl Callback {
 	}
 
 	pub fn mutating(path: &str) -> bool {
-		matches!(path, "Array#sortInPlace" | "Array#deleteWhere")
+		matches!(
+			path,
+			"Array#sortInPlace"
+				| "Array#deleteWhere"
+				| "Map#deleteWhere"
+				| "Pool#deleteWhere"
+				| "Columnar#deleteWhere"
+				| "OrderedColumnar#deleteWhere"
+		)
 	}
 
 	pub fn new(path: &str, arguments: Vec<Value>) -> Result<Box<Self>, Error> {
@@ -79,17 +102,27 @@ impl Callback {
 				.cloned()
 				.ok_or_else(|| Error::Stop(format!("missing argument {index}")))
 		};
+		let map = matches!(receiver, Value::Map(_));
 		let container = match receiver {
 			Value::Set(_) => Container::Set,
+			Value::Pool(_) => Container::Pool,
 			Value::Map(_) => Container::Map,
 			_ => Container::Array,
 		};
-		let kind = if path.ends_with("#find") {
+		let kind = if path == "Json.parse" {
+			Kind::Json(Box::new(crate::json::Reader::new(
+				&receiver,
+				arg(1)?,
+				arg(2)?.as_bool().unwrap_or(false),
+			)?))
+		} else if path.ends_with("#findIndex") {
+			Kind::FindIndex
+		} else if path.ends_with("#find") {
 			Kind::Find
 		} else if path.ends_with("#filter") {
 			Kind::Filter(container, false)
 		} else if path.ends_with("#deleteWhere") {
-			Kind::Filter(Container::Array, true)
+			Kind::Filter(container, true)
 		} else if path.ends_with("#map") {
 			Kind::Map(matches!(receiver, Value::Set(_)))
 		} else if path.ends_with("#every") {
@@ -105,14 +138,20 @@ impl Callback {
 		let function = if sort {
 			arguments.get(1).cloned()
 		} else {
-			Some(arg(1)?)
+			if path == "Json.parse" {
+				None
+			} else {
+				Some(arg(1)?)
+			}
 		};
 		let total = if matches!(kind, Kind::Reduce) {
 			arg(2)?
 		} else {
 			Value::None
 		};
-		let items = if sort {
+		let items = if path == "Json.parse" {
+			Vec::new()
+		} else if sort {
 			receiver.items().unwrap_or(&[]).to_vec()
 		} else {
 			builtins::iterate(&receiver)?
@@ -125,10 +164,25 @@ impl Callback {
 			output: Vec::new(),
 			total,
 			sort_position: 1,
+			map,
 		}))
 	}
 
-	pub fn advance(mut self: Box<Self>, returned: Option<Value>) -> Result<Progress, Error> {
+	pub fn advance(
+		mut self: Box<Self>,
+		returned: Option<Value>,
+		interpreter: &mut crate::Interpreter<'_>,
+	) -> Result<Progress, Error> {
+		if let Kind::Json(reader) = &mut self.kind {
+			return match reader.advance(returned, || interpreter.step().map_err(Error::from))? {
+				crate::json::ReadProgress::Done(value) => Ok(Progress::Done(value)),
+				crate::json::ReadProgress::Call(function) => Ok(Progress::Call {
+					function,
+					arguments: Vec::new(),
+					next: self,
+				}),
+			};
+		}
 		if matches!(self.kind, Kind::Sort) {
 			return self.sort(returned);
 		}
@@ -138,6 +192,11 @@ impl Callback {
 				Kind::Find => {
 					if boolean(value)? {
 						return Ok(Progress::Done(item.clone()));
+					}
+				}
+				Kind::FindIndex => {
+					if boolean(value)? {
+						return Ok(Progress::Done(Value::int(self.position as i64)));
 					}
 				}
 				Kind::Filter(_, inverse) => {
@@ -152,21 +211,32 @@ impl Callback {
 					}
 				}
 				Kind::Reduce => self.total = value,
-				Kind::Sort => unreachable!(),
+				Kind::Sort | Kind::Json(_) => unreachable!(),
 			}
 			self.position += 1;
 		}
 		let Some(item) = self.items.get(self.position) else {
 			return self.finish();
 		};
-		let arguments = match self.kind {
-			Kind::Reduce => vec![
-				std::mem::replace(&mut self.total, Value::None),
-				item.clone(),
-				Value::int(self.position as i64),
-			],
-			Kind::Filter(_, true) | Kind::Find | Kind::Quantifier(_) => vec![item.clone()],
-			_ => vec![item.clone(), Value::int(self.position as i64)],
+		let arguments = if self.map {
+			let (key, value) = builtins::pair(item.clone())?;
+			if matches!(self.kind, Kind::Reduce) {
+				vec![std::mem::replace(&mut self.total, Value::None), key, value]
+			} else {
+				vec![key, value]
+			}
+		} else {
+			match self.kind {
+				Kind::Reduce => vec![
+					std::mem::replace(&mut self.total, Value::None),
+					item.clone(),
+					Value::int(self.position as i64),
+				],
+				Kind::Filter(_, true) | Kind::Find | Kind::FindIndex | Kind::Quantifier(_) => {
+					vec![item.clone()]
+				}
+				_ => vec![item.clone(), Value::int(self.position as i64)],
+			}
 		};
 		Ok(Progress::Call {
 			function: self.function.as_ref().expect("a callback").clone(),
@@ -177,10 +247,12 @@ impl Callback {
 
 	fn finish(self: Box<Self>) -> Result<Progress, Error> {
 		let value = match self.kind {
-			Kind::Find => Value::None,
+			Kind::Json(_) => unreachable!("JSON finishes through its reader"),
+			Kind::Find | Kind::FindIndex => Value::None,
 			Kind::Quantifier(every) => Value::Boolean(every),
 			Kind::Reduce => self.total,
 			Kind::Filter(Container::Set, _) => Value::Set(Arc::new(self.output)),
+			Kind::Filter(Container::Pool, _) => Value::Pool(Arc::new(Pool::new(self.output))),
 			Kind::Map(true) => {
 				let mut set = Vec::new();
 				for value in self.output {

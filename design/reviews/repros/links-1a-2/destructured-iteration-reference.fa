@@ -1,0 +1,12 @@
+-- Destructured loop variables still designate fields of the collection.
+type Node = { value: Integer }
+function first = (values: Array<Node>): Node in values throws IndexError => try values[0]
+function exercise = (): Integer throws IndexError => {
+ mutable values: Array<Node> = [{ value = 1 }, { value = 2 }]
+ for { value } in values { value += 10 }
+ use node = try first(values)
+ node.value
+}
+static result = @exercise()
+console.log(result) -- prints: 11
+console.log(try exercise()) -- prints: 11

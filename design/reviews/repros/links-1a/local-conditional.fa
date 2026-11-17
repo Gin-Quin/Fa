@@ -1,0 +1,6 @@
+type Node = { value: Integer }
+function wrong = (owner: GrowingPool<Node>, yes: Boolean): Node in owner mutates owner.size => {
+	mutable local: GrowingPool<Node> = []
+	if yes { return local.add({ value = 7 }) }
+	owner.add({ value = 8 })
+}

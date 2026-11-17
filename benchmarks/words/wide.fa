@@ -52,7 +52,7 @@ for word in words {
 mutable total = 0
 for (word, count) in counts {
 	-- The first byte of the word (ASCII: its first letter's code).
-	total += count * (word.length + (try word.bytes()[0]))
+	total += count * (word.length + (try word.toUtf8()[0]))
 }
 console.log(words.length)
 console.log(counts.size)

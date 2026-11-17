@@ -1,0 +1,23 @@
+-- Implicit function-value conversions bind erased capabilities once.
+function identity = <Item>(value: Item): Item => value
+function apply = (transform: (value: Integer) => Integer): Integer => transform(9)
+function same = <Item>(owner: GrowingPool<Item>, value: Item in owner): Item in owner => value
+type Alias = (owner: GrowingPool<Integer>, value: Integer in owner) => Integer in owner
+type Tool<Item> = {
+ function identity = (value: Item): Item => value
+ function own = <Value>(value: Value): Value => value
+}
+function applyOwn = (transform: <Value>(value: Value) => Value): Integer => transform(9)
+function exercise = (): Array<Integer> => {
+ mutable values: GrowingPool<Integer> = []
+ use created = values.add(7)
+ let alias: Alias = same
+ use chosen = alias(values, created)
+ chosen = 9
+ let names = ["Ada", "Alan"].map(identity)
+ let textIdentity: (value: String) => String = Tool<String>.identity
+ [created, apply(identity), if names.get(0) == "Ada" and textIdentity("Alan") == "Alan" { applyOwn(Tool<String>.own) } else { 0 }]
+}
+static result = @exercise()
+console.log(result) -- prints: [9, 9, 9]
+console.log(exercise()) -- prints: [9, 9, 9]

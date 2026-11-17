@@ -1,0 +1,77 @@
+type Node = { value: Integer }
+type Model = {
+	nodes: GrowingPool<Node> = []
+	function add = (self, value: Integer): Node in self.nodes mutates self.nodes.size => self.nodes.add({ value = value })
+	function value = (self, node: Node in self.nodes): Integer in self.nodes => node.value
+}
+function first = (values: Array<Integer>): Integer in values throws IndexError => try values[0]
+function defaultOwner = (values: Array<Integer> = [7]): Integer in values throws IndexError => try values[0]
+function defaultReference = (owner: GrowingPool<Integer>, value: Integer in owner = owner.add(7)): Integer in owner mutates owner.size => value
+function identity = <Item>(owner: Pool<Item>, value: Item in owner): Item in owner => value
+function choose = (values: Array<Integer>, yes: Boolean): Integer in values throws IndexError => {
+	if yes { try values[0] } else { try values[1] }
+}
+function arrays = (): Integer throws IndexError => {
+	mutable values: Array<Integer> = [1, 2]
+	mutable index = 0
+	use saved = values[index]
+	index = 1
+	saved = 3
+	mutable use selected = try choose(values, false)
+	use snapshot = selected
+	reuse selected = try first(values)
+	selected = 4
+	snapshot = 5
+	values[0] + values[1]
+}
+function pools = (): Integer => {
+	mutable values: Pool<Node> = []
+	use first = values.add({ value = 1 })
+	use second = values.add({ value = 2 })
+	use alias = identity(values, second)
+	alias.value = 4
+	values.delete(first)
+	use found = values.find((node) => node.value == 4)
+	if found is not none { found.value = 5 }
+	for node in values { node.value += 4 }
+	mutable total = 0
+	for node in values { total += node.value }
+	total
+}
+function defaults = (): Integer => {
+	mutable values: GrowingPool<Integer> = []
+	use value = defaultReference(values)
+	value = 9
+	value
+}
+function methods = (): Integer => {
+	mutable model: Model = {}
+	use node = model.add(7)
+	use value = model.value(node)
+	value = 9
+	node.value
+}
+function closures = (): Integer throws IndexError => {
+	mutable values: Array<Integer> = [7]
+	use value = try first(values)
+	function read = (): Integer => value
+	value = 9
+	read()
+}
+function literalOwner = (): Integer throws IndexError => try first([9])
+function omittedOwner = (): Integer throws IndexError => try defaultOwner() + 2
+function data = (): GrowingPool<Node> => {
+	mutable model: Model = {}
+	use node = model.add(7)
+	node.value = 9
+	model.nodes
+}
+function checks = (): Array<Integer> throws IndexError => {
+	mutable total = 0
+	let built = data()
+	for node in built { total += node.value }
+	[try arrays(), pools(), defaults(), methods(), try closures(), try literalOwner(), try omittedOwner(), total]
+}
+static result = @checks()
+console.log(result) -- prints: [9, 9, 9, 9, 9, 9, 9, 9]
+console.log(try checks()) -- prints: [9, 9, 9, 9, 9, 9, 9, 9]

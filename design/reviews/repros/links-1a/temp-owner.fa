@@ -1,0 +1,3 @@
+function first = (values: Array<Integer>): Integer in values throws IndexError => try values[0]
+use x = try first([1, 2, 3])
+console.log(x)

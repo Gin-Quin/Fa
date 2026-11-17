@@ -14,7 +14,6 @@ import { CapacityError, IndexError, KeyNotFound } from "./errors.js";
 import { faFormat } from "./format.js";
 import { faCheckInteger, faRangeOverflow } from "./integers.js";
 import { faStop } from "./stops.js";
-import { faCharacters, faStringCompare } from "./strings.js";
 
 // @fa-helper faInlinePush deps: CapacityError
 /**
@@ -147,6 +146,66 @@ export function faIndexSet(array, index, value, drop) {
 export function faArrayGet(array, index) {
 	const position = index < 0 ? index + array.length : index;
 	return position >= 0 && position < array.length ? array[position] : undefined;
+}
+
+// @fa-helper faArrayView deps: faSliceBounds
+/**
+ * A live range view, without copying its items. The proxy stays an Array for
+ * ordinary iteration, methods, copying, equality and formatting. The analyzer
+ * forbids whole-view assignment and structural operations.
+ * @template T
+ * @param {T[]} array
+ * @param {number | undefined} start
+ * @param {number | undefined} end
+ * @param {boolean} inclusive
+ * @returns {T[]}
+ */
+export function faArrayView(array, start, end, inclusive) {
+	const [from, to] = faSliceBounds(array.length, start, end, inclusive);
+	const length = to - from;
+	/** @param {string | symbol} key */
+	const index = (key) => {
+		const value = typeof key === "string" && key !== "" ? Number(key) : -1;
+		return Number.isInteger(value) && value >= 0 && String(value) === key ? value : -1;
+	};
+	return new Proxy(/** @type {T[]} */ ([]), {
+		get(target, key, receiver) {
+			if (key === "length") return length;
+			const position = index(key);
+			if (position >= 0) return position < length ? array[from + position] : undefined;
+			return Reflect.get(target, key, receiver);
+		},
+		set(target, key, value) {
+			const position = index(key);
+			if (position >= 0) {
+				if (position >= length) return false;
+				array[from + position] = value;
+				return true;
+			}
+			if (key === "length") return value === length;
+			return Reflect.set(target, key, value);
+		},
+		has(target, key) {
+			const position = index(key);
+			return position >= 0 ? position < length : Reflect.has(target, key);
+		},
+		ownKeys() {
+			return [...Array.from({ length }, (_, position) => String(position)), "length"];
+		},
+		getOwnPropertyDescriptor(target, key) {
+			const position = index(key);
+			if (position >= 0 && position < length) {
+				return {
+					value: array[from + position],
+					writable: true,
+					enumerable: true,
+					configurable: true,
+				};
+			}
+			const descriptor = Reflect.getOwnPropertyDescriptor(target, key);
+			return key === "length" ? { ...descriptor, value: length } : descriptor;
+		},
+	});
 }
 
 // @fa-helper faArraySlice deps: faSliceBounds
@@ -369,14 +428,14 @@ export function faSortFloats(array) {
 	return array.sort((a, b) => a - b);
 }
 
-// @fa-helper faSortStrings deps: faArraySortInPlace faStringCompare
+// @fa-helper faSortStrings
 /**
- * `texts.sortInPlace()`: by code point, without `faCompare`'s type tests.
+ * `texts.sortInPlace()`: JavaScript UTF-16 code unit order.
  * @param {string[]} array
  * @returns {string[]} the array
  */
 export function faSortStrings(array) {
-	faArraySortInPlace(array, faStringCompare);
+	array.sort();
 	return array;
 }
 
@@ -1249,7 +1308,7 @@ export function faMapFind(map, predicate) {
 	return undefined;
 }
 
-// @fa-helper faIterable deps: FaRange faRangeValues faCharacters
+// @fa-helper faIterable deps: FaRange faRangeValues
 /**
  * The items of the source of a `from`: a range gives its integers, a string
  * its characters, any other collection itself.
@@ -1257,25 +1316,25 @@ export function faMapFind(map, predicate) {
  * @returns {Iterable<any>}
  */
 export function faIterable(source) {
-	if (typeof source === "string") {
-		return faCharacters(source);
-	}
 	return source instanceof FaRange ? faRangeValues(source) : source;
 }
 
 // @fa-helper FaValuePool
 /**
  * A `Pool` (or `GrowingPool`) of values that are not objects
- * (`Pool<Integer>`): its elements by slot, in a `Map` from a slot number to
- * the value, iterated as its values. A reference to an element is the pool
- * and its slot (`get`, `set`): `add` gives the slot, `slotOf` finds one,
+ * (`Pool<Integer>`): a direct slot array, live indices and a free list.
+ * A reference is the slot array and its index, with no lookup on access.
+ * `add` gives the slot, `slotOf` finds one,
  * `delete` and `take` take one. Printed, copied and compared by its tag.
  * @template T
  */
 export class FaValuePool {
-	/** @type {Map<number, T>} */
-	#slots = new Map();
-	#next = 0;
+	/** Direct reference container; only live slots contain initialized values. @type {(T | undefined)[]} */
+	$slots = [];
+	/** @type {Set<number>} */
+	#live = new Set();
+	/** @type {number[]} */
+	#free = [];
 
 	/** @param {Iterable<T>} [values] */
 	constructor(values) {
@@ -1293,7 +1352,7 @@ export class FaValuePool {
 
 	/** @returns {number} */
 	get size() {
-		return this.#slots.size;
+		return this.#live.size;
 	}
 
 	/**
@@ -1302,9 +1361,9 @@ export class FaValuePool {
 	 * @returns {number} its slot
 	 */
 	add(value) {
-		const slot = this.#next;
-		this.#next += 1;
-		this.#slots.set(slot, value);
+		const slot = this.#free.pop() ?? this.$slots.length;
+		this.$slots[slot] = value;
+		this.#live.add(slot);
 		return slot;
 	}
 
@@ -1323,7 +1382,7 @@ export class FaValuePool {
 	 * @returns {T | undefined}
 	 */
 	get(slot) {
-		return this.#slots.get(slot);
+		return this.$slots[slot];
 	}
 
 	/**
@@ -1332,7 +1391,7 @@ export class FaValuePool {
 	 * @returns {this}
 	 */
 	set(slot, value) {
-		this.#slots.set(slot, value);
+		this.$slots[slot] = value;
 		return this;
 	}
 
@@ -1341,7 +1400,10 @@ export class FaValuePool {
 	 * @returns {boolean}
 	 */
 	delete(slot) {
-		return this.#slots.delete(slot);
+		if (!this.#live.delete(slot)) return false;
+		this.$slots[slot] = undefined;
+		this.#free.push(slot);
+		return true;
 	}
 
 	/**
@@ -1350,14 +1412,16 @@ export class FaValuePool {
 	 * @returns {T | undefined} its value
 	 */
 	take(slot) {
-		const value = this.#slots.get(slot);
-		this.#slots.delete(slot);
+		const value = this.$slots[slot];
+		this.delete(slot);
 		return value;
 	}
 
 	/** @returns {void} */
 	clear() {
-		this.#slots.clear();
+		this.#live.clear();
+		this.$slots.length = 0;
+		this.#free.length = 0;
 	}
 
 	/**
@@ -1366,7 +1430,8 @@ export class FaValuePool {
 	 * @returns {number | undefined}
 	 */
 	slotOf(predicate) {
-		for (const [slot, value] of this.#slots) {
+		for (const slot of this.#live) {
+			const value = /** @type {T} */ (this.$slots[slot]);
 			if (predicate(value)) {
 				return slot;
 			}
@@ -1379,9 +1444,10 @@ export class FaValuePool {
 	 * @returns {void}
 	 */
 	deleteWhere(predicate) {
-		for (const [slot, value] of this.#slots) {
+		for (const slot of this.#live) {
+			const value = /** @type {T} */ (this.$slots[slot]);
 			if (predicate(value)) {
-				this.#slots.delete(slot);
+				this.delete(slot);
 			}
 		}
 	}
@@ -1393,7 +1459,7 @@ export class FaValuePool {
 	 */
 	filter(predicate) {
 		const kept = new FaValuePool();
-		for (const value of this.#slots.values()) {
+		for (const value of this.values()) {
 			if (predicate(value)) {
 				kept.add(value);
 			}
@@ -1407,12 +1473,23 @@ export class FaValuePool {
 	}
 
 	/** @returns {IterableIterator<T>} */
-	values() {
-		return this.#slots.values();
+	*values() {
+		for (const slot of this.#live) yield /** @type {T} */ (this.$slots[slot]);
 	}
 
 	/** @returns {IterableIterator<T>} */
 	[Symbol.iterator]() {
-		return this.#slots.values();
+		return this.values();
 	}
+}
+
+// @fa-helper faIsBytes
+/** Typed arrays from other JavaScript realms are still Bytes. ArrayBuffer's
+ * internal view test rejects objects that merely imitate the tag.
+ * @param {unknown} value @returns {value is Uint8Array}
+ */
+export function faIsBytes(value) {
+	return (
+		ArrayBuffer.isView(value) && Object.prototype.toString.call(value) === "[object Uint8Array]"
+	);
 }

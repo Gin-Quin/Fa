@@ -33,6 +33,7 @@ pub const RUNTIME_FILES: &[(&str, &str)] = &[
 	("equality.js", include_str!("../runtime/equality.js")),
 	("format.js", include_str!("../runtime/format.js")),
 	("copy.js", include_str!("../runtime/copy.js")),
+	("references.js", include_str!("../runtime/references.js")),
 	("relations.js", include_str!("../runtime/relations.js")),
 	("reactive.js", include_str!("../runtime/reactive.js")),
 	("foreign.js", include_str!("../runtime/foreign.js")),
@@ -328,10 +329,12 @@ mod tests {
 				helper.name
 			);
 			let declared = exports[0]
-				.strip_prefix("function ")
+				.strip_prefix("function* ")
+				.or_else(|| exports[0].strip_prefix("function "))
 				.or_else(|| exports[0].strip_prefix("async function "))
 				.or_else(|| exports[0].strip_prefix("class "))
 				.or_else(|| exports[0].strip_prefix("const "))
+				.or_else(|| exports[0].strip_prefix("let "))
 				.unwrap_or_else(|| panic!("`{}` exports `{}`", helper.name, exports[0]));
 			let declared: String = declared
 				.chars()
@@ -453,8 +456,8 @@ mod tests {
 	#[test]
 	fn collecting_does_not_depend_on_the_order_of_the_names() {
 		assert_eq!(
-			collect_helpers(["faStringLength", "faFloorModulo", "faFormat"]),
-			collect_helpers(["faFormat", "faFloorModulo", "faStringLength", "faFormat"])
+			collect_helpers(["faCharacters", "faFloorModulo", "faFormat"]),
+			collect_helpers(["faFormat", "faFloorModulo", "faCharacters", "faFormat"])
 		);
 	}
 
@@ -478,9 +481,8 @@ mod tests {
 
 	#[test]
 	fn module_state_belongs_to_its_helper() {
-		let chunk = collect_helpers(["faStringLength"]);
-		assert!(chunk.contains("let faSegmenterInstance;"));
-		assert!(chunk.contains("export function faSegmenter()"));
+		let chunk = collect_helpers(["faCharacters"]);
+		assert!(chunk.contains("export const faSegmenter = new Intl.Segmenter"));
 	}
 
 	#[test]

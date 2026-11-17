@@ -1,0 +1,7 @@
+-- Regression from the links 1a review.
+type Node = { value: Integer }
+mutable nodes: GrowingPool<Node> = []
+type Box<T> = { children: Array<T> }
+type Hidden = Box<Node in nodes> -- error: REF010
+function make = (): Hidden => ({ children = [] }) -- error: REF010
+console.log(make().children.length)

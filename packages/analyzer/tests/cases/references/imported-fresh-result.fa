@@ -1,0 +1,14 @@
+-- prints: 7
+-- file: main.fa
+mutable nodes: Pool<Node> = []
+nodes.add({ value = 1 })
+use existing = nodes.find((_node) => true)
+use fresh = add(nodes, 7)
+if existing is not none {
+	nodes.delete(existing)
+	console.log(fresh.value)
+}
+-- file: Node.fa
+export type = { value: Integer }
+-- file: add.fa
+export function = (nodes: Pool<Node>, value: Integer): Node in nodes mutates nodes.size => nodes.add({ value = value })

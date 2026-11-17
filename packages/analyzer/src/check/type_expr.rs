@@ -25,13 +25,60 @@ impl Walker<'_> {
 	/// generic function type is written").
 	pub(super) fn check_parameter_type(&mut self, n: NodeId) -> TypeId {
 		self.parameter_type = true;
-		let ty = self.check_type_expr(n);
+		let ty = self.check_reference_type_expr(n);
 		self.parameter_type = false;
+		ty
+	}
+
+	/// Only a whole parameter/result/use annotation may erase a reference to
+	/// its runtime item type. A reference nested in that item is still storage.
+	pub(super) fn check_reference_type_expr(&mut self, n: NodeId) -> TypeId {
+		let mut node = n;
+		loop {
+			match self.view(node) {
+				View::Group(inner) | View::Optional(inner) => node = inner,
+				View::RefType { .. } => {
+					self.borrowed_type_nodes.insert(node);
+					break;
+				}
+				_ => break,
+			}
+		}
+		self.check_owned_type_expr(n)
+	}
+
+	pub(super) fn check_owned_type_expr(&mut self, n: NodeId) -> TypeId {
+		let saved = self.type_expression_root.take();
+		let ty = self.check_type_expr(n);
+		self.type_expression_root = saved;
 		ty
 	}
 
 	/// The type a type expression denotes.
 	pub fn check_type_expr(&mut self, n: NodeId) -> TypeId {
+		let root = self.type_expression_root.is_none();
+		if root {
+			self.type_expression_root = Some(n);
+		}
+		let ty = self.type_expr_inner(n);
+		if root {
+			self.type_expression_root = None;
+			let mut whole = n;
+			while let View::Group(inner) | View::Optional(inner) = self.view(whole) {
+				whole = inner;
+			}
+			if self.borrowed_type_nodes.contains(&whole) {
+				if let View::RefType { item, .. } = self.view(whole) {
+					self.check_reference_annotation(item);
+				}
+			} else if !matches!(self.s.types.kind(ty), TypeKind::Sync(..)) {
+				self.check_reference_annotation(n);
+			}
+		}
+		ty
+	}
+
+	fn type_expr_inner(&mut self, n: NodeId) -> TypeId {
 		let tree = Arc::clone(&self.tree);
 		// only the type written right after a parameter's name: not its parts
 		let parameter_type = std::mem::take(&mut self.parameter_type);
@@ -131,9 +178,22 @@ impl Walker<'_> {
 					return ty;
 				}
 				SymbolKind::TypeParameter => return self.symbol_type(symbol, n),
-				// a `static` value is its literal type (M3: `static` is not analyzed yet)
+				// A `static` value can denote its well-formed literal type.
 				SymbolKind::Static => {
 					let ty = self.symbol_type(symbol, n);
+					let value = self
+						.a
+						.static_values
+						.get(&symbol)
+						.cloned()
+						.or_else(|| self.external_static(symbol));
+					if matches!(value, Some(fa_interpreter::Value::String(text)) if !text.is_well_formed())
+					{
+						let diagnostic =
+							self.diagnostic(&TY008, n, super::schemas::LONE_SURROGATE_TYPE);
+						self.report(diagnostic);
+						return TypeId::UNKNOWN;
+					}
 					return if self.s.types.is_literal(ty) {
 						ty
 					} else {
@@ -193,7 +253,7 @@ impl Walker<'_> {
 		if self.report_std_name(n, text) {
 			return TypeId::UNKNOWN;
 		}
-		let diagnostic = self.diagnostic(&TY007, n, format!("`{text}` is not a type"));
+		let diagnostic = self.diagnostic(&TY007, n, if text == "Character" { "`Character` is no longer a type: use `String` for text, including a single code unit or code point".to_string() } else { format!("`{text}` is not a type") });
 		self.report(diagnostic);
 		TypeId::UNKNOWN
 	}
@@ -553,6 +613,24 @@ impl Walker<'_> {
 		body: NodeId,
 		generics: &[crate::ids::ParamId],
 	) -> TypeId {
+		let parent = self.body.scope;
+		let scope = self
+			.a
+			.symbols
+			.scope_for(n, Some(parent), crate::symbols::ScopeKind::Function);
+		self.body.scope = scope;
+		let ty = self.function_type_expr_in_scope(n, signature, body, generics);
+		self.body.scope = parent;
+		ty
+	}
+
+	fn function_type_expr_in_scope(
+		&mut self,
+		n: NodeId,
+		signature: SignatureView<'_>,
+		body: NodeId,
+		generics: &[crate::ids::ParamId],
+	) -> TypeId {
 		if generics
 			.iter()
 			.any(|&param| self.s.types.param(param).value)
@@ -595,6 +673,11 @@ impl Walker<'_> {
 		let mut params = Vec::with_capacity(signature.parameters.len());
 		for (index, parameter) in signature.parameters.iter().enumerate() {
 			self.set_flag(parameter, NodeFlags::TYPE_EXPR);
+			if let View::Assignment { value: Some(_), .. } = self.view(parameter) {
+				let diagnostic = self.diagnostic(&crate::diagnostics::codes::types::FN030, parameter,
+					"a function type cannot declare a default: put the default on a named function, or pass this argument explicitly through the function value");
+				self.report(diagnostic);
+			}
 			// `(self) => String`: a method required by a structural type; the
 			// type is the method without its receiver (FieldFlags::METHOD)
 			if index == 0 && is_self_parameter(&tree, parameter) {
@@ -627,10 +710,39 @@ impl Walker<'_> {
 					TypeId::UNKNOWN
 				});
 			}
+			let annotation = match self.view(parameter) {
+				View::Assignment { annotation, .. } => annotation,
+				_ => None,
+			};
+			let reference = annotation.and_then(|annotation| self.reference_contract(annotation));
+			if reference.is_none()
+				&& let Some(annotation) = annotation
+			{
+				self.check_reference_annotation(annotation);
+			}
+			if let View::Assignment { target, .. } = self.view(parameter)
+				&& let View::Name(name) = self.view(target)
+			{
+				let symbol = self.declare(
+					parameter,
+					name,
+					crate::symbols::SymbolKind::Parameter {
+						index: params.len() as u16,
+					},
+				);
+				let entry = self.a.symbols.symbol_mut(symbol);
+				entry.ty = ty;
+				entry.state = crate::symbols::DeclState::Done;
+			}
 			let ty = if variadic { self.s.types.array(ty) } else { ty };
-			params.push(ParamSig { ty, variadic });
+			params.push(ParamSig {
+				reference,
+				ty,
+				variadic,
+			});
 		}
-		let ret = self.check_type_expr(body);
+		let ret = self.check_reference_type_expr(body);
+		let reference = self.reference_contract(body);
 		let throws = written_throws.map_or(TypeId::NEVER, |errors| self.check_type_expr(errors));
 		let unsupported = unsupported_clause
 			|| !signature.requires.is_empty()
@@ -662,6 +774,7 @@ impl Walker<'_> {
 			let effects = w.s.types.effect_set(&mutated, &[]);
 			let generics = w.s.types.list(&generics);
 			w.s.types.function(FnSig {
+				reference,
 				params,
 				is_async: signature.is_async,
 				effects,
@@ -785,7 +898,11 @@ impl Walker<'_> {
 						current = ty;
 					}
 					None => {
-						let message = format!("`{}` has no member `{text}`", w.display(current));
+						let message = format!(
+							"`{}` has no member `{text}`{}",
+							w.display(current),
+							w.removed_type_member_hint(current, &text)
+						);
 						let diagnostic = w.diagnostic(&TY007, member, message);
 						w.report(diagnostic);
 						return TypeId::UNKNOWN;

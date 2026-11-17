@@ -1,0 +1,14 @@
+function show = (text: String) => {
+	mutable sum = 0
+	for byte in text.toUtf8() {
+		sum += byte
+	}
+	console.log(text.utf8Length(), sum)
+}
+
+let text = String.from("é日😀")
+show(text) -- prints: 9 1589
+show(try text[2..3]) -- prints: 3 619
+show(try text[3..4]) -- prints: 3 619
+show("ASCII") -- prints: 5 361
+show("") -- prints: 0 0

@@ -1,0 +1,39 @@
+-- Generic code must retain the declared slot type, not the current value's shape.
+type Node = { value: Integer }
+function first = <Item>(values: Array<Item>): Item in values throws IndexError => try values[0]
+function replace = <Item>(values: Array<Item>, value: Item) throws IndexError mutates values[..] => {
+ use target = try first(values)
+ target = copy value
+}
+function entry = <Item>(values: Map<String, Item>): (Item in values)? => values.get("key")
+function indexed = <Item>(entries: Map<String, Item>): Item in entries throws KeyNotFound => try entries["key"]
+function duplicate = <Item>(entries: Map<String, Item>): Map<String, Item> => copy entries
+function check = (): Integer throws IndexError | KeyNotFound => {
+ mutable values: Array<Integer | Node> = [Node { value = 7 }]
+ try replace<Integer | Node>(values, 9)
+ mutable nodes: Array<Node> = [Node { value = 7 }]
+ try replace(nodes, Node { value = 9 })
+ use node = try first(nodes)
+ mutable entries: Map<String, Integer | Node> = [("key", Node { value = 7 })]
+ use item = entry(entries)
+ if item is not none { item = 9 }
+ use byIndex = try indexed(entries)
+ byIndex = 11
+ let viaGet = entries.get("key")
+ if viaGet is Integer { if viaGet != 11 { return 0 } } else { return 0 }
+ byIndex = 9
+ let copied = duplicate(entries)
+ let words: Map<String, String | Node> = [("key", "text")]
+ let copiedWords = duplicate(words)
+ let copiedWord = try copiedWords["key"]
+ let copiedNumber = try copied["key"]
+ if copiedWord is String and copiedNumber is Integer {
+  if copiedWord != "text" or copiedNumber != 9 { return 0 }
+ } else { return 0 }
+ let a = values[0]
+ let b = entries["key"]
+ if a is Integer and b is Integer { a + b + node.value - 18 } else { 0 }
+}
+static result = @check()
+console.log(result) -- prints: 9
+console.log(try check()) -- prints: 9

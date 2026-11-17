@@ -1,0 +1,63 @@
+-- Core UTF-16 operations over native WTF-8 storage.
+function identity = (text: String): String => text
+let text = "aé日😀z"
+console.log(text.length, text.utf8Length(), text.codeUnitAt(3), text.codeUnitAt(-2)) -- prints: 6 11 55357 56832
+console.log(text[1], text[2], text[3].length, text[3].isWellFormed(), text[4].isWellFormed()) -- prints: é 日 1 false false
+console.log(text[3] + text[4], text[3..4] + text[4..5]) -- prints: 😀 😀
+console.log(text[3], text[4], [text[3], text[4]]) -- prints: � � ["�", "�"]
+console.log(text[1..4], text[4..], text[3..3], text[-2..]) -- prints: é日� �z  �z
+for point, index in text {
+	console.log(index, point, point.length)
+}
+-- prints: 0 a 1
+-- prints: 1 é 1
+-- prints: 2 日 1
+-- prints: 3 😀 2
+-- prints: 5 z 1
+console.log("\u{10000}" < "\u{E000}", text[3] < "😀", "😀" < text[3], text[4] < "\u{E000}") -- prints: true true false true
+console.log(text[1] == "é", text[2] == "日", text[3] == "a", "z" == text[-1]) -- prints: true true false true
+console.log(when text[1] is { "a" => 1, "é" => 2, else => 3 }) -- prints: 2
+mutable pair = text[3]
+pair += text[4]
+console.log(pair, pair.length, pair == "😀", pair.isWellFormed()) -- prints: 😀 2 true true
+mutable frame = identity("é日")
+frame += text[3]
+frame += text[4]
+console.log(frame, frame.length, frame.isWellFormed()) -- prints: é日😀 4 true
+mutable heap = String.from("é日", capacity = 256)
+heap += text[3]
+heap += text[4]
+console.log(heap, heap.length, heap.isWellFormed(), heap.capacity >= 256) -- prints: é日😀 4 true true
+let empty = ""
+console.log(empty.length, empty[0..0].length, empty.get(0)) -- prints: 0 0 none
+console.log(identity("\r\nx").length, (try identity("\r\nx")[0..1]) == "\r") -- prints: 3 true
+
+mutable source = String.from("aé日😀z", capacity = 256)
+use borrowed = try source[1..3]
+console.log(borrowed, borrowed.length) -- prints: é日 2
+use half = try source[3..4]
+console.log(half, half.length, half.isWellFormed()) -- prints: � 1 false
+console.log("{text[3]}{text[4]}" == "😀") -- prints: true
+console.log("{text[3]}{text[4]}") -- prints: 😀
+console.log("{text[3]}{""}{text[4]}") -- prints: 😀
+console.log([text[3], "", text[4]].join("").length, ["e", "\u{301}"].join("").length, ["é", "日"].join("😀").length) -- prints: 2 2 4
+function checked = (value: String, index: Integer): UInt16 throws IndexError => try value.codeUnitAt(index)
+console.log(checked("é😀", -1) catch _error => 0, checked("", 0) catch _error => 999, checked("x", -2) catch _error => 999) -- prints: 56832 999 999
+
+type Cell = Union {
+	Text = { id: Int32, text: String }
+	Number = { number: Integer }
+}
+mutable cells: Array<Cell> = []
+cells.push(Cell.Text { id = 0, text = "é" })
+cells.push(Cell.Text { id = 0, text = text[3] })
+cells.push(Cell.Text { id = 0, text = "x".repeat(130) + text[4] })
+for cell in cells {
+	when cell is {
+		Cell.Text as value => console.log(value.text.length, value.text.isWellFormed(), try value.text.codeUnitAt(-1))
+		Cell.Number => console.log("number")
+	}
+}
+-- prints: 1 true 233
+-- prints: 1 false 55357
+-- prints: 131 false 56832

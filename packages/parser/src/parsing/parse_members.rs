@@ -36,6 +36,16 @@ pub(crate) fn parse_member_expression(context: &mut Context<'_>, stop_at: &[Toke
 		TokenKind::Identifier if context.slice() == "test" && is_test_declaration(context) => {
 			parse_declaration(context, stop_at)
 		}
+		TokenKind::Identifier
+			if context.slice() == "link"
+				&& context.lookup_next_token_kind() == TokenKind::Identifier =>
+		{
+			let start = context.token().start;
+			context.go_to_next_token();
+			let right = parse_member_identifier(context, stop_at);
+			let end = context.span(right).end;
+			context.insert(Node::Link { right }, start, end)
+		}
 		TokenKind::Identifier => parse_member_identifier(context, stop_at),
 		TokenKind::Function
 		| TokenKind::Async

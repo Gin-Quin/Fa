@@ -1,0 +1,10 @@
+type Node = { value: Integer }
+type Callback = () => Integer
+function make = (pool: GrowingPool<Node>): Node in pool mutates pool.size => pool.add({ value = 7 })
+function wrong = (): Callback => {
+	mutable local: GrowingPool<Node> = []
+	use n = make(local)
+	() => n.value
+}
+let escaped = wrong()
+console.log(escaped())

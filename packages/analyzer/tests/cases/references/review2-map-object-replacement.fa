@@ -1,0 +1,13 @@
+type Node = { value: Integer }
+function replace = (values: Map<String, Node>, key: String) mutates values[key], values.size => {
+ values[key] = { value = 9 }
+}
+function exercise = (key: String): Integer throws KeyNotFound => {
+ mutable values: Map<String, Node> = [("kept", { value = 7 })]
+ use kept = try values[key]
+ replace(values, key)
+ kept.value
+}
+static result = @exercise("kept")
+console.log(result) -- prints: 9
+console.log(try exercise("kept")) -- prints: 9

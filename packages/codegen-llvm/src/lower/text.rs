@@ -198,6 +198,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				value
 			};
 			let (bytes, length) = self.string_parts(value)?;
+			let capacity = self.string_capacity(value)?;
+			let encoded = self
+				.call_value(
+					self.runtime.function("fa_string_encoded_length")?,
+					&[bytes.into(), length.into(), capacity.into()],
+				)?
+				.into_int_value();
 			let empty = self.builder.build_int_compare(
 				IntPredicate::EQ,
 				length,
@@ -206,13 +213,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			)?;
 			let flag = self
 				.builder
-				.build_select(empty, self.simple_flag(), self.string_capacity(value)?, "")?
+				.build_select(empty, self.simple_flag(), capacity, "")?
 				.into_int_value();
 			simple = self.builder.build_and(simple, flag, "")?;
-			values.push((bytes, length));
+			values.push((bytes, length, capacity, encoded));
 		}
 		let mut total = self.usize.const_zero();
-		for &(_, length) in &values {
+		for &(_, _, _, length) in &values {
 			total = self
 				.call_value(
 					self.runtime.function("fa_string_size")?,
@@ -253,23 +260,243 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		.into_pointer_value();
 		let mut offset = self.usize.const_zero();
-		for (part, length) in values {
+		for (part, length, capacity, encoded) in values {
 			let target = unsafe {
 				self.builder
 					.build_in_bounds_gep(self.context.i8_type(), bytes, &[offset], "")?
 			};
 			self.call_runtime(
-				"fa_copy_bytes",
-				&[target.into(), part.into(), length.into()],
+				"fa_string_copy_bytes",
+				&[target.into(), part.into(), length.into(), capacity.into()],
 			)?;
-			offset = self.builder.build_int_add(offset, length, "")?;
+			offset = self.builder.build_int_add(offset, encoded, "")?;
 		}
-		self.call_runtime("fa_string_finish", &[result.pointer.into()])?;
+		self.call_runtime(
+			"fa_string_finish_known",
+			&[result.pointer.into(), simple.into()],
+		)?;
 		if destination.is_some() {
 			return Ok(Some(Val::void()));
 		}
 		let result = self.load(result)?;
 		Ok(Some(self.fresh(result)))
+	}
+
+	pub(crate) fn string_unit_node(&self, mut node: NodeId) -> Option<NodeId> {
+		while let View::Group(inner) | View::Try(inner) = self.view(node) {
+			node = inner;
+		}
+		(self
+			.flags(node)
+			.contains(fa_analyzer::analysis::NodeFlags::STRING_CODE_UNIT)
+			&& matches!(self.view(node), View::Index { .. }))
+		.then_some(node)
+	}
+
+	pub(crate) fn string_unit_index(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
+		let View::Index { target, index } = self.view(node) else {
+			return Err(self.unsupported(node.index(), "this code unit index"));
+		};
+		let text = self.expr(target)?;
+		let position = self.expr(index)?;
+		if text.repr == Repr::Never || position.repr == Repr::Never {
+			return Ok(Val::never());
+		}
+		self.string_unit_at(node, text, position)
+	}
+
+	pub(crate) fn string_unit_at(
+		&mut self,
+		node: NodeId,
+		text: Val<'ctx>,
+		position: Val<'ctx>,
+	) -> Result<Val<'ctx>, Error> {
+		let index_node = match self.view(node) {
+			View::Index { index, .. } => Some(index),
+			_ => self.analysis.call(node).and_then(|call| {
+				call.arguments.iter().find_map(|argument| match argument {
+					fa_analyzer::analysis::Argument::Given(index) => Some(*index),
+					_ => None,
+				})
+			}),
+		};
+		let position = self
+			.convert(position, Repr::Int(IntRepr::I64), node.index())?
+			.int();
+		if index_node.is_some_and(|index| !self.may_be_negative(index)) {
+			let nonnegative = self.builder.build_int_compare(
+				IntPredicate::SGE,
+				position,
+				position.get_type().const_zero(),
+				"",
+			)?;
+			let assume = inkwell::intrinsics::Intrinsic::find("llvm.assume")
+				.and_then(|intrinsic| intrinsic.get_declaration(self.module, &[]))
+				.expect("llvm.assume");
+			self.builder.build_call(assume, &[nonnegative.into()], "")?;
+		}
+		let (bytes, length) = self.string_parts(text)?;
+		let capacity = self.string_capacity(text)?;
+		let ascii = self.builder.build_int_compare(
+			IntPredicate::SLT,
+			capacity,
+			capacity.get_type().const_zero(),
+			"",
+		)?;
+		let byte_length =
+			self.builder
+				.build_int_z_extend_or_bit_cast(length, position.get_type(), "")?;
+		let inside =
+			self.builder
+				.build_int_compare(IntPredicate::ULT, position, byte_length, "")?;
+		let checked = self
+			.flags(node)
+			.contains(fa_analyzer::analysis::NodeFlags::INDEX_CHECK);
+		let ascii_check = self.append_block("unit_ascii_check");
+		let fast = self.append_block("unit_ascii");
+		let ascii_fallback = self.append_block("unit_ascii_fallback");
+		let unicode = self.append_block("unit_unicode");
+		let end = self.append_block("unit_read");
+		// Keep the invariant representation dispatch separate from bounds.
+		// An ASCII loop must not retain the Unicode cache-writing call.
+		self.builder
+			.build_conditional_branch(ascii, ascii_check, unicode)?;
+		self.builder.position_at_end(ascii_check);
+		self.builder
+			.build_conditional_branch(inside, fast, ascii_fallback)?;
+		self.builder.position_at_end(ascii_fallback);
+		if checked {
+			let negative = self.append_block("unit_negative");
+			let missing = self.append_block("unit_missing");
+			let nonnegative = self.builder.build_int_compare(
+				IntPredicate::SGE,
+				position,
+				position.get_type().const_zero(),
+				"",
+			)?;
+			self.builder
+				.build_conditional_branch(nonnegative, missing, negative)?;
+			self.builder.position_at_end(missing);
+			self.raise_runtime("fa_error_index", &[position.into(), byte_length.into()])?;
+			self.builder.position_at_end(negative);
+		}
+		// Normalize the index, rather than returning another byte value.
+		// Both successful ASCII paths share the same narrow load.
+		let normalized = self
+			.call_value(
+				self.runtime.function("fa_index_from_end")?,
+				&[position.into(), byte_length.into()],
+			)?
+			.into_int_value();
+		if checked {
+			let missing = self.builder.build_int_compare(
+				IntPredicate::SLT,
+				normalized,
+				normalized.get_type().const_zero(),
+				"",
+			)?;
+			self.guard(missing, |this| {
+				this.raise_runtime("fa_error_index", &[position.into(), byte_length.into()])
+			})?;
+		}
+		let negative_end = self.builder.get_insert_block().expect("a normalized index");
+		self.builder.build_unconditional_branch(fast)?;
+		self.builder.position_at_end(fast);
+		let offset = self
+			.builder
+			.build_phi(position.get_type(), "unit_position")?;
+		offset.add_incoming(&[(&position, ascii_check), (&normalized, negative_end)]);
+		let offset = self.builder.build_int_truncate_or_bit_cast(
+			offset.as_basic_value().into_int_value(),
+			self.usize,
+			"",
+		)?;
+		let pointer = unsafe {
+			self.builder
+				.build_in_bounds_gep(self.context.i8_type(), bytes, &[offset], "")?
+		};
+		let byte = self
+			.builder
+			.build_load(self.context.i8_type(), pointer, "")?
+			.into_int_value();
+		let byte = self
+			.builder
+			.build_int_z_extend(byte, self.context.i16_type(), "")?;
+		self.builder.build_unconditional_branch(end)?;
+		self.builder.position_at_end(unicode);
+		let unit = self
+			.call_value(
+				self.runtime.function("string_code_unit_slow")?,
+				&[
+					bytes.into(),
+					length.into(),
+					capacity.into(),
+					position.into(),
+				],
+			)?
+			.into_int_value();
+		self.runtime_integer_range(unit, -1, 65536)?;
+		if checked {
+			let missing = self.builder.build_int_compare(
+				IntPredicate::SLT,
+				unit,
+				unit.get_type().const_zero(),
+				"",
+			)?;
+			self.guard(missing, |this| {
+				this.raise_runtime_with("fa_error_index", |this| {
+					let count = this
+						.call_value(
+							this.runtime.function("fa_string_length")?,
+							&[bytes.into(), length.into(), capacity.into()],
+						)?
+						.into_int_value();
+					let count = this.builder.build_int_z_extend_or_bit_cast(
+						count,
+						this.context.i64_type(),
+						"",
+					)?;
+					Ok(vec![position.into(), count.into()])
+				})
+			})?;
+		}
+		let unit = self
+			.builder
+			.build_int_truncate(unit, self.context.i16_type(), "")?;
+		let unicode_end = self
+			.builder
+			.get_insert_block()
+			.expect("a checked Unicode fallback");
+		self.builder.build_unconditional_branch(end)?;
+		self.builder.position_at_end(end);
+		let result = self.builder.build_phi(self.context.i16_type(), "unit")?;
+		result.add_incoming(&[(&byte, fast), (&unit, unicode_end)]);
+		Ok(Val::new(
+			Repr::Int(IntRepr {
+				bits: 16,
+				signed: false,
+			}),
+			result.as_basic_value(),
+		))
+	}
+
+	/// Runtime decoders return -1 or an unsigned unit. State this before
+	/// inlining so joins retain the narrow range without inspecting the body.
+	pub(super) fn runtime_integer_range(
+		&self,
+		value: IntValue<'ctx>,
+		lower: i64,
+		upper: u64,
+	) -> Result<(), Error> {
+		let metadata = self.context.metadata_node(&[
+			value.get_type().const_int(lower as u64, true).into(),
+			value.get_type().const_int(upper, false).into(),
+		]);
+		value
+			.as_instruction_value()
+			.expect("a runtime integer call")
+			.set_metadata(metadata, self.context.get_kind_id("range"))
+			.map_err(|error| Error::Llvm(error.to_string()))
 	}
 
 	/// Inline strings have zero padding after their bytes. Two such values
@@ -327,8 +554,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let (bp, bl) = self.string_parts(right)?;
 		let equal = self
 			.call_value(
-				self.runtime.function("fa_string_equal")?,
-				&[ap.into(), al.into(), bp.into(), bl.into()],
+				self.runtime.function("fa_string_equal_flags")?,
+				&[
+					ap.into(),
+					al.into(),
+					ac.into(),
+					bp.into(),
+					bl.into(),
+					bc.into(),
+				],
 			)?
 			.into_int_value();
 		let equal = self.builder.build_int_compare(
@@ -540,7 +774,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder
 			.build_store(snapshot.pointer, current.value.expect("a string"))?;
 		self.call_runtime(
-			"fa_string_append",
+			"fa_string_append_after_guard",
 			&[
 				snapshot.pointer.into(),
 				suffix_bytes.into(),
@@ -563,12 +797,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// branches, so the appended value's length and capacity are constants.
 	pub(crate) fn literal_shape(&self, node: NodeId) -> Option<(u64, bool)> {
 		use fa_analyzer::syntax::View;
-		let shape = |text: &str| {
-			(
-				text.len() as u64,
-				text.bytes().all(|byte| byte < 0x80 && byte != b'\r'),
-			)
-		};
+		let shape = |text: &str| (text.len() as u64, text.is_ascii());
 		match self.view(node) {
 			View::String(text) => Some(shape(text)),
 			View::Group(inner) => self.literal_shape(inner),
@@ -611,7 +840,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let capacity = if simple {
 			self.simple_flag()
 		} else {
-			self.usize.const_zero()
+			self.string_capacity(value)?
 		};
 		let updated =
 			self.builder
@@ -638,7 +867,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<IntValue<'ctx>, Error> {
 		let kind = self.builder.build_and(
 			capacity,
-			self.simple_flag()
+			self.string_flags()
 				.const_add(self.usize.const_int(1, false))
 				.const_not(),
 			"",
@@ -808,8 +1037,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		builder: &inkwell::builder::Builder<'ctx>,
 		value: Val<'ctx>,
 	) -> Result<(PointerValue<'ctx>, IntValue<'ctx>), Error> {
+		self.string_parts_source(builder, value, None)
+	}
+
+	/// A slice borrows its stable owner place, including an inline payload.
+	/// The analyzer invalidates that designation before the owner may change.
+	pub(crate) fn string_place_parts(
+		&self,
+		value: Val<'ctx>,
+		place: PointerValue<'ctx>,
+	) -> Result<(PointerValue<'ctx>, IntValue<'ctx>), Error> {
+		self.string_parts_source(&self.builder, value, Some(place))
+	}
+
+	fn string_parts_source(
+		&self,
+		builder: &inkwell::builder::Builder<'ctx>,
+		value: Val<'ctx>,
+		source: Option<PointerValue<'ctx>>,
+	) -> Result<(PointerValue<'ctx>, IntValue<'ctx>), Error> {
 		// a field read once at the entry of the method (`frozen.rs`)
-		if let Some(parts) = self.frozen_parts(value) {
+		if source.is_none()
+			&& let Some(parts) = self.frozen_parts(value)
+		{
 			return Ok(parts);
 		}
 		let pair = value.value.expect("a string").into_struct_value();
@@ -829,17 +1079,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// A readonly parameter is an immutable reference for the entire call.
 		// Its loaded value can borrow inline bytes from that original place;
 		// mutable places and computed values still require an SSA snapshot.
-		let borrowed = pair.as_instruction_value().and_then(|instruction| {
-			if instruction.get_opcode() != InstructionOpcode::Load {
-				return None;
-			}
-			let pointer = instruction.get_operand(0)?.value()?.into_pointer_value();
-			self.frame
-				.as_ref()
-				.is_some_and(|frame| {
-					frame.function == function && frame.readonly_strings.contains(&pointer)
-				})
-				.then_some(pointer)
+		let borrowed = source.or_else(|| {
+			pair.as_instruction_value().and_then(|instruction| {
+				if instruction.get_opcode() != InstructionOpcode::Load {
+					return None;
+				}
+				let pointer = instruction.get_operand(0)?.value()?.into_pointer_value();
+				self.frame
+					.as_ref()
+					.is_some_and(|frame| {
+						frame.function == function && frame.readonly_strings.contains(&pointer)
+					})
+					.then_some(pointer)
+			})
 		});
 		let bytes = match borrowed {
 			Some(pointer) => builder
@@ -928,7 +1180,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let (b, b_length) = self.string_parts(right)?;
 		let result = self.call_with_pair(
 			"fa_concat",
-			&[a.into(), a_length.into(), b.into(), b_length.into()],
+			&[
+				a.into(),
+				a_length.into(),
+				self.string_capacity(left)?.into(),
+				b.into(),
+				b_length.into(),
+				self.string_capacity(right)?.into(),
+			],
 			Repr::Str,
 		)?;
 		Ok(self.fresh(result))
@@ -969,6 +1228,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					"fa_b_string",
 					&[bytes.into(), length.into(), capacity.into()],
 				)
+			}
+			Repr::Bytes => {
+				let array = self.bytes_as_array(value)?;
+				self.append_aggregate(array, node)
 			}
 			// a set of flags: `{ read, write }` (fields.rs)
 			Repr::Int(_)
@@ -1459,6 +1722,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if value.repr == Repr::Never {
 				return Ok(Val::never());
 			}
+			// A later conversion may consume the source block before these
+			// deferred arguments are formatted. Retain an owning snapshot.
+			let value = if value.repr == Repr::Bytes {
+				self.own(value, Some(node))?
+			} else {
+				value
+			};
 			values.push((value, node, spread));
 		}
 		let separated = self.alloca(Repr::Bool, "print_separator")?;
@@ -1575,6 +1845,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					Repr::Int(crate::lower::values::IntRepr::I64),
 					self.growing_length(&self.builder, array)?,
 				))
+			}
+			"Bytes#length" => {
+				let array = self.bytes_as_array(value)?;
+				self.array_length(array)
 			}
 			"Array#length" => {
 				if let fa_analyzer::syntax::View::Access { target, members } = self.view(node)

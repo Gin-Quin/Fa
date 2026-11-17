@@ -1,0 +1,6 @@
+type Node = { value: Integer }
+mutable nodes: GrowingPool<Node> = []
+type Box<T> = { children: Array<T> }
+type Hidden = Box<Node in nodes>
+function make = (): Hidden => ({ children = [] })
+console.log(make().children.length)

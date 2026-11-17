@@ -1,0 +1,11 @@
+function first = (values: Set<Integer>): (Integer in values)? => values.find((value) => value == 7)
+function exercise = (): Integer => {
+ mutable values: Set<Integer> = [7, 9]
+ use first = first(values)
+ if first is none { return 0 }
+ use alias = first
+ alias
+}
+static result = @exercise()
+console.log(result) -- prints: 7
+console.log(exercise()) -- prints: 7

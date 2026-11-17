@@ -1334,16 +1334,109 @@ impl Walker<'_> {
 		}
 	}
 
-	/// Whether a type expression contains `T in c`.
+	/// Whether a type expression contains stored references before erasure.
+	/// Follow resolved alias declarations (including imported summaries), not
+	/// structural TypeIds: `Array<Node in nodes>` and `Array<Node>` erase to
+	/// the same runtime type. Record types validate their own fields.
 	pub(crate) fn contains_reference_type(&self, n: NodeId) -> bool {
 		let mut stack = vec![n];
+		let mut seen = FxHashSet::default();
+		let mut applied = FxHashMap::default();
 		while let Some(node) = stack.pop() {
-			if matches!(self.view(node), View::RefType { .. }) {
-				return true;
+			if !seen.insert(node) {
+				continue;
+			}
+			match self.view(node) {
+				View::RefType { .. } => return true,
+				View::Object { .. } | View::TypedObject { .. } | View::Lambda { .. } => continue,
+				View::Call { callee, arguments } => {
+					let callee = self.strip_groups(callee);
+					applied.insert(callee, arguments.len());
+					if let View::Access { members, .. } = self.view(callee)
+						&& let Some(last) = members.last()
+					{
+						applied.insert(last, arguments.len());
+					}
+				}
+				View::Name(_) | View::Access { .. } => {
+					let supplied = applied.get(&node).copied().unwrap_or(0);
+					let resolved = match self.view(node) {
+						View::Access { members, .. } => members.last().unwrap_or(node),
+						_ => node,
+					};
+					if let resolution @ Resolution::External(_) = self.a.resolution(resolved)
+						&& self
+							.s
+							.external_node(resolution)
+							.is_some_and(|(module, decl)| {
+								self.s.interface(module).is_some_and(|interface| {
+									interface.reference_aliases.contains(&decl)
+										|| interface.reference_defaults.get(&decl).is_some_and(
+											|defaults| {
+												defaults
+													.iter()
+													.skip(supplied)
+													.any(|&reference| reference)
+											},
+										)
+								})
+							}) {
+						return true;
+					}
+					if let Resolution::Local(symbol) = self.a.resolution(resolved) {
+						if let Some((module, decl)) = self.proxy_decl(symbol) {
+							if self.s.interface(module).is_some_and(|interface| {
+								interface.reference_aliases.contains(&decl)
+									|| interface.reference_defaults.get(&decl).is_some_and(
+										|defaults| {
+											defaults
+												.iter()
+												.skip(supplied)
+												.any(|&reference| reference)
+										},
+									)
+							}) {
+								return true;
+							}
+						} else {
+							let entry = self.a.symbols.symbol(symbol);
+							if entry.kind == SymbolKind::Type {
+								match self.view(entry.decl_node) {
+									View::TypeDecl { value, .. }
+									| View::ExportType { value, .. } => {
+										stack.push(value);
+										stack.extend(
+											self.reference_default_nodes(entry.decl_node)
+												.into_iter()
+												.skip(supplied)
+												.flatten(),
+										);
+									}
+									_ => {}
+								}
+							}
+						}
+					}
+				}
+				_ => {}
 			}
 			stack.extend(syntax::children(&self.tree, node));
 		}
 		false
+	}
+
+	pub(super) fn reference_default_nodes(&self, declaration: NodeId) -> Vec<Option<NodeId>> {
+		let parameters = match self.view(declaration) {
+			View::TypeDecl { parameters, .. } | View::ExportType { parameters, .. } => parameters,
+			_ => return Vec::new(),
+		};
+		parameters
+			.iter()
+			.map(|parameter| match self.view(parameter) {
+				View::Assignment { value, .. } => value,
+				_ => None,
+			})
+			.collect()
 	}
 
 	/// `x.f = t` (and `x = literal`): the checks of a relation write
@@ -1448,30 +1541,75 @@ impl Walker<'_> {
 			return;
 		}
 		// the target: an element of the same owner (REL012)
-		if let Some(value) = value
-			&& let Some(from) = self.place_of(holder_node)
-			&& let Some(to) = self.place_of(value)
-			&& let (Some(from), Some(to)) = (self.collection_owner(from), self.collection_owner(to))
-			&& from != to
-			&& self.reported_once.insert((n, REL012.id))
-		{
-			let message = format!(
-				"`{}` is an element of `{}`, `{}` of `{}`: a relation links elements of the same owner",
-				self.tree.text(value.index()),
-				self.place_text(to),
-				self.tree.text(holder_node.index()),
-				self.place_text(from)
-			);
-			let diagnostic = self.diagnostic(&REL012, n, message);
-			self.report(diagnostic);
+		if let Some(value) = value {
+			for from in self.places_of(holder_node) {
+				for to in self.places_of(value) {
+					if let (Some(from), Some(to)) =
+						(self.collection_owner(from), self.collection_owner(to))
+						&& from != to && self.reported_once.insert((n, REL012.id))
+					{
+						let message = format!(
+							"`{}` is an element of `{}`, `{}` of `{}`: a relation links elements of the same owner",
+							self.tree.text(value.index()),
+							self.place_text(to),
+							self.tree.text(holder_node.index()),
+							self.place_text(from)
+						);
+						let diagnostic = self.diagnostic(&REL012, n, message);
+						self.report(diagnostic);
+					}
+				}
+			}
 		}
 		self.relations.writes.push((n, side));
 		// the other sides it writes (§8.6)
-		if let Some(place) = self.place_of(holder_node) {
+		for place in self.places_of(holder_node) {
 			let cause = format!("writing `{}.{field}`", self.tree.text(holder_node.index()));
 			for implied in self.implied_write(place, decl.field) {
 				self.record_implied_effect(implied, n, &cause);
 			}
+		}
+	}
+
+	/// A relation field's target collection, with its holder's owner bound.
+	/// The boolean distinguishes a scalar target from a relation pool.
+	pub(super) fn reference_field_collection(
+		&mut self,
+		place: crate::ids::PlaceId,
+	) -> Option<(crate::ids::PlaceId, bool)> {
+		let entry = self.places.get(place);
+		let Some(crate::flow::Step::Field(field)) = entry.step else {
+			return None;
+		};
+		let holder = self.canonical_reference_place(entry.parent?);
+		let ty = self.place_type(holder)?;
+		let name = self.s.types.syms.resolve(field).to_string();
+		let side = self.side_of(ty, &name)?;
+		let declaration = self.relations.sides[side].clone();
+		let collection = declaration.collection?;
+		let owner = if declaration.shape == Shape::Owner {
+			Some(holder)
+		} else {
+			self.collection_owner(holder)
+		};
+		let target = self.relation_collection_place(collection.reference, owner)?;
+		let scalar = matches!(
+			declaration.shape,
+			Shape::Owner | Shape::Direct { many: false } | Shape::Reverse { many: false, .. }
+		);
+		Some((target, scalar))
+	}
+
+	pub(super) fn reference_field_target(
+		&mut self,
+		place: crate::ids::PlaceId,
+	) -> crate::ids::PlaceId {
+		match self.reference_field_collection(place) {
+			Some((collection, true)) => self.places.child(
+				collection,
+				crate::flow::Step::Index(crate::flow::Identity::Existing(self.body.flow.time)),
+			),
+			_ => place,
 		}
 	}
 
@@ -1509,18 +1647,21 @@ impl Walker<'_> {
 		callee: NodeId,
 		arguments: &[crate::analysis::Argument],
 	) {
-		let (owner, method) = path.split_once('#').unwrap_or((path, ""));
 		// the collection: the callee without its method (`town.people`)
-		let base = match self.view(self.strip_groups(callee)) {
-			View::Access { target, members } => {
-				let members: Vec<NodeId> = members.iter().collect();
-				self.access_place(target, &members[..members.len().saturating_sub(1)])
-			}
-			_ => None,
-		};
-		let Some(base) = base else {
-			return;
-		};
+		for base in self.callee_receiver_places(callee) {
+			self.check_relation_call_at(n, path, callee, arguments, base);
+		}
+	}
+
+	fn check_relation_call_at(
+		&mut self,
+		n: NodeId,
+		path: &str,
+		callee: NodeId,
+		arguments: &[crate::analysis::Argument],
+		base: crate::ids::PlaceId,
+	) {
+		let (owner, method) = path.split_once('#').unwrap_or((path, ""));
 		match (owner, method) {
 			(
 				"Pool" | "Columnar" | "OrderedColumnar",
@@ -1745,7 +1886,7 @@ impl Walker<'_> {
 			let diagnostic = self.diagnostic(
 				&REF010,
 				annotation,
-				"only the fields of a relation store references: declare it with `use`, or keep an index",
+				"this type contains stored references outside a relation: borrow with `use`, declare a relation with its reverse side, or an explicit `link` field in a growing owner (links are not implemented yet)",
 			);
 			self.report(diagnostic);
 		}
@@ -2137,31 +2278,31 @@ impl Walker<'_> {
 				.parent(place)
 				.and_then(|all| self.places.parent(all));
 			for &argument in used {
-				let Some(other) = self.place_of(argument) else {
-					continue;
-				};
-				let element = self.places.parent(other) == collection
-					&& matches!(
-						self.places.get(other).step,
-						Some(crate::flow::Step::Index(_) | crate::flow::Step::All)
-					);
-				if element
-					|| matches!(
+				for other in self.places_of(argument) {
+					let element = self.places.parent(other) == collection
+						&& matches!(
+							self.places.get(other).step,
+							Some(crate::flow::Step::Index(_) | crate::flow::Step::All)
+						);
+					let permitted_owner = self.declared_reference_owner(n, argument);
+					if element
+						|| permitted_owner || matches!(
 						self.places.get(other).step,
 						Some(crate::flow::Step::Length | crate::flow::Step::Size)
 					) || !self.may_overlap(place, other)
-				{
-					continue;
+					{
+						continue;
+					}
+					let message = format!(
+						"`{callee}` changes `{}` (the other side of a relation), which its argument `{}` reads: copy it first with `let`",
+						self.place_text(place),
+						self.tree.text(argument.index())
+					);
+					let diagnostic =
+						self.diagnostic(&crate::diagnostics::codes::advanced::REF013, n, message);
+					self.report_flow(diagnostic);
+					return;
 				}
-				let message = format!(
-					"`{callee}` changes `{}` (the other side of a relation), which its argument `{}` reads: copy it first with `let`",
-					self.place_text(place),
-					self.tree.text(argument.index())
-				);
-				let diagnostic =
-					self.diagnostic(&crate::diagnostics::codes::advanced::REF013, n, message);
-				self.report_flow(diagnostic);
-				return;
 			}
 		}
 	}

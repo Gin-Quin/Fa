@@ -1,0 +1,11 @@
+function rule = (text: String, bytes: Bytes, items: Array<Integer>): String throws IndexError => {
+	let textTail = try text[-2..=-1]
+	let byteTail = try bytes[-2..=-1]
+	let itemTail = try items[-2..=-1]
+	let textReversed = try text[-1..-2]
+	let byteReversed = try bytes[-1..-2]
+	let itemReversed = try items[-1..-2]
+	"{textTail} {byteTail} {itemTail} {textReversed.length} {byteReversed.length} {itemReversed.length}"
+}
+static result = @rule("a😀", Bytes.from([1, 2, 3]), [1, 2, 3])
+console.log(result, (try rule("a😀", Bytes.from([1, 2, 3]), [1, 2, 3])) == result) -- prints: 😀 [2, 3] [2, 3] 0 0 0 true

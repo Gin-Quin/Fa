@@ -94,8 +94,8 @@ fn write_stable(types: &TypeStore, ty: TypeId, stack: &mut Vec<TypeId>, out: &mu
 		| TypeKind::BigIntLit(_)
 		| TypeKind::Percentage
 		| TypeKind::String
+		| TypeKind::Bytes
 		| TypeKind::StringLit(_)
-		| TypeKind::Character
 		| TypeKind::None
 		| TypeKind::Void
 		| TypeKind::Never

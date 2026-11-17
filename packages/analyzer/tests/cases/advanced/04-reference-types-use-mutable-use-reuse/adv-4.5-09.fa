@@ -1,5 +1,4 @@
--- pending: M2 (imported from the advanced brief)
-mutable tags: Set<String> = Set.from(["a"])
+mutable tags: Set<String> = ["a"]
 for tag in tags {
-	tag = "b" -- error REF014 (set elements are read-only)
+	tag = "b" -- error CL031 (set elements are read-only)
 }

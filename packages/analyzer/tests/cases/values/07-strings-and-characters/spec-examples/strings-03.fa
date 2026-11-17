@@ -1,0 +1,6 @@
+-- Specification example: strings 03
+-- prints: Ana Ana!
+mutable name = "Ana"
+let previous = name
+name += "!"
+console.log(previous, name) -- Ana Ana!

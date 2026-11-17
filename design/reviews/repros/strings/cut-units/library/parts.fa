@@ -1,0 +1,1 @@
+export function = (text: String, separator: String): Array<String> => text.split(separator)

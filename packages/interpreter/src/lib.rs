@@ -31,6 +31,9 @@ pub mod ir;
 pub mod json;
 mod machine;
 pub mod memory;
+pub mod references;
+mod strings;
+pub mod text;
 pub mod types;
 pub mod value;
 
@@ -296,7 +299,7 @@ mod tests {
 	}
 
 	#[test]
-	fn borrowed_arguments_write_back_on_return_and_error() {
+	fn borrowed_arguments_preserve_mutations_on_return_and_error() {
 		for fails in [false, true] {
 			let mut host = Functions::default();
 			let place = crate::ir::Place {
@@ -324,7 +327,8 @@ mod tests {
 					body,
 				}),
 			);
-			let call = Expr::CallFunction(FnKey(0, 80), vec![Arg::Borrow(place)]);
+			let call =
+				Expr::CallFunction(FnKey(0, 80), vec![Arg::Value(Expr::Borrow(place, false))]);
 			let expr = Expr::Block(vec![
 				Expr::Let(0, Expr::Array(vec![Item::One(int(1))]).boxed()),
 				Expr::Catch {
@@ -349,6 +353,120 @@ mod tests {
 		assert_eq!(run(&mut host, &call, 0), Ok(Value::int(6)));
 		let call = Expr::CallFunction(FnKey(0, 1), vec![Arg::Value(int(2)), Arg::Default]);
 		assert_eq!(run(&mut host, &call, 0), Ok(Value::int(12)));
+	}
+
+	#[test]
+	fn borrowed_results_keep_the_evaluated_slot_and_export_only_data() {
+		let mut host = Functions::default();
+		let key = FnKey(0, 90);
+		host.0.insert(
+			key,
+			Arc::new(Function {
+				name: "first".into(),
+				params: vec![Param {
+					slot: 0,
+					default: Some(Expr::Array(vec![Item::One(int(7))])),
+				}],
+				captures: Vec::new(),
+				slots: 1,
+				body: Expr::Borrow(
+					Place {
+						slot: 0,
+						steps: vec![Step::Index(int(0))],
+					},
+					false,
+				),
+			}),
+		);
+		let owner = Place {
+			slot: 0,
+			steps: Vec::new(),
+		};
+		let reference = Place {
+			slot: 1,
+			steps: Vec::new(),
+		};
+		let expr = Expr::Block(vec![
+			Expr::Let(0, Expr::Array(vec![Item::One(int(7))]).boxed()),
+			Expr::Let(
+				1,
+				Expr::CallFunction(key, vec![Arg::Value(Expr::Borrow(owner, false))]).boxed(),
+			),
+			Expr::Assign(reference, int(9).boxed()),
+			Expr::Local(0),
+		]);
+		assert_eq!(
+			run(&mut host, &expr, 2),
+			Ok(Value::array(vec![Value::int(9)]))
+		);
+		// The public host entry has no lowered caller argument slot; it creates
+		// one, and materializes the reference before disposing its root frame.
+		let function = Value::Function(Arc::new(crate::value::Closure {
+			function: key,
+			captured: Vec::new(),
+			bound: Vec::new(),
+		}));
+		let value = Interpreter::new(&mut host, Limits::default())
+			.call_value(&function, vec![Value::array(vec![Value::int(9)])]);
+		assert_eq!(value, Ok(Value::int(9)));
+		let omitted = Expr::Dereference(Expr::CallFunction(key, vec![Arg::Default]).boxed());
+		assert_eq!(run(&mut host, &omitted, 0), Ok(Value::int(7)));
+	}
+
+	#[test]
+	fn borrowed_indices_are_evaluated_once_and_stale_frames_are_errors() {
+		let mut host = Functions::default();
+		let expr = Expr::Block(vec![
+			Expr::Let(
+				0,
+				Expr::Array(vec![Item::One(int(7)), Item::One(int(9))]).boxed(),
+			),
+			Expr::Let(1, int(0).boxed()),
+			Expr::Let(
+				2,
+				Expr::Borrow(
+					Place {
+						slot: 0,
+						steps: vec![Step::Index(Expr::Local(1))],
+					},
+					false,
+				)
+				.boxed(),
+			),
+			Expr::Assign(
+				Place {
+					slot: 1,
+					steps: Vec::new(),
+				},
+				int(1).boxed(),
+			),
+			Expr::Local(2),
+		]);
+		assert_eq!(run(&mut host, &expr, 3), Ok(Value::int(7)));
+		let key = FnKey(0, 91);
+		host.0.insert(
+			key,
+			Arc::new(Function {
+				name: "invalid escape".into(),
+				params: Vec::new(),
+				captures: Vec::new(),
+				slots: 1,
+				body: Expr::Block(vec![
+					Expr::Let(0, int(7).boxed()),
+					Expr::Borrow(
+						Place {
+							slot: 0,
+							steps: Vec::new(),
+						},
+						false,
+					),
+				]),
+			}),
+		);
+		let escaped = Expr::Dereference(Expr::CallFunction(key, Vec::new()).boxed());
+		assert!(
+			matches!(run(&mut host, &escaped, 0), Err(Error::Stop(message)) if message.contains("outlived its collection"))
+		);
 	}
 
 	#[test]
@@ -605,16 +723,24 @@ mod tests {
 		host.0.insert(
 			FnKey(0, 24),
 			Arc::new(Function {
-				name: "evenKey".into(),
-				params: vec![Param {
-					slot: 0,
-					default: None,
-				}],
+				name: "evenKeyWithValue".into(),
+				params: (0..2)
+					.map(|slot| Param {
+						slot,
+						default: None,
+					})
+					.collect(),
 				captures: Vec::new(),
-				slots: 1,
-				body: Expr::CallFunction(
-					FnKey(0, 20),
-					vec![Arg::Value(Expr::Index(local(0), int(0).boxed()))],
+				slots: 2,
+				body: Expr::If(
+					Expr::CallFunction(FnKey(0, 20), vec![Arg::Value(*local(0))]).boxed(),
+					Expr::Equals(
+						local(1),
+						Expr::Arith(ArithOp::Multiply, INTEGER, local(0), int(10).boxed()).boxed(),
+						false,
+					)
+					.boxed(),
+					Some(Expr::Const(Value::Boolean(false)).boxed()),
 				),
 			}),
 		);
@@ -794,6 +920,7 @@ mod tests {
 					Expr::Closure {
 						function: FnKey(0, 2),
 						captures: vec![0],
+						borrowed: false,
 					},
 				],
 			),

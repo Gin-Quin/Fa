@@ -1,0 +1,35 @@
+function strict = (bytes: Bytes): String throws Utf8Error => try String.fromUtf8(bytes)
+function lossy = (bytes: Bytes): String => String.fromUtf8Lossy(bytes)
+function position = (bytes: Bytes): Integer => {
+	strict(bytes) catch error => return error.position
+	-1
+}
+
+let bytes = Bytes.from([104, 195, 169, 240, 159, 152, 128])
+console.log(try strict(bytes), bytes, position(bytes)) -- prints: hé😀 [104, 195, 169, 240, 159, 152, 128] -1
+console.log(try String.fromUtf8("hé日😀".toUtf8())) -- prints: hé日😀
+console.log(position(Bytes.from([255])), position(Bytes.from([97, 225, 128, 120])), position(Bytes.from([97, 240, 159]))) -- prints: 0 1 1
+console.log(lossy(Bytes.from([240, 159])), lossy(Bytes.from([237, 160, 128])), lossy(Bytes.from([225, 128, 120]))) -- prints: � ��� �x
+let bom = try strict(Bytes.from([239, 187, 191, 97]))
+console.log(try bom.codeUnitAt(0)) -- prints: 65279
+console.log(position(Bytes.from([240, 128, 128, 128])), position(Bytes.from([244, 144, 128, 128]))) -- prints: 0 0
+
+let pair = String.from("😀")
+let high = try pair[0]
+let low = try pair[1]
+console.log(high.toUtf8(), low.toUtf8(), (high + low).toUtf8()) -- prints: [239, 191, 189] [239, 191, 189] [240, 159, 152, 128]
+use cut = try pair[1..2]
+console.log(try strict(cut.toUtf8()), cut.length, cut.isWellFormed()) -- prints: � 1 false
+
+let long = "é😀".repeat(80)
+let encoded = long.toUtf8()
+console.log(long.length, encoded.length, (try strict(encoded)) == long, encoded.length) -- prints: 240 480 true 480
+let decoded = try String.fromUtf8(Bytes.filled(160, 97))
+console.log(decoded.length, decoded == "a".repeat(160)) -- prints: 160 true
+console.log(String.fromUtf8(Bytes.from([255])) catch error => "{error}") -- prints: Utf8Error { position = 0 }
+mutable total = 0
+for count in 0..100 {
+	let text = try String.fromUtf8(Bytes.filled(count, 97))
+	total += text.length
+}
+console.log(total) -- prints: 4950

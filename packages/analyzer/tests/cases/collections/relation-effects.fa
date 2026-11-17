@@ -21,11 +21,11 @@ for friend in ana.friends {
 	town.people.delete(friend) -- error: REF012
 }
 use dan = town.people.add({ name = "Dan" })
-for friend in ana.friends {
+for friend in ana.friends { -- error: REF002
 	town.people.delete(dan) -- error: REF012, REF002
 }
 use eve = town.people.add({ name = "Eve" })
-for fan in bao.bestFriendOf {
+for fan in bao.bestFriendOf { -- error: REF002
 	town.people.delete(eve) -- error: REF012, REF002
 }
 -- writing a direct side writes the reverse sides
@@ -35,11 +35,11 @@ for fan in bao.bestFriendOf {
 -- a one-to-one write also clears the previous holder's direct side: the
 -- elements of the iterated collection change, which is fine
 for person in town.people {
-	cleo.mentor = bao
+	cleo.mentor = bao -- error: REF002
 }
 -- many-to-many links write the reverse side
 for friend in bao.friendOf {
-	ana.friends.add(cleo) -- error: REF012
+	ana.friends.add(cleo) -- error: REF012 -- error: REF002
 }
 -- a new element links its targets
 for fan in bao.bestFriendOf {

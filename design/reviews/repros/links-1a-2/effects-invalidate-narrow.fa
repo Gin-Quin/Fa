@@ -1,0 +1,14 @@
+-- Expected: REF001 on `first`: `clearItems` (mutates node.items) clears the array `first` points into.
+type World = {
+ nodes: GrowingPool<Node> = []
+ type Node = { items: Array<Integer> }
+}
+function clearItems = (world: World, node: World.Node in world.nodes) mutates node.items => node.items.clear()
+function exercise = (i: Integer): Integer throws IndexError => {
+ mutable world: World = {}
+ use node = world.nodes.add({ items = [1, 2] })
+ use first = try node.items[i]
+ clearItems(world, node)
+ first
+}
+console.log(try exercise(0))

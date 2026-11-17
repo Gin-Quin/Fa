@@ -213,3 +213,21 @@ describe("faWorkerAnswer", () => {
 		}
 	});
 });
+
+test("shared mutexes and channels preserve Bytes as Uint8Array", () => {
+	const bytes = new Uint8Array([0, 195, 169, 255]);
+	const mutex = new FaMutex({ bytes });
+	const channel = new FaChannel(1);
+	channel.trySend(bytes);
+	faShare([mutex, channel]);
+	const [otherMutex, otherChannel] = faRevive(structuredClone([mutex, channel]));
+	const guard = otherMutex.tryLock();
+	expect(guard.value.bytes).toEqual(bytes);
+	guard.value.bytes[0] = 42;
+	faUnlock(guard);
+	const mine = mutex.tryLock();
+	expect(mine.value.bytes[0]).toBe(42);
+	expect(mine.value.bytes).toBeInstanceOf(Uint8Array);
+	faUnlock(mine);
+	expect(otherChannel.tryReceive()).toEqual(bytes);
+});

@@ -160,6 +160,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	pub(crate) fn needs_drop(&self, repr: Repr) -> bool {
 		match repr {
 			Repr::Str
+			| Repr::Bytes
 			| Repr::BigInt
 			| Repr::Array(_)
 			| Repr::Union
@@ -663,7 +664,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Str => {
 				let pair = value.into_struct_value();
 				let capacity = builder.build_extract_value(pair, 2, "")?.into_int_value();
-				let kind = builder.build_and(capacity, self.simple_flag().const_not(), "")?;
+				let kind = builder.build_and(capacity, self.string_flags().const_not(), "")?;
 				let nonzero = builder.build_int_compare(
 					IntPredicate::NE,
 					kind,
@@ -689,12 +690,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					Ok(())
 				})?;
 				let bytes = builder.build_extract_value(pair, 0, "")?;
-				let one = self.usize.const_int(1, false);
 				builder.build_call(
-					self.runtime.free()?,
-					&[bytes.into(), capacity.into(), one.into()],
+					self.runtime.function("fa_string_free")?,
+					&[bytes.into(), capacity.into()],
 					"",
 				)?;
+			}
+			Repr::Bytes => {
+				builder.build_call(self.runtime.function("fa_bytes_free")?, &[value.into()], "")?;
 			}
 			Repr::Array(item_type) => {
 				let item = self.item_repr(item_type, NodeId::new(0))?;
@@ -990,29 +993,30 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.return_copy_value(builder, function, pair.into())?;
 					Ok(())
 				})?;
-				let length = builder.build_extract_value(pair, 1, "")?.into_int_value();
-				let flag = builder.build_and(capacity, self.simple_flag(), "")?;
-				// a literal (kind 0, whatever its `SIMPLE` flag) is shared, and
-				// so is an empty string
-				let kind =
-					builder.build_left_shift(capacity, self.usize.const_int(1, false), "")?;
+				// Only immortal literal storage can be shared. An empty owner
+				// may still own a reserved heap block; the slow copy makes it inline.
+				let shifted =
+					builder.build_left_shift(capacity, self.usize.const_int(3, false), "")?;
+				let before = builder.build_int_sub(shifted, self.usize.const_int(1, false), "")?;
 				let literal = builder.build_int_compare(
-					IntPredicate::EQ,
-					kind,
+					IntPredicate::SLT,
+					before,
 					self.usize.const_zero(),
 					"",
 				)?;
-				let empty = builder.build_int_compare(
+				// Counted views use LITERAL together with SURROGATES; unlike
+				// immortal well-formed literals, their bytes must be copied.
+				let surrogates = builder.build_and(capacity, self.string_surrogates_flag(), "")?;
+				let well_formed_kind = builder.build_int_compare(
 					IntPredicate::EQ,
-					length,
+					surrogates,
 					self.usize.const_zero(),
 					"",
 				)?;
-				let shared = builder.build_or(literal, empty, "")?;
-				let not_shared = builder.build_not(shared, "")?;
+				let literal = builder.build_and(literal, well_formed_kind, "")?;
+				let not_shared = builder.build_not(literal, "")?;
 				self.helper_when(builder, function, not_shared, |builder| {
-					let zeroed = builder.build_insert_value(pair, flag, 2, "")?;
-					self.return_copy_value(builder, function, zeroed.into_struct_value().into())?;
+					self.return_copy_value(builder, function, pair.into())?;
 					Ok(())
 				})?;
 				let slow = self.copy_string_slow()?;
@@ -1026,6 +1030,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				// `packed::packable_items` admits no copy
 				return Err(Error::Llvm("a copy of a packed array".into()));
 			}
+			Repr::Bytes => builder
+				.build_call(self.runtime.function("fa_bytes_copy")?, &[value.into()], "")?
+				.try_as_basic_value()
+				.basic()
+				.expect("Bytes copy"),
 			Repr::Array(item_type) => {
 				let item = self.item_repr(item_type, NodeId::new(0))?;
 				let array = value.into_pointer_value();
@@ -1277,7 +1286,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// Keep allocation and memcpy off the literal-copy path. Otherwise
 	/// inlining the allocator makes the copy helper too large to inline,
-	/// and even a static ASCII Character pays a call and several spills.
+	/// and even a static ASCII string pays a call and several spills.
 	fn copy_string_slow(&self) -> Result<FunctionValue<'ctx>, Error> {
 		if let Some(function) = self.module.get_function("fa.copy_string_slow") {
 			return Ok(function);
@@ -1605,12 +1614,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// Takes a value to store it into an owner: moves a temporary or a local
 	/// read for the last time (`node`), copies anything else.
+	fn escape_owned_storage(&self, value: Val<'ctx>) -> Result<Val<'ctx>, Error> {
+		if value.repr == Repr::Bytes {
+			let owned = self.call_value(
+				self.runtime.function("fa_bytes_own")?,
+				&[value.value.expect("Bytes").into()],
+			)?;
+			Ok(Val::new(Repr::Bytes, owned))
+		} else {
+			self.escape_frame_string(value)
+		}
+	}
+
 	pub(crate) fn take(&self, value: Val<'ctx>, node: Option<NodeId>) -> Result<Val<'ctx>, Error> {
 		if value.value.is_none() || !self.needs_drop(value.repr) {
 			return Ok(value);
 		}
 		if self.unregister(value) {
-			return self.escape_frame_string(value);
+			return self.escape_owned_storage(value);
 		}
 		if let Some(node) = node
 			&& self.is_coalesced_return_read(node, value.repr)
@@ -1630,7 +1651,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.builder
 					.build_store(flag, self.context.bool_type().const_zero())?;
 			}
-			return self.escape_frame_string(value);
+			return self.escape_owned_storage(value);
 		}
 		self.emit_copy(value)
 	}

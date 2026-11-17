@@ -30,6 +30,15 @@ use fa_analyzer::types::{CollKind, ConstValue, NominalKind, TypeKind};
 use crate::generate::{Generator, Kind};
 use crate::js::{self, Expr, Prec};
 
+/// A scalar reference can select a local variable or a located member.
+pub(crate) struct LocalChoice {
+	pub selector: String,
+	pub locals: Vec<String>,
+	pub helper: String,
+	pub container: String,
+	pub key: String,
+}
+
 /// An assignable place, its container evaluated once.
 pub(crate) struct Place {
 	/// The JavaScript of the place (`point.x`, `items[$t0]`, `count`).
@@ -39,6 +48,9 @@ pub(crate) struct Place {
 	/// A value of a map (`map[key]`, a reference to it): the map and the
 	/// key, evaluated once. `text` reads it; a write is `map.set(key, value)`.
 	pub(crate) map: Option<(String, String)>,
+	/// Erased references write through the carrier or update the object in place.
+	pub(crate) reference: Option<(String, String)>,
+	pub(crate) choice: Option<LocalChoice>,
 }
 
 impl Place {
@@ -48,11 +60,33 @@ impl Place {
 			text,
 			ty,
 			map: None,
+			reference: None,
+			choice: None,
 		}
 	}
 
 	/// The statement writing a value into the place.
 	pub(crate) fn write(&self, value: &str) -> String {
+		if let Some(choice) = &self.choice {
+			let mut text = format!(
+				"{{ const $referenceValue = {value}; switch ({}) {{",
+				choice.selector
+			);
+			for (index, local) in choice.locals.iter().enumerate() {
+				text.push_str(&format!(
+					" case {}: {local} = $referenceValue; break;",
+					index + 1
+				));
+			}
+			text.push_str(&format!(
+				" default: {}({}, {}, $referenceValue); }} }}",
+				choice.helper, choice.container, choice.key
+			));
+			return text;
+		}
+		if let Some((helper, carrier)) = &self.reference {
+			return format!("{helper}({carrier}, {value});");
+		}
 		match &self.map {
 			Some((map, key)) => format!("{map}.set({key}, {value});"),
 			None => format!("{} = {value};", self.text),
@@ -348,6 +382,17 @@ impl Generator<'_> {
 	/// `target.a.b…` for the given members (all of an access, or all but the
 	/// last for the receiver of a method).
 	pub(crate) fn access_chain(&mut self, n: NodeId, target: NodeId, members: &[NodeId]) -> Expr {
+		let fact = members
+			.first()
+			.copied()
+			.filter(|&first| self.has(first, NodeFlags::CODE_POINT_COUNT))
+			.unwrap_or(n);
+		if let Some(mut count) = self.code_point_count(fact, target) {
+			for &member in members.iter().skip(1) {
+				count = self.apply_member(count, member, false);
+			}
+			return count;
+		}
 		// `Database.OpenError.Failed`, `library.Farm.Error.Empty`: a member of a
 		// type declared inside a type (the path before it names types only)
 		if let Some((&last, before)) = members.split_last()
@@ -429,6 +474,12 @@ impl Generator<'_> {
 
 	/// Whether a node names a type (`Point`, `Self`).
 	pub(crate) fn is_type_name(&self, n: NodeId) -> bool {
+		if self
+			.analysis
+			.has_flags(n, fa_analyzer::analysis::NodeFlags::TYPE_EXPR)
+		{
+			return true;
+		}
 		match self.analysis.resolution(n) {
 			Resolution::Local(symbol) => {
 				self.analysis.symbols.symbol(symbol).kind == SymbolKind::Type
@@ -446,6 +497,9 @@ impl Generator<'_> {
 				let name = self.name_of(function);
 				Expr::name(name, true)
 			}
+			Resolution::External(_) => self
+				.external_value(member)
+				.unwrap_or_else(|| self.unsupported(member, "this imported function of a type")),
 			Resolution::Builtin(builtin) if builtins::get(builtin).path == "Enum.members" => {
 				let denoted = match self.analysis.resolution(target) {
 					Resolution::Local(symbol) => self.analysis.symbols.symbol(symbol).ty,
@@ -474,18 +528,30 @@ impl Generator<'_> {
 					.with_purity(value.pure, false)
 			}
 			Resolution::Builtin(builtin) => match builtins::get(builtin).path {
+				"String#codeUnitAt" if !optional => {
+					let receiver = self.keep(value);
+					let index = self.temp();
+					let normalize = self.helper("faNormalizeIndex");
+					Expr::new(
+						format!(
+							"({index}) => {}.charCodeAt({normalize}({}.length, {index}))",
+							receiver.primary_text(),
+							receiver.primary_text()
+						),
+						Prec::Assign,
+					)
+				}
 				"Pointer#value" => {
 					let target = self.type_of(member);
 					self.pointer_value(value, target, member)
 				}
-				"String#length" if !optional => {
-					let helper = self.helper("faStringLength");
-					js::call(helper, &[value.text])
-				}
-				"Array#length" | "OrderedColumnar#length" | "CArray#length" => {
-					Expr::primary(format!("{}{dot}length", value.primary_text()))
-						.with_purity(value.pure, false)
-				}
+				"String#length"
+				| "String#capacity"
+				| "Bytes#length"
+				| "Array#length"
+				| "OrderedColumnar#length"
+				| "CArray#length" => Expr::primary(format!("{}{dot}length", value.primary_text()))
+					.with_purity(value.pure, false),
 				"Set#size" | "Map#size" | "Pool#size" | "Columnar#size" | "RelationPool#size" => {
 					Expr::primary(format!("{}{dot}size", value.primary_text()))
 						.with_purity(value.pure, false)
@@ -518,10 +584,7 @@ impl Generator<'_> {
 					Expr::primary(format!("{}{dot}size", value.primary_text()))
 						.with_purity(value.pure, false)
 				}
-				"String#capacity" if !optional => {
-					let helper = self.helper("faStringLength");
-					js::call(helper, &[value.text])
-				}
+
 				// the value protected by a mutex (concurrency.js)
 				"Guard#value" => Expr::primary(format!("{}{dot}value", value.primary_text()))
 					.with_purity(value.pure, false),
@@ -761,13 +824,7 @@ impl Generator<'_> {
 
 	/// `target[a..b]`: a slice of an array (a copy) or of a string.
 	fn slice(&mut self, target: NodeId, range: NodeId) -> Option<Expr> {
-		let helper = |g: &mut Self| {
-			if g.kind(g.type_of(target)) == Kind::Text {
-				g.helper("faStringSlice")
-			} else {
-				g.helper("faArraySlice")
-			}
-		};
+		let helper = |g: &mut Self| g.helper("faArraySlice");
 		// a compile-time range (`static span = 1..5`): its bounds
 		if !matches!(self.view(self.strip_groups(range)), View::Range { .. })
 			&& let Some((start, end, inclusive)) = self.constant_range(range)
@@ -822,15 +879,126 @@ impl Generator<'_> {
 		let end = end.map_or("undefined".to_string(), |_| {
 			values.next().expect("an end").text
 		});
-		let helper = if self.kind(self.type_of(target)) == Kind::Text {
-			self.helper("faStringSlice")
-		} else {
-			self.helper("faArraySlice")
-		};
+		let helper = self.helper("faArraySlice");
 		Some(js::call(
 			helper,
 			&[container, start, end, inclusive.to_string()],
 		))
+	}
+
+	/// Strings and bytes use native slices; borrowed arrays use a live view.
+	/// Ordinary array slice copies are handled separately.
+	pub(crate) fn native_slice(
+		&mut self,
+		n: NodeId,
+		target: NodeId,
+		range: NodeId,
+		view: bool,
+	) -> Option<Expr> {
+		let bytes = self.types.kind(self.type_of(target)) == TypeKind::Bytes;
+		let array = view
+			&& matches!(
+				self.types.kind(self.type_of(target)),
+				TypeKind::Collection(CollKind::Array, ..)
+			);
+		if !array && !bytes && self.kind(self.type_of(target)) != Kind::Text {
+			return None;
+		}
+		let (container, start, end, inclusive) = if let View::Range {
+			start,
+			end,
+			inclusive,
+		} = self.view(self.strip_groups(range))
+		{
+			let mut nodes = vec![target];
+			nodes.extend(start);
+			nodes.extend(end);
+			let mut values = self.in_order(&nodes, |g, node| g.expr(node)).into_iter();
+			let container = values.next().expect("a target");
+			let start = start.map(|_| values.next().expect("a start").text);
+			let end = end.map(|_| values.next().expect("an end").text);
+			(container, start, end, inclusive.to_string())
+		} else if let Some((start, end, inclusive)) = self.constant_range(range) {
+			(
+				self.expr(target),
+				start.map(|v| v.to_string()),
+				end.map(|v| v.to_string()),
+				inclusive.to_string(),
+			)
+		} else if self.type_of(range) == TypeId::RANGE {
+			let values = self.in_order(&[target, range], |g, node| g.expr(node));
+			let container = self.keep(values[0].clone());
+			let bounds = self.keep(values[1].clone());
+			(
+				container,
+				Some(format!("{}.start", bounds.primary_text())),
+				Some(format!("{}.end", bounds.primary_text())),
+				format!("{}.includesEnd", bounds.primary_text()),
+			)
+		} else {
+			return None;
+		};
+		if array {
+			let helper = self.helper("faArrayView");
+			return Some(js::call(
+				helper,
+				&[
+					container.text,
+					start.unwrap_or_else(|| "undefined".into()),
+					end.unwrap_or_else(|| "undefined".into()),
+					inclusive,
+				],
+			));
+		}
+		let method = if bytes && view { "subarray" } else { "slice" };
+		let mut start = start.unwrap_or_else(|| "0".to_string());
+		let mut end = end.unwrap_or_else(|| "undefined".to_string());
+		let container = if self.has(n, NodeFlags::INDEX_CHECK) || inclusive != "false" {
+			self.keep(container)
+		} else {
+			container
+		};
+		if self.has(n, NodeFlags::INDEX_CHECK) {
+			let helper = self.helper("faSliceBounds");
+			let bounds = self.temp();
+			self.out.line(format!(
+				"const {bounds} = {helper}({}.length, {start}, {end}, {inclusive});",
+				container.primary_text()
+			));
+			start = format!("{bounds}[0]");
+			end = format!("{bounds}[1]");
+		} else if inclusive != "false" && end != "undefined" {
+			// An inclusive negative end is normalized before adding one:
+			// slice(0, -1 + 1) would otherwise mean an empty slice.
+			if inclusive == "true"
+				&& let Ok(value) = end.parse::<i64>()
+			{
+				end = if value >= 0 {
+					(value + 1).to_string()
+				} else {
+					format!("{}.length + ({})", container.primary_text(), value + 1)
+				};
+			} else {
+				start = self.keep(Expr::primary(start)).text;
+				let last = self.keep(Expr::primary(end));
+				end = format!(
+					"({} < 0 ? {}.length + {} : {}) + ({inclusive} ? 1 : 0)",
+					last.text,
+					container.primary_text(),
+					last.text,
+					last.text
+				);
+			}
+		}
+		let arguments = if end == "undefined" {
+			start
+		} else {
+			format!("{start}, {end}")
+		};
+		Some(Expr::primary(format!(
+			"{}.{method}({arguments})",
+			container.primary_text()
+		)))
 	}
 
 	/// `target[index]`: an array item or a character of a string.
@@ -838,6 +1006,9 @@ impl Generator<'_> {
 		// the field at a key of a key set (fields.rs)
 		if self.analysis.key_reads.contains(&n) {
 			return self.key_read(target, index);
+		}
+		if let Some(slice) = self.native_slice(n, target, index, false) {
+			return slice;
 		}
 		if let Some(slice) = self.slice(target, index) {
 			return slice;
@@ -849,23 +1020,17 @@ impl Generator<'_> {
 		{
 			return self.map_index(n, container.clone(), position.clone(), key);
 		}
-		let read = match (self.kind(self.type_of(target)), self.index_access(n, index)) {
-			(Kind::Text, _) => {
-				// the grapheme at a position: a helper, checked or not
-				let helper = self.helper("faStringIndex");
-				js::call(helper, &[container.text.clone(), position.text.clone()])
-			}
-			(_, IndexAccess::Checked) => {
+		let read = match self.index_access(n, index) {
+			IndexAccess::Checked => {
 				let helper = self.helper("faIndex");
 				js::call(helper, &[container.text.clone(), position.text.clone()])
 			}
-			// a proven index that may be negative counts from the end: `at`
-			(_, IndexAccess::FromEnd) => Expr::primary(format!(
+			IndexAccess::FromEnd => Expr::primary(format!(
 				"{}.at({})",
 				container.primary_text(),
 				position.text
 			)),
-			(_, IndexAccess::Direct) => {
+			IndexAccess::Direct => {
 				Expr::primary(format!("{}[{}]", container.primary_text(), position.text))
 			}
 		};
@@ -1006,6 +1171,9 @@ impl Generator<'_> {
 				let Resolution::Local(symbol) = self.analysis.resolution(target) else {
 					return None;
 				};
+				if let Some(place) = self.local_choice_place(symbol, ty) {
+					return Some(place);
+				}
 				let mut text = self.name_of(symbol);
 				// a narrowed local designates its payload, the same JavaScript
 				// value (`if x is not none { x += 1 }`)
@@ -1021,7 +1189,14 @@ impl Generator<'_> {
 					ty = self.without_none(ty);
 					text = text.replace("?.[", "[").replace("?.", ".");
 				}
-				Some(Place { text, ty, map })
+				let reference = self.reference_write(symbol);
+				Some(Place {
+					text,
+					ty,
+					map,
+					reference,
+					choice: None,
+				})
 			}
 			View::Access {
 				target: container,
@@ -1104,6 +1279,8 @@ impl Generator<'_> {
 						text: read.text,
 						ty: self.type_of(target),
 						map: Some((container_value.primary_text(), position.text)),
+						reference: None,
+						choice: None,
 					});
 				}
 				if self.index_needs_normalizing(target, index) {
@@ -1212,6 +1389,7 @@ impl Generator<'_> {
 	pub(crate) fn is_composite(&self, ty: TypeId) -> bool {
 		match self.types.kind(ty) {
 			TypeKind::Object(_)
+			| TypeKind::Bytes
 			| TypeKind::Tuple(_)
 			| TypeKind::Collection(..)
 			| TypeKind::CArray(..)
@@ -1255,6 +1433,13 @@ impl Generator<'_> {
 	) -> Expr {
 		let ty = self.type_of(node);
 		if self.fcx.moving_replaced == Some(node) {
+			return value;
+		}
+		// A native bytes slice already owns its copy; do not copy it again.
+		if ty == TypeId::BYTES
+			&& let View::Index { index, .. } = self.view(self.strip_groups(node))
+			&& self.type_of(index) == TypeId::RANGE
+		{
 			return value;
 		}
 		// a place's value, not the last use of a local (D15); a new
@@ -1375,6 +1560,14 @@ impl Generator<'_> {
 	/// a call result is always fresh. A `mutable` local of the function, or
 	/// a `let` bound to a fresh value, is returned as is.
 	pub(crate) fn copy_returned(&mut self, node: NodeId, value: Expr) -> Expr {
+		if self
+			.current_function()
+			.and_then(|function| self.analysis.function(function))
+			.and_then(|info| info.sig)
+			.is_some_and(|sig| self.types.sig(sig).reference.is_some())
+		{
+			return value;
+		}
 		let ty = self.type_of(node);
 		if !self.is_composite(ty) || self.is_move(node) {
 			return value;
@@ -1511,6 +1704,7 @@ impl Generator<'_> {
 	/// `faCopy` otherwise.
 	pub(crate) fn copy_of(&mut self, value: Expr, ty: TypeId) -> Expr {
 		let primitive_items = match self.types.kind(ty) {
+			TypeKind::Bytes => true,
 			TypeKind::Collection(CollKind::Array | CollKind::InlineArray, item, _) => {
 				!self.is_composite(item)
 			}
@@ -1713,6 +1907,9 @@ impl Generator<'_> {
 	/// operands may be of wider types, structural typing), in declaration
 	/// order; `None` for other types.
 	pub(crate) fn equality_function(&mut self, ty: TypeId) -> Option<String> {
+		if self.types.kind(ty) == TypeKind::Bytes {
+			return Some(self.helper("faBytesEqual").to_string());
+		}
 		if !matches!(self.types.kind(ty), TypeKind::Object(_)) {
 			return None;
 		}
@@ -1767,6 +1964,7 @@ impl Generator<'_> {
 	/// The copy of a composite field read as `value.name`.
 	fn copy_field(&mut self, read: Expr, ty: TypeId) -> Option<Expr> {
 		match self.types.kind(ty) {
+			TypeKind::Bytes => Some(Expr::primary(format!("{}.slice()", read.primary_text()))),
 			TypeKind::Collection(CollKind::Array | CollKind::InlineArray, item, _)
 			| TypeKind::CArray(item, _)
 				if !self.is_composite(item) =>

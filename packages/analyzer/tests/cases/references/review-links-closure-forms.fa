@@ -1,0 +1,20 @@
+-- Named functions and functions stored in aggregates cannot hide a local borrow.
+type Callback = () => Integer
+function named = (): Callback => {
+ mutable values: GrowingPool<Integer> = []
+ use value = values.add(7)
+ function read = (): Integer => value
+ return read -- error: MEM004
+}
+function aggregate = (): { read: () => Integer } => {
+ mutable values: GrowingPool<Integer> = []
+ use value = values.add(7)
+ function read = (): Integer => value
+ { read = read } -- error: MEM004
+}
+function transitive = (): Callback => {
+ mutable values: GrowingPool<Integer> = []
+ use value = values.add(7)
+ function read = (): Integer => value
+ () => read() -- error: MEM004
+}

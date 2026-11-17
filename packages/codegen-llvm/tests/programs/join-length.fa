@@ -17,8 +17,8 @@ for length in 0..65 {
 	check([text, "middle", text], ";")
 	check(text.split("a"), ";")
 }
-assert ["e", "\u{301}"].join("").length == 1
-assert ["\r", "\n"].join("").length == 1
+assert ["e", "\u{301}"].join("").length == 2
+assert ["\r", "\n"].join("").length == 2
 assert empty.join("anything").length == 0
 
 mutable order = ""

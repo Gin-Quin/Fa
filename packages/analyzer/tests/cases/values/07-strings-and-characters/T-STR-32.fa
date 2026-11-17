@@ -1,0 +1,2 @@
+console.log(String.fromUtf8(Bytes.from([104, 255])) catch error => error.position, String.fromUtf8Lossy(Bytes.from([104, 255])), "😀"[0].toUtf8())
+-- prints: 1 h� [239, 191, 189]

@@ -1,0 +1,6 @@
+type Node = { value: Integer }
+mutable nodes: GrowingPool<Node> = []
+use a = nodes.add({ value = 1 })
+let xs: Array<Node in nodes> = [a]
+a.value = 5
+console.log(try xs[0].value)

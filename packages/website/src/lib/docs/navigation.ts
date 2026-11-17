@@ -33,6 +33,7 @@ export const navigation: Array<{ title: string; pages: string[] }> = [
 			"operations/arithmetic",
 			"operations/logical",
 			"operations/string",
+			"operations/json",
 			"operations/destructuring",
 		],
 	},

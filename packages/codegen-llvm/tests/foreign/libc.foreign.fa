@@ -31,3 +31,9 @@ console.log(sorted(numbers)) -- prints: [-7, 1, 2, 3]
 console.log(numbers) -- prints: [3, 1, 2, -7]
 let missing = environment("FA_SURELY_NOT_SET")
 console.log(missing is none) -- prints: true
+
+-- Lone UTF-16 surrogates are replaced at the CString boundary.
+function compareText: (left: CString, right: CString) => c.Int = @extern("strcmp")
+let face = "😀"
+console.log(compareText(face[0], "�") == 0, compareText(face[1], "�") == 0) -- prints: true true
+console.log(compareText(face[0] + face[1], face) == 0) -- prints: true

@@ -78,6 +78,11 @@ A missing field takes its default value, freshly built for each object, even whe
 
 Named union members carry a `"type"` property with their member name: `{ "type": "Circle", "radius": 1 }`. A member without data is `{ "type": "Point" }`. Non-object data, or an object with its own `type` field, goes under `"value"`; a literal member stays the literal. An unknown tag is a `JsonError` listing the accepted members.
 
+### JSON and graph owners
+
+Converting a type containing explicit [links](/advanced/relations#links-without-a-reverse-side) to JSON is a compile-time error, including a complete owner: silently omitting edges or recursively following cycles would change the data. Use an explicit data type containing node identifiers and ordered adjacency lists. Validate every identifier when rebuilding links, and publish only the resulting complete owner. Generic printing, equality and hashing omit link fields; that observation rule does not authorize a JSON conversion.
+
+
 ## Errors are part of the signature
 
 A handler returns a `Response`, so every failure has to be turned into one. This is the point where Fa's error model pays off: the compiler will not let you forget a case.

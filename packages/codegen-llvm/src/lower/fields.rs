@@ -371,13 +371,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		target: NodeId,
 		index: NodeId,
 	) -> Result<Val<'ctx>, Error> {
-		let key = match self.analysis.resolution(index) {
-			Resolution::Local(symbol) => self.current_keys.get(&symbol).cloned(),
-			_ => None,
-		};
-		let Some(key) = key else {
-			return Err(self.unsupported(node.index(), "this key of a key set"));
-		};
+		if self.is_place(target) {
+			let slot = self.key_place(node, target, index)?;
+			return self.load(slot);
+		}
+		let key = self.current_key(node, index)?;
 		let mut value = self.expr(target)?;
 		if value.repr == Repr::Never {
 			return Ok(value);
@@ -405,6 +403,53 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			value = Val::new(repr, raw);
 		}
 		Ok(value)
+	}
+
+	/// Borrowing a keyed field uses the same fact as an ordinary read.
+	pub(crate) fn key_place(
+		&mut self,
+		node: NodeId,
+		target: NodeId,
+		index: NodeId,
+	) -> Result<super::Slot<'ctx>, Error> {
+		let key = self.current_key(node, index)?;
+		let mut slot = self.place(target)?;
+		for name in key.split('.') {
+			if let Repr::Rec(target) = slot.repr {
+				slot = super::Slot {
+					pointer: self.load_edge(slot)?,
+					repr: self.repr_of(target, node.index())?,
+				};
+			}
+			let Repr::Object(object) = slot.repr else {
+				return Err(self.unsupported(node.index(), "this key of a key set"));
+			};
+			let position = self
+				.types()
+				.fields_of(object)
+				.iter()
+				.position(|field| self.types().syms.resolve(field.name) == name)
+				.ok_or_else(|| self.unsupported(node.index(), "this key of a key set"))?;
+			let structure = self.object_type(object);
+			slot = super::Slot {
+				pointer: self.builder.build_struct_gep(
+					structure,
+					slot.pointer,
+					position as u32,
+					"",
+				)?,
+				repr: self.field_repr(object, position, node.index())?,
+			};
+		}
+		Ok(slot)
+	}
+
+	fn current_key(&self, node: NodeId, index: NodeId) -> Result<String, Error> {
+		match self.analysis.resolution(index) {
+			Resolution::Local(symbol) => self.current_keys.get(&symbol).cloned(),
+			_ => None,
+		}
+		.ok_or_else(|| self.unsupported(node.index(), "this key of a key set"))
 	}
 
 	/// Forgets the slots of the locals declared in the body of a key loop:

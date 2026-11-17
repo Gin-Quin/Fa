@@ -48,10 +48,10 @@ impl Walker<'_> {
 					};
 					let actual = self.check(key_node, Some(key));
 					self.sink(key_node, actual, key);
-					self.escape(key_node, n);
+					self.store_closures(key_node, n);
 					let actual = self.check(value_node, Some(value));
 					self.sink(value_node, actual, value);
-					self.escape(value_node, n);
+					self.store_closures(value_node, n);
 					self.memo(inner, |_| pair);
 					self.memo(item, |_| pair);
 					keys.push(key_node);
@@ -830,7 +830,15 @@ impl Walker<'_> {
 	/// `CL031`: writing a set element or a map key (a read-only reference),
 	/// instead of `E-DECL-3`. Type part.
 	pub(super) fn report_readonly_element(&mut self, target: NodeId, symbol: SymbolId) -> bool {
-		if !self.readonly_elements.contains(&symbol) {
+		let readonly = self.readonly_elements.contains(&symbol)
+			|| self.body.flow.ref_state(symbol).is_some_and(|state| {
+				let state = self.facts.refs.get(state);
+				state.readonly || state.places.iter().any(|&place| self.readonly_place(place))
+			}) || self
+			.reference_parameters
+			.get(&symbol)
+			.is_some_and(|&place| self.readonly_place(place));
+		if !readonly {
 			return false;
 		}
 		let name = self

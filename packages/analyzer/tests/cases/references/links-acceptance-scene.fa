@@ -1,0 +1,124 @@
+-- pending: links slices 3–7 (adopted specification; no owned-copy fallback)
+function xorshift = (x: UInt64): UInt64 => {
+	mutable v = x
+	v = v.bitXor(v.shiftLeft(13))
+	v = v.bitXor(v.shiftRight(7))
+	v.bitXor(v.shiftLeft(17))
+}
+function randomBelow = (x: UInt64, bound: Integer<min = 1>): Integer =>
+	Integer(x %% UInt64(bound))
+
+type Vector = { x: Float32, y: Float32, z: Float32 }
+type Transform = { matrix: CArray<Float32, 9>, translation: Vector }
+let identity = Transform {
+	matrix = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+	translation = { x = 0.0, y = 0.0, z = 0.0 }
+}
+function rotation = (seed: UInt64): CArray<Float32, 9> => {
+	let axis = randomBelow(seed, 3)
+	let quarter = randomBelow(seed.shiftRight(8), 4)
+	mutable c: Float32 = 1.0
+	mutable s: Float32 = 0.0
+	if quarter == 1 {
+		c = 0.0
+		s = 1.0
+	} else if quarter == 2 {
+		c = -1.0
+		s = 0.0
+	} else if quarter == 3 {
+		c = 0.0
+		s = -1.0
+	}
+	if axis == 0 {
+		return [1.0, 0.0, 0.0, 0.0, c, 0.0 - s, 0.0, s, c]
+	}
+	if axis == 1 {
+		return [c, 0.0, s, 0.0, 1.0, 0.0, 0.0 - s, 0.0, c]
+	}
+	[c, 0.0 - s, 0.0, s, c, 0.0, 0.0, 0.0, 1.0]
+}
+function compose = (parent: Transform, local: Transform): Transform throws IndexError => {
+	mutable matrix: CArray<Float32, 9> = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+	for i in 0..3 {
+		for j in 0..3 {
+			mutable sum: Float32 = 0.0
+			for k in 0..3 {
+				sum += (try parent.matrix[i * 3 + k]) * (try local.matrix[k * 3 + j])
+			}
+			matrix[i * 3 + j] = sum
+		}
+	}
+	let p = parent.matrix
+	let t = local.translation
+	Transform {
+		matrix = matrix
+		translation = {
+			x = p[0] * t.x + p[1] * t.y + p[2] * t.z + parent.translation.x
+			y = p[3] * t.x + p[4] * t.y + p[5] * t.z + parent.translation.y
+			z = p[6] * t.x + p[7] * t.y + p[8] * t.z + parent.translation.z
+		}
+	}
+}
+
+type Scene = {
+	nodes: GrowingPool<Node> = []
+	type Node = {
+		id: Int32
+		local: Transform
+		world: Transform
+		link children: InlineArray<Node in nodes, 4> = []
+	}
+	function build = (self, depth: Integer<min = 0>, seed: UInt64): Node in self.nodes
+		throws CapacityError | ArithmeticError
+		mutates self.nodes.size, self.nodes[..].children => {
+		let state = xorshift(seed)
+		use node = self.nodes.add({
+			id = try Int32(self.nodes.size)
+			local = {
+				matrix = rotation(state)
+				translation = {
+					x = Float32(randomBelow(state.shiftRight(16), 9))
+					y = Float32(randomBelow(state.shiftRight(24), 9))
+					z = Float32(randomBelow(state.shiftRight(32), 9))
+				}
+			}
+			world = identity
+			children = []
+		})
+		if depth == 0 { return node }
+		let count = 1 + randomBelow(state.shiftRight(40), 4)
+		for index in 0..count {
+			use child = try self.build(depth - 1, xorshift(state.wrappingAdd(UInt64(index))))
+			try node.children.push(child)
+		}
+		node
+	}
+	function update = (self, node: Node in self.nodes, parent: Transform)
+		throws IndexError mutates self.nodes[..].world => {
+		node.world = try compose(parent, node.local)
+		let world = node.world -- ordinary inline value snapshot; no heap copy
+		for child in node.children {
+			try self.update(child, world)
+		}
+	}
+}
+
+mutable scene: Scene = {}
+use root = try scene.build(12, 12345)
+mutable total = 0
+for frame in 0..16 {
+	let step = Float32(frame %% 5)
+	for node in scene.nodes {
+		if node.id %% 7 == frame %% 7 {
+			node.local.translation.x = step
+			node.local.translation.z = 8.0 - step
+		}
+	}
+	try scene.update(root, identity)
+	for node in scene.nodes {
+		let t = node.world.translation
+		total += try Integer.truncate(t.x + t.y + t.z)
+	}
+}
+console.log(scene.nodes.size)
+console.log(total)

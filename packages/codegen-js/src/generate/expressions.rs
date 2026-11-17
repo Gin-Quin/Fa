@@ -1,20 +1,26 @@
 //! Expressions: names, booleans, comparisons, `if` values and the lifting of
 //! constructs that need statements (values brief §8, §13, §19).
 
+use fa_analyzer::analysis::NodeFlags;
 use fa_analyzer::builtins;
 use fa_analyzer::ids::{NodeId, TypeId};
 use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::{CompareOp, LogicOp, View};
 use fa_analyzer::types::TypeKind;
 
-use crate::generate::{Dest, Generator, Kind, Repr};
+use crate::generate::{Dest, Generator, Repr};
 use crate::js::{self, Expr, Prec};
 
 impl Generator<'_> {
 	/// The JavaScript of an expression, converted for its sink when the
 	/// analyzer recorded a conversion or a range check there.
 	pub(crate) fn expr(&mut self, n: NodeId) -> Expr {
-		let value = self.expr_raw(n);
+		let value = if self.call_returns_reference(n) && !self.is_object_reference(self.type_of(n))
+		{
+			self.read_reference_call(n)
+		} else {
+			self.expr_raw(n)
+		};
 		self.sink(n, value)
 	}
 
@@ -22,29 +28,11 @@ impl Generator<'_> {
 	pub(crate) fn expr_raw(&mut self, n: NodeId) -> Expr {
 		// a value computed at compile time (constants.rs)
 		if let Some(value) = self.comptime_value(n) {
-			return self.constant_value(n, &value, self.type_of(n));
+			let value = self.constant_value(n, &value, self.type_of(n));
+			return self.instantiated_function_value(n, value);
 		}
 		let value = self.expr_value(n);
-		// A grouped value can own the contextual instantiation. Its child
-		// may own one instead: bind the capabilities exactly once.
-		let mut source = n;
-		while let View::Group(inner) = self.view(source) {
-			if self.analysis.instantiation(inner).is_some() {
-				source = inner;
-				break;
-			}
-			source = inner;
-		}
-		let value = if self.analysis.instantiation(n).is_some()
-			&& (source == n || self.analysis.instantiation(source).is_none())
-			&& matches!(
-				self.view(source),
-				View::Name(_) | View::Access { .. } | View::Lambda { .. }
-			) {
-			self.specialized_function_value(n, value)
-		} else {
-			value
-		};
+		let value = self.instantiated_function_value(n, value);
 		// reads and writes of reactive places (reactivity.rs)
 		self.reactive_expr(n, value)
 	}
@@ -100,6 +88,34 @@ impl Generator<'_> {
 				right,
 				negated,
 			} => {
+				let unit_left = self
+					.has(self.strip_groups(left), NodeFlags::STRING_CODE_UNIT)
+					.then(|| self.one_unit_literal(right))
+					.flatten();
+				let unit_right = self
+					.has(self.strip_groups(right), NodeFlags::STRING_CODE_UNIT)
+					.then(|| self.one_unit_literal(left))
+					.flatten();
+				if unit_left.is_some() || unit_right.is_some() {
+					let values = self.in_order(&[left, right], |g, operand| {
+						if (operand == left && unit_left.is_some())
+							|| (operand == right && unit_right.is_some())
+						{
+							g.indexed_code_unit(operand)
+						} else {
+							Expr::constant(
+								unit_left.or(unit_right).unwrap().to_string(),
+								Prec::Primary,
+							)
+						}
+					});
+					return js::binary(
+						&values[0],
+						if negated { "!==" } else { "===" },
+						&values[1],
+						Prec::Equality,
+					);
+				}
 				let values = self.in_order(&[left, right], |g, operand| g.expr(operand));
 				self.equality(left, right, &values[0], &values[1], negated)
 			}
@@ -424,14 +440,9 @@ impl Generator<'_> {
 	}
 
 	/// One ordering `a < b` between two values of a node's operands.
-	fn order(&mut self, left: NodeId, op: CompareOp, a: &Expr, b: &Expr) -> Expr {
+	fn order(&mut self, _left: NodeId, op: CompareOp, a: &Expr, b: &Expr) -> Expr {
 		let symbol = op.symbol();
-		if self.kind(self.type_of(left)) == Kind::Text {
-			let compare = self.helper("faStringCompare");
-			let call = js::call(compare, &[a.text.clone(), b.text.clone()]);
-			let zero = Expr::constant("0", Prec::Primary);
-			return js::binary(&call, symbol, &zero, Prec::Relational);
-		}
+
 		js::binary(a, symbol, b, Prec::Relational)
 	}
 

@@ -243,7 +243,7 @@ impl Merger<'_> {
 			| K::BigInt
 			| K::Percentage
 			| K::String
-			| K::Character
+			| K::Bytes
 			| K::CString
 			| K::Range
 			| K::Subscription => kind,
@@ -332,7 +332,7 @@ impl Merger<'_> {
 		MaskId(self.view.global.masks.insert(self.view.mask_bits(mask)))
 	}
 
-	fn constant(&mut self, value: ConstId) -> ConstId {
+	pub(crate) fn constant(&mut self, value: ConstId) -> ConstId {
 		if !is_local(value.0) {
 			return value;
 		}
@@ -341,7 +341,6 @@ impl Merger<'_> {
 		}
 		let data = self.view.consts.resolve(value.0).map(|data| match data {
 			ConstValue::String(sym) => ConstValue::String(self.sym(sym)),
-			ConstValue::Character(sym) => ConstValue::Character(self.sym(sym)),
 			ConstValue::BigInt(sym) => ConstValue::BigInt(self.sym(sym)),
 			ConstValue::EnumMember(nominal, index) => {
 				ConstValue::EnumMember(self.nominal(nominal), index)
@@ -432,6 +431,7 @@ impl Merger<'_> {
 		}
 		let data = self.view.sig(sig);
 		let merged = FnSig {
+			reference: data.reference.map(|path| self.path(path)),
 			params: self.param_list(data.params),
 			ret: self.ty(data.ret),
 			throws: self.ty(data.throws),
@@ -453,6 +453,7 @@ impl Merger<'_> {
 		let params: Vec<ParamSig> = params
 			.into_iter()
 			.map(|param| ParamSig {
+				reference: param.reference.map(|path| self.path(path)),
 				ty: self.ty(param.ty),
 				..param
 			})
@@ -501,7 +502,7 @@ impl Merger<'_> {
 		PathListId(self.view.global.path_lists.insert(&paths))
 	}
 
-	fn path(&mut self, path: PathId) -> PathId {
+	pub(crate) fn path(&mut self, path: PathId) -> PathId {
 		if !is_local(path.0) {
 			return path;
 		}

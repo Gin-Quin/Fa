@@ -1,0 +1,6 @@
+function part = (text: String): String throws IndexError => {
+	mutable use word = try text[0..1]
+	reuse word = try text[1..3]
+	word
+}
+console.log(try part("a😀z"))

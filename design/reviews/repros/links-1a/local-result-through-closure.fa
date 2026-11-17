@@ -1,0 +1,7 @@
+type Node = { value: Integer }
+function wrong = (owner: GrowingPool<Node>): Node in owner => {
+	mutable local: GrowingPool<Node> = []
+	use n = local.add({ value = 7 })
+	function captured = (fake: GrowingPool<Node>): Node in fake => n
+	captured(owner)
+}

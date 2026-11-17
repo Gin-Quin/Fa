@@ -1,0 +1,11 @@
+-- Expected: REF001: the closure reads `n` after `values.clear()` invalidated it.
+type Node = { value: Integer }
+function at = (values: Array<Node>, i: Integer): Node in values throws IndexError => try values[i]
+function exercise = (): Integer throws IndexError => {
+ mutable values: Array<Node> = [{ value = 1 }]
+ use n = try at(values, 0)
+ function read = (): Integer => n.value
+ values.clear()
+ read()
+}
+console.log(try exercise())

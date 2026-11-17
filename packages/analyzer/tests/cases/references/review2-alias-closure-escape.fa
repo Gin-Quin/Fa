@@ -1,0 +1,12 @@
+-- error: MEM004
+-- Expected: MEM004 even when the returned callback has a local alias.
+type Callback = () => Integer
+function make = (): Callback => {
+ mutable values: GrowingPool<Integer> = []
+ use value = values.add(7)
+ function read = (): Integer => value
+ let callback = read
+ callback
+}
+let read = make()
+console.log(read())

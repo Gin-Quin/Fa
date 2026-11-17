@@ -1,0 +1,10 @@
+static text = "a😀"
+static unit = (text.codeUnitAt)(-1)
+static count = (text.codePoints)().length
+function encodedSum = (): Integer => {
+	mutable sum = 0
+	for byte in (text.toUtf8)() { sum += byte }
+	return sum
+}
+static sum = @encodedSum()
+console.log(unit, count, sum) -- prints: 56832 2 776

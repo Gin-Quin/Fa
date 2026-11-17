@@ -786,9 +786,23 @@ impl Walker<'_> {
 		// through the loop variable (an element of a `mutable` collection)
 		if let Some(pattern) = frame.pattern
 			&& let Some(variable) = self.a.symbols.symbol_of_decl(pattern)
-			&& let Some(&item) = self.aliases.get(&variable)
-			&& self.places.is_at_or_below(place, item)
-		{
+			&& self
+				.body
+				.flow
+				.ref_state(variable)
+				.map(|state| {
+					self.facts
+						.refs
+						.get(state)
+						.places
+						.iter()
+						.any(|&item| self.places.is_at_or_below(place, item))
+				})
+				.unwrap_or_else(|| {
+					self.aliases
+						.get(&variable)
+						.is_some_and(|&item| self.places.is_at_or_below(place, item))
+				}) {
 			return Some(Allowed::Variable);
 		}
 		// `T[i]` or below

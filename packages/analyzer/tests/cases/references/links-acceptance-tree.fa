@@ -1,0 +1,38 @@
+-- pending: links slices 3–7 (adopted specification; no owned-copy fallback)
+function xorshift = (x: UInt64): UInt64 => {
+	mutable v = x
+	v = v.bitXor(v.shiftLeft(13))
+	v = v.bitXor(v.shiftRight(7))
+	v.bitXor(v.shiftLeft(17))
+}
+type Tree = {
+	nodes: GrowingPool<Node> = []
+	type Node = {
+		value: Int32
+		link left: (Node in nodes)? = none
+		link right: (Node in nodes)? = none
+	}
+	function build = (self, depth: Integer<min = 0>, seed: UInt64): Node in self.nodes
+		mutates self.nodes.size => {
+		if depth == 0 {
+			return self.nodes.add({ value = Int32(seed %% 1000) })
+		}
+		use left = self.build(depth - 1, xorshift(seed))
+		use right = self.build(depth - 1, xorshift(seed.wrappingAdd(1)))
+		self.nodes.add({ value = Int32(seed %% 1000), left = left, right = right })
+	}
+	function sum = (self, node: Node in self.nodes, pass: Integer): Integer => {
+		mutable total = Integer(node.value).bitXor(pass)
+		use left = node.left
+		if left is not none { total += self.sum(left, pass) }
+		use right = node.right
+		if right is not none { total += self.sum(right, pass) }
+		total
+	}
+}
+mutable tree: Tree = {}
+use root = tree.build(21, 12345)
+mutable total = 0
+for pass in 0..8 { total += tree.sum(root, pass) }
+console.log(tree.nodes.size)
+console.log(total)

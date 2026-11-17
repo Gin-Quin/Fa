@@ -1,0 +1,7 @@
+-- Specification example: strings 17
+let face = "😀"
+let half = face[0]  -- a lone surrogate
+
+assert half.length == 1
+assert not half.isWellFormed()
+assert face[0] + face[1] == face -- the two halves make the character again

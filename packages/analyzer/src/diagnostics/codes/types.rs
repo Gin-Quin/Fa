@@ -40,6 +40,7 @@ codes! {
 	FN027 = "FN027", Error, [], "named arguments don't go through function values";
 	FN028 = "FN028", Error, [], "at most one, last";
 	FN029 = "FN029", Error, [], "elsewhere)";
+	FN030 = "FN030", Error, [], "a default in a function type";
 	FN040 = "FN040", Error, [], "self not first / annotated / outside a type";
 	FN041 = "FN041", Error, [], "self not first / annotated / outside a type";
 	FN042 = "FN042", Error, [], "methods can only be declared in type declarations";

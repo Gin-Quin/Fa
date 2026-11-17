@@ -3,30 +3,32 @@
 -- iteration stores an index out of bounds into the proven field through its
 -- loop variable, or a negative value into a never-negative field. The claims
 -- see the stores of the body like any other: the checks stay.
-type Link = { next: UInt32 }
-mutable links: Array<Link> = [{ next = 1 }, { next = 0 }, { next = 2 }]
-for parallel link in links {
-	link.next = link.next + 5
-}
-function hop = (from: UInt32): UInt32 throws IndexError => try links[try links[from].next].next
-console.log(hop(0) catch error => 99) -- prints: 99
-
--- in-bounds values: the proof holds
-type Step = { to: UInt32 }
-mutable steps: Array<Step> = [{ to = 1 }, { to = 2 }, { to = 0 }]
-for parallel step in steps {
-	step.to = 0
-}
-function stride = (from: UInt32): UInt32 throws IndexError => try steps[try steps[from].to].to
-console.log(stride(1) catch error => 99) -- prints: 0
-
--- a position counted up elsewhere, stored negative by an iteration
-type Cursor = { position: Integer }
-mutable cursors: Array<Cursor> = [{ position = 0 }, { position = 1 }]
-for parallel cursor, index in cursors {
-	if index == 1 {
-		cursor.position = 0 - 1
+@if target is "native" {
+	type Link = { next: UInt32 }
+	mutable links: Array<Link> = [{ next = 1 }, { next = 0 }, { next = 2 }]
+	for parallel link in links {
+		link.next = link.next + 5
 	}
+	function hop = (from: UInt32): UInt32 throws IndexError => try links[try links[from].next].next
+	console.log(hop(0) catch error => 99) -- prints: 99
+
+	-- in-bounds values: the proof holds
+	type Step = { to: UInt32 }
+	mutable steps: Array<Step> = [{ to = 1 }, { to = 2 }, { to = 0 }]
+	for parallel step in steps {
+		step.to = 0
+	}
+	function stride = (from: UInt32): UInt32 throws IndexError => try steps[try steps[from].to].to
+	console.log(stride(1) catch error => 99) -- prints: 0
+
+	-- a position counted up elsewhere, stored negative by an iteration
+	type Cursor = { position: Integer }
+	mutable cursors: Array<Cursor> = [{ position = 0 }, { position = 1 }]
+	for parallel cursor, index in cursors {
+		if index == 1 {
+			cursor.position = 0 - 1
+		}
+	}
+	function current = (cursor: Cursor, text: String): Byte => text.toUtf8().get(cursor.position) ?? 0
+	console.log(current(cursors[0], "xyz"), current(cursors[1], "xyz")) -- prints: 120 122
 }
-function current = (cursor: Cursor, text: String): Byte => text.bytes().get(cursor.position) ?? 0
-console.log(current(cursors[0], "xyz"), current(cursors[1], "xyz")) -- prints: 120 122

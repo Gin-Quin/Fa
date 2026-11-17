@@ -1,0 +1,22 @@
+type Node = { children: Array<Integer> }
+type Pick = (values: Array<Node>) => Array<Integer> in values throws IndexError
+function pick = (values: Array<Node>): Array<Integer> in values throws IndexError =>
+	try values[0].children
+function observe = (
+	values: Array<Node>
+	choose: Pick
+): Array<Integer> throws IndexError mutates values => {
+	use inner = try choose(values)
+	use same = inner
+	use independent = try choose(values)
+	inner.clear()
+	same.push(7)
+	[inner.length, independent.length]
+}
+function exercise = (): Array<Integer> throws IndexError => {
+	mutable values: Array<Node> = [{ children = [9] }]
+	try observe(values, pick)
+}
+static result = @exercise()
+console.log(result)         -- prints: [1, 1]
+console.log(try exercise()) -- prints: [1, 1]

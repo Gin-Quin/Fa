@@ -1,0 +1,39 @@
+-- Literal bounds count units, not bytes, code points or graphemes.
+let bmp = "é中"
+console.log(bmp[1], bmp[-2], bmp.codeUnitAt(1)) -- no-check
+let beyondBmp = bmp[2] -- error: E-NUM-17
+let face = "😀"
+console.log(face[0], face[1], face[-2], face.codeUnitAt(-1)) -- no-check
+let beyondFace = face.codeUnitAt(-3) -- error: E-NUM-17
+let combining = "e\u{301}"
+console.log(combining[1]) -- no-check
+let empty = ""
+let outsideEmpty = empty[0] -- error: E-NUM-17
+let half = face[0]
+console.log(half[0]) -- no-check
+let outsideHalf = half[1] -- error: E-NUM-17
+-- A saved code-point array has its own ordinary bounds and value semantics.
+let points = face.codePoints()
+let point = points[0] -- error: E-ERR-3, no-check: STRING_CODE_UNIT
+-- A string's mutation invalidates its former length and relations.
+mutable changed = "😀"
+let first = changed[0] -- no-check
+changed = ""
+let outsideAfterReplacement = changed[0] -- error: E-NUM-17
+console.log(first == "a")
+changed += "a"
+let unknownAfterAppend = changed[0] -- error: E-ERR-3
+function inspect = (text: String, index: Integer<min = 0>) => {
+	if index < text.length {
+		console.log(text[index], text.codeUnitAt(index)) -- no-check
+	}
+}
+function replace = (text: String): String => text
+mutable unstable = replace("abc")
+function position = (): Integer<min = 0> => 1
+let index = position()
+if index < unstable.length {
+	unstable = replace("")
+	let cannotUseOldRelation = unstable[index] -- error: E-ERR-3
+}
+console.log(bmp, face, combining)

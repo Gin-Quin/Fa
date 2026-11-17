@@ -168,7 +168,7 @@ impl TypeStore {
 			| TypeKind::NamedUnion(..)
 			| TypeKind::Fields(_)
 			| TypeKind::Collection(..) => true,
-			// the scalar types themselves: `Character | String` keeps both (distinguishability decides)
+			// the scalar types themselves: distinguishability is checked separately
 			_ => false,
 		}
 	}
@@ -591,7 +591,7 @@ mod tests {
 		assert_eq!(store.runtime_kind(TypeId::INT64), RuntimeKind::BigInt);
 		assert!(store.distinguishable(TypeId::INTEGER, TypeId::INT64));
 		// string kind
-		assert!(!check(&mut store, &[TypeId::STRING, TypeId::CHARACTER]));
+		assert!(check(&mut store, &[TypeId::STRING, TypeId::BYTES]));
 		let a = store.string_literal("a");
 		let b = store.string_literal("b");
 		assert!(check(&mut store, &[a, b]));

@@ -16,6 +16,111 @@ mod with_llvm {
 	use fa_analyzer::session::Session;
 	use fa_codegen_llvm::{OptLevel, Options, Target, compile};
 
+	#[test]
+	fn direct_code_point_counts_read_the_analyzer_fact_without_an_array() {
+		let source = include_str!("../../cli/tests/programs/review-code-point-count-array.fa");
+		for target in [Target::Native, Target::Wasm] {
+			for level in [OptLevel::O0, OptLevel::O3] {
+				let ir = ir_at_target("direct-point-count", source, false, level, target);
+				assert!(
+					!ir.contains("@fa_string_code_points("),
+					"{target:?}/{level:?}: {ir}"
+				);
+				if level == OptLevel::O0 {
+					assert!(ir.contains("@fa_string_code_point_count("), "{ir}");
+				}
+			}
+		}
+	}
+
+	#[test]
+	fn ascii_split_proofs_keep_other_cut_constructors_authoritative() {
+		for target in [Target::Native, Target::Wasm] {
+			for (name, separator, filter, extra, enabled) in [
+				("ascii", "\" \"", "", "", false),
+				(
+					"filtered-ascii",
+					"\" \"",
+					".filter((part) => not part.isEmpty())",
+					"",
+					false,
+				),
+				("unknown", "separator", "", "", true),
+				("empty", "\"\"", "", "", true),
+				("cut", "\"😀\"[1]", "", "", true),
+				(
+					"ascii-with-cut",
+					"\" \"",
+					"",
+					"if source.length >= 3 { use cut = source[2..3]\nconsole.log(cut) }\n",
+					true,
+				),
+			] {
+				let (parameter, argument) = if name == "unknown" {
+					(", separator: String", ", \" \"")
+				} else {
+					("", "")
+				};
+				let source = format!(
+					"function run = (text: String{parameter}): Integer => {{\nmutable source = text\nlet parts = source.split({separator}){filter}\n{extra}parts.length\n}}\nconsole.log(run(\"é😀 x\"{argument}))\n"
+				);
+				let ir = complete_ir_at_target(
+					&format!("split-capability-{name}"),
+					&source,
+					false,
+					OptLevel::O0,
+					target,
+				);
+				let flag = ir
+					.lines()
+					.find(|line| line.starts_with("@fa_virtual_string_slices ="))
+					.expect("virtual span capability");
+				assert!(
+					flag.contains(&format!("constant i32 {}", u8::from(enabled))),
+					"{name}/{target:?}: {flag}"
+				);
+				assert!(ir.contains("@fa_string_split_"), "{name}: {ir}");
+			}
+		}
+	}
+
+	#[test]
+	fn view_constructors_enable_virtual_surrogate_edges() {
+		let cases = [
+			(
+				"fa_string_slice_region",
+				"type Tree = Union { Leaf = { text: String }, Branch = { left: Tree, right: Tree } }\nfunction build = (text: String): Tree => Tree.Leaf { text = text[1..3] catch _ => \"\" }\nfunction count = (tree: Tree): Integer => when tree is { Tree.Leaf as { text } => text.length, Tree.Branch as { left, right } => count(left) + count(right) }\nconsole.log(count(build(\"ééé\")))\n",
+			),
+			(
+				"fa_string_split_views",
+				include_str!("../../../design/reviews/repros/strings/split-cut-allocation.fa"),
+			),
+			(
+				"fa_string_split_nonempty_views",
+				"function run = (text: String): Integer => {\nmutable source = text\nlet parts = source.split(\"😀\"[1]).filter((part) => not part.isEmpty())\nparts.length\n}\nconsole.log(run(\"é😀x\"))\n",
+			),
+			(
+				"fa_string_split_views_into",
+				"function run = (text: String): Integer => {\nmutable source = text\nlet parts = source.split(\"😀\"[1])\nparts.length\n}\nconsole.log(run(\"é😀x\"))\n",
+			),
+		];
+		for target in [Target::Native, Target::Wasm] {
+			for (helper, source) in cases {
+				let ir =
+					complete_ir_at_target("split-cut-views", source, false, OptLevel::O0, target);
+				assert!(ir.contains(&format!("@{helper}(")), "{helper}: {ir}");
+				let flag = ir
+					.lines()
+					.find(|line| line.starts_with("@fa_virtual_string_slices ="))
+					.expect("virtual span capability");
+				assert!(
+					flag.contains("constant i32 1"),
+					"{target:?}/{helper}: {flag}"
+				);
+			}
+		}
+	}
+
 	/// The IR of the Fa functions and of `main` (the runtime functions start with `fa_`).
 	fn ir_of(name: &str, source: &str) -> String {
 		ir_with(name, source, true)
@@ -42,21 +147,7 @@ mod with_llvm {
 		opt_level: OptLevel,
 		target: Target,
 	) -> String {
-		let mut session = Session::new();
-		let file = session.set_source("main", Arc::from(source));
-		session.analyze_file(file);
-		let options = Options {
-			opt_level,
-			emit_ir: true,
-			overflow_checks,
-			..Options::default()
-		};
-		let output = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
-			.join("fa-checks")
-			.join(name);
-		let artifact = compile(&session, file, "test.fa", target, &options, &output)
-			.unwrap_or_else(|error| panic!("{name}: {error}"));
-		let ir = std::fs::read_to_string(artifact.ir.expect("the IR")).expect("the IR file");
+		let ir = complete_ir_at_target(name, source, overflow_checks, opt_level, target);
 		// keep the program's own functions
 		let mut kept = String::new();
 		let mut keep = false;
@@ -74,6 +165,30 @@ mod with_llvm {
 			}
 		}
 		kept
+	}
+
+	fn complete_ir_at_target(
+		name: &str,
+		source: &str,
+		overflow_checks: bool,
+		opt_level: OptLevel,
+		target: Target,
+	) -> String {
+		let mut session = Session::new();
+		let file = session.set_source("main", Arc::from(source));
+		session.analyze_file(file);
+		let options = Options {
+			opt_level,
+			emit_ir: true,
+			overflow_checks,
+			..Options::default()
+		};
+		let output = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+			.join("fa-checks")
+			.join(name);
+		let artifact = compile(&session, file, "test.fa", target, &options, &output)
+			.unwrap_or_else(|error| panic!("{name}: {error}"));
+		std::fs::read_to_string(artifact.ir.expect("the IR")).expect("the IR file")
 	}
 
 	fn count(ir: &str, pattern: &str) -> usize {
@@ -1067,7 +1182,7 @@ console.log(moduleConstant(-17), localConstant(-17), negative(-17), quotient(-17
 		// on `position < 0`, which the proof that every store of the field
 		// is non-negative (`index_proofs.rs`) takes out, with or without
 		// overflow checks (a step of one), unless a store may be negative
-		let program = "type Cursor = {\n\ttext: String\n\tposition: Integer\n\tfunction current = (self): Byte => self.text.bytes().get(self.position) ?? 0\n\tfunction advance = (self) mutates self => {\n\t\tself.position += 1\n\t}\n}\nmutable cursor = Cursor { text = \"ab\", position = 0 }\nwhile cursor.current() != 0 {\n\tcursor.advance()\n}\nconsole.log(cursor.position)\n";
+		let program = "type Cursor = {\n\ttext: String\n\tposition: Integer\n\tfunction current = (self): Byte => self.text.toUtf8().get(self.position) ?? 0\n\tfunction advance = (self) mutates self => {\n\t\tself.position += 1\n\t}\n}\nmutable cursor = Cursor { text = \"ab\", position = 0 }\nwhile cursor.current() != 0 {\n\tcursor.advance()\n}\nconsole.log(cursor.position)\n";
 		for checked in [true, false] {
 			let ir = ir_with("cursor", program, checked);
 			let current = function(&ir, "fa.current");
@@ -1094,8 +1209,8 @@ console.log(moduleConstant(-17), localConstant(-17), negative(-17), quotient(-17
 		// and the small methods it calls on `self` are expanded into it
 		// (`frozen.rs`); a store anywhere, or a whole value of the type
 		// assigned, makes it read at each use again
-		let program = "type Scanner = {\n\ttext: String\n\tposition: Integer\n\tcount: Integer\n\tfunction current = (self): Byte => self.text.bytes().get(self.position) ?? 0\n\tfunction skipSpaces = (self) mutates self => {\n\t\twhile self.current() == 32 {\n\t\t\tself.position += 1\n\t\t}\n\t}\n\tfunction words = (self): Integer mutates self => {\n\t\tloop {\n\t\t\tself.skipSpaces()\n\t\t\tif self.current() == 0 {\n\t\t\t\tbreak\n\t\t\t}\n\t\t\twhile self.current() != 32 and self.current() != 0 {\n\t\t\t\tself.position += 1\n\t\t\t}\n\t\t\tself.count += 1\n\t\t}\n\t\tself.count\n\t}\n}\nmutable scanner = Scanner { text = \"one two\", position = 0, count = 0 }\nconsole.log(scanner.words())\n";
-		let inline_test = "4611686018427387904";
+		let program = "type Scanner = {\n\ttext: String\n\tposition: Integer\n\tcount: Integer\n\tfunction current = (self): Byte => self.text.toUtf8().get(self.position) ?? 0\n\tfunction skipSpaces = (self) mutates self => {\n\t\twhile self.current() == 32 {\n\t\t\tself.position += 1\n\t\t}\n\t}\n\tfunction words = (self): Integer mutates self => {\n\t\tloop {\n\t\t\tself.skipSpaces()\n\t\t\tif self.current() == 0 {\n\t\t\t\tbreak\n\t\t\t}\n\t\t\twhile self.current() != 32 and self.current() != 0 {\n\t\t\t\tself.position += 1\n\t\t\t}\n\t\t\tself.count += 1\n\t\t}\n\t\tself.count\n\t}\n}\nmutable scanner = Scanner { text = \"one two\", position = 0, count = 0 }\nconsole.log(scanner.words())\n";
+		let inline_test = "2305843009213693952";
 		let ir = ir_of("frozen", program);
 		let words = function(&ir, "fa.words");
 		assert!(
@@ -1103,6 +1218,7 @@ console.log(moduleConstant(-17), localConstant(-17), negative(-17), quotient(-17
 			"{words}"
 		);
 		assert_eq!(count(words, inline_test), 1, "{words}");
+		assert!(!words.contains("inline_snapshot"), "{words}");
 		for (name, change) in [
 			("frozen-field-written", "scanner.text = \"x\"\n"),
 			("frozen-field-appended", "scanner.text += \"x\"\n"),
@@ -1164,7 +1280,340 @@ console.log(moduleConstant(-17), localConstant(-17), negative(-17), quotient(-17
 			"let ascii = \"abc\"\nlet other = \"héllo\"\nconsole.log(ascii.length, other.length)\n",
 		);
 		assert!(ir.contains("i64 3, i64 -9223372036854775808 }"), "{ir}");
-		assert!(ir.contains("i64 6, i64 0 }"), "{ir}");
+		assert!(ir.contains("i64 6, i64 1152921504606846981 }"), "{ir}");
+	}
+
+	#[test]
+	fn indexed_string_literal_comparisons_read_code_units() {
+		let ir = ir_of(
+			"unit-comparisons",
+			r#"
+function equal = (text: String, index: Integer): Boolean throws IndexError => try text[index] == "é"
+function choose = (text: String, index: Integer): Integer throws IndexError => when try text[index] is { "a" => 1, "é" => 2, else => 3 }
+console.log(try equal("é", 0), try choose("a", 0))
+"#,
+		);
+		for name in ["fa.equal", "fa.choose"] {
+			let body = function(&ir, name);
+			assert!(body.contains("@fa_index_from_end("), "{body}");
+			assert!(body.contains("@string_code_unit_slow("), "{body}");
+			assert!(
+				body.lines()
+					.filter(|line| line.contains("@string_code_unit_slow("))
+					.all(|line| line.contains("!range")),
+				"{body}"
+			);
+			assert!(body.contains("load i8"), "{body}");
+			assert!(!body.contains("@fa_string_get("), "{body}");
+		}
+	}
+
+	#[test]
+	fn ascii_versioning_requires_a_whole_program_frozen_field() {
+		let source = include_str!("programs/strings_frozen_versions.fa");
+		let ir = complete_ir_at_target(
+			"frozen-version-proof",
+			source,
+			false,
+			OptLevel::O0,
+			Target::Native,
+		);
+		assert!(ir.contains("\"fa.frozen.ascii\""), "no frozen field marker");
+		let written = source.replace("try cursor.sum(0)", "cursor.text = text\ntry cursor.sum(0)");
+		let ir = complete_ir_at_target(
+			"mutable-version-proof",
+			&written,
+			false,
+			OptLevel::O0,
+			Target::Native,
+		);
+		assert!(
+			!ir.contains("\"fa.frozen.ascii\""),
+			"a written field was specialized"
+		);
+	}
+
+	#[test]
+	fn frozen_utf8_byte_parsers_specialize_before_the_reader_is_inlined() {
+		let source = include_str!("../../../benchmarks/calc/main.fa");
+		let ir = complete_ir_at_target(
+			"frozen-byte-parser",
+			source,
+			false,
+			OptLevel::O3,
+			Target::Native,
+		);
+		let variants: Vec<_> = ir
+			.split("define ")
+			.skip(1)
+			.filter(|body| {
+				body.lines()
+					.next()
+					.is_some_and(|line| line.contains("@fa.factor.arena.ascii("))
+			})
+			.map(|body| body.split_once("\n}").expect("a complete body").0)
+			.collect();
+		assert!(!variants.is_empty(), "the byte parser needs an ASCII body");
+		for body in variants {
+			assert!(body.contains("load i8"), "{body}");
+			assert!(!body.contains("@string_utf8_byte_slow("), "{body}");
+			assert!(!body.contains("@fa_string_utf8_byte("), "{body}");
+		}
+	}
+
+	#[test]
+	fn byte_parser_versioning_rejects_written_or_multiple_string_fields() {
+		let source = include_str!("../../cli/tests/programs/string-frozen-byte-reads.fa");
+		let written = source.replace(
+			"let cursor = ByteCursor { text }",
+			"mutable cursor = ByteCursor { text }\ncursor.text = text",
+		);
+		let multiple = source
+			.replace("\ttext: String\n", "\ttext: String\n\tother: String\n")
+			.replace("ByteCursor { text }", "ByteCursor { text, other = text }")
+			.replace(
+				"return accumulated",
+				"return accumulated + self.other.length",
+			);
+		for (name, source) in [
+			("written-byte-field", written),
+			("multiple-byte-fields", multiple),
+		] {
+			let ir = complete_ir_at_target(name, &source, false, OptLevel::O0, Target::Native);
+			assert!(!ir.contains("\"fa.frozen.ascii\""), "{name}");
+		}
+	}
+
+	#[test]
+	fn ascii_index_normalization_has_no_memory_effects() {
+		let ir = complete_ir_at_target(
+			"ascii-unit-effects",
+			r#"
+let text = arguments.get(0) ?? "é😀"
+let index = Integer.parse(arguments.get(1) ?? "0") catch _error => -1
+console.log(text.codeUnitAt(index) catch _error => 0)
+"#,
+			false,
+			OptLevel::O3,
+			Target::Native,
+		);
+		let body = function(&ir, "fa_index_from_end");
+		let attribute = body
+			.lines()
+			.next()
+			.expect("function header")
+			.split_whitespace()
+			.find(|word| word.starts_with('#'))
+			.expect("attribute group");
+		let attributes = ir
+			.lines()
+			.find(|line| line.starts_with(&format!("attributes {attribute} =")))
+			.expect("defined attributes");
+		assert!(attributes.contains("memory(none)"), "{attributes}");
+		assert!(!body.contains("store "), "{body}");
+		assert!(ir.contains("@string_code_unit_slow("), "{ir}");
+	}
+
+	#[test]
+	fn locally_caught_unused_index_errors_need_no_payload() {
+		let ir = ir_of(
+			"caught-index-payload",
+			r#"
+function ignored = (text: String, index: Integer): UInt16 => text.codeUnitAt(index) catch _error => 0
+function observed = (text: String, index: Integer): String => {
+	let unit = text.codeUnitAt(index) catch error => return "{error}"
+	"{unit}"
+}
+console.log(ignored("a", 2), observed("a", 2))
+"#,
+		);
+		assert!(
+			!function(&ir, "fa.ignored").contains("@fa_error_index("),
+			"{ir}"
+		);
+		for helper in ["@string_length_slow(", "@unit_count("] {
+			assert!(!function(&ir, "fa.ignored").contains(helper), "{ir}");
+		}
+		assert!(
+			function(&ir, "fa.observed").contains("@fa_error_index("),
+			"{ir}"
+		);
+	}
+
+	#[test]
+	fn utf8_conversions_consume_only_temporaries_and_dead_locals() {
+		let ir = ir_of(
+			"utf8-moves",
+			r#"
+function encode_live = (text: String): Bytes => text.toUtf8()
+function encode_dead = (): Bytes => {
+	mutable text = String.from("a long string whose allocation is transferred", capacity = 256)
+	text.toUtf8()
+}
+function decode_live = (bytes: Bytes): String throws Utf8Error => try String.fromUtf8(bytes)
+function decode_dead = (): String throws Utf8Error => try String.fromUtf8(Bytes.filled(160, 97))
+console.log(encode_live("abc"), encode_dead(), try decode_live(Bytes.filled(1, 97)), try decode_dead())
+"#,
+		);
+		for (name, helper, moved) in [
+			("fa.encode_live", "@fa_string_to_utf8(", false),
+			("fa.encode_dead", "@fa_string_to_utf8(", true),
+			("fa.decode_live", "@fa_string_decode_bytes(", false),
+			("fa.decode_dead", "@fa_string_decode_bytes(", true),
+		] {
+			let body = function(&ir, name);
+			let call = body
+				.lines()
+				.find(|line| line.contains(helper))
+				.expect("conversion call");
+			assert!(
+				call.contains(if moved { "i32 1" } else { "i32 0" }),
+				"{body}"
+			);
+		}
+	}
+
+	#[test]
+	fn ascii_packed_text_keeps_its_short_and_extended_headers() {
+		let source = format!(
+			r#"
+type Entry = Union {{ Text = {{ id: Int32, text: String }}, Number = {{ value: Integer }} }}
+mutable entries: Array<Entry> = []
+entries.push(Entry.Text {{ id = 0, text = "abc" }})
+entries.push(Entry.Text {{ id = 0, text = "{}" }})
+entries.push(Entry.Number {{ value = 1 }})
+mutable total = 0
+for entry in entries {{
+	total += when entry is {{ Entry.Text as item => Integer(item.id) + item.text.length, Entry.Number as item => item.value }}
+}}
+console.log(total)
+"#,
+			"x".repeat(128)
+		);
+		for (name, target, extended) in [
+			("packed-ascii-64", Target::Native, 142),
+			("packed-ascii-32", Target::Wasm, 138),
+		] {
+			let ir = ir_at_target(name, &source, false, OptLevel::O3, target);
+			let grows: Vec<_> = ir
+				.lines()
+				.filter(|line| line.contains("@packed_grow("))
+				.collect();
+			assert!(
+				grows.iter().any(|line| line.contains("i64 noundef 9)")),
+				"{name}: {grows:?}; IR bytes {} packed {}",
+				ir.len(),
+				count(&ir, "packed")
+			);
+			assert!(
+				grows
+					.iter()
+					.any(|line| line.contains(&format!("i64 noundef {extended})"))),
+				"{grows:?}"
+			);
+		}
+	}
+
+	#[test]
+	fn cached_string_length_preserves_the_value_header() {
+		let ir = optimized_ir(
+			"string-cache-header",
+			r#"
+function measure = (items: Array<String>): Integer => {
+	mutable total = 0
+	for item in items {
+		total += item.length + item.utf8Length()
+	}
+	total
+}
+console.log(measure(["é😀".repeat(100)]))
+"#,
+		);
+		// An owned length query reads its fixed byte/unit base without changing
+		// the item's three words. The subsequent byte length reuses them.
+		let body = function(&ir, "main");
+		let call = body.find("@string_length_slow(").expect("a cached query");
+		let after = body[call..]
+			.lines()
+			.skip(1)
+			.take_while(|line| !line.is_empty());
+		assert!(
+			after.into_iter().all(|line| !line.contains(" = load ")),
+			"{body}"
+		);
+	}
+
+	#[test]
+	fn utf8_iteration_encodes_with_bounded_scratch_without_bytes_allocation() {
+		let source = r#"
+function sum = (text: String): Integer => {
+	mutable total = 0
+	for byte in text.toUtf8() { total += byte }
+	total
+}
+console.log(sum("é😀"))
+"#;
+		for target in [Target::Native, Target::Wasm] {
+			let ir = ir_at_target(
+				&format!("utf8-cursor-{}", target.name()),
+				source,
+				true,
+				OptLevel::O0,
+				target,
+			);
+			assert!(ir.contains("@fa_next_utf8_byte("), "{ir}");
+			assert!(!ir.contains("@fa_array_new"), "{ir}");
+			let word = if target == Target::Wasm { "i32" } else { "i64" };
+			assert!(
+				ir.contains(&format!("alloca {{ {word}, i32, i32 }}")),
+				"{ir}"
+			);
+		}
+	}
+
+	#[test]
+	fn ordinary_string_operations_do_not_link_grapheme_tables() {
+		let source = r#"
+let text = arguments.get(0) ?? "é😀"
+console.log(text.length, text.split("").length)
+console.log(text.replace("é", "x").padStart(5, "0"))
+"#;
+		for target in [Target::Native, Target::Wasm] {
+			let ir = complete_ir_at_target(
+				&format!("units-no-graphemes-{}", target.name()),
+				source,
+				false,
+				OptLevel::O3,
+				target,
+			);
+			assert!(
+				!ir.contains("@fa_graphemes("),
+				"grapheme count linked on {target:?}"
+			);
+			assert!(
+				!ir.contains("@next_boundary("),
+				"segmentation linked on {target:?}"
+			);
+			assert!(
+				!ir.contains("@fa_next_grapheme("),
+				"segmentation wrapper linked on {target:?}"
+			);
+			assert!(!ir.contains("@FA_GRAPHEME_RANGES"), "{ir}");
+		}
+	}
+
+	#[test]
+	fn explicit_characters_links_unicode_grapheme_properties() {
+		for target in [Target::Native, Target::Wasm] {
+			let ir = complete_ir_at_target(
+				&format!("explicit-graphemes-{}", target.name()),
+				"let text = arguments.get(0) ?? \"é😀\"\nconsole.log(text.characters())\n",
+				false,
+				OptLevel::O3,
+				target,
+			);
+			assert!(ir.contains("@FA_GRAPHEME_RANGES"), "{ir}");
+		}
 	}
 
 	#[test]
@@ -1887,7 +2336,7 @@ console.log(items, stable, words, maybe)
 	fn immutable_global_literals_are_folded_in_functions() {
 		let ir = optimized_ir(
 			"constant-global",
-			"let letters = \"abc\"\nfunction letter = (i: Integer): Character throws IndexError => try letters[i]\nconsole.log(try letter(arguments.length))\n",
+			"let letters = \"abc\"\nfunction letter = (i: Integer): String throws IndexError => try letters[i]\nconsole.log(try letter(arguments.length))\n",
 		);
 		assert!(!ir.contains("@fa.global"), "{ir}");
 		assert!(ir.contains("i64 3"), "{ir}");
@@ -1967,6 +2416,7 @@ console.log(items, stable, words, maybe)
 		);
 		assert!(!ir.contains("@string_equal_bytes("), "{ir}");
 		assert!(!ir.contains("@fa_string_equal("), "{ir}");
+		assert!(!ir.contains("@fa_string_equal_flags("), "{ir}");
 		assert!(ir.contains("load i8"), "{ir}");
 	}
 
@@ -2738,6 +3188,46 @@ console.log(try read(T.One { child = T.Leaf { value = 7 } }, false))
 			)
 			.expect("the complete IR including globals");
 			assert!(full.contains("<{ i32, i32, { i8, i64 } }>"), "{full}");
+		}
+	}
+
+	#[test]
+	fn frozen_utf8_reads_share_the_encoded_length() {
+		let source = include_str!("../../cli/tests/programs/strings-frozen-utf8-length.fa");
+		for (name, target) in [("native", Target::Native), ("wasm", Target::Wasm)] {
+			let ir = ir_at_target(
+				&format!("frozen-utf8-length-{name}"),
+				source,
+				false,
+				OptLevel::O0,
+				target,
+			);
+			let body = function(&ir, "fa.checksum");
+			assert_eq!(count(body, "@fa_string_encoded_length("), 1, "{body}");
+			assert_eq!(count(body, "@fa_string_utf8_byte("), 2, "{body}");
+		}
+	}
+
+	#[test]
+	fn bytes_mutation_preserves_a_private_map_probe() {
+		let source = include_str!("../../cli/tests/programs/map-probe-bytes.fa");
+		for (name, target) in [("native", Target::Native), ("wasm", Target::Wasm)] {
+			let ir = ir_at_target(
+				&format!("map-probe-bytes-{name}"),
+				source,
+				false,
+				OptLevel::O0,
+				target,
+			);
+			let body = function(&ir, "fa.run");
+			let call = body.find("@fa.stamp(").expect("the Bytes mutation");
+			assert!(body[..call].contains("store i1 true, ptr %probe_valid"));
+			let block = body[..call].rfind("\n\n").expect("the call's block");
+			let consumer = call + body[call..].find("probe_cached").expect("the next lookup");
+			assert!(
+				!body[block..consumer].contains("store i1 false, ptr %probe_valid"),
+				"{name}: {body}"
+			);
 		}
 	}
 

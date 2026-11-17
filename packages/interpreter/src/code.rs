@@ -70,7 +70,6 @@ pub(crate) struct Item {
 #[derive(Clone)]
 pub(crate) enum Argument {
 	Value(Node),
-	Borrow(Place),
 	Default,
 	Variadic(Vec<Item>),
 }
@@ -79,6 +78,7 @@ pub(crate) enum Argument {
 pub(crate) enum Step {
 	Field(Arc<str>),
 	Index(Node),
+	Key(Node),
 }
 
 #[derive(Clone)]
@@ -98,16 +98,20 @@ pub(crate) enum Op {
 	Const(Value),
 	Local(Slot),
 	Global(GlobalKey),
+	BorrowGlobal(GlobalKey),
 	Function(FnKey),
-	Closure(FnKey, Vec<Slot>),
+	Closure(FnKey, Vec<Slot>, bool),
 	Let(Slot, Node),
 	Assign(Place, Node),
 	Read(Place),
+	Borrow(Place, bool),
+	Dereference(Node),
 	Block(Vec<Node>),
 	If(Node, Node, Option<Node>),
 	Loop(Node),
 	While(Node, Node),
 	For {
+		utf8: bool,
 		item: Option<Slot>,
 		index: Option<Slot>,
 		iterable: Node,
@@ -138,7 +142,9 @@ pub(crate) enum Op {
 	CallFunction(FnKey, Vec<Argument>),
 	Builtin(&'static str, Vec<Node>),
 	Mutate(&'static str, Place, Vec<Node>),
+	BorrowBuiltin(&'static str, Place, Vec<Node>),
 	Array(Vec<Item>),
+	Pool(Vec<Item>),
 	Set(Vec<Item>),
 	Map(Vec<Item>),
 	Tuple(Vec<Node>),
@@ -174,7 +180,6 @@ impl<'a> Builder<'a> {
 			.iter()
 			.map(|argument| match argument {
 				ir::Arg::Value(value) => Argument::Value(self.add(value)),
-				ir::Arg::Borrow(place) => Argument::Borrow(self.place(place)),
 				ir::Arg::Default => Argument::Default,
 				ir::Arg::Variadic(items) => Argument::Variadic(self.items(items)),
 			})
@@ -206,6 +211,7 @@ impl<'a> Builder<'a> {
 				.map(|step| match step {
 					ir::Step::Field(name) => Step::Field(Arc::clone(name)),
 					ir::Step::Index(index) => Step::Index(self.add(index)),
+					ir::Step::Key(key) => Step::Key(self.add(key)),
 				})
 				.collect(),
 		}
@@ -221,13 +227,18 @@ impl<'a> Builder<'a> {
 				ir::Expr::Const(value) => Op::Const(value.clone()),
 				ir::Expr::Local(slot) => Op::Local(*slot),
 				ir::Expr::Global(key) => Op::Global(*key),
+				ir::Expr::BorrowGlobal(key) => Op::BorrowGlobal(*key),
 				ir::Expr::Function(key) => Op::Function(*key),
-				ir::Expr::Closure { function, captures } => {
-					Op::Closure(*function, captures.clone())
-				}
+				ir::Expr::Closure {
+					function,
+					captures,
+					borrowed,
+				} => Op::Closure(*function, captures.clone(), *borrowed),
 				ir::Expr::Let(slot, value) => Op::Let(*slot, self.add(value)),
 				ir::Expr::Assign(place, value) => Op::Assign(self.place(place), self.add(value)),
 				ir::Expr::Read(place) => Op::Read(self.place(place)),
+				ir::Expr::Borrow(place, optional) => Op::Borrow(self.place(place), *optional),
+				ir::Expr::Dereference(value) => Op::Dereference(self.add(value)),
 				ir::Expr::Block(statements) => {
 					Op::Block(statements.iter().map(|node| self.add(node)).collect())
 				}
@@ -244,6 +255,19 @@ impl<'a> Builder<'a> {
 					iterable,
 					body,
 				} => Op::For {
+					utf8: false,
+					item: *item,
+					index: *index,
+					iterable: self.add(iterable),
+					body: self.add(body),
+				},
+				ir::Expr::ForUtf8 {
+					item,
+					index,
+					iterable,
+					body,
+				} => Op::For {
+					utf8: true,
 					item: *item,
 					index: *index,
 					iterable: self.add(iterable),
@@ -300,7 +324,13 @@ impl<'a> Builder<'a> {
 					self.place(place),
 					arguments.iter().map(|node| self.add(node)).collect(),
 				),
+				ir::Expr::BorrowBuiltin(path, place, arguments) => Op::BorrowBuiltin(
+					path,
+					self.place(place),
+					arguments.iter().map(|node| self.add(node)).collect(),
+				),
 				ir::Expr::Array(items) => Op::Array(self.items(items)),
+				ir::Expr::Pool(items) => Op::Pool(self.items(items)),
 				ir::Expr::Set(items) => Op::Set(self.items(items)),
 				ir::Expr::Map(items) => Op::Map(self.items(items)),
 				ir::Expr::Tuple(items) => {

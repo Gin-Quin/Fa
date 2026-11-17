@@ -37,6 +37,8 @@ for byte in data {
 }
 ```
 
+Slices share the [range rules](/values/ranges#slicing-with-a-range) of arrays and strings: normalize negative endpoints, allow `start == length`, return an empty slice for reversed normalized bounds, and allow `[..]` on an empty value. An inclusive end must name an existing byte; length is a valid end only for an exclusive range. For example, `Bytes.filled(2)[0..=2]` is a compile error.
+
 The bytes of a `mutable` value can be replaced, and `use` declares a slice without copying, as for an array:
 
 ```fa
@@ -45,6 +47,8 @@ buffer[0] = 255
 
 use header = buffer[0..2] -- a slice: no copy
 ```
+
+A slice reference is a view of a range of items. You cannot assign it as a whole, even with the same length: `part = Bytes.filled(2, 7)` is an error when `part` refers to a slice. Assign its items through a mutable view, using a loop to copy a range, or declare the reference with `mutable use` and reseat it with `reuse part = buffer[1..3]`. A slice copied into an ordinary `mutable` value remains assignable.
 
 The length never changes: there is no `push`, `reserve`, `capacity` property or capacity option in `from` or `filled`. Spare storage cannot be used by a fixed-length value; `filled(n)` already allocates exactly the requested length. To build a sequence of bytes of unknown length, fill an `Array<Byte>` and convert it with `Bytes.from(array)`.
 
@@ -74,7 +78,7 @@ let text = try String.fromUtf8(bytes) -- "héllo"
 | `String.fromUtf8(bytes)` | `String`; `throws Utf8Error` when the bytes are not valid UTF-8. A byte order mark is kept, as the character `U+FEFF` |
 | `String.fromUtf8Lossy(bytes)` | `String`; each invalid sequence becomes `U+FFFD` instead of an error |
 
-`Utf8Error` has one field, `position: Integer`: the index of the first byte that is not valid UTF-8.
+Decoding follows the WHATWG UTF-8 algorithm on every target and at compile time. Lossy decoding writes one U+FFFD per maximal invalid subpart; for example, the truncated bytes `[240, 159]` decode to one replacement character, while `[237, 160, 128]` decode to three. `Utf8Error.position: Integer` is the index of the first byte of the first invalid subpart. A byte order mark is retained.
 
 The `length` of a string is not the number of its bytes: it counts UTF-16 code units, as in JavaScript. A limit expressed in bytes is checked with `utf8Length()`:
 
@@ -101,16 +105,22 @@ Each one has a text variant, named with `Text`, which decodes or encodes UTF-8:
 
 Parsers of text formats take either: `Json.parse` accepts `Bytes` as well as a `String`, and reads the bytes directly, without building a string first.
 
+The current `TcpStream` buffers still use `Array<Byte>`; their migration to `Bytes` is deferred to the standard library pass.
+
 `console.log` writes text. `@readFile` gives a `String` at compile time: the file must be valid UTF-8.
 
 :::implementation
 ## Implementation details
 
+The shared slice proof requires an inclusive end to name an existing byte and checks unproven bounds at runtime. The analyzer rejects whole-slice assignment before lowering, including through aliases and after `reuse`; assigning items and reseating references are separate operations. A contiguous copy loop over flat items can be lowered to one block copy. No replacement of a view's header may silently leave its owner unchanged.
+
 ### Native
 
 - A `Bytes` has the layout of an `Array<Byte>` (see [arrays](/collections/arrays)), without spare capacity. A slice is a pointer and a length.
+- The native lowering keeps `Bytes` distinct from arrays, including in constants, optionals and unions. An owning value points to its block header; a borrowed value tags the address of a two-word descriptor (payload pointer and pointer-sized byte length) with its low bit. The descriptor is 16 bytes on 64-bit targets and 8 on wasm32. Borrowed calls preserve this tag; `use` and `reuse` snapshot the descriptor, while whole-place aliases retain the owner's place. Owning copies detach borrowed or read-only storage. Byte comparison and hashing always read raw bytes, even when they resemble a string's cut-surrogate edge form. Array traversal mechanics use a temporary stack header that borrows the same payload.
 - `Bytes.from(array)` and `toArray()` copy, or move the block when the source is not used afterwards.
 - `toUtf8()` and `String.fromUtf8` copy, or move the block of a heap string or of the `Bytes` when the source is not used afterwards. `String.fromUtf8` validates the bytes in one vectorized pass, which also computes the ASCII flag of the string. See [strings](/values/strings).
+- Large byte payloads reserve the existing String metadata prefix (32 bytes on 64-bit targets, 20 on wasm32); it is unread while the payload is Bytes. A dead heap String transfers this block to Bytes after releasing breadcrumbs and replacing any lone surrogate in place. Decoding a dead prefixed block validates first, then initializes the Unicode metadata before exposing the String. Small combined blocks keep their array layout and an even allocation extent; this padding never extends the logical byte range. They can become a String prefix in place (on wasm32, at most 96 bytes shift within the same allocation). Live inputs and incompatible array storage are copied. Conversion to an array moves an ordinary compatible block, otherwise builds an ordinary array allocation. Source evaluation and cleanup remain ordered, and an invalid consuming decode releases its input before raising `Utf8Error`.
 - Reading text (`File.readText`) reads the bytes into the block that becomes the string, then validates it: there is no second copy and no transcoding.
 
 ### JavaScript

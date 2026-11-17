@@ -3,11 +3,10 @@
 //! - Scalars (types brief §3.3, `design/decisions.md`): an integer type
 //!   satisfies another when its range is contained, whatever the storage
 //!   (`Integer` and `Int64` are mutually assignable); `Float32` satisfies
-//!   `Float` (exact widening, never the reverse); `Character` satisfies
-//!   `String`; a literal type satisfies its base type.
+//!   `Float` (exact widening, never the reverse); a literal type satisfies its base type.
 //! - Inside a collection (a view, [`Mode::View`]), the representation must not
 //!   change: integer storages must be equal (`Array(Int8)`, `Array(Integer)` and
-//!   `Array(Int64)` are distinct), no float widening, no `Character` → `String`.
+//!   `Array(Int64)` are distinct), no float widening.
 //! - Unions and optionals: a member satisfies its union; a union satisfies a
 //!   type when each of its members does.
 //! - Objects, tuples and functions get the minimal structural rules here;
@@ -189,13 +188,6 @@ impl TypeStore {
 					Ok(())
 				}
 			}
-			(K::Character, K::String) => {
-				if view {
-					Err(Reason::Storage)
-				} else {
-					Ok(())
-				}
-			}
 			(K::Member(a, index), K::NamedUnion(b, mask))
 			| (K::EnumMember(a, index), K::Enum(b, mask))
 				if a == b =>
@@ -359,11 +351,17 @@ impl TypeStore {
 			return Err(Reason::Arity);
 		}
 		for (actual, expected) in source_params.iter().zip(&target_params) {
+			if actual.reference != expected.reference {
+				return Err(Reason::Mismatch);
+			}
 			if actual.variadic != expected.variadic {
 				return Err(Reason::Arity);
 			}
 			// parameters are contravariant
 			self.assignable(expected.ty, actual.ty, Mode::Read)?;
+		}
+		if source.reference != target.reference {
+			return Err(Reason::Mismatch);
 		}
 		self.assignable(source.ret, target.ret, Mode::Read)?;
 		self.assignable(source.throws, target.throws, Mode::Read)?;
@@ -430,8 +428,7 @@ impl TypeStore {
 	/// or `None` when it doesn't adapt. Integer literals adapt to an integer
 	/// type containing them, to a float type representing them exactly, to
 	/// `BigInt`; float literals to `Float32` (when finite after rounding) and
-	/// `Float`. String literals adapting to `Character` (one grapheme cluster)
-	/// and literals adapting to a union member are decided by the walk (M1).
+	/// `Float`. Literals adapting to a union member are decided by the walk.
 	pub fn adapt_literal(&mut self, literal: TypeId, expected: TypeId) -> Option<TypeId> {
 		use TypeKind as K;
 		match (self.kind(literal), self.kind(expected)) {
@@ -627,19 +624,19 @@ mod tests {
 	}
 
 	#[test]
-	fn characters_and_literals() {
+	fn bytes_are_distinct_and_literals_adapt() {
 		let mut store = TypeStore::new();
-		assert!(ok(&mut store, TypeId::CHARACTER, TypeId::STRING));
-		assert!(!ok(&mut store, TypeId::STRING, TypeId::CHARACTER));
+		assert!(!ok(&mut store, TypeId::BYTES, TypeId::STRING));
+		assert!(!ok(&mut store, TypeId::STRING, TypeId::BYTES));
 		let hello = store.string_literal("hello");
 		let goodbye = store.string_literal("goodbye");
 		assert!(ok(&mut store, hello, TypeId::STRING));
 		assert!(!ok(&mut store, goodbye, hello));
 		assert!(ok(&mut store, TypeId::TRUE, TypeId::BOOLEAN));
 		assert!(!ok(&mut store, TypeId::TRUE, TypeId::FALSE));
-		let characters = store.array(TypeId::CHARACTER);
+		let bytes = store.array(TypeId::BYTES);
 		let strings = store.array(TypeId::STRING);
-		assert!(!ok(&mut store, characters, strings));
+		assert!(!ok(&mut store, bytes, strings));
 	}
 
 	#[test]

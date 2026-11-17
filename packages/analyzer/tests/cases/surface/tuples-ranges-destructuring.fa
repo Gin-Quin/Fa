@@ -56,6 +56,7 @@ span.end = none
 let start = range.start -- type start: Integer?
 let slice = [10, 20, 30, 40][1..3] -- type slice: Array<Integer>
 let tooLong = [10, 20][0..5] catch error => [] -- type tooLong: Array<Integer>
+-- ^ error: E-NUM-17; warning: W-ERR-2
 let inside = 2 is in range
 let literal = 2 is in 0..3 -- warning: W-RNG-1
 let ratio = 1.5

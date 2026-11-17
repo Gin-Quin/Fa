@@ -72,6 +72,7 @@ codes! {
 	FFI014 = "FFI014", Error, [], "a cLibrary API that isn't a namespace of functions with C types, throwing one Errors type";
 	MEM002 = "MEM002", Error, ["CONC009"], "on a later use). Without a binding, the watch lives to the end of its scope; at module level, for the program";
 	MEM003 = "MEM003", Error, [], "a Database can't be copied";
+	MEM004 = "MEM004", Error, [], "an escaping closure can't retain a reference into a shorter-lived collection";
 	META001 = "META001", Error, [], "argument of a compile-time call not known at compile time";
 	META002 = "META002", Error, ["E-DECL-20", "FN050", "TF006"], "impure function called at compile time";
 	META003 = "META003", Error, ["TF003"], "step budget exceeded";
@@ -120,6 +121,7 @@ codes! {
 	REF013 = "REF013", Error, ["EF030"], "the alias rule";
 	REF014 = "REF014", Error, [], "writing through a read-only reference (immutable collection, set element, map key)";
 	REF015 = "REF015", Error, [], "writing through a use alias of an immutable place";
+	REF016 = "REF016", Error, [], "assigning a slice view as a whole or applying a structural operation to it";
 	REF020 = "REF020", Error, ["CL050"], "argument of a T in p parameter that is not a reference into the argument of p";
 	REF021 = "REF021", Error, ["FN070"], "an escaping closure writes a captured value";
 	REL001 = "REL001", Error, [], "direct side without reverse side";

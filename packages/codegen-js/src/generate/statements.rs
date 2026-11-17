@@ -6,12 +6,13 @@
 //! `let x; if (c) { …; x = 1; } else { …; x = 2; }` and a function body
 //! ending with an `if` returns from each branch, without temporaries.
 
+use fa_analyzer::analysis::NodeFlags;
 use fa_analyzer::ids::{NodeId, SymbolId, TypeId};
 use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::{BindingKind, View};
 
 use crate::generate::{Dest, Generator, Kind, LoopCx};
-use crate::js::{self, Expr, Prec};
+use crate::js::{Expr, Prec};
 
 impl Generator<'_> {
 	/// A list of statements; the value of the last one goes to `dest`.
@@ -95,6 +96,19 @@ impl Generator<'_> {
 
 	/// A statement or an expression whose value goes to `dest`.
 	pub(crate) fn into(&mut self, n: NodeId, dest: Dest) {
+		if dest == Dest::Return
+			&& self.returns_reference()
+			&& matches!(
+				self.view(n),
+				View::Name(_)
+					| View::Access { .. }
+					| View::Index { .. }
+					| View::Call { .. }
+					| View::None
+			) {
+			self.reference_return(n);
+			return;
+		}
 		match self.view(n) {
 			View::Group(inner) | View::Try(inner) => self.into(inner, dest),
 			View::Error => {}
@@ -582,6 +596,7 @@ impl Generator<'_> {
 			self.pop_scope();
 			return;
 		}
+		let utf8 = self.has(self.strip_groups(iterable), NodeFlags::UTF8_ITERATION);
 		let collection = self.expr(iterable);
 		let text = self.kind(self.type_of(iterable)) == Kind::Text;
 		self.push_scope();
@@ -612,6 +627,8 @@ impl Generator<'_> {
 		} else {
 			None
 		};
+		let index_symbol = index_symbol.filter(|symbol| self.reads_symbol(body, *symbol));
+		let has_index = index_symbol.is_some();
 		let mut written = variable_symbol.is_some_and(|symbol| self.is_written(body, symbol));
 		// a pool or a columnar (a `Set` of objects): `for…of`, the variable
 		// is the element, written in place (references.rs)
@@ -625,22 +642,48 @@ impl Generator<'_> {
 			}
 			written = false;
 		}
-		if text {
-			let characters = self.helper("faCharacters");
-			let items = if has_index {
-				let temp = self.temp();
+		if text && has_index {
+			let items = self.keep(collection);
+			let position = index_symbol
+				.map(|symbol| self.declare(symbol))
+				.unwrap_or_else(|| self.temp());
+			let code = self.temp();
+			self.out.open(format!("for (let {position} = 0, {code}; {position} < {}.length; {position} += {code} > 0xffff ? 2 : 1)", items.primary_text()));
+			self.out.line(format!(
+				"{code} = {}.codePointAt({position});",
+				items.primary_text()
+			));
+			if let Some(symbol) = variable_symbol {
+				let name = self.declare(symbol);
 				self.out
-					.line(format!("const {temp} = {characters}({});", collection.text));
-				Expr::name(temp, true)
-			} else {
-				js::call(characters, std::slice::from_ref(&collection.text))
-			};
+					.line(format!("const {name} = String.fromCodePoint({code});"));
+			}
+			self.fcx.loops.push(LoopCx {
+				dest: Dest::Discard,
+			});
+			self.coop_point();
+			self.block_into(body, Dest::Discard);
+			self.fcx.loops.pop();
+			self.out.close("");
+		} else if utf8 {
+			// TextEncoder's bulk encoding and an indexed byte loop are much
+			// cheaper on JS engines than resuming a generator for every byte.
+			let items = self.keep(collection);
 			self.loop_over(
 				items,
 				variable_symbol,
 				destructured,
 				index_symbol,
-				written || has_index,
+				true,
+				body,
+			);
+		} else if text {
+			self.loop_over(
+				collection,
+				variable_symbol,
+				destructured,
+				index_symbol,
+				false,
 				body,
 			);
 		} else {
@@ -784,6 +827,17 @@ impl Generator<'_> {
 		self.pop_scope();
 	}
 
+	fn reads_symbol(&self, body: NodeId, symbol: SymbolId) -> bool {
+		let mut pending = vec![body];
+		while let Some(node) = pending.pop() {
+			if self.analysis.resolution(node) == Resolution::Local(symbol) {
+				return true;
+			}
+			pending.extend(fa_analyzer::syntax::children(self.tree, node));
+		}
+		false
+	}
+
 	/// Whether a statement assigns a symbol as a whole (`x = …`, `x += …`).
 	fn is_written(&self, body: NodeId, symbol: SymbolId) -> bool {
 		// the nodes of the body only
@@ -912,12 +966,20 @@ impl Generator<'_> {
 			) {
 			let values = self.in_order(&[container, index, value], |g, node| g.expr(node));
 			let stored = self.copy_stored(value, values[2].clone());
-			self.out.line(format!(
-				"{}.set({}, {});",
-				values[0].primary_text(),
-				values[1].text,
-				stored.text
-			));
+			if self.map_value_may_be_borrowed(target_node) {
+				let helper = self.helper("faMapAssign");
+				self.out.line(format!(
+					"{helper}({}, {}, {});",
+					values[0].text, values[1].text, stored.text
+				));
+			} else {
+				self.out.line(format!(
+					"{}.set({}, {});",
+					values[0].primary_text(),
+					values[1].text,
+					stored.text
+				));
+			}
 			return;
 		}
 		if let View::Index { index, .. } = self.view(target_node)
@@ -950,7 +1012,7 @@ impl Generator<'_> {
 			return;
 		};
 		if self.needs_statements(value) {
-			if place.map.is_some() {
+			if place.map.is_some() || place.reference.is_some() || place.choice.is_some() {
 				// a value of a map: computed into a temporary, then `set`
 				let temp = self.temp();
 				self.out.line(format!("let {temp};"));

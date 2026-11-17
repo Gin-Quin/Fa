@@ -539,10 +539,32 @@ impl Generator<'_> {
 	}
 
 	/// The result of a call whose receiver is dropped after it.
-	pub(crate) fn after_call_drop(&mut self, result: Expr, drop: Option<String>) -> Expr {
+	pub(crate) fn after_call_drop(
+		&mut self,
+		node: NodeId,
+		result: Expr,
+		drop: Option<String>,
+	) -> Expr {
 		let Some(drop) = drop else {
 			return result;
 		};
+		if self.call_returns_reference(node)
+			&& !self.is_object_reference(self.type_of(node))
+			&& self.reference_call_layout(node) == fa_analyzer::analysis::ReferenceLayout::General
+		{
+			let result_temp = self.inline_temp();
+			let key_temp = self.inline_temp();
+			let key = self.helper("faReferenceKey");
+			self.reference_call_keys
+				.insert(node, Expr::name(key_temp.clone(), true));
+			return Expr::new(
+				format!(
+					"({result_temp} = {}, {key_temp} = {key}, {drop}, {result_temp})",
+					result.at(Prec::Assign)
+				),
+				Prec::Primary,
+			);
+		}
 		let temp = self.inline_temp();
 		Expr::new(
 			format!("({temp} = {}, {drop}, {temp})", result.at(Prec::Assign)),

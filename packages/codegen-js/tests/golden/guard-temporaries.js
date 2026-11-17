@@ -1,4 +1,4 @@
-// helpers: FaStop, faStop, faOverflow, faCheckInteger, faSharedHandle, faNeedSharedMemory, FaGuard, FaMutex, faUnlock, faCancelSignal, faSched, faLater, faMacrotask, faReady, faAlive, faRemove, faWaitShared, faLock, faWriteError, faExit, faStopMessage, faIsStackOverflow, faIsError, faReport, FaTask, faWhenDone, faCancel, faEnd, faFatal, faSettle, faRunTask, faRunAsync, faWaiting, faLockNow
+// helpers: FaStop, faStop, faOverflow, faCheckInteger, faUtf8Encoder, faIsBytes, faSharedText, faUtf8Decoder, faSharedParse, faSharedHandle, faNeedSharedMemory, FaGuard, FaMutex, faUnlock, faCancelSignal, faSched, faLater, faMacrotask, faReady, faAlive, faRemove, faWaitShared, faLock, faWriteError, faExit, faStopMessage, faIsStackOverflow, faIsError, faReport, FaTask, faWhenDone, faCancel, faEnd, faFatal, faSettle, faRunTask, faRunAsync, faWaiting, faLockNow
 
 const drop$none = () => {};
 

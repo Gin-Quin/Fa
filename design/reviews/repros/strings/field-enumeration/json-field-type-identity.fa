@@ -1,0 +1,13 @@
+use { Json } = std.json
+type A = { z: Integer, a: Integer }
+type B = { a: Integer, z: Integer }
+function serialized = (): String => {
+	let anonymous = { z = 9, a = 1 }
+	let first = A { a = 1, z = 9 }
+	let second = B { z = 9, a = 1 }
+	let converted: B = first
+	[Json.stringify(anonymous), Json.stringify(first), Json.stringify(second), Json.stringify(converted)].join("|")
+}
+static compiled = @serialized()
+console.log(compiled) -- prints: {"a":1,"z":9}|{"z":9,"a":1}|{"a":1,"z":9}|{"a":1,"z":9}
+console.log(serialized()) -- prints: {"a":1,"z":9}|{"z":9,"a":1}|{"a":1,"z":9}|{"a":1,"z":9}

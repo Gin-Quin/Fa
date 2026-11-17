@@ -1,0 +1,23 @@
+-- Erased generic reference results over primitive, object and mixed-union items; writes through each.
+type Node = { value: Integer }
+function generic = <Item>(values: Array<Item>, i: Integer): Item in values throws IndexError => try values[i]
+function replace = <Item>(values: Array<Item>, i: Integer, item: Item) throws IndexError mutates values => {
+ use slot = try generic(values, i)
+ slot = item
+}
+function exercise = (): String throws IndexError => {
+ mutable numbers: Array<Integer> = [1, 2]
+ mutable nodes: Array<Node> = [{ value = 1 }]
+ mutable mixed: Array<Integer | Node> = [1, { value = 2 }]
+ try replace(numbers, 0, 10)
+ use n = try generic(nodes, 0)
+ n.value += 5
+ let seen = n.value
+ try replace(nodes, 0, { value = 40 })
+ try replace(mixed, 1, 30)
+ try replace(mixed, 0, { value = 50 })
+ "{numbers} {nodes} {mixed} {seen}"
+}
+static result = @exercise()
+console.log(result)
+console.log(try exercise())

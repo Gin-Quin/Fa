@@ -1,0 +1,18 @@
+function rule = (text: String, bytes: Bytes, items: Array<Integer>, end: Integer): String => {
+	let exclusive = text[..end] catch error => "?"
+	let start = text[end..] catch error => "?"
+	let reversed = text[-1..0] catch error => "?"
+	let inclusive = text[0..=end] catch error => "?"
+	let last = text[..=-1] catch error => "?"
+	let byteStart = bytes[end..] catch error => Bytes.filled(1)
+	let arrayStart = items[end..] catch error => [0]
+	let byteInclusive = bytes[0..=end] catch error => Bytes.filled(0)
+	let arrayInclusive = items[0..=end] catch error => []
+	"{exclusive.length} {start.length} {reversed.length} {inclusive == "?"} {last.length} {byteStart.length} {arrayStart.length} {byteInclusive.length} {arrayInclusive.length}"
+}
+static result = @rule("ab", Bytes.from([1, 2]), [1, 2], 2)
+console.log(result, rule("ab", Bytes.from([1, 2]), [1, 2], 2) == result) -- prints: 2 0 0 true 2 0 0 0 0 true
+static emptyText = ""[..]
+static emptyBytes = Bytes.filled(0)[..]
+static emptyItems: Array<Integer> = []
+console.log(emptyText.length, emptyBytes.length, emptyItems[..].length) -- prints: 0 0 0

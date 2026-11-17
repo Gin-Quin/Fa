@@ -1,0 +1,13 @@
+type Failure = Errors { Missing }
+function get = (
+	values: Array<Integer>
+	fail: Boolean
+): Integer in values throws Failure.Missing | IndexError => {
+	if fail { throw Failure.Missing }
+	try values[0]
+}
+mutable values: Array<Integer> = [7]
+use result = try get(values, false)
+result = 9
+console.log(values[0])
+get(values, true) catch _error => { console.log("caught") }

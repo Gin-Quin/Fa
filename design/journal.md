@@ -31,3 +31,35 @@ Recorded in `design/decisions.md` ("Lead decisions, 2026-11-15"): the trunk and 
 2. A full baseline against Goose and Rust on the trunk (CPU time and instructions).
 3. Language semantics before optimization: strings, then ownership (specification first), each on its integration branch.
 4. Completeness (native skips to zero, analyzer pending cases, interpreter), then performance, then `fa check` quality and speed and the three project shapes on every target.
+
+## 2026-11-16 and 17 — Strings land, ownership is specified, the reviews earn their keep
+
+### Landed on `main`
+
+- **The string redesign** (`af334be5`): strings have UTF-16 semantics (lengths, indices, slices and search positions in code units) over UTF-8 storage natively (WTF-8 with a lone surrogate), `Character` is gone, `Bytes` holds binary data with explicit UTF-8 conversions. Five engineers (analyzer, JavaScript, interpreter, native with its C runtime, integration), one review, one fix round. ASCII pays nothing: every benchmark stays within +1% of the trunk's instruction counts. A generated differential corpus now compares every string and `Bytes` operation on seven engines (the compile-time interpreter, Bun, Node, the web sandbox, native, wasm, freestanding) against JavaScript's own answers: a quick tier in the regular suite, the full tier (122 shards) before any change to the string code.
+- **`InlineArray<Item, capacity>`** (`caeec90c`): a bounded list stored in its owner, on every target, with a generated matrix of item kinds × positions × operations. Two reviews, two fix rounds: the matrix found 33 failing programs out of 39 at its first run.
+- **Native map optimizations** (`71af4fd0`): probe and slot reuse, frame headers of private maps, inline 64-bit slots. `lru` measured at 0.986× Goose with a passing control.
+- **The ownership specification and `copy`** (`0505d967`): collections and recursive values are never copied silently (a move at the last use, otherwise `copy`); tasks, resources and built-in lifetime owners are unique; `Mutex`, `Channel` and atomics share; `copy` is a reserved prefix operator. The enforcement is in progress on `feature/ownership`.
+- **The measurement driver and the baseline** against Goose and Rust (one driver, generated tables, a same-binary control), the audit of the sixteen Goose ports with the faithful unreserved, direct-output and open-table ports, and the first optimizations of recursive aggregates.
+
+### Validated, waiting to land in order
+
+`links/spec-references` (the specification of links, `REF010` everywhere, reference parameters and results of user functions on every target, a generated matrix of reference programs; two reviews, two fix rounds), then `perf/arrays` (constant remainder, boolean block fills, `GrowingArray` caches, shape and alias facts for `nbody`; one review, one fix round, which also fixed a wrong remainder of narrow unsigned integers that was on the trunk).
+
+### What the days taught
+
+- **Every compiler branch is reviewed before it lands.** Five reviews, five times critical defects in branches whose whole suite passed (a compiler stop on a common async pattern after the trunk merge, memory corruption in generic uses of `InlineArray`, a generic function receiving a map with a layout it didn't expect, references that outlived their collection, a double release of an empty string with reserved capacity).
+- **Generated matrices and differential corpora beat hand-written reproductions.** They are kept in the repository as tests.
+- **Several Fa ports of Goose's benchmarks were not Goose's programs** (recursive owning values where Goose links the nodes of one pool, three recursive walks where Goose scans the pool). Fa could not express that structure; it now has a decided design for it.
+
+### Decisions of the lead (all in `design/decisions.md`)
+
+Strings: literal replacements in `replace`, thirteen edge cases, well-formed literal types, lossy decoding of external text, `\uXXXX` for lone surrogates in JSON, the native view and compact formats. Ownership: `String` is an ordinary value and `Bytes` a collection; recursive values are structures; partial moves of field paths; common members of unions without narrowing; unique built-in handles; error payloads are data; a closure never consumes what it captures and captures only the paths it uses; one environment per declaration; conversions never convert the inside of a structure; `copy` reaches only its operand; an error never rolls back completed effects, and a failed sort keeps the original order; the enumeration order of fields depends on the static type alone. Planned for the next ownership step: a function takes ownership of a parameter through the `invalidates` effect. Collections: **pool links** (`link` fields into growing pools inside a complete owner, `InlineArray`, an `Index` parameter on the target collection), and the rule that a port of a Goose benchmark uses the corresponding Fa collection and does the same passes. Process: one CPU reserved for measurements, reviews before merges, landings one at a time.
+
+### State against the goals
+
+Goose's suite on the trunk before these optimizations: 8 met, 6 behind, 2 unresolved (`scene` 2.76×, `sexp` 1.46×, `interp` 1.43×, `respond` 1.29×, `records` 1.19×). Since: `lru` met; `scene` near 1.6× with its recursive port. The seven pool-shaped benchmarks wait for links; the string benchmarks can now be optimized on the final representation (`string-building` about 1.55× Goose). Against Rust, `nbody`, `sieve` and `mandelbrot` remain behind by a few percent to 12%. The machine's noise leaves many CPU verdicts unresolved; hardware counters are not available.
+
+### Next
+
+Land links 1a and the array optimizations; finish the ownership enforcement (moves, `MEM004`, partial moves, the repository migration), then its second step (generic conditions, owning parameters, unique resources on both backends, `with`); implement the `link` contract, the compact native pools and the seven pool ports; string construction and comparison on the new representation; the native expected skips and the analyzer's pending cases; `fa check` quality and speed; the three project shapes on every target.

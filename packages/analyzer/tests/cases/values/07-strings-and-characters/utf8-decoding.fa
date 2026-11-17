@@ -1,0 +1,10 @@
+-- Strict failures report byte positions; truncated input is not a surrogate.
+console.log(String.fromUtf8(Bytes.from([255, 97])) catch error => error.position) -- prints: 0
+console.log(String.fromUtf8(Bytes.from([97, 255, 98])) catch error => error.position) -- prints: 1
+console.log(String.fromUtf8(Bytes.from([97, 226, 130])) catch error => error.position) -- prints: 1
+console.log(String.fromUtf8Lossy(Bytes.from([255, 97]))) -- prints: �a
+console.log(String.fromUtf8Lossy(Bytes.from([97, 255, 98]))) -- prints: a�b
+console.log(String.fromUtf8Lossy(Bytes.from([97, 226, 130]))) -- prints: a�
+let bomBytes = Bytes.from([239, 187, 191, 65])
+let bomText = try String.fromUtf8(bomBytes)
+console.log(bomText.length, try bomText.codeUnitAt(0), bomText.toUtf8() == bomBytes) -- prints: 2 65279 true

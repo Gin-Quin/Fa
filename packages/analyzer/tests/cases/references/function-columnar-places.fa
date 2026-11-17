@@ -1,0 +1,16 @@
+-- prints: 9
+-- prints: 11
+-- prints: 11
+type Node = { value: Integer }
+function add = (nodes: GrowingColumnar<Node>, value: Integer): Node in nodes mutates nodes.size => nodes.add({ value = value })
+function same = (nodes: GrowingColumnar<Node>, node: Node in nodes): Node in nodes => node
+mutable nodes: GrowingColumnar<Node> = []
+use first = add(nodes, 7)
+first.value = 9
+console.log(first.value)
+use alias = same(nodes, first)
+alias.value = 11
+console.log(first.value)
+function get = (nodes: GrowingColumnar<Node>): (Node in nodes)? => nodes.find((_node) => true)
+use found = get(nodes)
+console.log(found?.value ?? 0)

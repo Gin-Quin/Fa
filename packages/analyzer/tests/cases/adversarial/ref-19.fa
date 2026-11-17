@@ -4,6 +4,18 @@ function example = (people: Array<Person>, i: Integer) throws IndexError mutates
 	use a = try people[i]
 	use b = try people[i + 2]
 	people.delete(i + 1)
+	console.log(a.name) -- error: REF001
+	console.log(b.name) -- error: REF001
+}
+
+-- Nonnegative indices retain the original disjointness proof.
+function nonnegative = (
+	people: Array<Person>
+	i: Integer<min = 0, max = 1000>
+) throws IndexError mutates people => {
+	use a = try people[i]
+	use b = try people[i + 2]
+	people.delete(i + 1)
 	console.log(a.name)
 	console.log(b.name) -- error: REF001
 }

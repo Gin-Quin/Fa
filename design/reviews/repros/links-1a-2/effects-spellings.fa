@@ -1,0 +1,25 @@
+-- Effect spellings for writes through a reference parameter: wide (owner path) and narrow (node path), free and method.
+type World = {
+ nodes: GrowingPool<Node> = []
+ type Node = { world: Integer, other: Integer }
+ function create = (self, node: Node in self.nodes = self.nodes.add({ world = 3, other = 0 })): Node in self.nodes mutates self.nodes.size => node
+ function wide = (self, node: Node in self.nodes) mutates self.nodes[..].world => { node.world += 2 }
+ function narrow = (self, node: Node in self.nodes) mutates node.world => { node.world += 4 }
+ function inferred = (self, node: Node in self.nodes) => node.world += 8
+}
+function freeWide = (world: World, node: World.Node in world.nodes) mutates world.nodes[..].world => { node.world += 16 }
+function freeNarrow = (world: World, node: World.Node in world.nodes) mutates node.world => { node.world += 32 }
+function exercise = (): Integer => {
+ mutable world: World = {}
+ use node = world.create()
+ use kept = world.nodes.add({ world = 0, other = 5 })
+ world.wide(node)
+ world.narrow(node)
+ world.inferred(node)
+ freeWide(world, node)
+ freeNarrow(world, node)
+ node.world + kept.other
+}
+static result = @exercise()
+console.log(result)
+console.log(exercise())

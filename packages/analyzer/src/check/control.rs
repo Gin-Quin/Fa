@@ -290,23 +290,6 @@ impl Walker<'_> {
 			self.report_branch_mix(n, a, b);
 			return TypeId::UNKNOWN;
 		}
-		// a `Character` joined with a `String` is a `String`
-		let text = types.iter().any(|&ty| {
-			matches!(
-				self.s.types.kind(ty),
-				TypeKind::String | TypeKind::StringLit(_)
-			)
-		});
-		let types: SmallVec<[TypeId; 4]> = types
-			.iter()
-			.map(|&ty| {
-				if text && ty == TypeId::CHARACTER {
-					TypeId::STRING
-				} else {
-					ty
-				}
-			})
-			.collect();
 		let union = self.s.types.union(&types);
 		if let Some((a, b)) = self.s.types.indistinguishable_pair(union) {
 			self.report_branch_mix(n, a, b);
@@ -396,6 +379,8 @@ impl Walker<'_> {
 			value_used,
 			function_depth,
 			break_types: Vec::new(),
+			break_origins: Default::default(),
+			break_nodes: Vec::new(),
 			break_values: Some(None),
 		});
 	}
@@ -427,6 +412,8 @@ impl Walker<'_> {
 				cx.breaks.clear();
 				cx.continues.clear();
 				cx.break_types.clear();
+				cx.break_origins = Default::default();
+				cx.break_nodes.clear();
 				cx.break_values = Some(None);
 			}
 			let exit = round(self).unwrap_or_else(|| head.fork());
@@ -772,6 +759,12 @@ impl Walker<'_> {
 		(iterable, item): (NodeId, TypeId),
 		body: NodeId,
 	) -> TypeId {
+		if self.direct_string_call(iterable, "String#toUtf8") {
+			self.set_flag(
+				self.strip_groups(iterable),
+				crate::analysis::NodeFlags::UTF8_ITERATION,
+			);
+		}
 		let parent = self.body.scope;
 		let scope = self.a.symbols.scope_for(n, Some(parent), ScopeKind::Block);
 		self.body.scope = scope;
@@ -838,6 +831,7 @@ impl Walker<'_> {
 					..
 				) | TypeKind::String
 					| TypeKind::StringLit(_)
+					| TypeKind::Bytes
 					| TypeKind::CArray(..)
 					| TypeKind::Unknown
 			);
@@ -875,16 +869,17 @@ impl Walker<'_> {
 			.map(|collection| (self.symbol_place(collection), 0));
 		// the variable designates an item of the collection, which the loop
 		// iterates: no element is added or removed meanwhile (effects.rs)
-		let mut collection = self.place_of(iterable);
+		let mut collections = self.places_of(iterable);
 		// an iterator: the loop reads its collection (iterators.rs)
 		let mut elements = true;
-		if collection.is_none()
+		if collections.is_empty()
 			&& let Some((source, items)) = self.iterator_source(iterable)
 		{
-			collection = Some(source);
+			collections = source;
 			elements = items;
 		}
-		if let Some(collection) = collection {
+		let mut item_places = Vec::new();
+		for &collection in &collections {
 			if matches!(
 				self.s.types.kind(self.type_of(iterable)),
 				TypeKind::Collection(CollKind::RelationPool(_), ..)
@@ -904,6 +899,7 @@ impl Walker<'_> {
 					SymbolKind::LoopVariable { copy: false }
 				) {
 				self.aliases.insert(variable, item_place);
+				item_places.push((variable, item_place));
 			}
 			// `for (key, value) in map`: the value designates the map's value
 			if let Some(pattern) = pattern
@@ -913,9 +909,27 @@ impl Walker<'_> {
 				&& let Some(variable) = self.a.symbols.symbol_of_decl(value)
 			{
 				self.aliases.insert(variable, item_place);
+				item_places.push((variable, item_place));
 			}
 			self.body.flow.iterating.push(collection);
 		}
+		for &(variable, _) in &item_places {
+			let places: smallvec::SmallVec<_> = item_places
+				.iter()
+				.filter_map(|&(other, place)| (other == variable).then_some(place))
+				.collect();
+			let state = self.facts.refs.state(crate::flow::refs::RefState {
+				places,
+				opaque: false,
+				bounds: Default::default(),
+				readonly: false,
+				invalidated: None,
+				reported: false,
+			});
+			self.body.flow.set_ref_state(variable, state);
+			self.body.flow.bind_reference_alias(variable, None);
+		}
+
 		self.enter_loop(n, LoopKind::For, None, false);
 		let exit = self.run_loop(|w| {
 			// a position is below a length, at most 2^48 (decision
@@ -938,15 +952,16 @@ impl Walker<'_> {
 			None
 		});
 		self.leave_loop(exit);
-		if let Some(collection) = collection
-			&& let Some(position) = self
+		for collection in collections {
+			if let Some(position) = self
 				.body
 				.flow
 				.iterating
 				.iter()
 				.rposition(|&place| place == collection)
-		{
-			self.body.flow.iterating.remove(position);
+			{
+				self.body.flow.iterating.remove(position);
+			}
 		}
 		self.body.scope = parent;
 		self.type_of(n)
@@ -1022,6 +1037,8 @@ impl Walker<'_> {
 			Some(FlowState::unreachable())
 		});
 		let cx = self.leave_loop(exit);
+		self.value_origins.insert(n, cx.break_origins.clone());
+		self.a.loop_results.insert(n, cx.break_nodes.clone());
 		let ty = self.memo(n, |w| {
 			if cx.break_types.is_empty() {
 				return TypeId::NEVER;
@@ -1208,8 +1225,17 @@ impl Walker<'_> {
 				}
 				_ => None,
 			};
+			let origins = value
+				.map(|value| self.evaluated_origins(value))
+				.unwrap_or_default();
 			let state = self.body.flow.fork();
 			let cx = self.body.loops.last_mut().expect("a loop");
+			if state.reachable {
+				cx.break_origins.join(&origins);
+				if let Some(value) = value {
+					cx.break_nodes.push(value);
+				}
+			}
 			if value.is_some() && state.reachable {
 				cx.break_values = cx.break_values.and_then(|hull| {
 					let set = set?;

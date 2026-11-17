@@ -153,8 +153,9 @@ fn primitive(path: &str) -> Option<(&'static str, TargetSet)> {
 		),
 		// the file system: blocking wherever it exists (not on `web`)
 		"File.read" => ("File.read", TargetSet::all() - TargetSet::WEB),
-		"File.readBytes" => ("File.readBytes", TargetSet::all() - TargetSet::WEB),
+		"File.readText" => ("File.readText", TargetSet::all() - TargetSet::WEB),
 		"File.write" => ("File.write", TargetSet::all() - TargetSet::WEB),
+		"File.writeText" => ("File.writeText", TargetSet::all() - TargetSet::WEB),
 		// sockets: blocking natively only (async on `bun` and `node`)
 		"TcpListener#accept" => ("TcpListener.accept", TargetSet::NATIVE),
 		"TcpStream.connect" => ("TcpStream.connect", TargetSet::NATIVE),
@@ -1736,9 +1737,8 @@ impl Walker<'_> {
 			if matches!(
 				self.view(value),
 				View::Name(_) | View::Access { .. } | View::Index { .. }
-			) && let Some(place) = self.place_of(value)
-			{
-				reads.push(place);
+			) {
+				reads.extend(self.places_of(value));
 			}
 		}
 		self.add_task(
@@ -1845,7 +1845,7 @@ impl Walker<'_> {
 		let reads = cx
 			.captures
 			.iter()
-			.filter_map(|&symbol| self.symbol_target(symbol))
+			.flat_map(|&symbol| self.symbol_places(symbol))
 			.collect();
 		self.add_task(
 			n,

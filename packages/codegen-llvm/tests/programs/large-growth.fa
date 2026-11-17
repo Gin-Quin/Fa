@@ -16,7 +16,7 @@ for index in 0..300000 {
 }
 -- an append of the text to itself, copied before the block grows
 text += text
-console.log(text.length, try text.bytes()[299999], try text.bytes()[599999]) -- prints: 600000 57 57
+console.log(text.length, try text.toUtf8()[299999], try text.toUtf8()[599999]) -- prints: 600000 57 57
 
 type Entry = Union {
 	Mark

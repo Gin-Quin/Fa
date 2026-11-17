@@ -1,0 +1,11 @@
+type Node = { value: Integer }
+type Callback = () => Integer
+function make = (): Callback => {
+ mutable values: GrowingPool<Node> = []
+ use node = values.add({ value = 7 })
+ function read = () => node.value
+ let callback = read
+ () => callback() -- error: MEM004
+}
+let read = make()
+console.log(read())

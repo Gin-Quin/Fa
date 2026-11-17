@@ -1,0 +1,4 @@
+-- Both documented JSON input forms must work through their union type.
+use { Json, JsonError } = std.json
+function parse = (input: String | Bytes): String throws JsonError => try Json.parse(input)
+console.log(try parse("\"é\""), try parse("\"😀\"".toUtf8())) -- prints: é 😀

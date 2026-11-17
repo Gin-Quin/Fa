@@ -24,6 +24,7 @@ mod appends;
 mod arith;
 mod arrays;
 mod big_integers;
+mod bytes;
 pub(crate) mod c_library;
 mod calls;
 mod capacity;
@@ -109,6 +110,7 @@ use values::{IntRepr, Repr, Val};
 
 /// LLVM's number for the `fastcc` calling convention.
 pub(crate) const FAST_CALLING_CONVENTION: u32 = 8;
+pub(super) const CANONICAL_SPLIT: &str = "fa.string.canonical-split";
 
 type CallbackInstanceKey<'ctx> = (FunctionValue<'ctx>, Vec<(usize, TypeId)>);
 type InstanceKey = (
@@ -134,6 +136,8 @@ pub(crate) struct Function<'ctx> {
 	/// Read-only aggregate parameters borrowed from the caller's storage.
 	borrowed: Vec<bool>,
 	ret: Repr,
+	/// Caller storage for a returned slice descriptor, when the result can be a view.
+	reference_buffer: Option<Repr>,
 	/// A synchronous object/tuple result slot precedes ordinary parameters
 	/// (after the environment, when present).
 	return_slot: bool,
@@ -182,6 +186,9 @@ struct LoopFrame<'ctx> {
 
 /// The function being lowered.
 struct Frame<'ctx> {
+	/// Explicit borrowed result expressions use the address-return ABI.
+	reference_returns: rustc_hash::FxHashSet<NodeId>,
+	reference_buffer: Option<PointerValue<'ctx>>,
 	return_slot: Option<Slot<'ctx>>,
 	nrvo_local: Option<(FileId, SymbolId)>,
 	return_buffer: Option<collection_storage::CollectionBuffer<'ctx>>,
@@ -212,7 +219,7 @@ struct Frame<'ctx> {
 	loops: Vec<LoopFrame<'ctx>>,
 	/// The handlers of the enclosing `catch`es, innermost last, the slot of
 	/// their error, and the depth of the cleanup stack around them.
-	catches: Vec<(BasicBlock<'ctx>, PointerValue<'ctx>, usize)>,
+	catches: Vec<(BasicBlock<'ctx>, Option<PointerValue<'ctx>>, usize)>,
 	/// Whether the function throws (returns its errors).
 	throws: bool,
 	/// Its requirements (hidden parameters, pointers to what provides
@@ -307,6 +314,7 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	lines: Vec<usize>,
 	/// The structs of object types.
 	object_types: std::cell::RefCell<FxHashMap<TypeId, StructType<'ctx>>>,
+	canonical_types: std::cell::RefCell<FxHashMap<TypeId, TypeId>>,
 	/// The global id of every member of a named union built or tested.
 	union_ids: std::cell::RefCell<FxHashMap<(fa_analyzer::ids::NominalId, u16), u64>>,
 	/// The generic functions, declared per instance.
@@ -345,6 +353,10 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The `mutable use` references: the slot holding the address of the
 	/// place they designate, and its representation.
 	references: FxHashMap<SymbolId, (PointerValue<'ctx>, Repr)>,
+	/// Descriptor snapshots per binding and compiled function instance;
+	/// module-level designations use no function key.
+	content_view_slots:
+		FxHashMap<(SymbolId, Option<inkwell::values::FunctionValue<'ctx>>), Slot<'ctx>>,
 	/// The places of the `provide` statements lowered so far.
 	provided: FxHashMap<NodeId, Slot<'ctx>>,
 	/// The receiver of the method call being lowered when it is already
@@ -418,7 +430,7 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The facts this lowering consulted (the key of a cached unit).
 	pub(crate) fact_log: Option<std::sync::Arc<crate::facts::FactLog>>,
 	/// The map types the program may keep a reference into the values of
-	/// (`facts::referenced_maps`, including generic patterns).
+	/// (`program::unsafe_maps`).
 	unsafe_maps: std::collections::BTreeSet<String>,
 	/// The map types some `deleteWhere` iterates over while deleting: their
 	/// entries stay out of the probe array (`tables.rs`, `inline`).
@@ -516,7 +528,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			.map(|(_, path)| path.clone())
 			.unwrap_or_default();
 		let state = program::FileState::new(session, entry, &path);
-		let fact_files: Vec<_> = files.iter().map(|(file, _)| *file).collect();
+		let map_facts = program::map_facts(session, files);
 		let mut lowering = Lowering {
 			session,
 			file: entry,
@@ -559,6 +571,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			constants: FxHashMap::default(),
 			lines: state.lines.clone(),
 			object_types: std::cell::RefCell::new(FxHashMap::default()),
+			canonical_types: std::cell::RefCell::new(FxHashMap::default()),
 			union_ids: std::cell::RefCell::new(FxHashMap::default()),
 			type_ids: std::cell::RefCell::new(FxHashMap::default()),
 			generic_functions: FxHashMap::default(),
@@ -578,6 +591,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			pending_receiver: None,
 			provided: FxHashMap::default(),
 			references: FxHashMap::default(),
+			content_view_slots: FxHashMap::default(),
 			saved_cleanups: Vec::new(),
 			owned_locals: FxHashMap::default(),
 			drop_functions: std::cell::RefCell::new(FxHashMap::default()),
@@ -600,8 +614,14 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			fact_log: None,
 			index_proofs: std::cell::RefCell::new(None),
 			program_proof_claims: std::cell::OnceCell::new(),
-			unsafe_maps: crate::facts::referenced_maps(session, &fact_files),
-			no_inline_maps: crate::facts::deleted_while_iterated_maps(session, &fact_files),
+			unsafe_maps: map_facts
+				.set(crate::facts::REFERENCED_MAPS)
+				.cloned()
+				.unwrap_or_default(),
+			no_inline_maps: map_facts
+				.set(crate::facts::DELETED_WHILE_ITERATED_MAPS)
+				.cloned()
+				.unwrap_or_default(),
 			packable_items: packed::packable_items(session, files),
 			packed_layouts: std::cell::RefCell::new(FxHashMap::default()),
 			readonly_collections: FxHashMap::default(),
@@ -798,6 +818,62 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.define_equal_box()?;
 		self.define_format_union()?;
 		self.define_boxes()?;
+		// The capability is program-wide, including late generic/callback
+		// instances. Separately compiled units and C libraries conservatively
+		// accept virtual views from other code; closed programs can erase it.
+		let virtual_views = !self.whole_program
+			|| self.c_library.is_some()
+			|| ["fa_string_slice_view", "fa_string_slice_region"]
+				.into_iter()
+				.filter_map(|name| self.module.get_function(name))
+				.any(|function| {
+					inkwell::values::BasicValue::get_first_use(
+						&function.as_global_value().as_pointer_value(),
+					)
+					.is_some()
+				}) || [
+			"fa_string_split_views",
+			"fa_string_split_nonempty_views",
+			"fa_string_split_views_into",
+		]
+		.into_iter()
+		.filter_map(|name| self.module.get_function(name))
+		.any(|function| {
+			use inkwell::values::{AnyValueEnum, BasicValue, BasicValueEnum, CallSiteValue};
+
+			let mut next = function
+				.as_global_value()
+				.as_pointer_value()
+				.get_first_use();
+			while let Some(usage) = next {
+				let instruction = match usage.get_user() {
+					AnyValueEnum::InstructionValue(instruction) => Some(instruction),
+					other => BasicValueEnum::try_from(other)
+						.ok()
+						.and_then(|value| value.as_instruction_value()),
+				};
+				if !instruction
+					.and_then(|instruction| CallSiteValue::try_from(instruction).ok())
+					.is_some_and(|call| {
+						call.get_string_attribute(AttributeLoc::Function, CANONICAL_SPLIT)
+							.is_some()
+					}) {
+					return true;
+				}
+				next = usage.get_next_use();
+			}
+			false
+		});
+		if let Some(flag) = self.module.get_global("fa_virtual_string_slices") {
+			flag.set_initializer(
+				&self
+					.context
+					.i32_type()
+					.const_int(virtual_views as u64, false),
+			);
+			flag.set_constant(true);
+			flag.set_linkage(Linkage::Internal);
+		}
 		// the drops at the end of `main` only free memory: the system takes
 		// it back at exit (drops with an effect: `destroy`, thread-safe values)
 		if let Some(flag) = self.module.get_global("fa.drops_at_exit") {
@@ -878,6 +954,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// The representation of a node's type.
 	pub(crate) fn node_repr(&self, node: NodeId) -> Result<Repr, Error> {
+		if self.reference_control(node) {
+			return Ok(Repr::Pointer);
+		}
 		self.repr_of(self.type_of(node), node.index())
 	}
 
@@ -915,7 +994,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	}
 
 	/// The `SIMPLE` flag of a string's capacity word: the top bit, set when
-	/// every byte is ASCII other than '\r' (one byte per character).
+	/// every byte is ASCII (one byte per code unit).
 	pub(crate) fn simple_flag(&self) -> IntValue<'ctx> {
 		let bits = self.usize.get_bit_width();
 		self.usize.const_int(1 << (bits - 1), false)
@@ -923,21 +1002,34 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	pub(crate) fn string_inline_flag(&self) -> IntValue<'ctx> {
 		self.usize
-			.const_int(1 << (self.usize.get_bit_width() - 2), false)
+			.const_int(1 << (self.usize.get_bit_width() - 3), false)
 	}
 
 	pub(crate) fn string_kind_mask(&self) -> IntValue<'ctx> {
 		self.usize
-			.const_int((1 << (self.usize.get_bit_width() - 2)) - 1, false)
+			.const_int((1 << (self.usize.get_bit_width() - 4)) - 1, false)
 	}
 
 	/// The capacity word of a static string (kind 0, with its `SIMPLE` flag).
 	pub(crate) fn static_capacity(&self, text: &str) -> IntValue<'ctx> {
-		if text.bytes().all(|byte| byte < 0x80 && byte != b'\r') {
+		if text.is_ascii() {
 			self.simple_flag()
 		} else {
-			self.usize.const_zero()
+			self.usize.const_int(
+				(1 << (self.usize.get_bit_width() - 4)) | text.encode_utf16().count() as u64,
+				false,
+			)
 		}
+	}
+
+	pub(crate) fn string_surrogates_flag(&self) -> IntValue<'ctx> {
+		self.usize
+			.const_int(1 << (self.usize.get_bit_width() - 2), false)
+	}
+
+	pub(crate) fn string_flags(&self) -> IntValue<'ctx> {
+		self.usize
+			.const_int(3 << (self.usize.get_bit_width() - 2), false)
 	}
 
 	/// The site of a runtime check: two NUL-terminated strings, the subject
@@ -1005,6 +1097,28 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		}
 		let pointer = builder.build_alloca(self.llvm_type(repr), name)?;
 		Ok(Slot { pointer, repr })
+	}
+
+	/// Scratch for a helper builder, always in that builder's function entry.
+	/// This must not allocate repeatedly when the access is inside a loop.
+	pub(crate) fn helper_alloca(
+		&self,
+		builder: &Builder<'ctx>,
+		ty: BasicTypeEnum<'ctx>,
+		name: &str,
+	) -> Result<PointerValue<'ctx>, Error> {
+		let function = builder
+			.get_insert_block()
+			.expect("a block")
+			.get_parent()
+			.expect("a function");
+		let entry = function.get_first_basic_block().expect("an entry");
+		let allocation = self.context.create_builder();
+		match entry.get_first_instruction() {
+			Some(first) => allocation.position_before(&first),
+			None => allocation.position_at_end(entry),
+		}
+		Ok(allocation.build_alloca(ty, name)?)
 	}
 
 	fn load(&self, slot: Slot<'ctx>) -> Result<Val<'ctx>, Error> {
@@ -1440,7 +1554,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				return Err(self.unsupported(node.index(), "a function without a signature"));
 			};
 			let sig = self.types().sig(sig);
-			let ret = self.repr_of(sig.ret, node.index())?;
+			let ret = if sig.reference.is_some() {
+				Repr::Pointer
+			} else {
+				self.repr_of(sig.ret, node.index())?
+			};
+			let reference_buffer = self.reference_buffer_repr(info.ty);
 			let mut params = Vec::new();
 			let mut types: Vec<BasicMetadataTypeEnum> = Vec::new();
 			if lambda {
@@ -1476,7 +1595,14 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				// Parameters are never copied: synchronous calls, direct or through
 				// a function value, borrow aggregates instead of expanding them
 				// into registers and spilling a new copy in every callee.
-				if !by_pointer[position] && self.borrows_parameter(repr) {
+				if !by_pointer[position]
+					&& (self.borrows_parameter(repr)
+						|| self
+							.types()
+							.params(sig.params)
+							.get(position)
+							.is_some_and(|param| param.reference.is_some()))
+				{
 					by_pointer[position] = true;
 					borrowed[position] = true;
 				}
@@ -1507,6 +1633,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			// the requirements: one hidden pointer each, after the parameters
 			for _ in self.types().requirements(sig.requires) {
+				types.push(self.pointer_type().into());
+			}
+			if reference_buffer.is_some() {
 				types.push(self.pointer_type().into());
 			}
 			let throws = info.throws != TypeId::NEVER || !callbacks.is_empty();
@@ -1604,6 +1733,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				borrowed,
 				ret,
 				return_slot,
+				reference_buffer,
 				return_collection,
 				throws,
 				lambda,
@@ -1731,6 +1861,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.saved_cleanups.push(outer);
 		let collection_budget = self.collection_budget_for(owner);
 		self.frame = Some(Frame {
+			reference_returns: rustc_hash::FxHashSet::default(),
+			reference_buffer: None,
 			return_slot: None,
 			nrvo_local: None,
 			return_buffer: None,
@@ -1820,6 +1952,20 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let by_reference = function.by_reference;
 		let captures = function.captures.clone();
 		self.begin_function(value, ret, Some(declaration));
+		if function.reference_buffer.is_some() {
+			self.frame_mut().reference_buffer = Some(
+				value
+					.get_last_param()
+					.expect("reference result storage")
+					.into_pointer_value(),
+			);
+		}
+		if info
+			.sig
+			.is_some_and(|sig| self.types().sig(sig).reference.is_some())
+		{
+			self.prepare_reference_returns(info.body);
+		}
 		self.frame_mut().arena = function.arena_body.is_some();
 		self.frame_mut().throws = throws;
 		self.begin_function_task(&function)?;
@@ -1871,6 +2017,28 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					.into_pointer_value();
 				index += 1;
 				let pointer = match (has_default, param.default) {
+					(true, Some(default))
+						if self.explicit_reference_parameter(info.ty, position) =>
+					{
+						let flag = value.get_nth_param(index).expect("a flag").into_int_value();
+						index += 1;
+						let given_block = self.builder.get_insert_block().expect("a block");
+						let use_default = self.append_block("default");
+						let join = self.append_block("given");
+						self.builder
+							.build_conditional_branch(flag, join, use_default)?;
+						self.builder.position_at_end(use_default);
+						let address = self
+							.borrowed_result(default)?
+							.value
+							.expect("a reference address");
+						let default_end = self.builder.get_insert_block().expect("a block");
+						self.branch_to(join)?;
+						self.builder.position_at_end(join);
+						let chosen = self.builder.build_phi(self.pointer_type(), "parameter")?;
+						chosen.add_incoming(&[(&pointer, given_block), (&address, default_end)]);
+						chosen.as_basic_value().into_pointer_value()
+					}
 					(true, Some(default)) => {
 						// not given: the default, in a slot the function owns
 						let flag = value.get_nth_param(index).expect("a flag").into_int_value();
@@ -1913,6 +2081,27 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 						chosen.as_basic_value().into_pointer_value()
 					}
 					_ => pointer,
+				};
+				let repr = if self.explicit_reference_parameter(info.ty, position) {
+					if let Repr::Optional(element) = repr {
+						self.nullable_references.insert(param.symbol, ());
+						element.repr()
+					} else {
+						repr
+					}
+				} else {
+					repr
+				};
+				let repr = if let Some(sig) = info.sig {
+					let params = self.types().params(self.types().sig(sig).params);
+					if let Some(path) = params.get(position).and_then(|param| param.reference) {
+						let roots: Vec<_> = params.iter().map(|param| param.ty).collect();
+						self.reference_item_repr(path, &roots, repr)
+					} else {
+						repr
+					}
+				} else {
+					repr
 				};
 				self.slots.insert(param.symbol, Slot { pointer, repr });
 				if repr == Repr::Str
@@ -2405,7 +2594,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				),
 				_ => Val::new(Repr::F64, self.context.f64_type().const_float(value)),
 			},
-			Value::String(text) => self.string_constant(&text),
+			Value::String(text) => self.text_constant(&text),
 			Value::None => Val::none(),
 			value => {
 				let ty = self.type_of(node);
@@ -2472,6 +2661,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// (`coercions`): the range check of a `SINK_CHECK` root, `Float32` →
 	/// `Float`, `Integer` ↔ `Int64`.
 	pub(crate) fn expr(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
+		if self.frame().reference_returns.contains(&node) {
+			return self.borrowed_result(node);
+		}
 		// a read of a reactive place is tracked before it happens
 		self.track_read(node)?;
 		let value = self.expr_inner(node)?;
@@ -3263,6 +3455,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			let value = self.expr(iterable)?;
 			return match value.repr {
 				Repr::Str => self.for_characters(node, pattern, has_index, value, body),
+				Repr::Bytes => {
+					let array = self.bytes_as_array(value)?;
+					self.for_items(node, pattern, has_index, iterable, array, body)
+				}
 				Repr::Array(_) | Repr::Growing(_) => {
 					let mut source = iterable;
 					while let View::Group(inner) = self.view(source) {
@@ -3396,7 +3592,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// `loop { … }`, whose value is the value of its `break`.
 	fn loop_expression(&mut self, node: NodeId, body: NodeId) -> Result<Val<'ctx>, Error> {
-		let repr = self.node_repr(node).unwrap_or(Repr::Void);
+		let repr = if self.reference_control(node) {
+			Repr::Pointer
+		} else {
+			self.node_repr(node).unwrap_or(Repr::Void)
+		};
 		let value = if repr.has_value() {
 			Some(self.alloca(repr, "loop")?)
 		} else {

@@ -1,0 +1,2 @@
+function literal = (text: String): Schema => Schema.StringLiteral { value = text }
+static invalid = @literal("😀"[0]) -- error: TF042

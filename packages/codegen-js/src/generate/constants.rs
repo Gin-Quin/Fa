@@ -101,7 +101,21 @@ impl Generator<'_> {
 				}
 			}
 			Value::Float(value) | Value::Percentage(value) => js::float_literal(*value),
-			Value::String(text) => Expr::constant(js::string_literal(text), Prec::Primary),
+			Value::Bytes(bytes) => Expr::primary(format!(
+				"new Uint8Array([{}])",
+				bytes
+					.iter()
+					.map(u8::to_string)
+					.collect::<Vec<_>>()
+					.join(", ")
+			)),
+			Value::String(text) => Expr::constant(
+				text.as_str().map_or_else(
+					|| js::string_literal_units(text.units()),
+					js::string_literal,
+				),
+				Prec::Primary,
+			),
 			// an empty pool, set or map (a field default of a type of another
 			// file): an empty collection of its class
 			Value::Array(items)
@@ -154,6 +168,21 @@ impl Generator<'_> {
 					.map(|(item, ty)| self.comptime_text(item, ty).map(|expr| expr.text))
 					.collect::<Option<Vec<_>>>()?;
 				Expr::constant(format!("[{}]", parts.join(", ")), Prec::Primary)
+			}
+			Value::Pool(pool) => {
+				let TypeKind::Collection(_, item, _) = types.kind(ty) else {
+					return None;
+				};
+				let parts = pool
+					.values()
+					.map(|value| self.comptime_text(value, item).map(|expr| expr.text))
+					.collect::<Option<Vec<_>>>()?;
+				let class = if self.is_value_pool(ty) {
+					self.helper("FaValuePool")
+				} else {
+					"Set"
+				};
+				Expr::primary(format!("new {class}([{}])", parts.join(", ")))
 			}
 			Value::Set(items) => {
 				let item = match types.kind(ty) {
@@ -236,7 +265,7 @@ impl Generator<'_> {
 				))
 			}
 			// functions are built by the runtime: not yet
-			Value::Function(_) => return None,
+			Value::Function(_) | Value::Reference(_) => return None,
 		})
 	}
 

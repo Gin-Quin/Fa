@@ -1,0 +1,6 @@
+static half = "😀"[0]
+static bad = Schema.StringLiteral { value = half } -- error: TF042
+type AlreadyRejected = TypeFromSchema<bad>
+function literal = (text: String): Schema => Schema.StringLiteral { value = text }
+static result = @literal(half) -- error: TF042
+type AlsoRejected = TypeFromSchema<result>

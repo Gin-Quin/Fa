@@ -54,6 +54,12 @@ type ProducerKey = (
 	Vec<(ParamId, GenericMethod)>,
 );
 
+type ProducerBindings = (
+	FxHashMap<ParamId, Repr>,
+	FxHashMap<ParamId, TypeId>,
+	Vec<(ParamId, GenericMethod)>,
+);
+
 /// The generic function types equal up to the names of their parameters.
 pub(crate) struct GenericClass {
 	/// The first type of the class met (global ids).
@@ -126,6 +132,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mut merger = self.types().merger(Some(module));
 		let global = merger.ty(generic);
 		let arguments: Vec<TypeId> = arguments.iter().map(|&ty| merger.ty(ty)).collect();
+		let module = merger.module(module);
 		drop(merger);
 		let mut scratch = TypeStore::view(self.types().global());
 		let own = scratch_generics(&scratch, global);
@@ -152,6 +159,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let global = merger.ty(ty);
 		let params: Vec<ParamId> = params.iter().map(|&param| merger.param(param)).collect();
 		let arguments: Vec<TypeId> = arguments.iter().map(|&ty| merger.ty(ty)).collect();
+		let module = merger.module(module);
 		drop(merger);
 		let mut scratch = TypeStore::view(self.types().global());
 		let instance = scratch.substitute(
@@ -181,29 +189,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if class.representative == global {
 				return index;
 			}
-			// renamed to the representative's parameters, both opened
-			let theirs: Vec<TypeId> = class
-				.generics
-				.iter()
-				.map(|&param| scratch.intern(TypeKind::Param(param)))
-				.collect();
-			let renamed = scratch.substitute(
-				global,
-				&Bindings {
-					params: own.clone(),
-					types: theirs.clone(),
-					..Default::default()
-				},
-			);
-			let opened = scratch.substitute(
-				class.representative,
-				&Bindings {
-					params: class.generics.clone(),
-					types: theirs,
-					..Default::default()
-				},
-			);
-			if renamed == opened {
+			if crate::map_facts::same_function_class(&mut scratch, global, class.representative) {
 				return index;
 			}
 		}
@@ -263,27 +249,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The producer of a class for a node of the file being lowered, under
 	/// the current bindings (a lambda) or none (a declaration).
-	fn producer(&mut self, class: usize, node: NodeId, kind: ProducerKind) -> usize {
-		let bindings = match kind {
-			ProducerKind::Lambda => self.bindings.borrow().clone(),
-			ProducerKind::Declaration => FxHashMap::default(),
-		};
-		let mut entries: Vec<(ParamId, Repr)> = bindings
+	fn producer(
+		&mut self,
+		class: usize,
+		node: NodeId,
+		kind: ProducerKind,
+		context: ProducerBindings,
+	) -> usize {
+		let (bindings, types, mut methods) = context;
+		let mut entries: Vec<_> = bindings
 			.iter()
 			.map(|(&param, &repr)| (param, repr))
 			.collect();
 		entries.sort_by_key(|(param, _)| *param);
-		let mut methods = if matches!(kind, ProducerKind::Lambda) {
-			self.method_bindings.borrow().clone()
-		} else {
-			Vec::new()
-		};
 		methods.sort_by_key(|(param, method)| (*param, method.name));
-		let types = if matches!(kind, ProducerKind::Lambda) {
-			self.type_bindings.borrow().clone()
-		} else {
-			FxHashMap::default()
-		};
 		let key = (
 			self.file,
 			node,
@@ -373,10 +352,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		ty: TypeId,
 		node: NodeId,
 		kind: ProducerKind,
+		context: ProducerBindings,
 	) -> Result<PointerValue<'ctx>, Error> {
 		if !self.is_split() {
 			let class = self.generic_class(ty);
-			let producer = self.producer(class, node, kind);
+			let producer = self.producer(class, node, kind, context);
 			return Ok(self.generic_values.producers[producer]
 				.placeholder
 				.as_pointer_value());
@@ -386,27 +366,30 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// find again)
 		let mut bindings = Vec::new();
 		let mut methods = Vec::new();
-		if matches!(kind, ProducerKind::Lambda) {
-			let current: Vec<(ParamId, Repr)> = self
-				.bindings
-				.borrow()
+		{
+			let (captured_bindings, captured_types, captured_methods) = context;
+			let current: Vec<(ParamId, Repr)> = captured_bindings
 				.iter()
 				.map(|(&param, &repr)| (param, repr))
 				.collect();
 			for (param, repr) in current {
-				let owner = self
-					.generic_functions
-					.iter()
-					.filter_map(|(owner, info)| {
-						info.generics
-							.iter()
-							.position(|&generic| generic == param)
-							.map(|index| (owner.index() as u32, index as u32))
-					})
-					.min();
-				let bound = self
-					.type_bindings
-					.borrow()
+				let owner = if matches!(kind, ProducerKind::Declaration) {
+					self.generic_functions
+						.get(&node)
+						.and_then(|info| info.generics.iter().position(|&generic| generic == param))
+						.map(|index| (node.index() as u32, index as u32))
+				} else {
+					self.generic_functions
+						.iter()
+						.filter_map(|(owner, info)| {
+							info.generics
+								.iter()
+								.position(|&generic| generic == param)
+								.map(|index| (owner.index() as u32, index as u32))
+						})
+						.min()
+				};
+				let bound = captured_types
 					.get(&param)
 					.copied()
 					.or_else(|| self.instance_types.borrow().get(&(param, repr)).copied());
@@ -419,25 +402,48 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				bindings.push((owner, index, self.global_type(bound)));
 			}
 			bindings.sort_by_key(|&(owner, index, _)| (owner, index));
-			let captured = self.method_bindings.borrow().clone();
-			for (param, method) in captured {
-				let owner = self
-					.generic_functions
-					.iter()
-					.filter_map(|(owner, info)| {
-						info.generics
-							.iter()
-							.position(|&generic| generic == param)
-							.map(|index| (owner.index() as u32, index as u32))
-					})
-					.min();
+			for (param, method) in captured_methods {
+				let owner = if matches!(kind, ProducerKind::Declaration) {
+					self.generic_functions
+						.get(&node)
+						.and_then(|info| info.generics.iter().position(|&generic| generic == param))
+						.map(|index| (node.index() as u32, index as u32))
+				} else {
+					self.generic_functions
+						.iter()
+						.filter_map(|(owner, info)| {
+							info.generics
+								.iter()
+								.position(|&generic| generic == param)
+								.map(|index| (owner.index() as u32, index as u32))
+						})
+						.min()
+				};
 				if let Some((owner, index)) = owner {
 					methods.push((owner, index, self.global_methods(&[method])[0].clone()));
 				}
 			}
 			methods.sort_by_key(|(owner, index, method)| (*owner, *index, method.name));
 		}
-		let module = self.session.module(self.file).to_string();
+		Ok(self.record_generic_table(
+			ty,
+			self.session.module(self.file).to_string(),
+			node,
+			matches!(kind, ProducerKind::Lambda),
+			bindings,
+			methods,
+		))
+	}
+
+	fn record_generic_table(
+		&mut self,
+		ty: TypeId,
+		module: String,
+		node: NodeId,
+		lambda: bool,
+		bindings: Vec<(u32, u32, TypeId)>,
+		methods: Vec<(u32, u32, GenericMethod)>,
+	) -> PointerValue<'ctx> {
 		let mut table = format!("fa.gv.table.{module}.{}", node.index());
 		if !bindings.is_empty() {
 			let types: Vec<TypeId> = bindings.iter().map(|&(_, _, ty)| ty).collect();
@@ -467,7 +473,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			class: self.class_key(ty),
 			module,
 			node: node.index() as u32,
-			lambda: matches!(kind, ProducerKind::Lambda),
+			lambda,
 			bindings,
 			methods,
 		};
@@ -475,7 +481,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if !needs.producers.contains(&producer) {
 			needs.producers.push(producer);
 		}
-		Ok(global.as_pointer_value())
+		global.as_pointer_value()
 	}
 
 	/// The index of an instance in the tables of its class: a constant, or,
@@ -565,6 +571,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<(), Error> {
 		let producer = &request.producer;
 		let node = NodeId::new(producer.node as usize);
+		if !producer.lambda {
+			let count = self.declaration_owner_params(node).len();
+			if producer.bindings.len() != count
+				|| producer
+					.bindings
+					.iter()
+					.enumerate()
+					.any(|(index, &(owner, position, _))| {
+						owner != producer.node || position as usize != index
+					}) || producer
+				.methods
+				.iter()
+				.any(|(owner, position, _)| *owner != producer.node || *position as usize >= count)
+			{
+				return Err(self.unsupported(
+					node.index(),
+					"an incomplete generic declaration owner (split build)",
+				));
+			}
+		}
 		// the bindings of the instance around a lambda
 		let mut bindings = FxHashMap::default();
 		let mut types = FxHashMap::default();
@@ -669,7 +695,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// a new environment.
 	pub(crate) fn generic_lambda_value(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
 		let ty = self.concrete_type(self.type_of(node));
-		let table = self.generic_table_of(ty, node, ProducerKind::Lambda)?;
+		let context = (
+			self.bindings.borrow().clone(),
+			self.type_bindings.borrow().clone(),
+			self.method_bindings.borrow().clone(),
+		);
+		let table = self.generic_table_of(ty, node, ProducerKind::Lambda, context)?;
 		let captures = self.find_captures(node);
 		// the environment of every instance (`declare_function` decides the same)
 		let given_to_call = {
@@ -699,12 +730,156 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		declaration: NodeId,
 		node: NodeId,
 	) -> Result<Val<'ctx>, Error> {
+		self.generic_declaration_value_in(self.file, declaration, node)
+	}
+
+	pub(crate) fn generic_declaration_value_in(
+		&mut self,
+		file: FileId,
+		declaration: NodeId,
+		node: NodeId,
+	) -> Result<Val<'ctx>, Error> {
 		let ty = self.concrete_type(self.type_of(node));
 		if !self.is_generic_function_type(ty) {
 			return Err(self.unsupported(node.index(), "this generic function value"));
 		}
-		let table = self.generic_table_of(ty, declaration, ProducerKind::Declaration)?;
-		self.closure_pair(table, self.pointer_type().const_null(), self.type_of(node))
+		let params = self
+			.generic_type_methods
+			.get(&(file, declaration))
+			.map(|(params, _)| params.clone())
+			.unwrap_or_default();
+		let context = self.fixed_owner_context(&params, node)?;
+		let current = self.file;
+		self.switch_file(file);
+		let table = self.generic_table_of(ty, declaration, ProducerKind::Declaration, context);
+		self.switch_file(current);
+		self.closure_pair(table?, self.pointer_type().const_null(), ty)
+	}
+
+	pub(crate) fn reached_generic_function_value(
+		&mut self,
+		reached: super::program::Reached,
+		node: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		match reached {
+			super::program::Reached::Function(file, declaration) => {
+				self.generic_declaration_value_in(file, declaration, node)
+			}
+			super::program::Reached::RemoteFunction(key) => {
+				let (module_id, keyed) = self.session.keyed(key).ok_or_else(|| {
+					self.unsupported(
+						node.index(),
+						"this generic function declaration of another unit",
+					)
+				})?;
+				let declaration = keyed.node;
+				let owner = self
+					.session
+					.interface(module_id)
+					.and_then(|interface| interface.function_owners.get(&declaration))
+					.copied();
+				let params = owner
+					.and_then(|owner| {
+						let module = self.types().decl_key_data(owner).module;
+						let interface = self.session.interface(module)?;
+						let list = interface.type_parameters.get(&interface.node_of(owner)?)?;
+						Some(
+							self.types()
+								.list_items(*list)
+								.iter()
+								.filter_map(|&ty| match self.types().kind(ty) {
+									TypeKind::Param(param) => Some(param),
+									_ => None,
+								})
+								.collect::<Vec<_>>(),
+						)
+					})
+					.unwrap_or_default();
+				let (_bindings, types, selected) = self.fixed_owner_context(&params, node)?;
+				let records = params
+					.iter()
+					.enumerate()
+					.map(|(index, param)| (declaration.index() as u32, index as u32, types[param]))
+					.collect();
+				let methods = selected
+					.iter()
+					.map(|(param, method)| {
+						let index = params
+							.iter()
+							.position(|known| known == param)
+							.expect("a captured owner parameter");
+						(
+							declaration.index() as u32,
+							index as u32,
+							self.global_methods(std::slice::from_ref(method))[0].clone(),
+						)
+					})
+					.collect();
+				let ty = self.concrete_type(self.type_of(node));
+				let module = self.types().module_path(module_id).to_string();
+				let table =
+					self.record_generic_table(ty, module, declaration, false, records, methods);
+				self.closure_pair(table, self.pointer_type().const_null(), ty)
+			}
+			_ => Err(self.unsupported(node.index(), "this generic function value")),
+		}
+	}
+
+	fn declaration_owner_params(&self, declaration: NodeId) -> Vec<ParamId> {
+		self.generic_type_methods
+			.get(&(self.file, declaration))
+			.map(|(params, _)| params.clone())
+			.unwrap_or_default()
+	}
+
+	fn fixed_owner_context(
+		&self,
+		params: &[ParamId],
+		node: NodeId,
+	) -> Result<ProducerBindings, Error> {
+		if params.is_empty() {
+			return Ok(Default::default());
+		}
+		let owner = self.call_method_owner(node).ok_or_else(|| {
+			self.unsupported(
+				node.index(),
+				"this generic function value without its written owner",
+			)
+		})?;
+		let given = self.types().list_items(owner.arguments);
+		if params.len() != given.len() {
+			return Err(
+				self.unsupported(node.index(), "this generic function owner's argument tuple")
+			);
+		}
+		let mut bindings = FxHashMap::default();
+		let mut types = FxHashMap::default();
+		for (&param, &argument) in params.iter().zip(given) {
+			let argument = self.global_type(self.concrete_type(argument));
+			if self.mentions_param(argument) {
+				return Err(
+					self.unsupported(node.index(), "this generic owner with an unbound argument")
+				);
+			}
+			bindings.insert(param, self.repr_of(argument, node.index())?);
+			types.insert(param, argument);
+		}
+		let mut methods = self.forwarded_methods(given);
+		methods.extend(owner.methods.iter().cloned());
+		let methods = methods
+			.into_iter()
+			.map(|method| {
+				let method = self.concrete_method(method);
+				let param = params
+					.get(method.parameter as usize)
+					.copied()
+					.ok_or_else(|| {
+						self.unsupported(node.index(), "this generic owner's method parameter")
+					})?;
+				Ok((param, method))
+			})
+			.collect::<Result<Vec<_>, Error>>()?;
+		Ok((bindings, types, methods))
 	}
 
 	/// `{ table, environment }` as a value of type `ty`.
@@ -863,6 +1038,50 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Some(info) => info.generics.clone(),
 			None => return Err(self.unsupported(node.index(), "this generic function value")),
 		};
+		let owner = if matches!(kind, ProducerKind::Declaration) {
+			self.declaration_owner_params(node)
+		} else {
+			Vec::new()
+		};
+		let mut all_types = Vec::new();
+		let mut all_reprs = Vec::new();
+		let mut all_methods = Vec::new();
+		for (position, &param) in owner.iter().enumerate() {
+			let ty = self
+				.type_bindings
+				.borrow()
+				.get(&param)
+				.copied()
+				.ok_or_else(|| {
+					self.unsupported(node.index(), "an incomplete generic function owner")
+				})?;
+			all_types.push(ty);
+			all_reprs.push(self.repr_of(ty, node.index())?);
+			for (bound, method) in self.method_bindings.borrow().iter() {
+				if *bound == param {
+					let mut method = self.concrete_method(method.clone());
+					method.parameter = position as u16;
+					all_methods.push(method);
+				}
+			}
+		}
+		all_types.extend_from_slice(types);
+		all_reprs.extend_from_slice(reprs);
+		all_methods.extend(methods.iter().cloned().map(|mut method| {
+			method.parameter += owner.len() as u16;
+			method
+		}));
+		if all_types.len() != generics.len() || all_reprs.len() != generics.len() {
+			return Err(self.unsupported(
+				node.index(),
+				"this generic function's complete argument tuple",
+			));
+		}
+		let (types, reprs, methods) = (
+			all_types.as_slice(),
+			all_reprs.as_slice(),
+			all_methods.as_slice(),
+		);
 		if !self.instance_allowed(&generics, types) {
 			return Ok(self.never_called_entry());
 		}
@@ -914,24 +1133,30 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// Whether type arguments satisfy the constraints of parameters.
 	fn instance_allowed(&self, generics: &[ParamId], types: &[TypeId]) -> bool {
-		let module = self.session.module_id(self.file);
-		let mut merger = self.types().merger(Some(module));
+		if generics.len() != types.len() {
+			return false;
+		}
+		let mut complete = self.type_bindings.borrow().clone();
+		complete.extend(generics.iter().copied().zip(types.iter().copied()));
+		let mut merger = self.types().merger(None);
+		let mut bindings = Bindings::default();
+		for (param, ty) in complete {
+			bindings.params.push(merger.param(param));
+			bindings.types.push(merger.ty(ty));
+		}
 		let mut pairs = Vec::new();
 		for (&param, &ty) in generics.iter().zip(types) {
 			let constraint = self.types().param(param).constraint;
-			if constraint.is_unset() || constraint == TypeId::UNKNOWN {
-				continue;
+			if !constraint.is_unset() && constraint != TypeId::UNKNOWN {
+				pairs.push((merger.ty(ty), merger.ty(constraint)));
 			}
-			pairs.push((merger.ty(ty), merger.ty(constraint)));
 		}
 		drop(merger);
-		if pairs.is_empty() {
-			return true;
-		}
 		let mut scratch = TypeStore::view(self.types().global());
-		pairs
-			.into_iter()
-			.all(|(ty, constraint)| scratch.satisfies(ty, constraint))
+		pairs.into_iter().all(|(ty, constraint)| {
+			let constraint = scratch.substitute(constraint, &bindings);
+			scratch.satisfies(ty, constraint)
+		})
 	}
 
 	/// The entry of an instance a producer never gets called at.

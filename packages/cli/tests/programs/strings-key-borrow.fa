@@ -1,0 +1,19 @@
+-- Key-set reads retain their field paths through borrowed VM arguments.
+function length = (text: String): Integer => text.length
+type Leaf = { z: String, a: String }
+type Root = { right: Leaf, left: Leaf }
+function inspect = <Item, capacity: UInt32, fields: DeepKeys<Item>>(value: Item): String throws CapacityError => {
+	mutable rows: InlineArray<String, capacity> = []
+	@for key in fields { try rows.push("{key}:{length(value[key])}") }
+	mutable ordered: Array<String> = []
+	for row in rows { ordered.push(row) }
+	ordered.sort().join("|")
+}
+function observe = (): String throws CapacityError => {
+	let leaf = Leaf { z = "😀"[0], a = "é日" }
+	let source = Root { right = leaf, left = leaf }
+	try inspect<Root, 4, { right { z, a }, left { a, z } }>(source)
+}
+static expected = @observe()
+console.log(expected) -- prints: left.a:2|left.z:1|right.a:2|right.z:1
+console.log(try observe()) -- prints: left.a:2|left.z:1|right.a:2|right.z:1

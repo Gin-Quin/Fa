@@ -1,0 +1,34 @@
+-- Distinct type tuples and deletion policies keep their own map layouts.
+function update = <Key, Item>(entries: Map<Key, Item>, key: Key, value: Item) mutates entries => {
+ use slot = entries.getOrInsert(copy key, copy value)
+ entries[key] = copy value
+ slot = copy value
+}
+function prune = <Key, Item>(entries: Map<Key, Item>) mutates entries => entries.deleteWhere((_value, _key) => true)
+function exercise = (): Array<Integer> throws KeyNotFound => {
+ mutable numbers: Map<Integer, Integer> = [(1, 7)]
+ update(numbers, 1, 9)
+ mutable words: Map<String, String> = [("a", "old")]
+ update(words, "a", "new")
+ mutable other: Map<Int8, Int16> = [(1, 7), (2, 8)]
+ prune(other)
+ [try numbers[1], other.size, if try words["a"] == "new" { 9 } else { 0 }]
+}
+static result = @exercise()
+console.log(result) -- prints: [9, 0, 9]
+console.log(try exercise()) -- prints: [9, 0, 9]
+
+function pause = () => {}
+function read = <Item>(entries: Map<String, Item>): Item? => {
+ use slot = entries.get("key")
+ pause()
+ if slot is none { none } else { copy slot }
+}
+function invoke = (action: <Value>(entries: Map<String, Value>) => Value?, entries: Map<String, Integer>): Integer => action(entries) ?? 0
+function viaValue = (): Integer => {
+ let entries: Map<String, Integer> = [("key", 9)]
+ invoke(read, entries)
+}
+static indirect = @viaValue()
+console.log(indirect) -- prints: 9
+console.log(viaValue()) -- prints: 9

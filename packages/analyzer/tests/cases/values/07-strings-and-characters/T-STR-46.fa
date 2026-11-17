@@ -1,4 +1,1 @@
--- error: E-STR-8
--- brief: ⇒ E-STR-8
-let text = "F"
-let c: Character = text
+let c: Character = "F" -- error: TY007

@@ -1,0 +1,9 @@
+-- A known result length must still evaluate the receiver, including its stop.
+function fail = (): "x" => {
+	assert false
+	"x"
+}
+function direct = (): Integer => fail().codePoints().length
+function chained = (): String => fail().codePoints().length.toString()
+static first = @direct() -- error META005
+static second = @chained() -- error META005

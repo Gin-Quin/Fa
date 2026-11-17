@@ -618,6 +618,10 @@ pub enum Node {
 		kind: EffectKind,
 		paths: Vec<usize>,
 	},
+	/// A contextual stored-link field modifier.
+	Link {
+		right: usize,
+	},
 	Readonly {
 		// ex: `readonly balance: Integer = 0` (in a type)
 		right: usize,
@@ -755,7 +759,8 @@ impl Node {
 			| Node::Start { right }
 			| Node::Assert { right }
 			| Node::InRelation { right }
-			| Node::Readonly { right } => visit(*right),
+			| Node::Readonly { right }
+			| Node::Link { right } => visit(*right),
 			Node::Percentage { value } | Node::Optional { value } => visit(*value),
 			Node::Group { expression }
 			| Node::ExportNamespace { expression }
@@ -1104,6 +1109,7 @@ impl Node {
 			Node::Requires { .. } => "Requires",
 			Node::Effect { .. } => "Effect",
 			Node::Readonly { .. } => "Readonly",
+			Node::Link { .. } => "Link",
 			Node::CompoundAssignment { .. } => "CompoundAssignment",
 			Node::Assignment { .. } => "Assignment",
 			Node::ExportValue { .. } => "ExportValue",

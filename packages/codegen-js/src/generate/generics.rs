@@ -16,13 +16,30 @@
 use std::collections::HashMap;
 
 use fa_analyzer::ids::{NodeId, ParamId, Sym, SymbolId, TypeId};
-pub(crate) use fa_analyzer::modules::GenericRequirement as Hidden;
-use fa_analyzer::symbols::{Resolution, SymbolKind};
+use fa_analyzer::modules::GenericRequirement;
+use fa_analyzer::symbols::Resolution;
 use fa_analyzer::syntax::View;
 use fa_analyzer::types::{FieldFlags, TypeKind};
 
 use crate::generate::Generator;
-use crate::js::{self, Expr, Prec};
+use crate::js::{self, Expr};
+
+/// Backend capabilities, including the representation of an erased place.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Hidden {
+	Value(ParamId),
+	Drop(ParamId),
+	Method(ParamId, Sym),
+}
+impl From<GenericRequirement> for Hidden {
+	fn from(value: GenericRequirement) -> Self {
+		match value {
+			GenericRequirement::Value(p) => Self::Value(p),
+			GenericRequirement::Drop(p) => Self::Drop(p),
+			GenericRequirement::Method(p, m) => Self::Method(p, m),
+		}
+	}
+}
 
 impl Generator<'_> {
 	/// The hidden parameters of a generic function declaration, in order.
@@ -39,13 +56,15 @@ impl Generator<'_> {
 			.generic_functions
 			.get(&declaration)
 		{
-			Some(summary) => hidden.extend(summary.requirements.iter().cloned()),
+			Some(summary) => {
+				hidden.extend(summary.requirements.iter().copied().map(Hidden::from));
+			}
 			None => hidden.extend(self.hidden_for_generics(&info.generics)),
 		}
 		hidden
 	}
 
-	fn function_generics(&self, function: NodeId) -> Vec<ParamId> {
+	pub(super) fn function_generics(&self, function: NodeId) -> Vec<ParamId> {
 		let mut params = self.owner_parameters(function);
 		if let Some(info) = self.analysis.function(function) {
 			params.extend(info.generics.iter().copied());
@@ -53,7 +72,7 @@ impl Generator<'_> {
 		params
 	}
 
-	fn owner_parameters(&self, function: NodeId) -> Vec<ParamId> {
+	pub(super) fn owner_parameters(&self, function: NodeId) -> Vec<ParamId> {
 		self.analysis
 			.function_owners
 			.get(&function)
@@ -63,7 +82,11 @@ impl Generator<'_> {
 	}
 
 	fn hidden_for_generics(&self, generics: &[ParamId]) -> Vec<Hidden> {
-		fa_analyzer::modules::generic_requirements(self.types, generics)
+		let hidden: Vec<_> = fa_analyzer::modules::generic_requirements(self.types, generics)
+			.into_iter()
+			.map(Hidden::from)
+			.collect();
+		hidden
 	}
 
 	/// Declares the hidden parameters of a generic function being generated
@@ -111,37 +134,8 @@ impl Generator<'_> {
 	/// The `Static` symbol a value parameter's name resolves to in the body
 	/// of a function.
 	fn value_parameter_symbol(&self, function: NodeId, param: ParamId) -> Option<SymbolId> {
-		let name = self.types.param(param).name;
-		// the declaration holds the generic parameters, not the lambda
-		let declaration = self
-			.analysis
-			.function(function)
-			.and_then(|info| info.declaration)
-			.unwrap_or(function);
-		let owner = self
-			.analysis
-			.function_owners
-			.get(&function)
-			.copied()
-			.filter(|owner| {
-				self.analysis
-					.type_decls
-					.get(owner)
-					.is_some_and(|info| info.generics.contains(&param))
-			})
-			.unwrap_or(declaration);
-		let span = self.tree.spans[owner.index()];
 		self.analysis
-			.symbols
-			.symbols()
-			.iter()
-			.position(|symbol| {
-				symbol.kind == SymbolKind::Static && symbol.name == name && {
-					let declared = self.tree.spans[symbol.decl_node.index()];
-					span.start <= declared.start && declared.end <= span.end
-				}
-			})
-			.map(SymbolId::new)
+			.value_parameter_symbol(self.types, self.tree, function, param)
 	}
 
 	/// The values of the hidden parameters of a generic function at a call
@@ -161,6 +155,33 @@ impl Generator<'_> {
 		generics: &[ParamId],
 		hidden: Vec<Hidden>,
 	) -> Vec<String> {
+		let (bindings, methods) = self.generic_call_bindings(call, generics);
+		self.hidden_arguments_bound(call, generics, hidden, &bindings, &methods)
+	}
+
+	pub(super) fn generic_application_site(&self, call: NodeId) -> NodeId {
+		if let View::Call { callee, .. } = self.view(call) {
+			let callee = self.strip_groups(callee);
+			if self.has(
+				callee,
+				fa_analyzer::analysis::NodeFlags::GENERIC_APPLICATION,
+			) {
+				return callee;
+			}
+		}
+		call
+	}
+
+	pub(super) fn generic_call_bindings(
+		&self,
+		call: NodeId,
+		generics: &[ParamId],
+	) -> (Vec<TypeId>, Vec<fa_analyzer::analysis::GenericMethod>) {
+		let call = if self.analysis.instantiation(call).is_some() {
+			call
+		} else {
+			self.generic_application_site(call)
+		};
 		let mut bindings: Vec<TypeId> = self
 			.analysis
 			.instantiation(call)
@@ -174,13 +195,18 @@ impl Generator<'_> {
 			.unwrap_or_default();
 		if let Some(owner) = self.call_method_owner(call) {
 			let prefix = self.types.list_items(owner.arguments).to_vec();
+			let own = generics.len().saturating_sub(prefix.len());
+			if bindings.len() > own {
+				bindings = bindings[bindings.len() - own..].to_vec();
+			}
+
 			for method in &mut methods {
 				method.parameter += prefix.len() as u16;
 			}
 			methods.extend(owner.methods.iter().cloned());
 			bindings.splice(0..0, prefix);
 		}
-		self.hidden_arguments_bound(call, generics, hidden, &bindings, &methods)
+		(bindings, methods)
 	}
 
 	fn hidden_arguments_bound(
@@ -252,8 +278,10 @@ impl Generator<'_> {
 	}
 
 	fn call_method_owner(&self, call: NodeId) -> Option<&fa_analyzer::analysis::WrittenType> {
-		let View::Call { mut callee, .. } = self.view(call) else {
-			return None;
+		let mut callee = match self.view(call) {
+			View::Call { callee, .. } => callee,
+			View::Access { .. } | View::OptionalAccess { .. } => call,
+			_ => return None,
 		};
 		loop {
 			callee = self.strip_groups(callee);
@@ -321,7 +349,7 @@ impl Generator<'_> {
 							_ => None,
 						},
 					));
-					hidden.extend(summary.requirements);
+					hidden.extend(summary.requirements.into_iter().map(Hidden::from));
 					return self.hidden_arguments_for(call, &generics, hidden);
 				}
 			}
@@ -453,7 +481,7 @@ impl Generator<'_> {
 		})
 	}
 
-	fn external_owner_parameters(&self, key: fa_analyzer::ids::DeclKey) -> Vec<ParamId> {
+	pub(super) fn external_owner_parameters(&self, key: fa_analyzer::ids::DeclKey) -> Vec<ParamId> {
 		let Some((module, keyed)) = self.session.keyed(key) else {
 			return Vec::new();
 		};
@@ -511,29 +539,58 @@ impl Generator<'_> {
 		Some(name)
 	}
 
-	/// A declaration inferred for a concrete function value needs the same
-	/// capabilities as an explicit application. Keep both async instances.
-	pub(crate) fn specialized_function_value(&mut self, n: NodeId, value: Expr) -> Expr {
-		let hidden = self.signature_hidden_arguments(n, n);
+	/// Implicit generic-to-concrete function conversions bind capabilities
+	/// once at conversion, just like an explicitly written application.
+	pub(crate) fn instantiated_function_value(&mut self, node: NodeId, value: Expr) -> Expr {
+		let mut source = node;
+		while let View::Group(inner) = self.view(source) {
+			if self.analysis.instantiation(inner).is_some() {
+				return value;
+			}
+			source = inner;
+		}
+		if !matches!(
+			self.view(source),
+			View::Name(_) | View::Access { .. } | View::Lambda { .. }
+		) || self.is_callee(node)
+			|| (source != node && self.analysis.instantiation(node).is_none())
+		{
+			return value;
+		}
+		let hidden = if self.analysis.instantiation(node).is_some() {
+			self.signature_hidden_arguments(node, node)
+		} else if let Some(owner) = self.call_method_owner(node).cloned() {
+			// A written generic owner is already fixed even when the method
+			// keeps its own generic list on the resulting function value.
+			let named = match self.view(node) {
+				View::Access { members, .. } => members.last().unwrap_or(node),
+				_ => node,
+			};
+			let generics = match self.analysis.resolution(named) {
+				Resolution::Local(symbol) => {
+					self.owner_parameters(self.analysis.symbols.symbol(symbol).decl_node)
+				}
+				Resolution::External(key) => self.external_owner_parameters(key),
+				_ => Vec::new(),
+			};
+			let hidden = self.hidden_for_generics(&generics);
+			let bindings = self.types.list_items(owner.arguments).to_vec();
+			self.hidden_arguments_bound(node, &generics, hidden, &bindings, &owner.methods)
+		} else {
+			Vec::new()
+		};
+		let value = self.reference_function_value(node, value);
+		self.bind_function_hidden(value, hidden)
+	}
+
+	fn bind_function_hidden(&mut self, value: Expr, hidden: Vec<String>) -> Expr {
 		if hidden.is_empty() {
 			return value;
 		}
-		let value = self.keep(value);
-		let arguments = hidden.join(", ");
-		let sync = format!("((...$a) => {}({arguments}, ...$a))", value.primary_text());
-		if self.tasks.asynchronous
-			&& matches!(self.types.kind(self.type_of(n)), TypeKind::Function(sig) if self.types.sig(sig).is_async)
-		{
-			let call = self.helper("faCallValue");
-			let asynchronous = format!(
-				"(($task, ...$a) => {call}($task, {}, {arguments}, ...$a))",
-				value.text
-			);
-			let helper = self.helper("faAsyncValue");
-			js::call(helper, &[sync, asynchronous])
-		} else {
-			Expr::primary(sync)
-		}
+		let helper = self.helper("faBindGenerics");
+		let mut arguments = vec![value.text];
+		arguments.extend(hidden);
+		js::call(helper, &arguments)
 	}
 
 	/// A generic application used as a value (`repeatText(2)`): the
@@ -547,7 +604,7 @@ impl Generator<'_> {
 				.map(|info| (symbol, info.clone())),
 			_ => None,
 		};
-		let (function, hidden, arity) = match local {
+		let (function, hidden) = match local {
 			Some((symbol, info)) => {
 				if info.generics.is_empty() {
 					return None;
@@ -555,40 +612,29 @@ impl Generator<'_> {
 				(
 					self.name_of(symbol),
 					self.hidden_arguments(info.declaration.unwrap_or(info.lambda), n),
-					info.params.len(),
 				)
 			}
 			None => {
-				let TypeKind::Function(sig) = self.types.kind(self.type_of(n)) else {
+				let TypeKind::Function(_) = self.types.kind(self.type_of(n)) else {
 					return None;
 				};
-				let arity = self.types.params(self.types.sig(sig).params).len();
 				let hidden = self.signature_hidden_arguments(callee, n);
-				(self.expr(callee).primary_text(), hidden, arity)
+				(self.expr(callee).primary_text(), hidden)
 			}
 		};
-		if hidden.is_empty() {
-			return Some(Expr::name(function, true));
-		}
-		let parameters: Vec<String> = (0..arity).map(|i| format!("$p{i}")).collect();
-		let mut arguments = hidden;
-		arguments.extend(parameters.iter().cloned());
-		let call = js::call(&function, &arguments);
-		Some(Expr::new(
-			format!("({}) => {}", parameters.join(", "), call.text),
-			Prec::Assign,
-		))
+		let value = self.select_reference_body_value(n, callee, Expr::name(function, true));
+		Some(self.bind_function_hidden(value, hidden))
 	}
 
 	/// The name of a hidden parameter (`$Item$describe`: Fa names never
 	/// contain `$`).
 	fn declare_hidden_name(&mut self, wanted: &str) -> String {
-		let wanted = crate::names::synthesized_name(wanted);
-		let mut name = format!("${wanted}");
+		let base = crate::names::identifier(&format!("${wanted}"));
+		let mut name = base.clone();
 		let mut suffix = 0;
 		while self.hidden_names.values().any(|known| *known == name) {
 			suffix += 1;
-			name = format!("${wanted}${suffix}");
+			name = format!("{base}${suffix}");
 		}
 		name
 	}

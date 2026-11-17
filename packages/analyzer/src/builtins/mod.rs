@@ -7,8 +7,7 @@
 //! - `console.log`, `Integer.parse`: a member of a namespace or an associated
 //!   function of a type, looked up with [`member`];
 //! - `String#includes`, `String#length`: a method or a property of the values
-//!   of a built-in type, looked up with [`instance_member`]. `Character` values
-//!   share the members of `String`.
+//!   of a built-in type, looked up with [`instance_member`].
 //!
 //! Backends recognize a built-in by its path (`Resolution::Builtin(id)` on the
 //! name or member node, then [`get`]`(id).path`). Types are built in the
@@ -16,6 +15,7 @@
 //! than matching on [`BuiltinKind`], which grows with the prelude.
 
 pub mod array;
+pub mod bytes;
 pub mod concurrency;
 pub mod console;
 pub mod effects;
@@ -91,6 +91,8 @@ pub enum Ty {
 	Optional(&'static Ty),
 	/// `Array(T)`
 	Array(&'static Ty),
+	/// A union of built-in signature types.
+	Union(&'static [Ty]),
 	/// A built-in error type, by name (`ParseError`).
 	Error(&'static str),
 	/// Any value with a `toString` (printing): `UNKNOWN` for the walk, which
@@ -119,6 +121,11 @@ impl Ty {
 			Ty::Natural => "Integer<min = 0>".to_string(),
 			Ty::Optional(item) => format!("{}?", item.describe(types)),
 			Ty::Array(item) => format!("Array<{}>", item.describe(types)),
+			Ty::Union(items) => items
+				.iter()
+				.map(|ty| ty.describe(types))
+				.collect::<Vec<_>>()
+				.join(" | "),
 			Ty::Error(name) => name.to_string(),
 			Ty::Printable => "Printable".to_string(),
 			Ty::Receiver => "Self".to_string(),
@@ -152,6 +159,13 @@ impl Ty {
 			Ty::Array(item) => {
 				let item = item.build_for(types, receiver);
 				types.array(item)
+			}
+			Ty::Union(items) => {
+				let items: Vec<_> = items
+					.iter()
+					.map(|ty| ty.build_for(types, receiver))
+					.collect();
+				types.union(&items)
 			}
 			Ty::Error(name) => errors::error_type(types, name).unwrap_or(TypeId::UNKNOWN),
 			Ty::Printable => TypeId::UNKNOWN,
@@ -216,6 +230,7 @@ impl Signature {
 			.iter()
 			.enumerate()
 			.map(|(index, param)| ParamSig {
+				reference: None,
 				ty: param.ty.build_for(types, receiver),
 				variadic: self.variadic && index == last,
 			})
@@ -253,6 +268,7 @@ fn registry() -> &'static Registry {
 			ranges::BUILTINS,
 			reactivity::BUILTINS,
 			strings::BUILTINS,
+			bytes::BUILTINS,
 			foreign::BUILTINS,
 			std_library::BUILTINS,
 			schema::BUILTINS,
@@ -322,13 +338,14 @@ pub fn has_members(id: BuiltinId) -> bool {
 }
 
 /// The method or property `name` of the values of a built-in type
-/// (`"hello".length`, `x.sqrt`, `range.start`): `String` and `Character`
+/// (`"hello".length`, `x.sqrt`, `range.start`): `String`
 /// values, numbers (`Integer#…` for every integer type, `Float#…` for both
 /// float types), ranges.
 pub fn instance_member(types: &TypeStore, receiver: TypeId, name: &str) -> Option<BuiltinId> {
 	use crate::types::TypeKind;
 	let owner = match types.kind(receiver) {
-		TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => "String",
+		TypeKind::String | TypeKind::StringLit(_) => "String",
+		TypeKind::Bytes => "Bytes",
 		TypeKind::Range => "Range",
 		TypeKind::Subscription => "Subscription",
 		TypeKind::Pointer(_) => "Pointer",
@@ -420,10 +437,10 @@ mod tests {
 	}
 
 	#[test]
-	fn instance_members_of_strings_and_characters() {
+	fn instance_members_of_strings() {
 		let mut types = TypeStore::new();
 		let literal = types.string_literal("abc");
-		for receiver in [TypeId::STRING, TypeId::CHARACTER, literal] {
+		for receiver in [TypeId::STRING, literal] {
 			let length = instance_member(&types, receiver, "length").unwrap();
 			assert_eq!(get(length).path, "String#length");
 		}

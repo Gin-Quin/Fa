@@ -1,0 +1,11 @@
+type Node = { value: Integer }
+type Callback = () => Integer
+type Holder = { callback: Callback }
+function make = (): Callback => {
+ mutable values: GrowingPool<Node> = []
+ use node = values.add({ value = 7 })
+ mutable holder: Holder = { callback = () => node.value }
+ holder.callback = () => 42
+ holder.callback
+}
+console.log(make()()) -- prints: 42

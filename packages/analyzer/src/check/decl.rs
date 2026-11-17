@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::analysis::NodeFlags;
 use crate::builtins;
 use crate::check::{BodyCx, PlaceInfo, Walker};
-use crate::diagnostics::codes::advanced::{EFF006, EFF020, MOD004, MOD007};
+use crate::diagnostics::codes::advanced::{EFF006, EFF020, MOD004, MOD007, REF016};
 use crate::diagnostics::codes::analyzer::AN001;
 use crate::diagnostics::codes::types::FN015;
 use crate::diagnostics::codes::values::{
@@ -100,6 +100,17 @@ impl Walker<'_> {
 				self.check_stmt(statement);
 			}
 		}
+		// Value blocks are also checked directly by branches and function bodies,
+		// outside `check`, so publish their evaluated result at this boundary.
+		let origins = if result.0 == TypeId::NEVER {
+			Default::default()
+		} else {
+			result
+				.1
+				.map(|value| self.evaluated_origins(value))
+				.unwrap_or_default()
+		};
+		self.value_origins.insert(n, origins);
 		// a task bound in the block ends with it: its borrows too (tasks.rs)
 		self.end_block_tasks(scope, result.1);
 		self.body.scope = parent;
@@ -611,7 +622,7 @@ impl Walker<'_> {
 		};
 		// a name assigned as a whole is written, not used (foreign.rs)
 		self.access_roots.insert(self.strip_groups(target));
-		let place = self.check_place(target);
+		let (place, rejected) = self.assignment_place(target);
 		// a name assigned as a whole is written, not read: it has its declared
 		// type, and no narrowing to re-validate in the next rounds of a loop
 		let name = self.strip_groups(target);
@@ -623,6 +634,9 @@ impl Walker<'_> {
 		let actual = self.check(value, expected);
 		self.sink(value, actual, place.ty);
 		let ty = self.memo(n, |w| {
+			if rejected {
+				return TypeId::VOID;
+			}
 			let parameter = !place.below
 				&& place.symbol.is_some_and(|symbol| {
 					matches!(
@@ -656,7 +670,9 @@ impl Walker<'_> {
 		self.restore_moved_fields(target);
 		// a relation side: written through its direct side (relations.rs)
 		self.check_relation_write(n, target, value);
-		// a closure stored into a place escapes; a copy, maybe a move (moves.rs)
+		// Retain the evaluated function values in their assigned storage.
+		let destinations = self.places_of(target);
+		self.store_value_origins(destinations, value);
 		self.escape(value, n);
 		self.note_copy_site(value);
 		// flow: the value's facts replace the place's (numbers.rs)
@@ -716,6 +732,40 @@ impl Walker<'_> {
 		};
 		let diagnostic = self.diagnostic(&E_DECL_3, target, message);
 		self.report(diagnostic);
+	}
+
+	/// Assignment checks must not turn a rejected slice replacement into a
+	/// write effect, while a slice still stays writable as the root of an item.
+	pub(super) fn assignment_place(&mut self, target: NodeId) -> (PlaceInfo, bool) {
+		let mut place = self.check_place(target);
+		let slice = self.is_slice_assignment_target(target);
+		let unit = self.is_string_item_assignment_target(target);
+		if unit {
+			place.assignable = false;
+			let diagnostic = self.diagnostic(
+				&E_DECL_3,
+				target,
+				"a string has no item assignment: build a new string and assign the owner instead",
+			);
+			self.report_flow(diagnostic);
+		} else if slice {
+			place.assignable = false;
+			let text = self.tree.text(target.index());
+			let fix = if crate::builtins::strings::is_string_like(&self.s.types, place.ty) {
+				"assign the owning string instead, or reseat a `mutable use` reference with `reuse`"
+			} else {
+				"assign its items in a loop, or reseat a `mutable use` reference with `reuse`"
+			};
+			let diagnostic = self.diagnostic(
+				&REF016,
+				target,
+				format!(
+					"`{text}` is a slice view of a range of items: it cannot be assigned as a whole; {fix}"
+				),
+			);
+			self.report_flow(diagnostic);
+		}
+		(place, slice || unit)
 	}
 
 	/// A declaration the analyzer doesn't handle yet: `AN001`, and its names

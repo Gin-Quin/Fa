@@ -19,27 +19,19 @@ The single list of open work, in the order of [the journal's Next roadmap](journ
 - **Native conversion between recursive object types overflows the compiler's stack.** Found on `perf/aggregates`, present on trunk `864167d6`: `type Node = { value: Integer, next: Node? }`, `type Other = { value: Int8, next: Other? }`, `let converted: Node = Other { value = 1, next = Other { value = 2 } }` passes `fa check` and builds for Bun, but `fa build --target=native` aborts with a Rust stack overflow (the field conversion recurses over the type pair without a helper per pair). Emit one conversion helper per (source, target) pair, or report a diagnostic; add the program to the native fixtures. Coordinate with `feature/ownership` (copies and conversions).
 - **Review m3 refactoring.** Split the long `readonly_table`, `build_composition_body`, `lower_function_body`, `builtin_call` and `for_items` by responsibility, preserving their tested behavior. See the lead's `trunk-merge-review.md`.
 
-- **Analyzer: reject Array fields of stored references.**
-  `benchmarks/audit/ports/scene-children/main.fa` declares
-  `children: Array<SceneNode in nodes>`. It is accepted and prints 0 on native,
-  wasm and Bun after the original child changes to 2, silently storing owned
-  copies. The reference/relation rules prohibit this field: reject it with a
-  diagnostic instead of erasing its reference type. The pool-link language
-  study does not authorize this current missing rejection; do not fix it in
-  the benchmark-port task.
 
 ## 2. Language semantics
 
 ### Strings first: UTF-16 semantics over UTF-8 storage
 
-Documentation is written; the redesign is unimplemented. Follow the string/Bytes pages and their implementation sections, plus "Strings: UTF-16 semantics, UTF-8 storage" in `decisions.md`. WP9 below points here.
+The analyzer/prelude/tooling, JavaScript backend and compile-time interpreter are integrated on `feature/strings`, with lossless JavaScript constants, well-formed literal types and the lead's 13 edge-case decisions. The pages `values/strings`, `operations/string`, `values/bytes`, arrays and ranges are the contract; see the dated string integration decisions and `strings-3-integration.md` in the lead's reports. WP9 below points here.
 
-- **Analyzer and prelude.** Remove Character, adaptation and E-STR-8/9; suggest String for the old name. Use String/String? for indexing/get and String code points in loops; literal length facts use UTF-16 units. Add codeUnitAt, isWellFormed, utf8Length, UTF-8 conversions, Bytes/Schema.Bytes/Utf8Error; remove bytes(). Recognize codePoints().length and toUtf8 iteration without building arrays.
-- **Native strings.** Implement cached UTF-16 length and 64-unit breadcrumbs, ASCII-bearing slices (including CR), WTF-8 cut/join pairs, replacement on output, code-unit comparison/search positions and code-point iteration. Avoid building one-unit strings when comparing literals. Link UAX #29 only for characters(); keep the UTF-8 wasm host boundary.
-- **Bytes and standard I/O.** Use Array<Byte> storage natively and Uint8Array on JS, moving dead source blocks where proven. Implement strict/lossy UTF-8 validation and error positions, copies versus use slices, File.read/write Bytes and readText/writeText, HTTP body/text and Json.parse Bytes. HTTP itself remains completeness work below.
-- **JavaScript and interpreter.** JS uses native UTF-16 operations, for-of/codePointAt iteration, shared Intl.Segmenter/encoders/decoders and Buffer.byteLength or the web loop. Remove grapheme/ASCII fast-path helpers. Give compile-time strings and Bytes identical semantics, including lone-surrogate constants and JSON output rules.
-- **Tooling and acceptance.** Update LSP Character hovers/completions, all 11 Character fixtures, T-STR cases (12–14, 20–21, 26–27, 31–32, 46–47), non-ASCII indexing/search/order/pair tests and calc/sexp/string-building benchmarks. Preserve bound checks and helper isolation. The formatter/parser need no new syntax.
-- **Historical string records.** Update grapheme descriptions in spec-review, minimalism-audit, analyzer-design, llvm-backend-plan and native-goose-performance when touching their subjects; current language pages win.
+- **Native integration (lead).** Review and merge `strings/native` with main current. The backend/runtime implementation, lossless constants, no-copy views, Bytes, Unicode segmentation and compiler lifetime fix are delivered there; the final validation record is `strings-2-native.md` in the lead’s reports. The intermittent LLVM block-deletion use-after-free predates the string work and is fixed without adding a target exclusion.
+- **Final lead-merge validation.** Re-run the shared T-STR/Bytes/edge-01–13 fixtures, workspace/runtime/goldens and website checks after the final merge with main. Native historical UTF-16 expectations and its dynamic-bound failure test are reconciled. Preserve the branch’s exact ratchets and the recorded +1% ASCII instruction gate; no new exclusions or pending annotations.
+
+The standard library deferrals and optional bulk-loop optimization are recorded below; neither changes this redesign's current language contract.
+
+- Standard library pass: provide a way to obtain exact bytes from an existing `CString`, with an explicit length/terminator contract. Today only a separate C binding returning `Pointer<Byte>` and `toArray(count)` provides that route; `CString.toString()` decodes with replacement.
 
 ### Ownership, explicit copies, Set and with
 
@@ -80,6 +72,10 @@ One item per ordered slice of [the WIP assessment §3.4](reviews/ownership-wip-2
 - **O33 — Deferred key-loop effects/copies and missing diagnostic rules.** Reimplement specialized summaries/caller refresh, default/destruction effect sites and prioritized remaining documented diagnostics. ([§3.4, slice 33](reviews/ownership-wip-2026-11-15.md#34-ordered-focused-slices)) Must satisfy: errors §Throwing errors; memory-management §Last uses and moves / §Explicit copy; generics §Copy conditions.
 - **O34a — Origin alternatives in analyzer/interface.** Fresh design/implementation of equal-field written origin joins and union identity; common single-origin code only as reference. ([§3.4, slice 34a](reviews/ownership-wip-2026-11-15.md#34-ordered-focused-slices)) Must satisfy: unions §Written alternatives with identical fields / general compatible common fields and methods; structural-typing §What is compared.
 - **O34b — Origin union dispatch/destruction in both backends.** Runtime common-method tag/dispatch and actual written alternative through copy/move/erase, sharing native layouts only when semantically sound. ([§3.4, slice 34b](reviews/ownership-wip-2026-11-15.md#34-ordered-focused-slices)) Must satisfy: unions §Written alternatives with identical fields; foreign-code §Releasing C resources; memory-management §Lifetimes and destruction.
+<a id="o34c-static-type-field-enumeration"></a>
+
+- **O34c — Static-type field enumeration (lead, 2026-11-16).** Implement with ownership/written origins, alongside the metadata that selects methods of written types. Declared identities for reflection/order are distinct; structural assignability is unchanged. Every enumeration uses the static type at its site: declared order for `A = { z: Integer, a: Integer }`, declared order for `B = { a: Integer, z: Integer }`, UTF-16 name order for the anonymous type, and B's order after conversion to B. Apply to printing, JSON, reflection/schemas and key loops on every target and at compile time, never using runtime object key order. Acceptance: [shared fixtures and runner notes](reviews/repros/strings/field-enumeration/README.md), including both literals of one anonymous type, nested/recursive values, A/B/anonymous printing and JSON, converted values, and moved source effects. Run both generated `field-order-` and `field-enumeration-` classes with `FA_STRINGS_DIFFERENTIAL_DEFERRED=1`; remove their explicit exclusions from `DEFERRED_CASE_CLASSES` only when they pass. The string branch preserves trunk behavior and defers this item; its scoped recursive JSON-name fix is independent and remains required.
+
 - **O35 — Measured pass reduction.** Reimplement only F→P optimization differences: shared scan parents, read/reference reuse, lazy region facts; preserve latest semantic code/closed facts. ([§3.4, slice 35](reviews/ownership-wip-2026-11-15.md#34-ordered-focused-slices)) Must satisfy: all preceding ownership sections; deterministic diagnostics and unchanged semantic behavior.
 
 - **String copy visibility (tooling, lead 2026-11-16).** Add a `fa check` option reporting implicit native String copies with source sites and reasons (mutable destination, escaping lifetime, source modification). Satisfy memory-management §Strings and strings §Implementation details; no change to ordinary String semantics.
@@ -98,7 +94,7 @@ One item per ordered slice of [the WIP assessment §3.4](reviews/ownership-wip-2
 
 One entry per work package of [the dated inventory §4](reviews/inventory-2026-11-15.md#4-proposed-work-packages-native-first-then-js), with completed portions removed. Cross-references to semantics above describe the same work, not a second assignment.
 
-- **WP1 — Native expected-skips to zero.** Returned primitive references/use/reuse, anonymous-union fields and method values, Enum/Optional conversions, rest patterns, range writes/equality, optional-array get, checkedPow/float constants and Fa type names. Also close the new deep-recursion runtime entries: js-million-copy on all LLVM targets and js-deep-values on wasm; audit unbounded copy/equality/format helpers. Sets/string slices follow O17–18/WP9. See native/wasm ratchet files.
+- **WP1 — Native expected-skips to zero.** Primitive use/reuse of remaining built-in reference producers, anonymous-union fields and method values, Enum/Optional conversions, rest patterns, range writes/equality, optional-array get, checkedPow/float constants and Fa type names. Also close the new deep-recursion runtime entries: js-million-copy on all LLVM targets and js-deep-values on wasm; audit unbounded copy/equality/format helpers. Sets/string slices follow O17–18/WP9. See native/wasm ratchet files.
 - **WP2 — Native compile-time values.** Lower Schema named members, @readDirectory and per-item @for; remove the five genuine native/wasm compile-time skips only when their fixtures pass. TypeFromSchema inside generic types has InlineArray round-trip cases. Generic function bodies still freeze @typeToSchema before instantiation: Array<Item> reflects Item as Never, and an InlineArray capacity parameter becomes none. Carry reflection metadata through those erased calls; repros: design/reviews/repros/inline-array/schema-generic-function{,-array-control}.fa.
 - **WP3 — Native/wasm leftovers.** Non-scalar while-let, relation assignment, async lambdas/function-value awaits, wasm async-function-values, O0 large-parameter limits and a wasm shadow-stack overflow trap (verify stack-first). The large-payload fixture has 8,196 parameters, above Node's O0 limit; floats_and_strings is already fixed.
 - **WP4 — Native run/test residuals.** ORC, fork isolation and O0 tests are integrated. Native/wasm tests still need build.link/libraryPaths and per-unit package coverage. Confirm whether native run should keep O3; C-library runs and develop currently retain linked execution (possible dlopen/JIT follow-ups). See the JIT decision and WP13.
@@ -106,13 +102,18 @@ One entry per work package of [the dated inventory §4](reviews/inventory-2026-1
 - **WP6 — Ownership semantics.** O1–20 and O25–34 own explicit Copy, unique Resource/Task, borrowed ABI, shared handles, standard Set hashing, written origins and transport. Specification first; MEM003/MEM004 and positive execution on every supported target.
 - **WP7 — Analyzer pending batch A.** Close the 30 values M1 cases and missing E-CMP-10, E-ERR-5, E-OBJ-14, E-OPT-5, E-STR-6, E-WHEN-4/7, W-ERR-4 and W-LEX-1 emitters. Run FA_STRICT_PENDING=1 and execute runnable cases.
 - **WP8 — Analyzer pending batch B.** Types/advanced M2/M3, references/relations, callable/type assignability, configuration/dependencies and the remaining diagnostic registry codes. Split by rule; require zero unaccounted pending cases/codes and enforce the registry contract. Deferred key-loop thrown/copy summaries and caller refresh are O33.
-- **WP9 — Strings/Bytes.** The implementation scope and cross-target acceptance are in section 2; no redesign code has landed.
+- **WP9 — Strings/Bytes.** The integration branch and remaining native/final acceptance work are in section 2; the redesign is not yet on main.
 - **WP10 — Generics.** The remaining GN030, messages, async ordering, formatter and recovery work is in section 2. The merge settled tuple-ending block lambdas as WFN001 and E-DECL-6 already emits once; neither is a missing feature.
-- **WP11 — JavaScript completeness.** Gaps branch is integrated: guards, deep values, detached snapshots, worker cancellation, enum equality, console spreads, tuple pools and async declarations have regressions. Remaining refusal families: mixed/composite pools, user-returned primitive references, first-class builtins, recursive JSON parse schemas and missing erased generic/key-set metadata. Resource destruction belongs to ownership; generic pointers and CStruct-by-value ABI remain separate gaps. JSON schemas also reject constrained generic items (`Item: Integer`) in ordinary Array and InlineArray; resolve the constraint when checking JSON compatibility and lowering its schema (capacity-only generic InlineArray JSON is covered). See the exhaustive js-gaps report.
+- **WP11 — JavaScript completeness.** Gaps branch is integrated: guards, deep values, detached snapshots, worker cancellation, enum equality, console spreads, tuple pools and async declarations have regressions. Remaining refusal families: mixed/composite pools, first-class builtins, recursive JSON parse schemas and missing erased generic/key-set metadata. Resource destruction belongs to ownership; generic pointers and CStruct-by-value ABI remain separate gaps. JSON schemas also reject constrained generic items (`Item: Integer`) in ordinary Array and InlineArray; resolve the constraint when checking JSON compatibility and lowering its schema (capacity-only generic InlineArray JSON is covered). See the exhaustive js-gaps report.
 - **WP12 — Node/web residuals.** Harness and web exclusions are integrated. Close the six remaining target entries listed below; preserve sandbox global/worker/clone restrictions and exact ratchets.
 - **WP13 — CLI/project shapes.** Complete per-test include/timeout, decide LCOV coverage versus documentation, standalone-file test discovery and native/wasm workspace package-name resolution. Exercise the full command/shape matrix and dependencies described in section 5.
 - **WP14 — Interpreter coverage.** Patterns/rest, when/then, conversions, members/receivers, effect/type values, assignments, imported statics and compile-time parameters, one focused construct per slice. The continuation stack is already integrated; preserve exact step/heap/depth accounting and check the ulimit regression before reopening it.
 - **WP15 — Freestanding completeness.** Float output without libc, BigInt, JSON and stack-overflow behavior; reduce the ratchet to intentional AN004 target refusals. Worker-cancellation timing is tracked below (the JS directory fixture is outside the LLVM single-file corpus).
+
+### Standard library string follow-ups (lead, 2026-11-16)
+
+- **Locale collation.** Keep `String.compareLocale` runtime-only. Complete native locale collation and decide the deferred policy: the review recommends a deterministic root default, root fallback for malformed/unsupported locales with the current nonthrowing signature, and collation equality that need not imply code-unit String equality (promise only the sign). Document normalization and locale-data-version dependence, with tests on every target. These remain recommendations, not implemented policy.
+- **TcpStream buffers.** Coordinate the prelude, asynchronous runtime, both backends and fixtures to migrate read/write buffers from `Array<Byte>` to `Bytes`. Preserve byte counts, partial reads/writes and ownership; ordinary file I/O already uses Bytes.
 
 ### Exact Node/web ratchets and JavaScript follow-ups
 
@@ -126,6 +127,23 @@ One entry per work package of [the dated inventory §4](reviews/inventory-2026-1
 - **Resource-safe deep helpers and transport.** Ordinary JS copy/equality/assignment/format/JSON-write are iterative; recursive resource destruction and finite-schema JSON parsing still need their separately scoped work. Preserve prototype shared-handle identity, helper dependency isolation and clean generated output while landing ownership.
 - **Other inventory/review coverage.** Implement the provisional std.http surface; verify full-Unicode case conversion and JSON lone-surrogate output. Add regressions for move-mutable-use-branch and callback-capture-overlap when ownership lands. Reconcile pending-documentation implementation notes and stale historical spec-review entries when their subjects change.
 
+- **Cross-unit composition coverage.** Cover another unit’s function in a composition.
+
+## Contained links (adopted, 2026-11-16)
+
+Owner-path function references, reference defaults/structured results, dependent effect coverage, escaping local-reference capture rejection and reference-type rejection in every owned type position are implemented across checking, JavaScript, native/wasm and compile-time evaluation.
+Next slices follow [Pool links](pool-links.md): link binding,
+containment diagnostics and effects; dense paged native storage and Index limits;
+JavaScript direct-object links; whole-owner copy/move relinking; interpreter,
+reflection/JSON/worker boundaries. Acceptance programs are
+`references/links-acceptance-{model,tree,scene,chain-index-copy,containment-errors,target-errors}.fa` in the analyzer cases. InlineArray of owned items and its documentation are integrated.
+
+Native storage facts remain conservative for types containing synchronization
+or FFI handles whose stable names are not yet defined (`Sync`, `Pointer`,
+`CString`, `CArray`). Extend that naming format in a separate reviewed change,
+with cache-version invalidation; physical layout equality already uses canonical
+types and must not be replaced by fact-name equality.
+
 ## 4. Performance
 
 - **Wide asynchronous aggregate compilation.** Profile optimized compilation of
@@ -137,12 +155,11 @@ One entry per work package of [the dated inventory §4](reviews/inventory-2026-1
 - **Deferred Goose pool ports (lead, 2026-11-16).** The
   [sixteen-port audit](../benchmarks/audit/ports/README.md) records all structures,
   passes and intended Rust rows. Scene/interp/sexp/calc/tree/binary-trees/graph
-  wait for the language study of one-way growing-pool links, compact widths and
-  bounded inline ordered lists (`InlineArray` of owned items is implemented). Do not
+  wait for implementation of the adopted one-way growing-pool links, compact widths and
+  bounded inline link lists ([decision](pool-links.md); `InlineArray` of owned items is implemented). Do not
   use CArray integer-link approximations. Retain the current main rows until then; when replacing them, keep recursive
   variants and change Rust pairings together. Sexp needs reverse sibling order
-  and its parser error path. The separate missing Array-reference-field
-  rejection is an analyzer bug in section 1.
+  and its parser error path. The scene-children probe now rejects unsupported Array reference fields as REF010; convert it to explicit links when their storage is implemented.
 - **Stored borrowed slice keys for explicit words.** Standard Map remains the
   main comparator with a 1.10-times-Goose goal (Int32 counters are delivered).
   `benchmarks/audit/ports/words-slice-key/main.fa` gets REL001/REL002 for a
@@ -178,6 +195,18 @@ One entry per work package of [the dated inventory §4](reviews/inventory-2026-1
   Retain bounds and stable addresses; no allocator tuning or reservation is
   justified. Original attribution: `2026-11-16-ports.json`.
 
+- **Post-merge string CPU recheck (2026-11-16).** The [faithful-port string audit](../benchmarks/results/2026-11-16-strings-trunk.md) passes all36 instruction gates versus clean main cbe3c5a6 (largest increase +0.644%). Preserve its first21-round CPU series. Respond/words/records/calc/sexp/word-count fail the identical-binary control; strlist straddles1.10 despite a passing control. Append a separately labeled quiet supplemental recheck before drawing CPU conclusions for those rows. String-building has a passing control and remains behind Goose (1.546/1.563); its construction/destination work stays in the ranked item below.
+- **GrowingArray faithful-port baseline.** The former push/scan follow-up is
+  implemented by the array loop facts above. Retain the original attribution:
+  at 3.2 M items, the pre-optimization scan executed 25.60 M instructions versus
+  12.00 M for Goose and the reserved Array control; construction was 128.35 M
+  versus Array 121.95 M and Goose 109.00 M. Segment growth cost only 5,406
+  inclusive instructions. Its passing-control CPU series was 1.119 / 1.143
+  times Goose with broad IQR, and the Array comparison straddled equality.
+  Those historical measurements do not establish the merged implementation's
+  CPU acceptance; preserve the separately recorded failed-control series above.
+  Mark indexing remains a follow-up. Raw baseline evidence:
+  `benchmarks/results/2026-11-16-ports.json`.
 
 The 2026-11-16 trunk baseline is [generated from the recorded JSON](../benchmarks/README.md#trunk-baseline--2026-11-16). Of the original Goose 16, eight meet the ≤1.10× CPU gate, six are behind and two are unresolved; against the matching Rust rows, twelve meet the strict faster-than gate, one is behind and three are unresolved. Native CPU, instructions, RSS and sizes are separate. A threshold margin within ±0.05 requires an interleaved same-binary control within 3% on both estimates. Preserve the first primary series; supplemental diagnostics do not replace it.
 
@@ -192,6 +221,8 @@ Ranked by the sum of CPU gap budgets over the 25 distinct ports at default sizes
 7. **Secondary JavaScript costs.** Full-size wasm passes all 29 ports/variants. Bun passes 22: push/records/sexp/strlist/sum cross 512 MiB, and the two byte-building variants are refused by E-NUM-19 (their native formatting branches contain out-of-range JavaScript Integer literals). Make those variants portable without disabling diagnostics. Profile respond/calc BigInt work, particles' temporary vectors and recursive object storage; remove dead bigint work and investigate exact paired-32-bit lowering only with evidence. The String/Bytes redesign touches part of this work.
 8. **Separate package/compiler performance work.** Publish the cross-unit call graph before widening frame grants; the single-file runtime suite cannot measure the remote-call 4 KiB→512-byte restriction. Apply async storage gates per function before no-suspension intervals, preserve the shared 128-byte recursive offer and 256 KiB stack test, and restore cleanup dereferenceable only with a proof that a moved local is not zero. Broaden borrowed/non-escaping capture proofs conservatively. Profile current tier-1 textual-IR parsing/verification before bitcode reuse; reproduce the 50,000-line native build's 1.4 GB peak, consider splitting its top-level function and measure slow-literal-union-250. O35 owns semantic-safe analyzer pass reduction after semantics.
 
+- **Bytes copy/fill loops.** Optional optimization: recognize proven contiguous indexed loops as `set(subarray)` / `fill` on JavaScript (and block operations natively). Bounds alone are insufficient. Publish source/destination owner and interval relationships, prove disjointness or equivalence to the written forward copy (overlapping views can propagate an overwritten byte), and prove a stable fill/copy expression with no per-iteration calls, async/reactive changes or observable evaluation-order effects. Preserve zero-iteration behavior. `edge-08-views.fa` pins overlapping forward-copy and fill semantics; the ordinary indexed loops stay correct until these proofs are available.
+
 ## 5. fa check and the three project shapes
 
 - **Diagnostic clarity.** Audit every message/fix, duplicate/cascade reports (ref-duplicate-report, ref-error-cascade) and nested-call/stack limits (stack-overflow-chain-1500 and the undocumented compile-time depth limit). Obtain the missing W-ERR-1 slice repro; it is not reproduced, and proven/unproven bounds currently behave as specified.
@@ -199,3 +230,8 @@ Ranked by the sum of CPU gap budgets over the 25 distinct ports at default sizes
 - **Command/shape matrix (WP13).** Standalone, package and workspace: check/build/run/test/develop/preview where supported, on every target. Cover native/wasm workspace package lookup, sibling/Git/remote dependencies on native/wasm/web, per-unit versus whole builds, link settings, standalone tests, watch and whole-workspace development/preview; make intentional target refusals explicit.
 - **CLI diagnostics and coverage policy.** Add CLI002/003/005/009, deno, missing-LLVM and fa update CLI001 cases; implement or revise advertised coverage and per-test configuration without silently ignoring options.
 - **Final reviews.** Schedule the second analyzer review after M2/M3, tooling review after the shape matrix, and final backend reviews after completeness. The trunk merge review is delivered; preserve its repros.
+
+### Findings outside the links reference branch (second review)
+
+- Destructured loop variables must keep their element places: `for { value } in values { value += 10 }` currently assigns to a JavaScript `const`, the evaluator keeps 1, and native/wasm correctly produce 11. Reproduction: `design/reviews/repros/links-1a-2/pre-existing-destructured-loop-write.fa`; the loops specification requires references.
+- Methods of a nested type must resolve the enclosing owner's fields: `World.Node` cannot currently read `owner.nodes` for a `World` parameter (EFF008/AN001). Reproduction: `design/reviews/repros/links-1a-2/pre-existing-nested-type-outer-field.fa` (also blocks `nested-default-effects.fa`).

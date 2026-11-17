@@ -28,7 +28,7 @@ function total = (nodes: Array<Node>): Integer => {
 console.log(total([{ key = 2 }, { key = 3 }, { key = -1 }, { key = 4 }])) -- prints: 5
 
 -- `is not` with literals leaves the other literals
-function sign = (c: Character): String => {
+function sign = (c: String): String => {
 	if c is not "+" | "-" {
 		return "none"
 	}
@@ -37,8 +37,8 @@ function sign = (c: Character): String => {
 }
 console.log(sign("+"), sign("x")) -- prints: + none
 
--- a `Character` and a `String` join as a `String`
-function pick = (p: Boolean, a: String, b: Character) => if p { a } else { b }
+-- a `String` and a `String` join as a `String`
+function pick = (p: Boolean, a: String, b: String) => if p { a } else { b }
 console.log(pick(false, "x", "y"), pick(true, "x", "y")) -- prints: y x
 
 -- a conversion that changes the storage of a receiver is not useless

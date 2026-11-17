@@ -1,0 +1,9 @@
+-- Regression from the links 1a review.
+type Node = { value: Integer }
+mutable nodes: GrowingPool<Node> = []
+type Box<T> = { children: Array<T> }
+function make = (node: Node): Box<Node in nodes> => ({ children = [node] }) -- error: REF010
+use child = nodes.add({ value = 0 })
+let box = make(child)
+child.value = 2
+console.log(try box.children[0].value)

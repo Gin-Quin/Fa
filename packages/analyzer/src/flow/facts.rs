@@ -180,7 +180,7 @@ pub struct Fact {
 	pub int: IntervalSetId,
 	/// Its exact value (strings, booleans, enumeration members, numbers).
 	pub literal: ConstId,
-	/// The length of a collection or the grapheme count of a string.
+	/// The length of a collection or the UTF-16 code unit count of a string.
 	pub length: IntervalId,
 	/// Map keys proven present (types brief D32).
 	pub key_present: ConstListId,
@@ -223,6 +223,7 @@ pub struct FactStore {
 	loop_heads: FxHashMap<NodeId, crate::flow::FlowState>,
 	/// The states of local references (`flow/refs.rs`).
 	pub refs: crate::flow::refs::RefStore,
+	pub origins: crate::flow::values::OriginStore,
 }
 
 impl Default for FactStore {
@@ -242,6 +243,7 @@ impl FactStore {
 			bindings: FxHashMap::default(),
 			loop_heads: FxHashMap::default(),
 			refs: crate::flow::refs::RefStore::new(),
+			origins: crate::flow::values::OriginStore::default(),
 		};
 		store.intervals.intern(Interval::full());
 		store.sets.intern(IntervalSet::of(Interval::full()));

@@ -1,0 +1,14 @@
+let pair = String.from("😀")
+let high = try pair[0]
+let low = try pair[1]
+let text = String.from("é😀")
+console.log(text.padStart(2, pair) == text, text.padEnd(0, pair) == text, text.padStart(-1, pair) == text) -- prints: true true true
+console.log(text.padStart(9223372036854775807, "") == text) -- prints: true
+let before = text.padStart(4, pair)
+let after = text.padEnd(4, pair)
+console.log(before == high + text, before.length, before.isWellFormed()) -- prints: true 4 false
+console.log(after == text + high, after.length, after.isWellFormed()) -- prints: true 4 false
+console.log(low.padStart(2, high) == pair, high.padEnd(2, low) == pair) -- prints: true true
+let letter = String.from("x")
+console.log(letter.padStart(3, "e\u{301}") == "e\u{301}x", letter.padStart(2, "e\u{301}") == "ex") -- prints: true true
+console.log(letter.padEnd(4, "ab") == "xaba", letter.padStart(3, "\r") == "\r\rx") -- prints: true true

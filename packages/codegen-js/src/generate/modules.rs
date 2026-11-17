@@ -516,15 +516,47 @@ impl Generator<'_> {
 					"export const {export}$ref = {{ get v() {{ return {local}; }}, set v(value) {{ {local} = value; }} }};"
 				));
 			}
-			// its integer variants (`integer_variants.rs`)
-			for variant in self
-				.integer_variants
-				.get(&decl)
-				.cloned()
-				.unwrap_or_default()
-			{
-				let suffix = self.variant_suffix(decl, &variant);
-				exported.push(format!("{local}{suffix} as {export}{suffix}"));
+			let generics = self.function_generics(decl);
+			let mut numbers = vec![None];
+			numbers.extend(
+				self.integer_variants
+					.get(&decl)
+					.cloned()
+					.unwrap_or_default()
+					.into_iter()
+					.map(Some),
+			);
+			for references in self.reference_variants(decl) {
+				let reference_suffix = self.reference_suffix(&generics, &references);
+				let mut layouts = vec![fa_analyzer::analysis::ReferenceLayout::General];
+				let saved = self.reference_bindings.clone();
+				self.reference_bindings.extend(references.iter().copied());
+				if let Some(layout) = self.analysis.reference_layouts.get(&decl).copied() {
+					let object = self
+						.analysis
+						.function(decl)
+						.and_then(|info| info.sig)
+						.is_some_and(|sig| self.is_object_reference(self.types.sig(sig).ret));
+					if !object && layout != fa_analyzer::analysis::ReferenceLayout::General {
+						layouts.push(layout);
+					}
+				}
+				self.reference_bindings = saved;
+				for numeric in &numbers {
+					for &layout in &layouts {
+						let numeric_suffix = numeric
+							.as_ref()
+							.map(|variant| self.variant_suffix(decl, variant))
+							.unwrap_or_default();
+						let suffix = format!(
+							"{numeric_suffix}{reference_suffix}{}",
+							Self::reference_layout_suffix(layout)
+						);
+						if !suffix.is_empty() {
+							exported.push(format!("{local}{suffix} as {export}{suffix}"));
+						}
+					}
+				}
 			}
 			exported.push(if local == *export {
 				local

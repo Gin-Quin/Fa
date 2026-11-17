@@ -566,6 +566,7 @@ impl<'a> Printer<'a> {
 			Node::Assert { right } => concat!["assert ", self.node(*right)],
 			Node::InRelation { right } => concat!["in ", self.node(*right)],
 			Node::Readonly { right } => concat!["readonly ", self.node(*right)],
+			Node::Link { right } => concat!["link ", self.node(*right)],
 			Node::Return { expression } => match expression {
 				Some(expression) => concat!["return ", self.node(*expression)],
 				None => Document::text("return"),

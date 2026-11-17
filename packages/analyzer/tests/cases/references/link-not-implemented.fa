@@ -1,0 +1,8 @@
+-- Explicit links must never fall back to owned fields or relation storage.
+type Graph = {
+	link root: (Integer in nodes)? = none -- error: AN001
+}
+let link = 3
+type Ordinary = { link: Integer }
+let value: Ordinary = { link = link }
+console.log(value.link) -- prints: 3

@@ -79,7 +79,7 @@ type Parser = {
 	count: Integer
 
 	-- The byte at the position, or a null byte at the end of the text.
-	function current = (self): Byte => self.text.bytes().get(self.position) ?? end
+	function current = (self): Byte => self.text.toUtf8().get(self.position) ?? end
 
 	function skipSpaces = (self) mutates self => {
 		while self.current() == space {
@@ -130,7 +130,7 @@ type Parser = {
 
 -- The pass index rides along so that the four walks are four different computations.
 function walk = (node: Sexp, pass: Integer): Integer => when node is {
-	Sexp.Symbol as { name } => name.length + (name.bytes().get(0) ?? 0) + pass
+	Sexp.Symbol as { name } => name.length + (name.toUtf8().get(0) ?? 0) + pass
 	Sexp.Number as { value } => Integer(value).bitXor(pass)
 	Sexp.List as { items } => {
 		mutable total = 1
@@ -153,7 +153,7 @@ mutable parser = Parser { text = generator.text, position = 0, count = 0 }
 mutable roots: Array<Sexp> = []
 loop {
 	parser.skipSpaces()
-	if parser.position >= parser.text.bytes().length {
+	if parser.position >= parser.text.toUtf8().length {
 		break
 	}
 	roots.push(parser.node())

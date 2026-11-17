@@ -48,7 +48,7 @@ struct ParamSyntax {
 
 /// A default value, checked in the function's context: the value, its
 /// expected type, and whether it is checked quietly (`FN020`).
-type DeferredDefault = (NodeId, Option<TypeId>, bool);
+type DeferredDefault = (NodeId, Option<TypeId>, bool, Option<NodeId>);
 
 /// What is being analyzed: a `function` declaration or a lambda.
 #[derive(Copy, Clone, Debug)]
@@ -150,8 +150,11 @@ impl Walker<'_> {
 				let inside_loop = self.body.inside_loop || !self.body.loops.is_empty();
 				let saved = std::mem::replace(&mut self.body, BodyCx::new(scope));
 				self.body.inside_loop = inside_loop;
+				self.body.flow.refs = saved.flow.refs.clone();
+				self.body.flow.values = saved.flow.values.clone();
 				let ty = self.check_function(value, signature, body, owner, expected);
 				self.body = saved;
+				self.record_capture_origins(value);
 				self.rigid_params.truncate(rigid);
 				self.body.scope = saved_scope;
 				for key in [n, value] {
@@ -225,8 +228,11 @@ impl Walker<'_> {
 				let inside_loop = self.body.inside_loop || !self.body.loops.is_empty();
 				let saved = std::mem::replace(&mut self.body, BodyCx::new(scope));
 				self.body.inside_loop = inside_loop;
+				self.body.flow.refs = saved.flow.refs.clone();
+				self.body.flow.values = saved.flow.values.clone();
 				let ty = self.check_function(value, signature, body, owner, expected);
 				self.body = saved;
+				self.record_capture_origins(value);
 				ty
 			}
 			// `function f = g then h`, `function f = chain[1..]` (compose.rs)
@@ -538,9 +544,24 @@ impl Walker<'_> {
 			self.check_params(lambda, signature.parameters, expected, owner.lenient);
 		// the parameters named by `Type(…)` are declared: the body's lambdas are not
 		self.pending_implicit.clear();
+		let reference = signature
+			.returns
+			.and_then(|returns| self.reference_contract(returns));
+		if owner.is_async
+			&& reference.is_some()
+			&& let Some(returns) = signature.returns
+			&& self.reported_once.insert((returns, "REF008"))
+		{
+			let diagnostic = self.diagnostic(
+				&crate::diagnostics::codes::advanced::REF008,
+				returns,
+				"an async function can't return a reference: return an index or an owned copy instead",
+			);
+			self.report(diagnostic);
+		}
 		let declared_return = signature
 			.returns
-			.map(|returns| self.check_type_expr(returns));
+			.map(|returns| self.check_reference_type_expr(returns));
 		// errors are thrown, never returned (errors.md, `E-ERR-7`)
 		if let (Some(returns), Some(ty)) = (signature.returns, declared_return)
 			&& let Some(error) = self.error_member(ty)
@@ -610,7 +631,7 @@ impl Walker<'_> {
 				returns.map(|ret| {
 					self.function_type(
 						&param_sigs,
-						ret,
+						(ret, reference),
 						throws,
 						declared_effects,
 						&declared_requires,
@@ -688,11 +709,16 @@ impl Walker<'_> {
 		}
 		// a default value runs inside the function: its errors and effects
 		// are the function's (defining-functions.md)
-		for (default, expected, quiet) in defaults {
+		for (default, expected, quiet, annotation) in defaults {
 			self.quiet += u32::from(quiet);
 			let actual = self.check(default, expected);
 			if let Some(expected) = expected {
 				self.sink(default, actual, expected);
+			}
+			if let Some(owner) =
+				annotation.and_then(|annotation| self.reference_return_owner(annotation))
+			{
+				self.check_reference_default(default, owner);
 			}
 			self.quiet -= u32::from(quiet);
 		}
@@ -701,7 +727,7 @@ impl Walker<'_> {
 		} else {
 			self.check_expression_body(body, mode)
 		};
-		let cx = self.body.functions.pop();
+		let mut cx = self.body.functions.pop();
 		if parallel_callback {
 			self.parallel.pop();
 		}
@@ -717,20 +743,39 @@ impl Walker<'_> {
 			_ => Some(body),
 		};
 		if let Some(value_node) = value_node {
-			if matches!(
-				self.view(self.strip_groups(value_node)),
-				View::Lambda { .. } | View::Copy(_)
-			) {
-				self.escape(value_node, value_node);
-			}
+			self.escape(value_node, value_node);
 			// the value of the function is a copy, maybe a move (moves.rs)
 			if !matches!(mode, TypeId::VOID | TypeId::NEVER) {
-				self.note_copy_site(value_node);
+				if reference.is_none() {
+					self.note_copy_site(value_node);
+				}
 				if !block_body || !matches!(self.view(value_node), View::Return(_)) {
 					self.check_returned_reference(
 						value_node,
 						cx.as_ref().and_then(|cx| cx.ref_owner),
 					);
+					let valid = self.reference_result_valid(
+						value_node,
+						cx.as_ref().and_then(|cx| cx.ref_owner),
+					);
+					let summary = self.reference_value_summary(value_node);
+					let fresh = self
+						.reference_is_fresh(value_node, cx.as_ref().and_then(|cx| cx.ref_owner));
+					let layout = cx
+						.as_ref()
+						.and_then(|cx| cx.ref_owner)
+						.and_then(|owner| self.reference_result_layout(value_node, owner));
+					if let Some(cx) = &mut cx {
+						cx.ref_valid &= valid;
+						cx.ref_origins.extend(summary);
+						cx.ref_origins.sort_unstable();
+						cx.ref_origins.dedup();
+						cx.ref_fresh &= fresh;
+						if let Some(layout) = layout {
+							cx.ref_layout =
+								Some(cx.ref_layout.map_or(layout, |old| old.joined(layout)));
+						}
+					}
 				}
 			}
 			// a task it returns can't use its locals (tasks.rs)
@@ -795,7 +840,7 @@ impl Walker<'_> {
 				Some(returns) => returns,
 				None if mode == TypeId::VOID => TypeId::VOID,
 				None => {
-					let returned = cx.map_or(TypeId::NEVER, |cx| cx.returned);
+					let returned = cx.as_ref().map_or(TypeId::NEVER, |cx| cx.returned);
 					let ty = if returned == TypeId::NEVER {
 						body_ty
 					} else {
@@ -805,12 +850,12 @@ impl Walker<'_> {
 				}
 			};
 			w.check_stored_iterator_type(signature.returns.unwrap_or(lambda), ret, "returned");
-			if incomplete {
+			if incomplete || owner.is_async && reference.is_some() {
 				TypeId::UNKNOWN
 			} else {
 				w.function_type(
 					&param_sigs,
-					ret,
+					(ret, reference),
 					throws,
 					effects,
 					&all_requires,
@@ -820,7 +865,9 @@ impl Walker<'_> {
 		});
 		if let TypeKind::Function(sig) = self.s.types.kind(ty) {
 			let mut sig = self.s.types.sig(sig);
-			if sig.throws != throws {
+			let fresh = reference.is_some() && cx.as_ref().is_some_and(|cx| cx.ref_fresh);
+			if sig.throws != throws || sig.fresh != fresh {
+				sig.fresh = fresh;
 				sig.throws = throws;
 				ty = self.s.types.function(sig);
 				self.set_type(lambda, ty);
@@ -828,6 +875,21 @@ impl Walker<'_> {
 		}
 		let sig = self.signature_id(ty);
 		for key in [Some(lambda), owner.declaration].into_iter().flatten() {
+			if reference.is_some() {
+				if let Some(cx) = &cx
+					&& cx.ref_valid
+				{
+					self.a.reference_origins.insert(key, cx.ref_origins.clone());
+				} else {
+					self.a.reference_origins.remove(&key);
+				}
+				self.a.reference_layouts.insert(
+					key,
+					cx.as_ref()
+						.and_then(|cx| cx.ref_layout)
+						.unwrap_or(crate::analysis::ReferenceLayout::General),
+				);
+			}
 			if let Some(info) = self.a.functions.get_mut(&key) {
 				info.ty = ty;
 				info.sig = sig;
@@ -844,16 +906,18 @@ impl Walker<'_> {
 	fn function_type(
 		&mut self,
 		params: &[ParamSig],
-		ret: TypeId,
+		result: (TypeId, Option<crate::ids::PathId>),
 		throws: TypeId,
 		effects: crate::ids::EffectSetId,
 		requires: &[crate::types::Requirement],
 		is_async: bool,
 	) -> TypeId {
+		let (ret, reference) = result;
 		let base = self.s.types.simple_sig(&[], ret, throws);
 		let params = self.s.types.param_list(params);
 		let requires = self.s.types.req_list(requires);
 		self.s.types.function(FnSig {
+			reference,
 			params,
 			effects,
 			requires,
@@ -939,7 +1003,7 @@ impl Walker<'_> {
 					.collect();
 				later_use = self.find_name_use(default, &later);
 				let expected = (!declared.is_unset()).then_some(declared);
-				defaults.push((default, expected, later_use.is_some()));
+				defaults.push((default, expected, later_use.is_some(), param.annotation));
 			}
 			let last = index + 1 == syntaxes.len();
 			let ty = self.memo(param.node, |w| {
@@ -958,6 +1022,29 @@ impl Walker<'_> {
 			let Some(symbol) = self.a.symbols.symbol_of_decl(param.node) else {
 				continue;
 			};
+			let reference = param
+				.annotation
+				.and_then(|annotation| self.reference_contract(annotation));
+			if let Some(annotation) = param.annotation {
+				if let Some(owner) = self.reference_return_owner(annotation) {
+					let place = self.places.child(
+						owner,
+						crate::flow::Step::Index(crate::flow::Identity::Unknown),
+					);
+					self.reference_parameters.insert(symbol, place);
+					let formal = self.places.symbol(symbol);
+					let mut state = crate::flow::refs::RefState::valid(formal);
+					state.bounds.push(crate::flow::values::ReferenceBound {
+						place: owner,
+						formal: Some(symbol),
+					});
+					let state = self.facts.refs.state(state);
+					self.body.flow.set_ref_state(symbol, state);
+					self.body.flow.bind_reference_alias(symbol, None);
+				} else if self.contains_reference_type(annotation) {
+					self.check_reference_annotation(annotation);
+				}
+			}
 			let body_ty = self.a.symbols.symbol(symbol).ty;
 			if let Some(pattern) = param.pattern {
 				let mut names = super::destructuring::PatternNames::default();
@@ -971,6 +1058,7 @@ impl Walker<'_> {
 					variadic: param.variadic,
 				},
 				ParamSig {
+					reference,
 					ty: if param.variadic { body_ty } else { ty },
 					variadic: param.variadic,
 				},
@@ -1055,6 +1143,7 @@ impl Walker<'_> {
 				variadic: false,
 			},
 			ParamSig {
+				reference: None,
 				ty,
 				variadic: false,
 			},
@@ -1447,8 +1536,10 @@ impl Walker<'_> {
 			Some(value) => {
 				let ty = self.check(value, Some(returns));
 				self.sink(value, ty, returns);
-				self.note_copy_site(value);
 				let owner = self.body.functions.last().and_then(|cx| cx.ref_owner);
+				if owner.is_none() {
+					self.note_copy_site(value);
+				}
 				self.check_returned_reference(value, owner);
 			}
 			None if returns == TypeId::NEVER => {
@@ -1477,6 +1568,9 @@ impl Walker<'_> {
 				});
 			}
 			None => {}
+		}
+		if let Some(value) = value {
+			self.escape(value, value);
 		}
 		let state = self.body.flow.fork();
 		if let Some(cx) = self.body.functions.last_mut() {

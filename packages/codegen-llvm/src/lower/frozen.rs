@@ -48,6 +48,7 @@ pub(crate) struct FrozenParts<'ctx> {
 	value: BasicValueEnum<'ctx>,
 	bytes: PointerValue<'ctx>,
 	length: IntValue<'ctx>,
+	encoded_length: IntValue<'ctx>,
 }
 
 /// How to expand a call of a small method of `self` (see the module).
@@ -168,6 +169,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.map(|parts| (parts.bytes, parts.length))
 	}
 
+	pub(crate) fn frozen_byte_length(&self, value: Val<'ctx>) -> Option<IntValue<'ctx>> {
+		let raw = value.value?;
+		self.frozen_string_parts
+			.iter()
+			.find(|parts| parts.value == raw)
+			.map(|parts| parts.encoded_length)
+	}
+
 	/// Whether a representation is a scalar: nothing to drop or to own.
 	fn plain(&self, repr: Repr) -> bool {
 		matches!(
@@ -248,8 +257,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				return None;
 			}
 		}
-		// a small body, with nothing that leaves early, captures, starts,
-		// references, or calls user code but methods of its `self`
+		// A small nonthrowing body: locally handled errors stay inside it.
+		// Nothing leaves early, captures, starts, references, or calls user
+		// code but methods of its `self`.
 		let mut stack = vec![function_info.body.index()];
 		let mut count = 0;
 		while let Some(at) = stack.pop() {
@@ -261,8 +271,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			match self.view(at_node) {
 				View::Return(_)
 				| View::Throw(_)
-				| View::Try(_)
-				| View::Catch { .. }
 				| View::Lambda { .. }
 				| View::Function { .. }
 				| View::Start { .. }
@@ -458,11 +466,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.build_struct_gep(structure, slot.pointer, index, "")?;
 			let value = self.load(Slot { pointer, repr })?;
 			if repr == Repr::Str {
-				let (bytes, length) = self.string_parts(value)?;
+				// The whole-program field proof also fixes inline payload
+				// storage for this call. Borrow it instead of snapshotting it.
+				let (bytes, length) = self.string_place_parts(value, pointer)?;
+				let encoded_length = self
+					.call_value(
+						self.runtime.function("fa_string_encoded_length")?,
+						&[
+							bytes.into(),
+							length.into(),
+							self.string_capacity(value)?.into(),
+						],
+					)?
+					.into_int_value();
 				self.frozen_string_parts.push(FrozenParts {
 					value: value.value.expect("a string"),
 					bytes,
 					length,
+					encoded_length,
 				});
 			}
 			self.frozen_reads.push(FrozenRead {
@@ -471,6 +492,43 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				index,
 				value,
 			});
+		}
+		// A single exact field can version the already-lowered body at O3.
+		// Record the real LLVM argument index, including hidden ABI slots.
+		if info.declaration.is_some()
+			&& info.captures.is_empty()
+			&& info.params.iter().all(|param| {
+				param.default.is_none() && !param.variadic && !self.is_moved_parameter(param.symbol)
+			}) {
+			let strings: Vec<_> = self
+				.frozen_reads
+				.iter()
+				.filter(|read| read.function == function && read.value.repr == Repr::Str)
+				.collect();
+			if let [read] = strings.as_slice()
+				&& let Some(argument) = function
+					.get_params()
+					.iter()
+					.position(|value| *value == read.pointer)
+			{
+				let offset = self
+					.target_data()
+					.offset_of_element(&self.object_type(owner), read.index)
+					.expect("a frozen field")
+					+ 2 * u64::from(self.usize.get_bit_width() / 8);
+				let owner_key = fa_analyzer::stable_names::stable_type_name(self.types(), owner)
+					.expect("a stable frozen field owner");
+				let field = self.types().fields_of(owner)[read.index as usize].name;
+				let key = format!(
+					"{argument},{offset},{owner_key}.{}",
+					self.types().syms.resolve(field)
+				);
+				function.add_attribute(
+					inkwell::attributes::AttributeLoc::Function,
+					self.context
+						.create_string_attribute("fa.frozen.ascii", &key),
+				);
+			}
 		}
 		Ok(())
 	}

@@ -1,0 +1,15 @@
+type Node = { world: Integer }
+type Model = { nodes: GrowingPool<Node> = [] }
+function narrow = (model: Model, node: Node in model.nodes) mutates node.world => {
+	node.world += 1
+}
+function wide = (model: Model, node: Node in model.nodes) mutates model.nodes[..].world => {
+	node.world += 2
+}
+function inferred = (model: Model, node: Node in model.nodes) => narrow(model, node)
+mutable model: Model = {}
+use node = model.nodes.add({ world = 0 })
+narrow(model, node)
+wide(model, node)
+inferred(model, node)
+console.log(node.world) -- prints: 4

@@ -1,0 +1,9 @@
+-- Specification example: operations 6
+let text = "hello world"
+let planetIndex = text.indexOf("planet") -- none
+
+if planetIndex is not none {
+	console.log("found at {planetIndex}")
+}
+
+let position = text.indexOf("planet") ?? 0

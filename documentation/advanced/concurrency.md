@@ -425,7 +425,7 @@ The rules:
 
 Arguments and results crossing a worker boundary require an independent value, a common `Mutex` protecting shared state, or a proven exclusive transfer invalidating the source and its aliases. Keeping a collection usable on both sides requires `copy` at the visible transfer site. Unique resources can transfer only with an exclusivity proof; a Task never crosses, even inside a resource, a shared payload or a closure (`CONC008`). There is no automatic field locking. A value borrowed from `Guard.value` cannot escape its protection, nor can an older unprotected alias bypass that protection. See [memory management](/advanced/memory-management#closures).
 
-[References](/advanced/owned-references) and [relations](/advanced/relations) cannot cross a worker boundary: passing one to a worker method is a compile error. [Requirements](/advanced/requirements) do not cross worker boundaries either.
+Individual [references](/advanced/owned-references) and [relations](/advanced/relations) cannot cross a worker boundary. An owner containing explicit links may cross only as a complete owner containing all the linked collections and their holders, by an independent copy or proven exclusive transfer; its links remain internal. [Requirements](/advanced/requirements) do not cross worker boundaries either.
 
 [Thread-safe values](#thread-safety-and-synchronization) are the only shared ones: a mutex, an atomic or a channel passed to a worker is the same mutex, atomic or channel on both sides.
 
@@ -577,7 +577,7 @@ async function main = () => {
 | `tryReceive()` | receives without waiting; `none` when no value is ready |
 | `close()` | no value can be sent anymore; the values already sent can still be received |
 
-A value sent through a channel is copied (moved when it isn't used afterwards). `T` can't contain references or relations.
+A value sent through a channel is copied (moved when it isn't used afterwards). `T` cannot contain escaping references or relation sides. A complete closed owner may contain internal explicit links.
 
 ## Thread safety and synchronization
 
@@ -591,7 +591,7 @@ They are the only values that can be shared mutably between tasks or threads; sh
 - **They are handles.** A copy of a thread-safe value designates the same mutex, atomic or channel, which lives as long as one of its handles does. This is how a worker and its caller share a channel.
 - **Their methods don't declare `mutates self`.** Like Rust's `&self` methods on a `Mutex`, they modify the shared state from an immutable reference. So several tasks and threads can use the same one at once, and a function receiving one doesn't declare `mutates`.
 - **They are declared `mutable`** where they are created, like every value that changes: declaring one with `let` is an error.
-- **They hold owned data.** The `T` of a `Mutex<T>` or a `Channel<T>` can't contain references or relations.
+- **They hold owned data.** The T of Mutex/Channel cannot contain escaping references or relation sides. Internal explicit links require a complete owner containing all the linked collections and their holders in the payload: a holder behind a shared handle cannot borrow a pool outside it.
 
 Immutable values need none of this: a value that no thread modifies can be read by every thread.
 
@@ -713,6 +713,12 @@ Code using a feature that is not available on a target fails to compile for this
 
 On the web, sharing these handles with a worker requires cross-origin isolation: serve `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`. Without it, passing a shared handle stops the program and names the required headers.
 
+### Complete-owner boundaries
+
+Worker copies preserve the cycles and shared children inside the complete owner; an exclusive transfer invalidates its source and aliases. An individual link, linked element, Task or Guard borrow cannot be sent, including through a tuple, generic argument or closure. Task-containing owners retain executor restrictions. Put every pool and incoming holder inside the transferred payload; shared handles and task frames are containment boundaries, not exclusively owned children of an external graph. `Guard.value` stays protected by its guard.
+
+All links must point inside the received owner before it becomes available to your program. For an external JSON protocol, send a separate data type with node identifiers and rebuild the links after validating them.
+
 ## Best practices
 
 1. **Use the right tool for the job**:
@@ -780,5 +786,10 @@ The strategy is detailed in `design/compilation-with-llvm.md`, and decided for a
 ### Analysis
 
 - A file depends on the target when it reads `target` or `configuration`, uses a primitive absent on some targets, or makes a blocking call unavailable on some targets. `await`, `start`, and calls that never wait do not themselves cause target dependence.
+
+
+### Closed graph transport
+
+Generated binary codecs validate incoming ordinals and initialize the complete graph before publication. On native/wasm and JavaScript, build-time generated codecs/transfer operations preserve the complete owner and ordinal mapping, independently of physical page sizes. JavaScript copies allocate destinations before resolving edges; no structuredClone/JSON fallback may erase Fa categories. Validate untrusted input at reception before publishing nodes; hot link reads remain direct. The interpreter exports complete immutable graphs symbolically. No Task/Guard/individual-link escape is introduced.
 
 :::

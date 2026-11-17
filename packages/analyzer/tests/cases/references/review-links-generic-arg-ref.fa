@@ -1,0 +1,8 @@
+-- Regression from the links 1a review.
+type Node = { value: Integer }
+mutable nodes: GrowingPool<Node> = []
+function wrap = <T>(x: T): Array<T> => [x]
+use a = nodes.add({ value = 1 })
+let xs = wrap<Node in nodes>(a) -- error: REF010
+a.value = 5
+console.log(try xs[0].value)

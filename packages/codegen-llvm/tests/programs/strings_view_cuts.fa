@@ -1,0 +1,30 @@
+let pair = String.from("😀")
+let high = try pair[0]
+let low = try pair[1]
+let text = "prefix-" + pair.repeat(80) + "-suffix"
+use cut = try text[8..166]
+console.log(cut.length, cut.utf8Length(), cut.isWellFormed(), cut.startsWith(low), cut.endsWith(high)) -- prints: 158 318 false true true
+console.log(cut.indexOf(pair), cut.indexOf(low + high), cut.lastIndexOf(high)) -- prints: 1 0 157
+let owned = cut
+console.log(cut == owned, cut < owned, owned < cut, owned.length) -- prints: true false false 158
+mutable keys: Set<String> = []
+keys.add(owned)
+console.log(keys.includes(cut)) -- prints: true
+
+mutable use current = cut
+use fixed = current
+reuse current = try text[9..165]
+console.log(current.length, current.isWellFormed(), fixed.length, fixed.isWellFormed()) -- prints: 156 true 158 false
+for index in 0..3 { reuse current = try text[8..166] }
+console.log(current.length, current.isWellFormed()) -- prints: 158 false
+
+function measure = (value: String): Integer => value.length
+console.log(measure(cut)) -- prints: 158
+use nested = try cut[0..1]
+console.log(nested == low, nested.length, nested.utf8Length(), nested.codePoints().length, try nested.codePoints()[0]) -- prints: true 1 3 1 56832
+console.log(try nested.toUtf8()[0], try nested.toUtf8()[1], try nested.toUtf8()[2]) -- prints: 239 191 189
+mutable sum = 0
+for byte in nested.toUtf8() { sum += byte }
+console.log(sum) -- prints: 619
+console.log(nested.toLowerCase() == low, nested.trim() == low, nested.padStart(2, high) == pair) -- prints: true true true
+console.log(nested.replaceAll("", "") == low, try nested.split("")[0] == low) -- prints: true true

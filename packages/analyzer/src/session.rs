@@ -1132,6 +1132,8 @@ fn merge_interface(
 		..*exported
 	};
 	Interface {
+		reference_aliases: interface.reference_aliases.clone(),
+		reference_defaults: interface.reference_defaults.clone(),
 		export: interface
 			.export
 			.as_ref()
@@ -1191,6 +1193,53 @@ fn merge_interface(
 					other => other.clone(),
 				};
 				((decl, merger.sym(name)), origin)
+			})
+			.collect(),
+		reference_origins: interface
+			.reference_origins
+			.iter()
+			.map(|(&decl, origins)| {
+				(
+					decl,
+					origins
+						.iter()
+						.map(|origin| crate::analysis::ReferenceOrigin {
+							path: merger.path(origin.path),
+							..*origin
+						})
+						.collect(),
+				)
+			})
+			.collect(),
+		reference_layouts: interface
+			.reference_layouts
+			.iter()
+			.map(|(&decl, &layout)| {
+				(
+					decl,
+					match layout {
+						crate::analysis::ReferenceLayout::Field(name) => {
+							crate::analysis::ReferenceLayout::Field(merger.sym(name))
+						}
+						crate::analysis::ReferenceLayout::Entry { key, ty } => {
+							crate::analysis::ReferenceLayout::Entry {
+								key: merger.constant(key),
+								ty: merger.ty(ty),
+							}
+						}
+						other => other,
+					},
+				)
+			})
+			.collect(),
+		reference_sensitive: interface
+			.reference_sensitive
+			.iter()
+			.map(|(&decl, params)| {
+				(
+					decl,
+					params.iter().map(|&param| merger.param(param)).collect(),
+				)
 			})
 			.collect(),
 		function_owners: interface

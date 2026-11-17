@@ -52,6 +52,7 @@
 		},
 		"declarations": {
 			"patterns": [
+				{ "name": "storage.modifier.fa", "match": "\\blink(?=\\s+#?[A-Za-z_][A-Za-z0-9_]*\\s*:)" },
 				{
 					"match": "\\b(function)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
 					"captures": {

@@ -14,6 +14,7 @@
 
 pub mod host;
 pub mod inputs;
+mod json;
 pub mod lower;
 pub mod schema;
 
@@ -96,10 +97,19 @@ fn exact(types: &mut TypeStore, value: &Value, depth: u32) -> TypeId {
 		Value::Percentage(_) => TypeId::PERCENTAGE,
 		// a long text is not interned twice (its literal type would copy it)
 		Value::String(text) if text.len() > MAX_LITERAL_TEXT => TypeId::STRING,
-		Value::String(text) => types.string_literal(text),
+		Value::String(text) => match text.as_str() {
+			Some(text) => types.string_literal(text),
+			None => TypeId::STRING,
+		},
+		Value::Bytes(_) => TypeId::BYTES,
 		Value::Array(items) => {
 			let item = join(types, items, depth);
 			types.array(item)
+		}
+		Value::Pool(pool) => {
+			let values: Vec<_> = pool.values().cloned().collect();
+			let item = join(types, &values, depth);
+			types.collection(crate::types::CollKind::Pool, item, TypeId::NONE)
 		}
 		Value::Set(items) => {
 			let item = join(types, items, depth);
@@ -133,7 +143,7 @@ fn exact(types: &mut TypeStore, value: &Value, depth: u32) -> TypeId {
 			types.object(&fields, None)
 		}
 		Value::Range { .. } => TypeId::RANGE,
-		Value::Member(_) | Value::Function(_) => TypeId::UNKNOWN,
+		Value::Member(_) | Value::Function(_) | Value::Reference(_) => TypeId::UNKNOWN,
 	}
 }
 
@@ -240,6 +250,7 @@ pub fn visit(expr: &Expr, f: &mut dyn FnMut(&Expr)) {
 		Expr::Const(_)
 		| Expr::Local(_)
 		| Expr::Global(_)
+		| Expr::BorrowGlobal(_)
 		| Expr::Function(_)
 		| Expr::Closure { .. }
 		| Expr::Continue
@@ -255,17 +266,18 @@ pub fn visit(expr: &Expr, f: &mut dyn FnMut(&Expr)) {
 		| Expr::Is(value, ..)
 		| Expr::MemberData(value)
 		| Expr::Field(value, ..) => visit(value, f),
+		Expr::Dereference(value) => visit(value, f),
 		Expr::Assign(target, value) => {
 			place(target, f);
 			visit(value, f);
 		}
-		Expr::Read(target) => place(target, f),
+		Expr::Read(target) | Expr::Borrow(target, _) => place(target, f),
 		Expr::Block(values) | Expr::Tuple(values) | Expr::Builtin(_, values) => {
 			for value in values {
 				visit(value, f);
 			}
 		}
-		Expr::Mutate(_, target, values) => {
+		Expr::Mutate(_, target, values) | Expr::BorrowBuiltin(_, target, values) => {
 			place(target, f);
 			for value in values {
 				visit(value, f);
@@ -290,7 +302,7 @@ pub fn visit(expr: &Expr, f: &mut dyn FnMut(&Expr)) {
 			visit(a, f);
 			visit(b, f);
 		}
-		Expr::For { iterable, body, .. } => {
+		Expr::For { iterable, body, .. } | Expr::ForUtf8 { iterable, body, .. } => {
 			visit(iterable, f);
 			visit(body, f);
 		}
@@ -314,7 +326,9 @@ pub fn visit(expr: &Expr, f: &mut dyn FnMut(&Expr)) {
 				visit_argument(argument, f);
 			}
 		}
-		Expr::Array(values) | Expr::Set(values) | Expr::Map(values) => items(values, f),
+		Expr::Array(values) | Expr::Pool(values) | Expr::Set(values) | Expr::Map(values) => {
+			items(values, f)
+		}
 		Expr::Object(fields) => {
 			for (_, value) in fields {
 				visit(value, f);
@@ -346,13 +360,6 @@ pub fn visit(expr: &Expr, f: &mut dyn FnMut(&Expr)) {
 fn visit_argument(argument: &fa_interpreter::ir::Arg, f: &mut dyn FnMut(&Expr)) {
 	match argument {
 		fa_interpreter::ir::Arg::Value(value) => visit(value, f),
-		fa_interpreter::ir::Arg::Borrow(place) => {
-			for step in &place.steps {
-				if let Step::Index(index) = step {
-					visit(index, f);
-				}
-			}
-		}
 		fa_interpreter::ir::Arg::Default => {}
 		fa_interpreter::ir::Arg::Variadic(items) => {
 			for item in items {

@@ -1,0 +1,29 @@
+-- prints: 9
+-- prints: 9
+-- prints: 7
+-- prints: 8
+type Outer = {
+	inner: Inner = {}
+	type Inner = {
+		nodes: GrowingPool<Node> = []
+		type Node = { value: Integer }
+		function add = (self, value: Integer): Node in self.nodes mutates self.nodes.size =>
+			self.nodes.add({ value })
+	}
+}
+mutable outer: Outer = {}
+use n = outer.inner.add(7)
+n.value = 9
+console.log(n.value)
+console.log((outer.inner.nodes.find((_n) => true))?.value ?? 0)
+function choose = (nodes: Array<Integer>, first: Boolean): Integer in nodes throws IndexError => {
+	if first { return try nodes[0] }
+	try nodes[1]
+}
+mutable values: Array<Integer> = [1, 2]
+use a = try choose(values, true)
+use b = try choose(values, false)
+a = 7
+b = 8
+console.log(values[0])
+console.log(values[1])

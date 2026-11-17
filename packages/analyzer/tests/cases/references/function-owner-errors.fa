@@ -1,0 +1,13 @@
+type Node = { value: Integer }
+function first = (nodes: GrowingPool<Node>): Node in nodes => {
+	mutable local: GrowingPool<Node> = []
+	local.add({ value = 1 }) -- error: REF009
+}
+function pass = (owner: GrowingPool<Node>, node: Node in owner): Node in owner => node
+mutable a: GrowingPool<Node> = []
+mutable b: GrowingPool<Node> = []
+use one = a.add({ value = 1 })
+use two = b.add({ value = 2 })
+pass(a, two) -- error: REF020
+function wrong = (owner: GrowingPool<Node>, node: Node in owner, other: GrowingPool<Node>): Node in other => node -- error: REF009
+function noPlace = (owner: GrowingPool<Node>): Node in owner => Node { value = 0 } -- error: REF008

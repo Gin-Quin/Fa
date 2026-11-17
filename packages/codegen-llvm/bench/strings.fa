@@ -1,0 +1,22 @@
+-- String scaling audit: compile with O3, synchronous, unchecked arithmetic.
+let requested = Integer.parse(arguments.get(0) ?? "2000") catch _error => 2000
+let n = if requested > 0 { requested } else { 0 }
+let text = "é€😀".repeat(n)
+mutable sum = 0
+for index in 0..text.length {
+	sum += text.codeUnitAt(index)
+}
+mutable lengths = 0
+for round in 0..n { lengths += text.length }
+mutable built = ""
+mutable joined = ""
+let high = "😀"[0]
+let low = "😀"[1]
+for round in 0..n {
+	built += "é😀"
+	joined += high
+	joined += low
+}
+let replaced = text.replaceAll("😀", "x")
+let fields = text.split("😀")
+console.log(sum, lengths, built.length, joined.length, replaced.length, fields.length, text.lastIndexOf("😀") ?? -1, joined.isWellFormed())

@@ -101,7 +101,7 @@ function render = (response: Response): String => {
 -- 64-bit FNV-1a over the UTF-8 bytes of the text.
 function fnv1a = (text: String): UInt64 => {
 	mutable hash: UInt64 = 14695981039346656037
-	for byte in text.bytes() {
+	for byte in text.toUtf8() {
 		hash = hash.bitXor(byte).wrappingMul(1099511628211)
 	}
 	hash

@@ -206,7 +206,7 @@ impl Walker<'_> {
 			}
 			let ty = self.check(value, Some(item));
 			self.sink(value, ty, item);
-			self.escape(value, n);
+			self.store_closures(value, n);
 			given += 1;
 		}
 		if given != count && !spreads {
@@ -759,19 +759,11 @@ impl Walker<'_> {
 	/// mutable parameter, or `self` of a mutating method).
 	fn is_mutable_place(&mut self, value: NodeId) -> bool {
 		let value = self.strip_groups(value);
-		let Some(place) = self.place_of(value) else {
-			return false;
-		};
-		let Some(symbol) = self.place_symbol(place) else {
-			return false;
-		};
-		matches!(
-			self.a.symbols.symbol(symbol).kind,
-			SymbolKind::Mutable
-				| SymbolKind::MutableUse
-				| SymbolKind::Parameter { .. }
-				| SymbolKind::SelfParameter
-		)
+		let places = self.places_of(value);
+		!places.is_empty()
+			&& places
+				.iter()
+				.all(|&place| self.place_writable(place) == super::effects::Writable::Yes)
 	}
 
 	/// `FFI006`: a callback is a `function` known at compile time, which
@@ -1034,15 +1026,16 @@ impl Walker<'_> {
 			self.report_flow(diagnostic);
 			return;
 		}
-		if let Some(place) = self.place_of(value)
-			&& !self
+		for place in self.places_of(value) {
+			if !self
 				.body
 				.flow
 				.moved_fields
 				.iter()
 				.any(|&(other, _)| other == place)
-		{
-			self.body.flow.moved_fields.push((place, value));
+			{
+				self.body.flow.moved_fields.push((place, value));
+			}
 		}
 	}
 
@@ -1080,35 +1073,34 @@ impl Walker<'_> {
 		let View::Access { members, .. } = syntax::view(&tree, n) else {
 			return;
 		};
-		let Some(mut place) = self.place_of(target) else {
-			return;
-		};
-		let count = members.len();
-		for (position, member) in members.iter().enumerate() {
-			let Some(next) = self.member_step(place, member) else {
-				return;
-			};
-			place = next;
-			if written && position + 1 == count {
-				return;
-			}
-			if let Some(&(_, at)) = self
-				.body
-				.flow
-				.moved_fields
-				.iter()
-				.find(|&&(other, _)| other == place)
-			{
-				let text = tree.text(n.index()).to_string();
-				let line = self.line_of(at);
-				let message = format!(
-					"`{}` was moved out on line {line}: assign it again before using `{text}`",
-					tree.text(at.index())
-				);
-				let diagnostic =
-					self.diagnostic(&crate::diagnostics::codes::advanced::MEM002, n, message);
-				self.report_flow(diagnostic);
-				return;
+		for mut place in self.places_of(target) {
+			let count = members.len();
+			for (position, member) in members.iter().enumerate() {
+				let Some(next) = self.member_step(place, member) else {
+					return;
+				};
+				place = next;
+				if written && position + 1 == count {
+					return;
+				}
+				if let Some(&(_, at)) = self
+					.body
+					.flow
+					.moved_fields
+					.iter()
+					.find(|&&(other, _)| other == place)
+				{
+					let text = tree.text(n.index()).to_string();
+					let line = self.line_of(at);
+					let message = format!(
+						"`{}` was moved out on line {line}: assign it again before using `{text}`",
+						tree.text(at.index())
+					);
+					let diagnostic =
+						self.diagnostic(&crate::diagnostics::codes::advanced::MEM002, n, message);
+					self.report_flow(diagnostic);
+					return;
+				}
 			}
 		}
 	}
@@ -1119,13 +1111,18 @@ impl Walker<'_> {
 		if self.body.flow.moved_fields.is_empty() {
 			return;
 		}
-		let Some(place) = self.place_of(target) else {
+		let targets = self.places_of(target);
+		if targets.is_empty() {
 			return;
-		};
+		}
 		let places = std::mem::take(&mut self.body.flow.moved_fields);
 		let kept = places
 			.into_iter()
-			.filter(|&(moved, _)| !self.places.is_at_or_below(moved, place))
+			.filter(|&(moved, _)| {
+				!targets
+					.iter()
+					.all(|&place| self.places.is_at_or_below(moved, place))
+			})
 			.collect();
 		self.body.flow.moved_fields = kept;
 	}

@@ -55,8 +55,6 @@
 #            (REQ007 is checked for lambdas stored in fields, places, collections)
 #   MEM003   an escaping closure capturing a value with `destroy`: not checked yet
 #   META010  `@import`: AN001, not supported by the analyzer yet
-#   REF008, REF009, REF017  returned references and references into temporaries:
-#            not implemented (pending cases adversarial/ref-24, -25, -34, -35)
 #   FFI007   C unions, bit fields, variadic functions: only met by `fa bind`
 #   TEST004, CLI*, CFG*, DEP*  reported by the `fa` command (packages/cli), not the
 #            analyzer

@@ -16,9 +16,7 @@ pub fn test(test: &TypeTest, value: &Value) -> bool {
 		}
 		TypeTest::Float => matches!(value, Value::Float(_)),
 		TypeTest::String => matches!(value, Value::String(_)),
-		TypeTest::Character => {
-			matches!(value, Value::String(text) if crate::builtins::grapheme_count(text) == 1)
-		}
+		TypeTest::Bytes => matches!(value, Value::Bytes(_)),
 		TypeTest::Array => matches!(value, Value::Array(_)),
 		TypeTest::Map => matches!(value, Value::Map(_)),
 		TypeTest::Set => matches!(value, Value::Set(_)),

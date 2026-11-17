@@ -1,0 +1,10 @@
+-- A general view keeps its UTF-16 count and copies on an owning return.
+function returned = (): String throws IndexError => {
+	mutable owner = String.from("é日😀".repeat(50), capacity = 2048)
+	use part = try owner[1..8]
+	console.log(part.length, part.utf8Length()) -- prints: 7 16
+	part
+}
+let owned = try returned()
+let churn = String.from("x".repeat(400), capacity = 2048)
+console.log(churn.length, owned.length, owned, owned.isWellFormed()) -- prints: 400 7 日😀é日😀 true

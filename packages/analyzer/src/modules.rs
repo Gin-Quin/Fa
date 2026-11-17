@@ -702,6 +702,13 @@ pub struct Interface {
 	/// `ExternalField`), so that every file whose values may be of their
 	/// types writes and deletes them with both sides.
 	pub relations: Vec<crate::analysis::Relation>,
+	/// Aliases whose denoted type contains a reference before runtime erasure.
+	pub reference_aliases: FxHashSet<NodeId>,
+	/// Reference-containing generic defaults, by declaration and position.
+	pub reference_defaults: FxHashMap<NodeId, Vec<bool>>,
+	pub reference_layouts: FxHashMap<NodeId, crate::analysis::ReferenceLayout>,
+	pub reference_origins: FxHashMap<NodeId, Vec<crate::analysis::ReferenceOrigin>>,
+	pub reference_sensitive: FxHashMap<NodeId, Vec<ParamId>>,
 }
 
 /// The generic parameters reached by exported types, including binders
@@ -1024,6 +1031,47 @@ impl Interface {
 					key_hash(decl),
 					rustc_hash::FxBuildHasher.hash_one(text) as u128,
 					0,
+				));
+			}
+		}
+		for &decl in &self.reference_aliases {
+			parts.push((14, key_hash(decl), 1, 0));
+		}
+		for (&decl, defaults) in &self.reference_defaults {
+			for (index, &reference) in defaults.iter().enumerate() {
+				parts.push((15, key_hash(decl), index as u128, u128::from(reference)));
+			}
+		}
+		for (&decl, &layout) in &self.reference_layouts {
+			let value = match layout {
+				crate::analysis::ReferenceLayout::Owner => 1,
+				crate::analysis::ReferenceLayout::General => 2,
+				crate::analysis::ReferenceLayout::Index(index) => {
+					(u128::from(index as u64) << 3) | 4
+				}
+				crate::analysis::ReferenceLayout::Entry { key, ty } => {
+					types.const_hash(key) ^ types.stable_hash(ty).rotate_left(9) ^ 5
+				}
+				crate::analysis::ReferenceLayout::Field(name) => {
+					(rustc_hash::FxBuildHasher.hash_one(types.syms.resolve(name)) as u128) << 2 | 3
+				}
+			};
+			parts.push((16, key_hash(decl), 0, value));
+		}
+		for (&decl, params) in &self.reference_sensitive {
+			for &param in params {
+				parts.push((17, key_hash(decl), 0, param_hash(param)));
+			}
+		}
+		for (&decl, origins) in &self.reference_origins {
+			for origin in origins {
+				parts.push((
+					18,
+					key_hash(decl),
+					types.path_hash(origin.path),
+					u128::from(origin.descendant)
+						| u128::from(origin.readonly) << 1
+						| u128::from(origin.slice) << 2,
 				));
 			}
 		}

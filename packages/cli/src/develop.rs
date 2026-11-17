@@ -891,7 +891,8 @@ pub(crate) fn develop(arguments: &[OsString]) -> i32 {
 						} else {
 							format!("reloaded {}", shown.join(", "))
 						};
-						eprintln!("fa develop: {}{reason}: {what}", package.prefix());
+						let message = format!("fa develop: {}{reason}: {what}", package.prefix());
+						eprintln!("{message}");
 						package.run_covering_tests(&before);
 					}
 					Reload::Errors => {}
@@ -902,7 +903,9 @@ pub(crate) fn develop(arguments: &[OsString]) -> i32 {
 						} else {
 							"restarting"
 						};
-						eprintln!("fa develop: {}{reason}: {verb} ({why})", package.prefix());
+						let message =
+							format!("fa develop: {}{reason}: {verb} ({why})", package.prefix());
+						eprintln!("{message}");
 						if package.restart(&bun) {
 							package.run_covering_tests(&before);
 						}
@@ -929,7 +932,8 @@ pub(crate) fn develop(arguments: &[OsString]) -> i32 {
 					} else {
 						"running again"
 					};
-					eprintln!("fa develop: {}{reason}: {verb}", package.prefix());
+					let message = format!("fa develop: {}{reason}: {verb}", package.prefix());
+					eprintln!("{message}");
 					// the changes made while it loaded are seen by the next poll
 					package.watcher.watch(watched_roots(&package.loaded));
 					if package.restart(&bun) {

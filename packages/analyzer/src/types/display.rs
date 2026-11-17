@@ -62,13 +62,22 @@ impl TypeStore {
 	/// The type as written in Fa: `Integer<min = 0>`, `String?`, `"a" | "b"`,
 	/// `{ name: String, age: Integer }`, `(Integer) => String`.
 	pub fn display(&self, ty: TypeId) -> String {
+		self.display_with_parameters(ty, &[])
+	}
+
+	/// Parameter spellings are presentation metadata, never type identity.
+	pub fn display_with_parameters(&self, ty: TypeId, names: &[String]) -> String {
 		let mut out = String::new();
-		self.write_type(&mut out, ty, false);
+		self.write_type_named(&mut out, ty, false, names);
 		out
 	}
 
 	/// Writes a type; `nested` parenthesizes unions and functions.
 	fn write_type(&self, out: &mut String, ty: TypeId, nested: bool) {
+		self.write_type_named(out, ty, nested, &[]);
+	}
+
+	fn write_type_named(&self, out: &mut String, ty: TypeId, nested: bool, names: &[String]) {
 		if ty.is_unset() {
 			out.push_str("<unset>");
 			return;
@@ -92,7 +101,7 @@ impl TypeStore {
 			TypeKind::Percentage => out.push_str("Percentage"),
 			TypeKind::String => out.push_str("String"),
 			TypeKind::StringLit(sym) => write_quoted(out, self.syms.resolve(sym)),
-			TypeKind::Character => out.push_str("Character"),
+			TypeKind::Bytes => out.push_str("Bytes"),
 			TypeKind::Object(shape) => {
 				if let Some(nominal) = self.shape(shape).nominal {
 					out.push_str(self.decl_name(self.nominal(nominal).key));
@@ -228,9 +237,26 @@ impl TypeStore {
 					out.push('>');
 				}
 				out.push('(');
+				let borrowed = sig.reference.is_some()
+					|| self
+						.params(sig.params)
+						.iter()
+						.any(|p| p.reference.is_some());
+				let parameter = |index: u16| {
+					Some(
+						names
+							.get(index as usize)
+							.cloned()
+							.unwrap_or_else(|| format!("arg{}", index + 1)),
+					)
+				};
 				for (index, param) in self.params(sig.params).iter().enumerate() {
 					if index > 0 {
 						out.push_str(", ");
+					}
+					if borrowed {
+						out.push_str(&parameter(index as u16).expect("parameter name"));
+						out.push_str(": ");
 					}
 					// a variadic parameter's type is `Array(T)`, written `...T`
 					let ty = match (param.variadic, self.kind(param.ty)) {
@@ -241,9 +267,17 @@ impl TypeStore {
 						_ => param.ty,
 					};
 					self.write_type(out, ty, false);
+					if let Some(owner) = param.reference {
+						out.push_str(" in ");
+						out.push_str(&crate::effects::path_text(self, owner, &parameter));
+					}
 				}
 				out.push_str(") => ");
 				self.write_type(out, sig.ret, true);
+				if let Some(owner) = sig.reference {
+					out.push_str(" in ");
+					out.push_str(&crate::effects::path_text(self, owner, &parameter));
+				}
 				if sig.throws != TypeId::NEVER {
 					out.push_str(" throws ");
 					self.write_type(out, sig.throws, true);
@@ -359,9 +393,7 @@ impl TypeStore {
 			ConstValue::Float(bits) => {
 				let _ = write!(out, "{:?}", f64::from_bits(bits));
 			}
-			ConstValue::String(sym) | ConstValue::Character(sym) => {
-				write_quoted(out, self.syms.resolve(sym))
-			}
+			ConstValue::String(sym) => write_quoted(out, self.syms.resolve(sym)),
 			ConstValue::BigInt(sym) => {
 				let _ = write!(out, "{}n", self.syms.resolve(sym));
 			}

@@ -36,7 +36,120 @@ use crate::types::{
 	Bindings, CollKind, FieldEntry, FieldFlags, IntStorage, NominalInfo, NominalKind,
 };
 
+pub(super) const LONE_SURROGATE_TYPE: &str =
+	"a literal type cannot hold a lone surrogate: use `String`, or make the value well-formed";
+
 impl Walker<'_> {
+	/// Check the known payload at its written field, rather than blaming the
+	/// whole constructor. Unknown runtime payloads are ordinary schema data.
+	pub(super) fn check_literal_schema_constructor(&mut self, n: NodeId, member: TypeId) {
+		use crate::types::TypeKind;
+		let TypeKind::Member(nominal, index) = self.s.types.kind(member) else {
+			return;
+		};
+		if self.schema_input_depth > 0
+			|| crate::builtins::schema::MEMBERS.get(index as usize) != Some(&"StringLiteral")
+		{
+			return;
+		}
+		let schema = crate::builtins::schema::schema(&mut self.s.types);
+		if !matches!(self.s.types.kind(schema), TypeKind::NamedUnion(owner, _) if owner == nominal)
+		{
+			return;
+		}
+		if let Some((field, Value::String(text))) = self.known_schema_field(n, "value", 0)
+			&& !text.is_well_formed()
+		{
+			let diagnostic = self.diagnostic(&TF042, field, LONE_SURROGATE_TYPE);
+			self.report(diagnostic);
+			self.rejected_literal_schemas.insert(n);
+		}
+	}
+
+	/// Follow the analyzer's resolved field sources, including spreads, rather
+	/// than guessing which written initializer supplies the final value.
+	fn known_schema_field(&mut self, n: NodeId, name: &str, depth: u32) -> Option<(NodeId, Value)> {
+		use crate::analysis::FieldValue;
+		if depth > 64 {
+			return None;
+		}
+		let n = self.strip_groups(n);
+		if let Some(Value::Object(object)) = self.a.constants.get(&n) {
+			return object.get(name).cloned().map(|value| (n, value));
+		}
+		let source = self
+			.a
+			.objects
+			.get(&n)?
+			.fields
+			.iter()
+			.find(|(field, _)| self.s.types.syms.resolve(*field) == name)?
+			.1;
+		match source {
+			FieldValue::Given(value) | FieldValue::Default(value) => {
+				let value = self.strip_groups(value);
+				let known = self.a.constants.get(&value).cloned().or_else(|| {
+					if !self.is_constant_expression(value, 0) {
+						return None;
+					}
+					// This is a known-data check, not a new compile-time
+					// requirement on otherwise runtime schema construction.
+					self.quiet += 1;
+					let computed = self.evaluate_at(value, value);
+					self.quiet -= 1;
+					computed
+				})?;
+				Some((value, known))
+			}
+			FieldValue::Spread(value) => self.known_schema_field(value, name, depth + 1),
+			FieldValue::Constant(index) => self
+				.a
+				.field_constants
+				.get(index as usize)
+				.cloned()
+				.map(|value| (n, value)),
+			FieldValue::None => None,
+		}
+	}
+
+	/// Known schema construction is checked too; runtime schema data with an
+	/// unknown payload remains legal. Do not turn ordinary malformed Strings
+	/// into literal types, or diagnose them merely for being values.
+	pub(super) fn check_literal_schema_value(&mut self, n: NodeId, value: &Value) {
+		if self.schema_input_depth == 0
+			&& malformed_literal_schema(value)
+			&& !self.literal_schema_rejected(n)
+		{
+			let diagnostic = self.diagnostic(&TF042, n, LONE_SURROGATE_TYPE);
+			self.report(diagnostic);
+			self.rejected_literal_schemas.insert(n);
+		}
+	}
+
+	/// Follow constant names as well as syntax so reconstructing a schema
+	/// already rejected at its declaration produces no duplicate diagnostic.
+	pub(super) fn literal_schema_rejected(&self, n: NodeId) -> bool {
+		let mut pending = vec![n];
+		let mut seen = rustc_hash::FxHashSet::default();
+		while let Some(node) = pending.pop() {
+			if !seen.insert(node) {
+				continue;
+			}
+			if self.rejected_literal_schemas.contains(&node) {
+				return true;
+			}
+			if let View::Name(_) = self.view(node)
+				&& let crate::symbols::Resolution::Local(symbol) = self.a.resolution(node)
+				&& (self.a.static_values.contains_key(&symbol)
+					|| self.a.module_constants.contains_key(&symbol))
+			{
+				pending.push(self.a.symbols.symbol(symbol).decl_node);
+			}
+			pending.extend(syntax::children(&self.tree, node));
+		}
+		false
+	}
+
 	/// `TypeFromSchema(schema)` in a type.
 	pub(super) fn type_from_schema(
 		&mut self,
@@ -53,8 +166,10 @@ impl Walker<'_> {
 			if deferred {
 				self.deferred_comptime += 1;
 			}
+			self.schema_input_depth += 1;
 			let actual = self.check(argument, Some(schema));
 			self.sink(argument, actual, schema);
+			self.schema_input_depth -= 1;
 			if deferred {
 				self.deferred_comptime -= 1;
 			}
@@ -77,6 +192,9 @@ impl Walker<'_> {
 					n,
 					"`TypeFromSchema` inside a generic type function, but as its value",
 				);
+			}
+			if w.literal_schema_rejected(argument) {
+				return TypeId::UNKNOWN;
 			}
 			let Some(value) = w.evaluate_at(argument, argument) else {
 				return TypeId::UNKNOWN;
@@ -239,7 +357,7 @@ impl Walker<'_> {
 		match kind {
 			"Boolean" => TypeId::BOOLEAN,
 			"String" => TypeId::STRING,
-			"Character" => TypeId::CHARACTER,
+			"Bytes" => TypeId::BYTES,
 			"Percentage" => TypeId::PERCENTAGE,
 			"BigInt" => TypeId::BIG_INT,
 			"None" => TypeId::NONE,
@@ -251,7 +369,10 @@ impl Walker<'_> {
 				None => self.invalid_schema(n, &TF042, "a `BooleanLiteral` has a `Boolean` value"),
 			},
 			"StringLiteral" => match field("value") {
-				Some(Value::String(text)) => self.s.types.string_literal(&text),
+				Some(Value::String(text)) => match text.as_str() {
+					Some(text) => self.s.types.string_literal(text),
+					None => self.invalid_schema(n, &TF042, LONE_SURROGATE_TYPE),
+				},
 				_ => self.invalid_schema(n, &TF042, "a `StringLiteral` has a `String` value"),
 			},
 			"IntegerLiteral" => match field("value").and_then(|value| value.as_int()) {
@@ -696,4 +817,31 @@ struct NamedSchema {
 	reference: Option<TypeId>,
 	/// Whether its definition is an object type.
 	object: bool,
+}
+
+/// Only schema literal payloads are restricted; strings elsewhere in schema
+/// data (for example a default value) are not themselves literal types.
+fn malformed_literal_schema(value: &Value) -> bool {
+	let mut pending = vec![value];
+	while let Some(value) = pending.pop() {
+		match value {
+			Value::Member(member) => {
+				if member.name.as_ref() == "Schema.StringLiteral"
+					&& let Some(Value::Object(data)) = &member.data
+					&& let Some(Value::String(text)) = data.get("value")
+					&& !text.is_well_formed()
+				{
+					return true;
+				}
+				pending.extend(member.data.iter());
+			}
+			Value::Object(object) => pending.extend(object.fields.iter().map(|(_, value)| value)),
+			Value::Array(items) | Value::Tuple(items) | Value::Set(items) => {
+				pending.extend(items.iter())
+			}
+			Value::Map(entries) => pending.extend(entries.iter().flat_map(|(k, v)| [k, v])),
+			_ => {}
+		}
+	}
+	false
 }

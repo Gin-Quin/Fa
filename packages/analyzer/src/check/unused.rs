@@ -15,7 +15,11 @@ impl Walker<'_> {
 	pub(super) fn report_unused(&mut self) {
 		let mut unused = Vec::new();
 		for (index, symbol) in self.a.symbols.symbols().iter().enumerate() {
-			if self.used_symbols.get(index).copied().unwrap_or(false) {
+			if self.used_symbols.get(index).copied().unwrap_or(false)
+				|| self
+					.a
+					.has_flags(symbol.decl_node, crate::analysis::NodeFlags::TYPE_EXPR)
+			{
 				continue;
 			}
 			let kind = match symbol.kind {

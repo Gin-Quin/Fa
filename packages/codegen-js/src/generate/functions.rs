@@ -58,44 +58,89 @@ impl Generator<'_> {
 				let indent = self.out.indentation();
 				// an escaping local function copies its captures (references.rs)
 				let saved = self.copy_captures(&info);
-				// the instances of a function that may suspend (tasks.rs)
-				for (mode, instance) in self.instance_modes(n) {
-					self.tasks.next_mode = Some(mode);
-					let parts = self.function_parts(&info, indent, false);
-					let keyword = if matches!(mode, Mode::Async { .. }) {
-						"async function"
-					} else {
-						"function"
-					};
-					let name = instance.unwrap_or_else(|| name.clone());
-					self.out
-						.line(format!("{keyword} {name}{} {{", parts.parameters));
-					self.out.append(parts.body);
-					self.out.line("}");
-				}
-				// the integer variants (`integer_variants.rs`)
-				for variant in self.integer_variants.get(&n).cloned().unwrap_or_default() {
-					let suffix = self.variant_suffix(n, &variant);
-					self.numeric_bindings = variant.into_iter().collect();
-					for (mode, instance) in self.instance_modes(n) {
-						self.tasks.next_mode = Some(mode);
-						let parts = self.function_parts(&info, indent, false);
-						let keyword = if matches!(mode, Mode::Async { .. }) {
-							"async function"
-						} else {
-							"function"
-						};
-						let name = format!("{}{suffix}", instance.unwrap_or_else(|| name.clone()));
-						self.out
-							.line(format!("{keyword} {name}{} {{", parts.parameters));
-						self.out.append(parts.body);
-						self.out.line("}");
+				let saved_references = self.reference_bindings.clone();
+				let generics = self.function_generics(n);
+				let mut numbers = vec![None];
+				numbers.extend(
+					self.integer_variants
+						.get(&n)
+						.cloned()
+						.unwrap_or_default()
+						.into_iter()
+						.map(Some),
+				);
+				for references in self.reference_variants(n) {
+					self.reference_bindings = saved_references.clone();
+					self.reference_bindings.extend(references.iter().copied());
+					let reference_suffix = self.reference_suffix(&generics, &references);
+					let mut layouts = vec![fa_analyzer::analysis::ReferenceLayout::General];
+					if let Some(layout) = self.analysis.reference_layouts.get(&n).copied() {
+						let ret = info
+							.sig
+							.map(|sig| self.types.sig(sig).ret)
+							.unwrap_or(TypeId::UNKNOWN);
+						if !self.is_object_reference(ret)
+							&& layout != fa_analyzer::analysis::ReferenceLayout::General
+						{
+							layouts.push(layout);
+						}
 					}
-					self.numeric_bindings.clear();
+					for numeric in &numbers {
+						let numeric_suffix = numeric
+							.as_ref()
+							.map(|variant| self.variant_suffix(n, variant))
+							.unwrap_or_default();
+						self.numeric_bindings =
+							numeric.clone().unwrap_or_default().into_iter().collect();
+						for &layout in &layouts {
+							self.reference_layout = layout;
+							for (mode, instance) in self.instance_modes(n) {
+								self.tasks.next_mode = Some(mode);
+								let parts = self.function_parts(&info, indent, false);
+								let keyword = if matches!(mode, Mode::Async { .. }) {
+									"async function"
+								} else {
+									"function"
+								};
+								let name = format!(
+									"{}{numeric_suffix}{reference_suffix}{}",
+									instance.unwrap_or_else(|| name.clone()),
+									Self::reference_layout_suffix(layout)
+								);
+								self.out
+									.line(format!("{keyword} {name}{} {{", parts.parameters));
+								self.out.append(parts.body);
+								self.out.line("}");
+							}
+						}
+					}
 				}
-				if let Some((name, code)) = self.promise_api(n) {
-					self.out.line(format!("const {name} = {code};"));
+				self.numeric_bindings.clear();
+				self.reference_bindings = saved_references;
+				self.reference_layout = fa_analyzer::analysis::ReferenceLayout::General;
+				for references in self.reference_variants(n) {
+					let reference = self.reference_suffix(&generics, &references);
+					for numeric in &numbers {
+						let number = numeric
+							.as_ref()
+							.map(|v| self.variant_suffix(n, v))
+							.unwrap_or_default();
+						let suffix = format!("{number}{reference}");
+						if let Some((name, code)) = self.promise_api(n, &suffix) {
+							self.out.line(format!("const {name} = {code};"));
+						}
+						if !references.is_empty()
+							&& let Some(instances) = self.tasks.instances.get(&n).cloned()
+							&& let (Some(sync), Some(asynchronous)) =
+								(instances.sync_name, instances.async_name)
+						{
+							let helper = self.helper("faAsyncValue");
+							self.out
+								.line(format!("{helper}({sync}{suffix}, {asynchronous}{suffix});"));
+						}
+					}
 				}
+				self.emit_reference_family(n, &name);
 				// the instance receiving reactive places (D24, reactivity.rs)
 				if self.reactive_instances.contains(&n) {
 					let params: Vec<SymbolId> =
@@ -185,6 +230,42 @@ impl Generator<'_> {
 		};
 		let indent = self.out.indentation();
 		let saved = self.copy_captures(&info);
+		if self
+			.analysis
+			.reference_sensitive
+			.get(&n)
+			.is_some_and(|params| !params.is_empty())
+			&& !info.generics.is_empty()
+		{
+			let base = self.temp();
+			let generics = self.function_generics(n);
+			let bindings = self.reference_bindings.clone();
+			for variant in self.reference_variants(n) {
+				self.reference_bindings = bindings.clone();
+				self.reference_bindings.extend(variant.iter().copied());
+				let suffix = self.reference_suffix(&generics, &variant);
+				let parts = self.function_parts(&info, indent, true);
+				let arrow = Self::arrow(parts, indent);
+				let value = if self.lambda_suspends(n) {
+					self.tasks.next_mode = Some(Mode::Async { coop: true });
+					let parts = self.function_parts(&info, indent, true);
+					let asynchronous = Self::arrow(parts, indent);
+					let helper = self.helper("faAsyncValue");
+					js::call(
+						helper,
+						&[arrow.text, format!("async {}", asynchronous.text)],
+					)
+				} else {
+					arrow
+				};
+				self.out
+					.line(format!("const {base}{suffix} = {};", value.text));
+			}
+			self.reference_bindings = bindings;
+			self.emit_reference_family(n, &base);
+			self.restore_captures(saved);
+			return Expr::name(base, true);
+		}
 		let parts = self.function_parts(&info, indent, true);
 		// an async lambda that may suspend: its async instance too (tasks.rs)
 		let asynchronous = self.lambda_suspends(n).then(|| {
@@ -257,6 +338,15 @@ impl Generator<'_> {
 				.is_some_and(|summary| summary.starts);
 		let (parts, temps) = self.in_function(info.lambda, |g| {
 			g.fcx.mode = mode;
+			g.fcx.reference_layout = g.reference_layout;
+			let general_reference = g.returns_reference()
+				&& !g.is_object_reference(ret)
+				&& g.reference_layout == fa_analyzer::analysis::ReferenceLayout::General;
+			if general_reference {
+				let container = g.temp();
+				let key = g.temp();
+				g.fcx.reference_result = Some((container, key, "$referenceReturn".into()));
+			}
 			// a generic function's hidden parameters first (generics.rs)
 			let mut parameters = g.declare_hidden(info.lambda);
 			let mut prologue = Writer::at(indent + 1);
@@ -270,7 +360,7 @@ impl Generator<'_> {
 			if required {
 				g.requirement_scopes.push(requirements);
 			}
-			for param in &info.params {
+			for (position, param) in info.params.iter().enumerate() {
 				// a destructured parameter: a temporary, its pattern bound in the body
 				if let View::DestructuredParameter { pattern, .. } = g.view(param.node) {
 					let name = g.temp();
@@ -283,6 +373,27 @@ impl Generator<'_> {
 					continue;
 				}
 				let name = g.declare(param.symbol);
+				if let Some(key) = g.bind_reference_parameter(info, position, &name) {
+					let physical = parameters.len() + 1;
+					parameters.extend([name.clone(), key.clone()]);
+					if let Some(default) = param.default {
+						let omitted = g.helper("faOmitted");
+						let (lines, pair) = g.capture_at(indent + 2, |g| g.reference_pair(default));
+						let condition = if arrow {
+							format!("if ({name} === {omitted})")
+						} else {
+							format!("if (arguments.length < {physical} || {name} === {omitted})")
+						};
+						prologue.open(condition);
+						prologue.append(lines);
+						if let Some((container, slot)) = pair {
+							prologue.line(format!("{name} = {};", container.text));
+							prologue.line(format!("{key} = {};", slot.text));
+						}
+						prologue.close("");
+					}
+					continue;
+				}
 				if param.variadic {
 					parameters.push(format!("...{name}"));
 					// the hidden arguments come after the variadic ones: taken
@@ -383,7 +494,7 @@ impl Generator<'_> {
 			}
 			let mut expression = None;
 			let mut body = prologue;
-			if arrow && !info.block_body && body.is_empty() {
+			if arrow && !info.block_body && body.is_empty() && !g.returns_reference() {
 				let (lines, value) = g.capture_at(indent + 1, |g| g.expr(info.body));
 				if lines.is_empty() {
 					let value = if dest == Dest::Return {
@@ -423,6 +534,16 @@ impl Generator<'_> {
 				wrapped.append(indent_by_one(body));
 				drops.reverse();
 				wrapped.close(&format!("finally {{ {} }}", drops.join(" ")));
+				body = wrapped;
+			}
+			if let Some((container, key, label)) = g.fcx.reference_result.clone() {
+				let publish = g.helper("faReferenceResult");
+				let mut wrapped = Writer::at(indent + 1);
+				wrapped.line(format!("let {container}, {key};"));
+				wrapped.open(format!("{label}:"));
+				wrapped.append(indent_by_one(body));
+				wrapped.close("");
+				wrapped.line(format!("return {publish}({container}, {key});"));
 				body = wrapped;
 			}
 			FunctionParts {
@@ -501,6 +622,7 @@ impl Generator<'_> {
 	}
 
 	fn call_inner(&mut self, n: NodeId, callee: NodeId, arguments: NodeList<'_>) -> Expr {
+		let callee = self.strip_groups(callee);
 		// `pick(value, { foo })`: the value copied to the node's type
 		if let Some(&value) = self.analysis.forwards.get(&n) {
 			let ty = self.type_of(n);
@@ -584,15 +706,22 @@ impl Generator<'_> {
 				} else {
 					self.temporary_receiver(callee, receiver)
 				};
+				let function = self
+					.select_reference_call(n, callee, Expr::name(function, true))
+					.text;
 				let omitted = self.sentinel_slots(declaration, 1);
 				let (receiver, mut values) =
 					self.arguments(n, receiver, &rest, arguments, &omitted);
 				values.insert(0, receiver.text.clone());
+				self.call_arguments
+					.entry(n)
+					.or_default()
+					.insert(0, Some(receiver.text.clone()));
 				let hidden = self.hidden_arguments(declaration, n);
 				values.splice(0..0, hidden);
 				let result = self.finish_call(n, Some(declaration), function, values);
 				if !optional {
-					return self.after_call_drop(result, drop);
+					return self.after_call_drop(n, result, drop);
 				}
 				// `receiver?.method()`: `none` when the receiver is `none`
 				let none = Expr::constant("undefined", Prec::Primary);
@@ -615,7 +744,13 @@ impl Generator<'_> {
 				let Some(function) = method.and_then(|member| self.external_value(member)) else {
 					return self.unsupported(n, "this method of another file");
 				};
+				let function = self.select_reference_call(n, callee, function);
 				let receiver = self.receiver(callee);
+				let receiver = if self.call_returns_reference(n) {
+					self.keep_value_part(receiver)
+				} else {
+					receiver
+				};
 				let (receiver, drop) = self.temporary_receiver(callee, receiver);
 				let rest: Vec<Argument> = info
 					.arguments
@@ -625,10 +760,14 @@ impl Generator<'_> {
 					.collect();
 				let (receiver, mut values) = self.arguments(n, receiver, &rest, arguments, &[]);
 				values.insert(0, receiver.text.clone());
+				self.call_arguments
+					.entry(n)
+					.or_default()
+					.insert(0, Some(receiver.text.clone()));
 				let hidden = self.signature_hidden_arguments(callee, n);
 				values.splice(0..0, hidden);
 				let result = self.finish_call(n, None, function.text, values);
-				self.after_call_drop(result, drop)
+				self.after_call_drop(n, result, drop)
 			}
 			Callee::Value if self.constraint_method_call(callee).is_some() => {
 				// `item.describe()` on a type parameter: the hidden function
@@ -713,6 +852,7 @@ impl Generator<'_> {
 					}
 					_ => function,
 				};
+				let function = self.select_reference_call(n, callee, function);
 				let (function, mut values) =
 					self.arguments(n, function, &info.arguments, arguments, &omitted);
 				if let Some(sources) = sources {
@@ -883,8 +1023,20 @@ impl Generator<'_> {
 				Slot::Omitted(_) => unreachable!(),
 			})
 			.collect();
-		let (lines, values) =
-			self.capture(|g| g.in_order(&nodes, |g, node| g.argument(node, detached)));
+		let (lines, values) = self.capture(|g| {
+			g.in_order(&nodes, |g, node| {
+				if g.reference_parameter(call, node) {
+					g.reference_argument(call, node)
+				} else {
+					let value = g.argument(node, detached);
+					if g.is_reference_owner_argument(call, node) {
+						g.keep_value_part(value)
+					} else {
+						value
+					}
+				}
+			})
+		});
 		let mut first = first;
 		if !lines.is_empty() && !first.stable {
 			let temp = self.temp();
@@ -898,6 +1050,7 @@ impl Generator<'_> {
 			by_slot[index] = Some(value);
 		}
 		if reordered {
+			first = self.keep(first);
 			// keep the written order of the values with effects: temporaries
 			for &(_, index) in &order {
 				let value = by_slot[index].take().expect("a value");
@@ -910,6 +1063,13 @@ impl Generator<'_> {
 				}
 			}
 		}
+		self.call_arguments.insert(
+			call,
+			by_slot
+				.iter()
+				.map(|value| value.as_ref().map(|value| value.text.clone()))
+				.collect(),
+		);
 		// hidden arguments follow: every slot is passed (references.rs)
 		let requirements = self.requirement_arguments(call);
 		// the sources of a reactive instance follow too (reactivity.rs)
@@ -927,18 +1087,26 @@ impl Generator<'_> {
 					&& last.is_some_and(|last| index < last || every)
 			})
 			.then(|| self.helper("faOmitted"));
-		let values = by_slot
-			.into_iter()
-			.zip(&slots)
-			.enumerate()
-			.filter(|(index, _)| last.is_some_and(|last| *index <= last))
-			.map(|(_, (value, slot))| match (value, slot) {
+		let mut values = Vec::new();
+		for (index, (value, slot)) in by_slot.into_iter().zip(&slots).enumerate() {
+			if !last.is_some_and(|last| index <= last) {
+				continue;
+			}
+			let value = match (value, slot) {
 				(Some(value), _) => value.text,
 				(None, Slot::Omitted(true)) => sentinel.unwrap_or("undefined").to_string(),
-				(None, _) => "undefined".to_string(),
-			})
-			.chain(requirements)
-			.collect();
+				_ => "undefined".into(),
+			};
+			values.push(value);
+			if let Slot::Value(node) = slot {
+				if let Some(key) = self.reference_argument_keys.remove(node) {
+					values.push(key.text);
+				}
+			} else if self.reference_pair_slot(call, index, arguments.len()) {
+				values.push("undefined".into());
+			}
+		}
+		values.extend(requirements);
 		(first, values)
 	}
 
@@ -1096,6 +1264,32 @@ impl Generator<'_> {
 				let helper = self.helper("faParseInteger");
 				js::call(helper, &values)
 			}
+			"Bytes.from" => {
+				let values = self.builtin_arguments(n, arguments);
+				js::call("Uint8Array.from", &values)
+			}
+			"Bytes.filled" => {
+				let values = self.builtin_arguments(n, arguments);
+				let array = format!("new Uint8Array({})", values[0]);
+				Expr::primary(match values.get(1).filter(|value| value.as_str() != "0") {
+					Some(value) => format!("{array}.fill({value})"),
+					None => array,
+				})
+			}
+			"String.fromUtf8" | "String.fromUtf8Lossy" => {
+				let values = self.simple_arguments(arguments);
+				let helper = self.helper(if path == "String.fromUtf8" {
+					"faFromUtf8"
+				} else {
+					"faUtf8LossyDecoder"
+				});
+				let function = if path == "String.fromUtf8" {
+					helper.to_string()
+				} else {
+					format!("{helper}.decode")
+				};
+				js::call(&function, &values)
+			}
 			"String.compareLocale" => {
 				let values = self.simple_arguments(arguments);
 				let helper = self.helper("faStringCompareLocale");
@@ -1212,36 +1406,52 @@ impl Generator<'_> {
 				let receiver = self.receiver(callee);
 				Expr::primary(format!("{}.toString()", receiver.primary_text()))
 			}
-			_ if path.starts_with("String#") => {
+			_ if path.starts_with("String#") || path.starts_with("Bytes#") => {
 				let View::Access { .. } = self.view(callee) else {
 					return self.unsupported(n, &format!("`{path}`"));
 				};
 				let receiver = self.receiver(callee);
-				let nodes: Vec<Option<NodeId>> = arguments
-					.iter()
-					.map(|argument| match argument {
-						Argument::Given(value) => Some(*value),
-						_ => None,
+				let View::Call {
+					arguments: written, ..
+				} = self.view(n)
+				else {
+					unreachable!("a builtin call")
+				};
+				let (receiver, values) = self.arguments(n, receiver, arguments, written, &[]);
+				let values = values
+					.into_iter()
+					.enumerate()
+					.map(|(index, text)| {
+						let pure = match arguments.get(index) {
+							Some(Argument::Given(node)) => {
+								matches!(self.view(self.strip_groups(*node)), View::String(_))
+							}
+							_ => false,
+						};
+						Some(Expr::primary(text).with_purity(pure, pure))
 					})
 					.collect();
-				let given: Vec<NodeId> = nodes.iter().flatten().copied().collect();
-				let (lines, values) = self.capture(|g| g.in_order(&given, |g, node| g.expr(node)));
-				let mut receiver = receiver;
-				if !lines.is_empty() && !receiver.stable {
-					let temp = self.temp();
-					self.out.line(format!("const {temp} = {};", receiver.text));
-					receiver = Expr::name(temp, true);
-				}
-				self.out.append(lines);
-				let mut values = values.into_iter();
-				let arguments = nodes
-					.iter()
-					.map(|node| node.map(|_| values.next().expect("a value")))
-					.collect();
-				self.string_method(n, path, receiver, arguments)
+				self.string_method(n, path, receiver, values)
 			}
 			_ => self.unsupported(n, &format!("`{path}`")),
 		}
+	}
+
+	fn builtin_arguments(&mut self, n: NodeId, arguments: &[Argument]) -> Vec<String> {
+		let View::Call {
+			arguments: written, ..
+		} = self.view(n)
+		else {
+			unreachable!("a builtin call")
+		};
+		self.arguments(
+			n,
+			Expr::constant("undefined", Prec::Primary),
+			arguments,
+			written,
+			&[],
+		)
+		.1
 	}
 
 	/// The arguments of a built-in function: given ones, in order; omitted
@@ -1270,6 +1480,7 @@ impl Generator<'_> {
 	/// The receiver of a method call whose callee is `receiver.method` (or
 	/// `receiver?.method`: the receiver before `?.`).
 	pub(crate) fn receiver(&mut self, callee: NodeId) -> Expr {
+		let callee = self.strip_groups(callee);
 		match self.view(callee) {
 			View::Access { target, members } => self.access_prefix(callee, target, members),
 			View::OptionalAccess { target, members } if members.len() == 1 => self.expr(target),
@@ -1279,7 +1490,7 @@ impl Generator<'_> {
 
 	/// The type of the receiver of a method call.
 	pub(crate) fn receiver_type(&self, callee: NodeId) -> TypeId {
-		match self.view(callee) {
+		match self.view(self.strip_groups(callee)) {
 			View::Access { target, members } | View::OptionalAccess { target, members } => {
 				match members.len() {
 					0 | 1 => self.type_of(target),

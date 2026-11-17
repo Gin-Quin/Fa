@@ -1,0 +1,24 @@
+-- A method's owner arguments and its own arguments form one application tuple.
+type Cache<Key> = {
+ key: Key
+ function write = <Item>(self, entries: Map<Key, Item>, value: Item) mutates entries => {
+  use slot = entries.getOrInsert(self.key, copy value)
+  entries[self.key] = copy value
+  slot = copy value
+ }
+}
+function identity = <Value>(value: Value): Value => copy value
+function cloneCache = (transform: <Value>(value: Value) => Value, value: Cache<String>): Cache<String> => transform(value)
+function exercise = (): Array<Integer> => {
+ let names = Cache<String> { key = "key" }
+ mutable numbers: Map<String, Integer> = [("key", 7)]
+ let cloned = cloneCache(identity, names)
+ cloned.write(numbers, 9)
+ let indexes = Cache<Int8> { key = 1 }
+ mutable words: Map<Int8, String> = [(1, "old")]
+ indexes.write(words, "new")
+ [numbers.get("key") ?? 0, if words.get(1) == "new" { 9 } else { 0 }]
+}
+static result = @exercise()
+console.log(result) -- prints: [9, 9]
+console.log(exercise()) -- prints: [9, 9]

@@ -49,6 +49,74 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn cstring_input_uses_whatwg_replacement() {
+		let clang = std::env::var_os("LLVM_SYS_181_PREFIX")
+			.map(|prefix| PathBuf::from(prefix).join("bin/clang"))
+			.filter(|clang| clang.is_file());
+		let Some(clang) = clang else {
+			eprintln!("skipped: no clang in the LLVM install");
+			return;
+		};
+		let sources = programs().join("utf8");
+		let directory =
+			std::env::temp_dir().join(format!("fa-foreign-utf8-{}", std::process::id()));
+		std::fs::create_dir_all(&directory).expect("a temporary directory");
+		let path = sources.join("input.foreign.fa");
+		let source = std::fs::read_to_string(&path).expect("the program");
+		let expected: Vec<&str> = source
+			.lines()
+			.filter_map(|line| line.split_once("-- prints: ").map(|(_, printed)| printed))
+			.collect();
+		for target in [Target::Native, Target::NativeFreestanding, Target::Wasm]
+			.into_iter()
+			.filter(|target| {
+				*target != Target::NativeFreestanding
+					|| cfg!(all(target_arch = "x86_64", target_os = "linux"))
+			}) {
+			let object = directory.join(format!("input-{}.o", target.name()));
+			let mut compile = Command::new(&clang);
+			if target == Target::Wasm {
+				compile.arg("--target=wasm32-unknown-unknown");
+			}
+			let status = compile
+				.args(["-O1", "-std=c11", "-ffreestanding", "-fPIC", "-c", "-o"])
+				.arg(&object)
+				.arg(sources.join("input.c"))
+				.status()
+				.expect("clang runs");
+			assert!(
+				status.success(),
+				"clang compiles the UTF-8 source for {target:?}"
+			);
+			let libraries = Libraries {
+				link: vec![object.display().to_string()],
+				..Libraries::default()
+			};
+			let options = Options {
+				leak_check: true,
+				..Options::default()
+			};
+			let artifact = compile_file_linking(
+				&path,
+				target,
+				&options,
+				&directory.join(target.name()),
+				&libraries,
+			)
+			.unwrap_or_else(|error| panic!("{target:?}: {error}"));
+			let result = run(&artifact, &[]).expect("the program runs");
+			let printed = String::from_utf8_lossy(&result.stdout);
+			assert!(
+				result.status.success(),
+				"{target:?}: {}",
+				String::from_utf8_lossy(&result.stderr)
+			);
+			assert_eq!(printed.lines().collect::<Vec<_>>(), expected, "{target:?}");
+		}
+		std::fs::remove_dir_all(directory).expect("remove the test directory");
+	}
+
+	#[test]
 	fn foreign_programs_run() {
 		let directory = std::env::temp_dir().join(format!("fa-foreign-{}", std::process::id()));
 		std::fs::create_dir_all(&directory).expect("a temporary directory");

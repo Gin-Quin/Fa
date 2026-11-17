@@ -1,0 +1,7 @@
+-- Regression from the links 1a review.
+type Node = { value: Integer }
+function get = (owner: GrowingPool<Node>, node: Node in owner = { value = 7 }): Node in owner => -- error: REF020
+	node
+mutable owner: GrowingPool<Node> = []
+use result = get(owner)
+console.log(result.value)

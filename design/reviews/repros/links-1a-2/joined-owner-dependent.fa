@@ -1,0 +1,13 @@
+-- Expected: REF020; node is not necessarily in the collection passed as owner.
+type Node = { value: Integer }
+type Model = { a: GrowingPool<Node> = [], b: GrowingPool<Node> = [] }
+function identity = (owner: GrowingPool<Node>, node: Node in owner): Node in owner => node
+function wrong = (model: Model, chooseA: Boolean): Node in model.a mutates model.a.size => {
+ use node = model.a.add({ value = 7 })
+ mutable use owner = model.b
+ if chooseA { reuse owner = model.a }
+ identity(owner, node)
+}
+mutable model: Model = {}
+use returned = wrong(model, false)
+console.log(returned.value)

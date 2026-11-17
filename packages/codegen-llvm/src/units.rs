@@ -53,7 +53,7 @@ unsafe extern "C" {
 /// compiler is never reused.
 const VERSION: &str = concat!(
 	env!("CARGO_PKG_VERSION"),
-	"-split-7-platform-1-effects-1-errors-1-regions-1-packed-capacity-1-frame-1-sync-payload-1-region-string-view-1-region-edges-1-inline-length-4-template-size-1-coroutine-decimal-1-array-capacities-1-map-probes-3-key32-sentinel-3-map-headers-3-map-positive-probes-1-map-scalar64-1-map-generic-layout-2-unique-sections-1-array-extents-1-growing-bulk-cache-1-arithmetic-width-1"
+	"-split-7-platform-1-effects-1-errors-1-regions-1-packed-capacity-1-frame-1-sync-payload-1-region-string-view-1-region-edges-1-inline-length-4-template-size-1-coroutine-decimal-1-frozen-ascii-2-array-capacities-1-strings-review-6-map-probes-3-key32-sentinel-3-map-headers-3-map-positive-probes-1-map-scalar64-1-map-generic-layout-2-unique-sections-1-reference-results-8-links-inline-merge-2-links-strings-merge-1-reference-views-1-array-extents-1-growing-bulk-cache-1-arithmetic-width-1"
 );
 
 /// A file name made of a module path.
@@ -110,6 +110,13 @@ fn options_key(target: Target, options: &Options, split: &SplitOptions, hasher: 
 		"dynamic-tls".hash(hasher);
 	}
 	split.facts.is_some().hash(hasher);
+	// Frozen-field queries include wider shapes and negative facts. New
+	// writes/shapes must invalidate caches even when no old member was read.
+	split
+		.facts
+		.as_ref()
+		.and_then(|facts| facts.set(crate::facts::WRITTEN_FIELDS))
+		.hash(hasher);
 	// emulated thread-local variables (`jit.rs`)
 	split.in_memory.hash(hasher);
 }
@@ -173,6 +180,7 @@ fn emit(
 	}
 	crate::optimize::materialize_aggregate_copies(module, machine)?;
 	crate::compile::keep_huge_functions_unoptimized(module);
+	crate::optimize::specialize_ascii_methods(module, machine, options)?;
 	let pipeline = if split.lto {
 		if options.size {
 			"thinlto-pre-link<Oz>"
@@ -526,6 +534,13 @@ fn runtime_object(
 	// multi-file programs keep the eager representation of characters
 	if let Some(flag) = module.get_global("fa_compact_characters") {
 		flag.set_initializer(&context.i32_type().const_zero());
+		flag.set_constant(true);
+		flag.set_linkage(Linkage::Internal);
+	}
+	// Every separately compiled unit may receive a view through a borrowed
+	// parameter or callback. This value never varies with a unit's cache key.
+	if let Some(flag) = module.get_global("fa_virtual_string_slices") {
+		flag.set_initializer(&context.i32_type().const_int(1, false));
 		flag.set_constant(true);
 		flag.set_linkage(Linkage::Internal);
 	}
@@ -1319,10 +1334,15 @@ struct UnitRecorder {
 	units: std::sync::Mutex<Vec<Vec<String>>>,
 	/// The whole-program facts of the units so far, merged (`facts.rs`).
 	facts: std::sync::Mutex<crate::facts::ProgramFacts>,
+	map_facts: std::sync::Mutex<crate::map_facts::MapFacts>,
 }
 
 impl fa_analyzer::pipeline::UnitSink for UnitRecorder {
 	fn unit(&self, session: &mut Session, files: &[FileId]) {
+		self.map_facts
+			.lock()
+			.unwrap_or_else(|poisoned| poisoned.into_inner())
+			.collect(session, files);
 		let facts = crate::facts::ProgramFacts::of_unit(session, files);
 		self.facts
 			.lock()
@@ -1642,6 +1662,13 @@ pub fn compile_package(
 		.facts
 		.into_inner()
 		.unwrap_or_else(|poisoned| poisoned.into_inner());
+	facts.resolve_maps(
+		recorder
+			.map_facts
+			.into_inner()
+			.unwrap_or_else(|poisoned| poisoned.into_inner())
+			.resolve(root.types()),
+	);
 	facts.finish();
 	let split = &SplitOptions {
 		facts: Some(std::sync::Arc::new(facts)),
@@ -2147,4 +2174,30 @@ fn entry_is_asynchronous(
 			.get(key)
 			.is_some_and(|summary| summary.starts || summary.suspends)
 	})
+}
+
+#[cfg(test)]
+mod frozen_cache_tests {
+	use super::*;
+
+	fn key(source: &str) -> u64 {
+		let (session, file) = fa_analyzer::session::analyze_source(source);
+		let facts = crate::facts::ProgramFacts::of_unit(&session, &[file]);
+		let split = SplitOptions {
+			facts: Some(std::sync::Arc::new(facts)),
+			..SplitOptions::default()
+		};
+		let mut hash = StableHasher::default();
+		options_key(Target::Native, &Options::default(), &split, &mut hash);
+		hash.finish()
+	}
+
+	#[test]
+	fn written_fields_and_new_shapes_change_cached_object_keys() {
+		let base = "type Cursor = { text: String, position: Integer }\nmutable cursor = Cursor { text = \"ab\", position = 0 }\ncursor.position += 1\n";
+		assert_eq!(key(base), key(base));
+		assert_ne!(key(base), key(&format!("{base}cursor.text = \"é\"\n")));
+		let shape = "type Wide = { text: String, position: Integer, extra: Integer }\nmutable wide = Wide { text = \"x\", position = 0, extra = 0 }\nwide.text = \"é\"\n";
+		assert_ne!(key(base), key(&format!("{base}{shape}")));
+	}
 }

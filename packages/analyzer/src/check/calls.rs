@@ -74,6 +74,7 @@ impl Walker<'_> {
 		arguments: NodeList<'_>,
 		expected: Option<TypeId>,
 	) -> TypeId {
+		self.reference_results.remove(&n);
 		// `@readFile(path)`… (comptime.rs)
 		if let Some(ty) = self.check_operation(n, callee, arguments) {
 			return ty;
@@ -368,6 +369,7 @@ impl Walker<'_> {
 		let throws = substitute(self, sig.throws);
 		// `Integer.round(2.7)`, `a.shiftLeft(2)`: proven, they can't fail (math.rs)
 		let throws = self.number_api_throws(n, callee, kind, &binding.arguments, throws);
+		let throws = self.string_api_throws(n, callee, kind, &binding.arguments, throws, comptime);
 		let throws = self.inline_push_throws(n, callee, kind, throws);
 		if !callback_errors.is_empty() && !matches!(kind, Callee::Builtin(_)) {
 			self.set_flag(n, NodeFlags::PASSES_ERRORS);
@@ -500,7 +502,9 @@ impl Walker<'_> {
 			let name = self.tree.text(callee.index()).to_string();
 			self.resolve_requirements(n, &name, &requires)
 		};
+		self.check_reference_arguments(n, sig);
 		self.apply_call_effects(n, callee, sig.effects);
+		self.record_reference_result(n, callee, sig);
 		self.call_providers.clear();
 		// `subscription.stop()` consumes it (reactivity.rs)
 		self.note_stop_call(n, callee);
@@ -530,6 +534,7 @@ impl Walker<'_> {
 		callee: NodeId,
 		params: crate::ids::ParamListId,
 	) -> (Callee, Vec<BindParam>) {
+		let callee = self.strip_groups(callee);
 		let sigs = self.s.types.params(params).to_vec();
 		let sigs = sigs.as_slice();
 		let plain = |kind| -> (Callee, Vec<BindParam>) {
@@ -581,6 +586,7 @@ impl Walker<'_> {
 						let path = builtins::get(builtin).path;
 						if (path.contains('#') && matches!(written.ty, builtins::Ty::Ordering))
 							|| (path == "String.from" && written.name == "capacity")
+							|| matches!(path, "Bytes.from" | "Bytes.filled")
 						{
 							param.builtin_name = Some(self.s.types.syms.intern(written.name));
 						}

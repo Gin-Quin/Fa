@@ -1,0 +1,4 @@
+static half = "😀"[0]
+let bad = Schema.StringLiteral { ...{ value = half } } -- error: TF042
+static fields = { value = half }
+let alsoBad = Schema.StringLiteral { ...fields } -- error: TF042

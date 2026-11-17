@@ -402,12 +402,30 @@ impl Walker<'_> {
 		// the binding: declared once (its type: the errors of the first visit)
 		if !error_name.is_empty() && self.a.symbols.symbol_of_decl(n).is_none() {
 			let symbol = self.declare(n, error_name, SymbolKind::CatchBinding);
-			self.a.symbols.symbol_mut(symbol).ty = if errors == TypeId::NEVER {
+			let ty = if errors == TypeId::NEVER {
 				TypeId::ERROR
 			} else {
 				errors
 			};
+			self.a.symbols.symbol_mut(symbol).ty = ty;
 		}
+		// Keep the declared error type, and record the known single variant
+		// as a flow fact so its payload is accessible (Utf8Error.position).
+		if let Some(symbol) = self.a.symbols.symbol_of_decl(n)
+			&& let TypeKind::NamedUnion(nominal, mask) =
+				self.s.types.kind(self.a.symbols.symbol(symbol).ty)
+			&& self.s.types.nominal(nominal).kind == crate::types::NominalKind::Errors
+			&& self
+				.s
+				.types
+				.sym_list(self.s.types.nominal(nominal).members)
+				.len() == 1
+			&& self.s.types.mask_has(mask, 0)
+		{
+			let member = self.s.types.member(nominal, 0);
+			self.narrow_symbol(symbol, member, n);
+		}
+
 		let handler_expected = expected.or_else(|| {
 			(!statement && left != TypeId::NEVER && !self.s.types.is_recovering(left))
 				.then(|| self.s.types.widen(left))

@@ -15,9 +15,11 @@
 //!   `mutable use x` keeps that address in a slot of its own, which
 //!   `reuse x = place` changes.
 
-use fa_analyzer::ids::{NodeId, SymbolId};
+use fa_analyzer::analysis::Argument;
+use fa_analyzer::ids::{NodeId, PathId, SymbolId, TypeId};
 use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::View;
+use fa_analyzer::types::{CollKind, PathRoot, PathStep, TypeKind};
 use inkwell::values::PointerValue;
 
 use crate::error::Error;
@@ -34,6 +36,419 @@ pub(crate) enum WriteBack<'ctx> {
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
+	/// Slice descriptors belong to the caller, never to the returned callee frame.
+	pub(super) fn reference_buffer_repr(&self, ty: TypeId) -> Option<Repr> {
+		let TypeKind::Function(sig) = self.types().kind(ty) else {
+			return None;
+		};
+		self.reference_buffer_for_signature(self.types().sig(sig))
+	}
+
+	pub(super) fn reference_buffer_for_signature(
+		&self,
+		sig: fa_analyzer::types::FnSig,
+	) -> Option<Repr> {
+		sig.reference?;
+		let repr = match self.repr_of(sig.ret, 0).ok()? {
+			Repr::Optional(item) => item.repr(),
+			repr => repr,
+		};
+		matches!(repr, Repr::Str | Repr::Bytes | Repr::Array(_)).then_some(repr)
+	}
+
+	fn reference_buffer_type(&self, repr: Repr) -> inkwell::types::StructType<'ctx> {
+		if repr == Repr::Bytes {
+			self.bytes_reference_type()
+		} else if matches!(repr, Repr::Array(_)) {
+			self.context.struct_type(
+				&[
+					self.pointer_type().into(),
+					self.header_type().into(),
+					self.context.i64_type().into(),
+				],
+				false,
+			)
+		} else {
+			self.string_type
+		}
+	}
+
+	pub(super) fn allocate_reference_buffer(
+		&self,
+		repr: Repr,
+	) -> Result<inkwell::values::PointerValue<'ctx>, Error> {
+		self.alloca_type(
+			self.reference_buffer_type(repr).into(),
+			"reference_result_view",
+		)
+	}
+
+	fn snapshot_reference_result(
+		&mut self,
+		slot: Slot<'ctx>,
+		node: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		let Some(buffer) = self
+			.frame()
+			.reference_buffer
+			.filter(|_| self.frame().reference_returns.contains(&node))
+		else {
+			return Ok(Val::new(Repr::Pointer, slot.pointer));
+		};
+		let present = self.append_block("reference_view_present");
+		let end = self.append_block("reference_view_end");
+		let before = self
+			.builder
+			.get_insert_block()
+			.expect("a reference return block");
+		let exists = self.builder.build_is_not_null(slot.pointer, "")?;
+		self.builder
+			.build_conditional_branch(exists, present, end)?;
+		self.builder.position_at_end(present);
+		// A unit indexed from a String is an inline value, not a writable slot.
+		let owner_is_text = self
+			.frame()
+			.owner
+			.and_then(|owner| self.analysis.function(owner))
+			.and_then(|info| info.sig)
+			.is_some_and(|sig| {
+				let sig = self.types().sig(sig);
+				let roots: Vec<_> = self
+					.types()
+					.params(sig.params)
+					.iter()
+					.map(|p| p.ty)
+					.collect();
+				sig.reference
+					.and_then(|path| self.reference_owner_type(path, &roots))
+					.is_some_and(|ty| {
+						matches!(
+							self.types().kind(ty),
+							TypeKind::String | TypeKind::StringLit(_)
+						)
+					})
+			});
+		let pointer = if slot.repr == Repr::Str && owner_is_text {
+			let value = self.load(slot)?;
+			self.builder
+				.build_store(buffer, value.value.expect("a borrowed string"))?;
+			buffer
+		} else {
+			self.call_value(
+				self.runtime.function(match slot.repr {
+					Repr::Bytes => "fa_bytes_reference",
+					Repr::Array(_) => "fa_array_reference",
+					_ => "fa_string_reference",
+				})?,
+				&[slot.pointer.into(), buffer.into()],
+			)?
+			.into_pointer_value()
+		};
+		self.builder.build_unconditional_branch(end)?;
+		self.builder.position_at_end(end);
+		let phi = self
+			.builder
+			.build_phi(self.pointer_type(), "reference_view")?;
+		phi.add_incoming(&[(&slot.pointer, before), (&pointer, present)]);
+		Ok(Val::new(Repr::Pointer, phi.as_basic_value()))
+	}
+
+	/// Determine borrowed-result expressions before lowering their function.
+	/// Nested lambdas own their return ABI and are visited separately.
+	pub(super) fn prepare_reference_returns(&mut self, body: NodeId) {
+		let mut roots = rustc_hash::FxHashSet::default();
+		let tail = match self.view(body) {
+			View::Block { statements } => statements.last(),
+			_ => Some(body),
+		};
+		if let Some(tail) = tail
+			&& !matches!(self.view(tail), View::Return(_) | View::Throw(_))
+		{
+			roots.insert(tail);
+		}
+		let mut pending = vec![body];
+		while let Some(node) = pending.pop() {
+			match self.view(node) {
+				View::Return(Some(value)) => {
+					roots.insert(value);
+				}
+				View::Lambda { .. } | View::Function { .. } => continue,
+				_ => pending.extend(fa_analyzer::syntax::children(self.tree, node)),
+			}
+		}
+		self.prepare_reference_values(roots.into_iter().collect());
+	}
+
+	fn prepare_reference_values(&mut self, roots: Vec<NodeId>) {
+		let mut pending = roots;
+		let mut values = rustc_hash::FxHashSet::default();
+		while let Some(node) = pending.pop() {
+			values.insert(node);
+			match self.view(node) {
+				View::Group(inner) | View::Try(inner) | View::Do(inner) => pending.push(inner),
+				View::Block { statements } => pending.extend(statements.last()),
+				View::If {
+					then_body,
+					else_body,
+					..
+				} => {
+					pending.push(then_body);
+					pending.extend(else_body);
+				}
+				View::When { arms, .. } => pending.extend(arms.iter().map(|arm| arm.value)),
+				View::Loop { .. } => pending.extend(
+					self.analysis
+						.loop_results
+						.get(&node)
+						.into_iter()
+						.flatten()
+						.copied(),
+				),
+				View::Catch {
+					expression,
+					handler,
+					..
+				} => pending.extend([expression, handler]),
+				_ => {}
+			}
+		}
+		self.frame_mut().reference_returns.extend(values);
+	}
+
+	/// The declared result of a user call, separated from its address ABI.
+	pub(super) fn user_reference_result(
+		&self,
+		node: NodeId,
+	) -> Option<(fa_analyzer::ids::TypeId, bool)> {
+		if self
+			.analysis
+			.has_flags(node, fa_analyzer::analysis::NodeFlags::GENERIC_APPLICATION)
+		{
+			return None;
+		}
+		let View::Call { callee, .. } = self.view(node) else {
+			return None;
+		};
+		let fa_analyzer::types::TypeKind::Function(sig) = self.types().kind(self.type_of(callee))
+		else {
+			return None;
+		};
+		let sig = self.types().sig(sig);
+		sig.reference?;
+		let result = self.type_of(node);
+		let members = self.types().union_members(&result);
+		let optional = members.contains(&fa_analyzer::ids::TypeId::NONE);
+		Some((result, optional))
+	}
+
+	/// Locate the collection's type without evaluating any argument again.
+	fn reference_owner_type(&self, path: PathId, roots: &[TypeId]) -> Option<TypeId> {
+		let (data, steps) = self.types().path_data(path);
+		let mut ty = match data.root {
+			PathRoot::Param(index) => *roots.get(index as usize)?,
+			PathRoot::SelfParam => *roots.first()?,
+			PathRoot::ModuleValue(key) => {
+				let (file, symbol) = self.session.external(Resolution::External(key))?;
+				self.session.analysis(file).symbols.symbol(symbol).ty
+			}
+			_ => return None,
+		};
+		for step in steps {
+			ty = self.types().rec_target(ty).unwrap_or(ty);
+			ty = match step {
+				PathStep::Field(name) | PathStep::Private(name) => {
+					self.types()
+						.fields_of(ty)
+						.iter()
+						.find(|field| self.same_field_name(field.name, *name))?
+						.ty
+				}
+				_ => return None,
+			};
+		}
+		Some(self.concrete_type(ty))
+	}
+
+	/// Columnar elements keep their row locator, not an object-layout address.
+	pub(super) fn reference_item_repr(&self, path: PathId, roots: &[TypeId], repr: Repr) -> Repr {
+		if let Repr::Object(object) = repr
+			&& let Some(owner) = self.reference_owner_type(path, roots)
+			&& let TypeKind::Collection(CollKind::Columnar | CollKind::GrowingColumnar, item, _) =
+				self.types().kind(owner)
+			&& matches!(self.repr_of(owner, 0), Ok(Repr::Columnar(_)))
+			&& self.same_concrete_type(self.types().rec_target(item).unwrap_or(item), object)
+		{
+			Repr::Row(object)
+		} else {
+			repr
+		}
+	}
+
+	pub(super) fn reference_result_repr(
+		&self,
+		node: NodeId,
+		element: TypeId,
+	) -> Result<Repr, Error> {
+		let repr = match self.repr_of(element, node.index())? {
+			// Keep the complete item representation of an optional reference,
+			// including every member of an anonymous union. Selecting one
+			// member would read or write the slot with the wrong layout.
+			Repr::Optional(item) => item.repr(),
+			repr => repr,
+		};
+		let View::Call { callee, .. } = self.view(node) else {
+			return Ok(repr);
+		};
+		let TypeKind::Function(sig) = self.types().kind(self.type_of(callee)) else {
+			return Ok(repr);
+		};
+		let Some(path) = self.types().sig(sig).reference else {
+			return Ok(repr);
+		};
+		let Some(call) = self.analysis.call(node) else {
+			return Ok(repr);
+		};
+		let roots: Vec<_> = call
+			.arguments
+			.iter()
+			.map(|argument| match argument {
+				Argument::Given(node) => self.type_of(*node),
+				Argument::Receiver(callee) => match self.view(*callee) {
+					View::Access { target, members } => self.type_of(if members.len() == 1 {
+						target
+					} else {
+						members.get(members.len() - 2).unwrap_or(target)
+					}),
+					_ => TypeId::UNKNOWN,
+				},
+				_ => TypeId::UNKNOWN,
+			})
+			.collect();
+		Ok(self.reference_item_repr(path, &roots, repr))
+	}
+
+	/// Evaluate a result as a borrowed address, without a copy, temporary
+	/// lifetime extension or a second evaluation of an insertion.
+	pub(super) fn borrowed_result(&mut self, value: NodeId) -> Result<Val<'ctx>, Error> {
+		if self.reference_control(value) {
+			return self.expr_inner(value);
+		}
+		let mut node = value;
+		while let View::Group(inner) | View::Try(inner) = self.view(node) {
+			node = inner;
+		}
+		if matches!(self.view(node), View::None) {
+			return Ok(Val::new(Repr::Pointer, self.pointer_type().const_null()));
+		}
+		let slot = if let Some((element, _)) = self.user_reference_result(node) {
+			let pointer = self
+				.call_present(node)?
+				.value
+				.expect("a borrowed result")
+				.into_pointer_value();
+			Slot {
+				pointer,
+				repr: self.reference_result_repr(node, element)?,
+			}
+		} else {
+			match self.collection_reference(node)? {
+				Some((slot, _)) => slot,
+				None => self.reference_place(node)?,
+			}
+		};
+		self.snapshot_reference_result(slot, value)
+	}
+
+	/// Structured reference values merge addresses, rather than loaded data.
+	pub(super) fn reference_control(&self, node: NodeId) -> bool {
+		self.frame().reference_returns.contains(&node)
+			&& matches!(
+				self.view(node),
+				View::Group(_)
+					| View::Try(_) | View::Do(_)
+					| View::Block { .. }
+					| View::If { .. }
+					| View::When { .. }
+					| View::Catch { .. }
+					| View::Loop { .. }
+			)
+	}
+
+	/// Materialize a borrowed call for an ordinary read; `use` takes the
+	/// same returned address directly through `collection_reference`.
+	pub(super) fn read_reference_result(
+		&mut self,
+		node: NodeId,
+		raw: Val<'ctx>,
+	) -> Result<Val<'ctx>, Error> {
+		let Some((element, optional)) = self.user_reference_result(node) else {
+			return Ok(raw);
+		};
+		if raw.repr == Repr::Never {
+			return Ok(raw);
+		}
+		let pointer = raw
+			.value
+			.expect("a reference result address")
+			.into_pointer_value();
+		let repr = self.reference_result_repr(node, element)?;
+		if optional {
+			self.optional_element(pointer, repr, node)
+		} else {
+			self.load(Slot { pointer, repr })
+		}
+	}
+
+	fn snapshot_content_designation(
+		&mut self,
+		symbol: SymbolId,
+		place: Slot<'ctx>,
+	) -> Result<Slot<'ctx>, Error> {
+		if !matches!(place.repr, Repr::Str | Repr::Bytes | Repr::Array(_)) {
+			return Ok(place);
+		}
+		let ty = self.reference_buffer_type(place.repr);
+		let shared = self.shared.contains_key(&symbol) || self.frame().owner.is_none();
+		let key = (symbol, (!shared).then_some(self.frame().function));
+		let snapshot = match self.content_view_slots.get(&key) {
+			Some(&slot) => slot,
+			None => {
+				let slot = if shared {
+					let global = self.module.add_global(ty, None, "fa.content_view");
+					global.set_initializer(&ty.const_zero());
+					global.set_linkage(inkwell::module::Linkage::Internal);
+					Slot {
+						pointer: global.as_pointer_value(),
+						repr: place.repr,
+					}
+				} else {
+					Slot {
+						pointer: self.alloca_type(ty.into(), "content_view")?,
+						repr: place.repr,
+					}
+				};
+				self.content_view_slots.insert(key, slot);
+				slot
+			}
+		};
+		let pointer = self
+			.call_value(
+				self.runtime.function(if place.repr == Repr::Bytes {
+					"fa_bytes_reference"
+				} else if matches!(place.repr, Repr::Array(_)) {
+					"fa_array_reference"
+				} else {
+					"fa_string_reference"
+				})?,
+				&[place.pointer.into(), snapshot.pointer.into()],
+			)?
+			.into_pointer_value();
+		Ok(Slot {
+			pointer,
+			repr: place.repr,
+		})
+	}
+
 	/// Whether a node designates a place (a local, a field, an item).
 	pub(crate) fn is_place(&self, node: NodeId) -> bool {
 		let stored = |kind| {
@@ -48,7 +463,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			)
 		};
 		match self.view(node) {
-			View::Group(inner) => self.is_place(inner),
+			View::Try(inner) | View::Group(inner) => self.is_place(inner),
+			View::Call { .. } if self.user_reference_result(node).is_some() => true,
 			View::Name(_) => match self.analysis.resolution(node) {
 				Resolution::Local(symbol) => stored(self.analysis.symbols.symbol(symbol).kind),
 				resolution @ Resolution::External(..) => match self.external(resolution) {
@@ -79,7 +495,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 			}
 
-			View::Index { target, .. } => self.is_place(target),
+			View::Index { target, index } => {
+				self.node_repr(target).ok() != Some(Repr::Str)
+					&& self.node_repr(index).ok() != Some(Repr::Range)
+					&& self.is_place(target)
+			}
 			_ => false,
 		}
 	}
@@ -209,7 +629,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				for (index, field) in view_fields.iter().enumerate() {
 					let Some(target) = place_fields
 						.iter()
-						.position(|other| other.name == field.name)
+						.position(|other| self.same_field_name(other.name, field.name))
 					else {
 						continue;
 					};
@@ -292,8 +712,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				place
 			}
-			None => self.reference_place(value)?,
+			None => {
+				let place = self.reference_place(value)?;
+				if matches!(self.node_repr(value)?, Repr::Optional(_))
+					&& !matches!(place.repr, Repr::Optional(_))
+				{
+					self.nullable_references.insert(symbol, ());
+				}
+				place
+			}
 		};
+		let place = self.snapshot_content_designation(symbol, place)?;
 		let data = self.analysis.symbols.symbol(symbol);
 		if self.shared.contains_key(&symbol) {
 			// a top-level reference that functions read
@@ -411,6 +840,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Resolution::Local(symbol) = self.analysis.resolution(node) else {
 			return Err(self.unsupported(node.index(), "this `reuse`"));
 		};
+		// Functions are lowered before module initializers. A reseating may
+		// therefore be the first lowered use of a module-level reference.
+		if !self.references.contains_key(&symbol) && self.shared.contains_key(&symbol) {
+			let repr = self.repr_of(self.analysis.symbols.symbol(symbol).ty, node.index())?;
+			self.reference_holder(symbol, repr);
+		}
 		let Some(&(holder, _)) = self.references.get(&symbol) else {
 			return Err(self.unsupported(node.index(), "this `reuse`"));
 		};
@@ -418,14 +853,152 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Some((place, _)) => place,
 			None => self.reference_place(value)?,
 		};
+		let place = self.snapshot_content_designation(symbol, place)?;
 		self.builder.build_store(holder, place.pointer)?;
 		Ok(Val::void())
+	}
+
+	/// Array lookups return the existing slot address, including absent
+	/// optionals. Ordinary value reads keep the existing lookup lowering.
+	fn array_reference(&mut self, node: NodeId) -> Result<Option<(Slot<'ctx>, bool)>, Error> {
+		let Some(info) = self.analysis.call(node).cloned() else {
+			return Ok(None);
+		};
+		let fa_analyzer::analysis::Callee::Builtin(id) = info.callee else {
+			return Ok(None);
+		};
+		let path = fa_analyzer::builtins::get(id).path;
+		if !matches!(
+			path,
+			"Array#get"
+				| "Array#find"
+				| "OrderedColumnar#get"
+				| "OrderedColumnar#find"
+				| "OrderedColumnar#add"
+		) {
+			return Ok(None);
+		}
+		let array = self.receiver(node)?;
+		let (Repr::Array(item_type) | Repr::Growing(item_type)) = array.repr else {
+			return Ok(None);
+		};
+		let repr = self.item_repr(item_type, node)?;
+		let pointer = array.value.expect("an array").into_pointer_value();
+		let length = if matches!(array.repr, Repr::Growing(_)) {
+			self.growing_length(&self.builder, pointer)?
+		} else {
+			self.array_parts(pointer)?.1
+		};
+		let argument = match info.arguments.first() {
+			Some(fa_analyzer::analysis::Argument::Given(value)) => *value,
+			_ => return Err(self.unsupported(node.index(), "this lookup")),
+		};
+		let argument_value = self.expr(argument)?;
+		if path == "OrderedColumnar#add" {
+			self.materialize_array(pointer, repr)?;
+			let index = self.array_length(array)?.int();
+			self.array_push(array, argument_value, node, Some(argument))?;
+			return Ok(Some((
+				self.array_reference_slot(array, repr, index)?,
+				false,
+			)));
+		}
+		let result = self.pointer_alloca("reference")?;
+		self.builder
+			.build_store(result, self.pointer_type().const_null())?;
+		let end = self.append_block("reference_found");
+		if matches!(path, "Array#get" | "OrderedColumnar#get") {
+			let index = self
+				.convert(
+					argument_value,
+					Repr::Int(super::values::IntRepr::I64),
+					node.index(),
+				)?
+				.int();
+			let index = self.counted_from_end(index, length)?;
+			let inside =
+				self.builder
+					.build_int_compare(inkwell::IntPredicate::ULT, index, length, "")?;
+			let present = self.append_block("reference_present");
+			self.builder
+				.build_conditional_branch(inside, present, end)?;
+			self.builder.position_at_end(present);
+			let slot = self.array_reference_slot(array, repr, index)?;
+			self.builder.build_store(result, slot.pointer)?;
+			self.builder.build_unconditional_branch(end)?;
+		} else {
+			self.for_each_index(length, |this, index| {
+				let slot = this.array_reference_slot(array, repr, index)?;
+				let index_value = Val::new(Repr::Int(super::values::IntRepr::I64), index);
+				let holds = this.call_collection_callback(
+					argument_value,
+					argument,
+					&[],
+					&[slot],
+					&[index_value],
+				)?;
+				let found = this.append_block("reference_present");
+				let next = this.append_block("reference_next");
+				this.builder
+					.build_conditional_branch(holds.int(), found, next)?;
+				this.builder.position_at_end(found);
+				this.builder.build_store(result, slot.pointer)?;
+				this.builder.build_unconditional_branch(end)?;
+				this.builder.position_at_end(next);
+				Ok(())
+			})?;
+			self.builder.build_unconditional_branch(end)?;
+		}
+		self.builder.position_at_end(end);
+		let pointer = self
+			.builder
+			.build_load(self.pointer_type(), result, "")?
+			.into_pointer_value();
+		Ok(Some((Slot { pointer, repr }, true)))
+	}
+
+	fn array_reference_slot(
+		&self,
+		array: Val<'ctx>,
+		repr: Repr,
+		index: inkwell::values::IntValue<'ctx>,
+	) -> Result<Slot<'ctx>, Error> {
+		let pointer = array.value.expect("an array").into_pointer_value();
+		if matches!(array.repr, Repr::Growing(_)) {
+			Ok(Slot {
+				pointer: self.growing_at(&self.builder, pointer, repr, index)?,
+				repr,
+			})
+		} else {
+			self.array_item_slot(pointer, repr, index)
+		}
 	}
 
 	/// The element a reference to a collection's element designates, and
 	/// whether it may be null: `pool.add(…)`, `pool.find(…)` (pools.rs),
 	/// `map.get(key)` (tables.rs).
 	fn collection_reference(&mut self, value: NodeId) -> Result<Option<(Slot<'ctx>, bool)>, Error> {
+		let mut node = value;
+		while let View::Group(inner) | View::Try(inner) = self.view(node) {
+			node = inner;
+		}
+		if let Some((element, optional)) = self.user_reference_result(node) {
+			let raw = self.call_present(node)?;
+			let pointer = raw
+				.value
+				.ok_or_else(|| {
+					self.unsupported(node.index(), "a reference result without a place")
+				})?
+				.into_pointer_value();
+			let repr = self.reference_result_repr(node, element)?;
+			return Ok(Some((Slot { pointer, repr }, optional)));
+		}
+		if let Some(reference) = self.set_reference(node)? {
+			return Ok(Some(reference));
+		}
+		if let Some(reference) = self.array_reference(node)? {
+			return Ok(Some(reference));
+		}
 		if let Some(found) = self.pool_reference(value)? {
 			return Ok(Some(found));
 		}
@@ -439,8 +1012,118 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		while let View::Group(group) | View::Try(group) = self.view(inner) {
 			inner = group;
 		}
+		if let View::Index { target, index } = self.view(inner)
+			&& let Repr::Array(item_type) = self.node_repr(target)?
+			&& self.node_repr(index)? == Repr::Range
+		{
+			let array = self.expr(target)?;
+			let range = self.expr(index)?;
+			let (start, end, flags) = self.range_parts(range)?;
+			let item = self.item_repr(item_type, inner)?;
+			let ty = self.context.struct_type(
+				&[self.header_type().into(), self.context.i64_type().into()],
+				false,
+			);
+			let descriptor = self.alloca_type(ty.into(), "array_slice_view")?;
+			let error = self
+				.call_value(
+					self.runtime.function("fa_array_slice_view")?,
+					&[
+						array.value.expect("an array").into(),
+						start.into(),
+						end.into(),
+						flags.into(),
+						self.item_size(item)?.into(),
+						descriptor.into(),
+					],
+				)?
+				.into_pointer_value();
+			self.raise_if_error(error)?;
+			let slot = self.alloca(Repr::Array(item_type), "array_slice_place")?;
+			self.builder.build_store(slot.pointer, descriptor)?;
+			return Ok(slot);
+		}
+		if let View::Index { target, index } = self.view(inner)
+			&& self.node_repr(target)? == Repr::Bytes
+			&& self.node_repr(index)? == Repr::Range
+		{
+			let value = self.bytes_slice(inner, target, index, true)?;
+			let slot = self.alloca(Repr::Bytes, "bytes_slice_place")?;
+			self.builder
+				.build_store(slot.pointer, value.value.expect("a byte view"))?;
+			return Ok(slot);
+		}
+		if let View::Index { target, index } = self.view(inner)
+			&& self.node_repr(target)? == Repr::Str
+			&& self.node_repr(index)? == Repr::Range
+		{
+			let source = self
+				.is_place(target)
+				.then(|| self.place(target))
+				.transpose()?;
+			let text = match source {
+				Some(source) => self.load(source)?,
+				None => self.expr(target)?,
+			};
+			let range = self.expr(index)?;
+			let (bytes, length) = match source {
+				Some(source) => self.string_place_parts(text, source.pointer)?,
+				None => self.string_parts(text)?,
+			};
+			let capacity = self.string_capacity(text)?;
+			let (start, end, flags) = self.range_parts(range)?;
+			let slot = if self.frame().owner.is_none() {
+				let global = self
+					.module
+					.add_global(self.string_type, None, "fa.string_slice");
+				global.set_initializer(&self.string_type.const_zero());
+				global.set_linkage(inkwell::module::Linkage::Internal);
+				Slot {
+					pointer: global.as_pointer_value(),
+					repr: Repr::Str,
+				}
+			} else {
+				self.alloca(Repr::Str, "string_slice")?
+			};
+			let error = self
+				.call_value(
+					self.runtime.function("fa_string_slice_view")?,
+					&[
+						bytes.into(),
+						length.into(),
+						capacity.into(),
+						start.into(),
+						end.into(),
+						flags.into(),
+						slot.pointer.into(),
+					],
+				)?
+				.into_pointer_value();
+			self.raise_if_error(error)?;
+			return Ok(slot);
+		}
+		if let View::Index { target, .. } = self.view(inner)
+			&& self.node_repr(target)? == Repr::Str
+		{
+			let value = self.expr_inner(inner)?;
+			let slot = self.alloca(Repr::Str, "string_unit_reference")?;
+			self.builder
+				.build_store(slot.pointer, value.value.expect("a string unit"))?;
+			return Ok(slot);
+		}
 		if self.is_place(inner) {
-			return self.place(inner);
+			let place = self.place(inner)?;
+			if let Repr::Link(target) = place.repr {
+				let pointer = self
+					.builder
+					.build_load(self.pointer_type(), place.pointer, "relation_target")?
+					.into_pointer_value();
+				return Ok(Slot {
+					pointer,
+					repr: self.repr_of(target, inner.index())?,
+				});
+			}
+			return Ok(place);
 		}
 		// `map.getOrInsert(key, value)`: the value in the map
 		if let Some(info) = self.analysis.call(inner).cloned()

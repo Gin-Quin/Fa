@@ -26,6 +26,7 @@ impl Walker<'_> {
 	/// Completes the interface of the file (its export and the members of
 	/// its namespaces are published already).
 	pub(super) fn publish_interface(&mut self, root: NodeId) {
+		self.record_reference_sensitivity();
 		// the function node of each function declaration
 		let mut function_nodes: FxHashMap<NodeId, NodeId> = FxHashMap::default();
 		for (&node, info) in &self.a.functions {
@@ -350,6 +351,12 @@ impl Walker<'_> {
 				}
 			}
 			let used = match self.a.resolution(node) {
+				_ if self
+					.a
+					.has_flags(node, crate::analysis::NodeFlags::TYPE_EXPR) =>
+				{
+					None
+				}
 				Resolution::Local(symbol) if module_level(self, symbol) => {
 					Some(self.symbol_key(symbol))
 				}
@@ -455,7 +462,38 @@ impl Walker<'_> {
 			.collect();
 		let key_set_applications = self.foreign_key_set_applications();
 		let key_loop_params = self.key_sets.loop_params.iter().copied().collect();
+		let reference_aliases = self
+			.a
+			.type_decls
+			.keys()
+			.copied()
+			.filter(|&decl| match self.view(decl) {
+				View::TypeDecl { value, .. } | View::ExportType { value, .. } => {
+					self.contains_reference_type(value)
+				}
+				_ => false,
+			})
+			.collect();
+		let reference_defaults = self
+			.a
+			.type_decls
+			.keys()
+			.copied()
+			.filter_map(|decl| {
+				let defaults: Vec<_> = self
+					.reference_default_nodes(decl)
+					.iter()
+					.map(|default| default.is_some_and(|value| self.contains_reference_type(value)))
+					.collect();
+				defaults
+					.iter()
+					.any(|&reference| reference)
+					.then_some((decl, defaults))
+			})
+			.collect();
 		let interface = &mut self.s.source_file_mut(self.file).interface;
+		interface.reference_aliases = reference_aliases;
+		interface.reference_defaults = reference_defaults;
 		interface.keys = keys;
 		interface.externs = externs;
 		interface.type_functions = type_functions;
@@ -468,6 +506,9 @@ impl Walker<'_> {
 		interface.parameters = parameters;
 		interface.implicit_writes = implicit_writes;
 		interface.generic_functions = generic_functions;
+		interface.reference_layouts = self.a.reference_layouts.clone();
+		interface.reference_origins = self.a.reference_origins.clone();
+		interface.reference_sensitive = self.a.reference_sensitive.clone();
 		interface.key_set_params = key_set_params;
 		interface.derived_params = derived_params;
 		interface.key_set_applications = key_set_applications;
@@ -493,6 +534,12 @@ impl Walker<'_> {
 			let mut stack = vec![work];
 			while let Some(node) = stack.pop() {
 				let used = match self.a.resolution(node) {
+					_ if self
+						.a
+						.has_flags(node, crate::analysis::NodeFlags::TYPE_EXPR) =>
+					{
+						None
+					}
 					Resolution::Local(symbol) => {
 						let data = self.a.symbols.symbol(symbol);
 						let module_level = matches!(

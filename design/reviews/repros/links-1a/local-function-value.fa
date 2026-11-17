@@ -1,0 +1,8 @@
+type Node = { value: Integer }
+function first = (pool: GrowingPool<Node>): (Node in pool)? => pool.find((_n) => true)
+function wrong = (owner: GrowingPool<Node>): (Node in owner)? => {
+	mutable local: GrowingPool<Node> = []
+	local.add({ value = 7 })
+	let f = first
+	f(local)
+}

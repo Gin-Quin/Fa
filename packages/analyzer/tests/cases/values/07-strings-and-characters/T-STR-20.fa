@@ -1,5 +1,5 @@
--- brief: → `0:a / 1:é / 2:🇫🇷`
-for c, i in "aé🇫🇷" { console.log("{i}:{c}") }
+for c, i in "aé😀b" { console.log("{i}:{c}") }
 -- prints: 0:a
 -- prints: 1:é
--- prints: 2:🇫🇷
+-- prints: 2:😀
+-- prints: 4:b

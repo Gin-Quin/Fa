@@ -164,6 +164,15 @@ pub fn copies(
 	if !owns_memory || is_move(tree, analysis, value) {
 		return false;
 	}
+	let mut borrowed = value;
+	while let View::Try(inner) | View::Group(inner) = syntax::view(tree, borrowed) {
+		borrowed = inner;
+	}
+	if matches!(syntax::view(tree, borrowed), View::Call { .. })
+		&& analysis.has_flags(borrowed, NodeFlags::PLACE)
+	{
+		return true;
+	}
 	let Some(root) = value_place_root(tree, analysis, value) else {
 		return false;
 	};

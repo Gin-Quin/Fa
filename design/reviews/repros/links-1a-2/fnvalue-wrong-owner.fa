@@ -1,0 +1,13 @@
+-- Expected: a type mismatch at `let pick: Pick = fromOther` (result in `other`, the type says `values`); else REF001 is missed.
+type Node = { value: Integer }
+type Pick = (values: Array<Node>, other: Array<Node>) => Node in values throws IndexError
+function fromOther = (values: Array<Node>, other: Array<Node>): Node in other throws IndexError => try other[0]
+function exercise = (): Integer throws IndexError => {
+ mutable kept: Array<Node> = [{ value = 1 }]
+ let pick: Pick = fromOther
+ mutable local: Array<Node> = [{ value = 7 }]
+ use node = try pick(kept, local)
+ local.clear()
+ node.value
+}
+console.log(try exercise())

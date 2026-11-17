@@ -7,7 +7,7 @@ type Scanner = {
 	position: Integer
 	count: Integer
 
-	function current = (self): Byte => self.text.bytes().get(self.position) ?? 0
+	function current = (self): Byte => self.text.toUtf8().get(self.position) ?? 0
 
 	function skipSpaces = (self) mutates self => {
 		while self.current() == 32 {
@@ -43,7 +43,7 @@ type Tape = {
 	text: String
 	position: Integer
 
-	function current = (self): Byte => self.text.bytes().get(self.position) ?? 0
+	function current = (self): Byte => self.text.toUtf8().get(self.position) ?? 0
 
 	function damage = (self) mutates self => {
 		self.text = "x"

@@ -65,8 +65,8 @@ pub enum TypeKind {
 	String,
 	/// A string literal type.
 	StringLit(Sym),
-	/// `Character`.
-	Character,
+	/// A fixed-length sequence of bytes, distinct from `Array<Byte>`.
+	Bytes,
 	/// An object type.
 	Object(ShapeId),
 	/// A tuple type.
@@ -312,6 +312,8 @@ pub enum RuntimeKind {
 	Columnar = 13,
 	/// Objects, named unions, C structures.
 	Object = 14,
+	/// A JavaScript `Uint8Array`, distinct from arrays and objects.
+	Bytes = 15,
 }
 
 impl RuntimeKind {
@@ -331,6 +333,7 @@ impl RuntimeKind {
 			12 => RuntimeKind::Pool,
 			13 => RuntimeKind::Columnar,
 			14 => RuntimeKind::Object,
+			15 => RuntimeKind::Bytes,
 			_ => RuntimeKind::Other,
 		}
 	}
@@ -465,6 +468,8 @@ pub struct DeclKeyData {
 /// A parameter of a function signature.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct ParamSig {
+	/// Dependent collection owner, independent of the erased runtime item type.
+	pub reference: Option<PathId>,
 	/// The parameter type.
 	pub ty: TypeId,
 	/// A variadic parameter (`...values: Array(T)`).
@@ -483,6 +488,10 @@ pub struct Requirement {
 /// A function signature. Parameter names are not part of the identity.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct FnSig {
+	/// Collection path of an explicitly borrowed result.
+	pub reference: Option<PathId>,
+	/// Every reachable non-none result is freshly added (direct calls only).
+	pub fresh: bool,
 	/// The parameters.
 	pub params: ParamListId,
 	/// The return type.
@@ -522,8 +531,6 @@ pub enum ConstValue {
 	Float(u64),
 	/// A string.
 	String(Sym),
-	/// A character.
-	Character(Sym),
 	/// A big integer, by its decimal text.
 	BigInt(Sym),
 	/// A member of an enumeration.

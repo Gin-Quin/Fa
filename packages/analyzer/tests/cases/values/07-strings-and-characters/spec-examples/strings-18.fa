@@ -1,0 +1,5 @@
+-- Specification example: strings 18
+let text = "a😀b"
+for character in text {
+	console.log(character)
+}

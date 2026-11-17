@@ -1,0 +1,7 @@
+function inspect = <Item>(value: Item, text: String, bytes: Bytes): String throws IndexError => {
+	use word = try text[1..2]
+	use span = try bytes[1..2]
+	"{word}{span}{value}"
+}
+let bytes = Bytes.from([1, 2, 3])
+console.log(try inspect(1, "abc", bytes), try inspect("x", "abc", bytes)) -- prints: b[2]1 b[2]x

@@ -130,6 +130,7 @@ impl Walker<'_> {
 		let params: Vec<ParamSig> = params
 			.iter()
 			.map(|&ty| ParamSig {
+				reference: None,
 				ty,
 				variadic: false,
 			})
@@ -244,7 +245,7 @@ impl Walker<'_> {
 				continue;
 			}
 			let ty = self.check(item, expected_item);
-			self.escape(item, n);
+			self.store_closures(item, n);
 			if let Some(expected_item) = expected_item {
 				self.sink(item, ty, expected_item);
 			}
@@ -344,6 +345,7 @@ impl Walker<'_> {
 	/// value that can't be iterated (yet).
 	pub fn iteration_item(&mut self, ty: TypeId) -> Option<TypeId> {
 		match self.s.types.kind(ty) {
+			TypeKind::Bytes => Some(TypeId::BYTE),
 			TypeKind::CArray(item, _) => Some(item),
 			TypeKind::Collection(
 				CollKind::Array
@@ -363,7 +365,7 @@ impl Walker<'_> {
 			TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, value, key) => {
 				Some(self.s.types.tuple(&[key, value]))
 			}
-			TypeKind::String | TypeKind::StringLit(_) => Some(TypeId::CHARACTER),
+			TypeKind::String | TypeKind::StringLit(_) => Some(TypeId::STRING),
 			TypeKind::Iterator(item, _) => Some(item),
 			TypeKind::Unknown => Some(TypeId::UNKNOWN),
 			_ => None,

@@ -1,0 +1,3 @@
+-- Accepted by the analyzer; the JavaScript backend currently refuses this.
+function trimmed = (value: String?): String? => value?.trim()
+console.log(trimmed(" hi "), trimmed(none))

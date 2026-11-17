@@ -1,0 +1,3 @@
+-- Accepted by the analyzer; the JavaScript backend currently refuses this.
+static values: Map<{ code: Integer }, String> = [({ code = 1 }, "one"), ({ code = 2 }, "two")]
+console.log(values.size)

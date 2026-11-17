@@ -468,7 +468,12 @@ mod with_llvm {
 		for target in [Target::Native, Target::Wasm] {
 			let ir = ir_at_target("pending-task-owner", source, true, OptLevel::O0, target);
 			let text = function(&ir, "fa.ordinaryText.async");
-			assert!(text.lines().any(|line| line.contains("@fa_string_assign_local(") && line.ends_with("i32 1, i32 0)")), "{target:?}: {text}");
+			assert!(
+				text.lines()
+					.any(|line| line.contains("@fa_string_assign_local(")
+						&& line.ends_with("i32 1, i32 0)")),
+				"{target:?}: {text}"
+			);
 			let record = function(&ir, "fa.ordinaryRecord.async");
 			assert!(record.contains("@fa.copy"), "{target:?}: {record}");
 			for name in ["fa.afterCompletion.async", "fa.afterMovedTask.async"] {

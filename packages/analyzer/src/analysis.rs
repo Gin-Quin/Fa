@@ -582,7 +582,7 @@ bitflags! {
 		const UTF8_ITERATION = 1 << 21;
 		/// An inline append needs its capacity guard.
 		const CAPACITY_CHECK = 1 << 22;
-		/// This place's owner is retained by an outstanding task borrow.
+		/// This place's owner is retained by an outstanding borrow.
 		/// Backend last-use optimizations must preserve it, even for ordinary
 		/// values such as strings whose independent assignment is implicit.
 		const BORROWED_OWNER = 1 << 23;

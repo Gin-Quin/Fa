@@ -18,6 +18,7 @@ impl Walker<'_> {
 		self.collect_store_values();
 		let reads = self.ownership_reads();
 		self.finish_ownership_task_borrows(&reads);
+		self.mark_reserved_module_reads();
 		let mut commits: FxHashMap<NodeId, Vec<NodeId>> = FxHashMap::default();
 		for value in self.copy_sites.iter().copied() {
 			commits.entry(value).or_default().push(value);
@@ -56,7 +57,9 @@ impl Walker<'_> {
 			for (symbol, values) in sources {
 				let later = graph.later_uses(symbol);
 				for value in values {
-					if self.pending_ownership_task(value, symbol).is_some() {
+					if self.pending_ownership_task(value, symbol).is_some()
+						|| self.module_owner_borrows.contains_key(&symbol)
+					{
 						self.clear_flag(value, NodeFlags::MOVE);
 						self.a.moved_reads.remove(&value);
 						continue;
@@ -430,6 +433,7 @@ impl Walker<'_> {
 				break;
 			}
 		}
+		self.reserve_exported_owner_sources(&free);
 		reads
 	}
 
@@ -694,6 +698,25 @@ mod tests {
 					.then(|| analysis.has_flags(node, NodeFlags::MOVE))
 			})
 			.collect()
+	}
+
+	#[test]
+	fn an_exported_reader_keeps_its_module_owner_live_after_initialization() {
+		let source = "let original = [1, 2]\nmutable target = original\ntarget.push(3)\nexport function = () => console.log(original.length, target.length)\n";
+		assert_eq!(crate::check::test_support::codes(source), ["MEM004"]);
+	}
+
+	#[test]
+	fn exported_readers_include_transitive_calls_and_omitted_defaults() {
+		for reader in [
+			"function read = (): Integer => original.length\nexport function = () => console.log(read(), target.length)",
+			"function read = (value: Integer = original.length): Integer => value\nexport function = () => console.log(read(), target.length)",
+		] {
+			let source = format!(
+				"let original = [1, 2]\nmutable target = original\ntarget.push(3)\n{reader}\n"
+			);
+			assert_eq!(crate::check::test_support::codes(&source), ["MEM004"]);
+		}
 	}
 
 	#[test]

@@ -261,6 +261,42 @@ impl Walker<'_> {
 				continue;
 			}
 			if let Some(symbol) = crate::lower::copies::value_place_root(&self.tree, &self.a, value)
+				&& let Some(&reader) = self.module_owner_borrows.get(&symbol)
+			{
+				if category == Ownership::Unique
+					&& self.output.iter().any(|diagnostic| {
+						diagnostic.code.id == MEM002.id
+							&& diagnostic.location.span == self.span(value)
+					}) {
+					continue;
+				}
+				let text = self.tree.text(value.index());
+				let (code, fix) = if category == Ownership::Unique {
+					(
+						&MEM002,
+						"keep this unique owner in the module, or create another instance"
+							.to_string(),
+					)
+				} else {
+					(
+						&MEM004,
+						format!(
+							"write `copy {text}` for an independent value, or borrow with `use`"
+						),
+					)
+				};
+				let mut diagnostic = self.diagnostic(code, value, format!("`{text}` remains available to the exported function on line {}, which may read it after module initialization; transferring its owner would invalidate that read: {fix}", self.line_of(reader)))
+					.with_related(Location { file: self.file, span: self.span(reader) }, "this exported function keeps the module owner live");
+				if category == Ownership::Structure {
+					diagnostic = diagnostic.with_fix(Fix {
+						title: format!("Make an independent copy of `{text}`"),
+						edits: self.explicit_copy_edits(value),
+					});
+				}
+				self.report(diagnostic);
+				continue;
+			}
+			if let Some(symbol) = crate::lower::copies::value_place_root(&self.tree, &self.a, value)
 				&& let Some(start) = self.pending_ownership_task(value, symbol)
 			{
 				let text = self.tree.text(value.index());

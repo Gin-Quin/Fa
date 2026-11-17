@@ -22,6 +22,7 @@ mod capture_fixes;
 mod captures;
 mod concrete;
 mod copies;
+mod globals;
 mod graph;
 mod origins;
 mod readiness;

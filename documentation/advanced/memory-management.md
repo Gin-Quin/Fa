@@ -414,6 +414,8 @@ append(values)
 console.log(values) -- [1, 2, 3]
 ```
 
+A module owner used by an exported function stays available after initialization, including through a helper call or an omitted default. Storing its structure data needs `copy` (`MEM004`); transferring a unique owner would invalidate that later execution (`MEM002`).
+
 A pending task keeps its borrowed owners live until it is awaited or cancelled, including after the Task handle moves. A structure store during that borrow requires `copy` (`MEM004`); transferring a unique owner is `MEM002`. Ordinary values still copy implicitly while the task uses their source.
 
 Storing a borrowed structure is different from passing it: write `copy`. Destructuring a parameter also borrows its fields. Returning a reference is allowed only when the caller already owns its target; returning owned data follows the storage rules.
